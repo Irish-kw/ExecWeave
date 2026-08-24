@@ -5,8 +5,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-
-SCHEMA_VERSION = "0.1"
+SCHEMA_VERSION = "0.2"
 
 
 @dataclass(frozen=True)
@@ -31,6 +30,7 @@ class RuntimeEvent:
     relation: str
     source: Entity | None
     target: Entity | None
+    sequence: int | None = None
     attributes: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -43,12 +43,14 @@ class RuntimeEvent:
         source: Entity | None = None,
         target: Entity | None = None,
         attributes: dict[str, Any] | None = None,
+        timestamp: str | None = None,
     ) -> "RuntimeEvent":
         return cls(
             schema_version=SCHEMA_VERSION,
             event_id=str(uuid4()),
             session_id=session_id,
-            timestamp=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            timestamp=timestamp
+            or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             event_type=event_type,
             relation=relation,
             source=source,
