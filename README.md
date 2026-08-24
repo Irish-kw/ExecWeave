@@ -10,30 +10,31 @@
 
 **See what AI agents actually do on your machine.**
 
-ExecWeave is an open-source project for turning the runtime behavior of AI agents into an interactive execution graph.
-
-Instead of reading long CLI logs or scrolling through thousands of trace events, ExecWeave aims to connect agents, processes, commands, files, network endpoints, tools, MCP servers, repositories, credentials, and other runtime resources into one understandable graph.
+ExecWeave turns local AI-agent runtime activity into a graph-ready event stream. Instead of treating CLI logs as the interface, it records relationships among sessions, processes, files, executables, sockets, and network endpoints so they can become an interactive execution graph.
 
 > **Turn opaque AI-agent execution into something humans can actually understand.**
 
 ## Current status
 
-ExecWeave is in **early development**. Phase 1 runtime collection now has a runnable MVP.
+**Phase 1 — Runtime Collection is complete for the Linux reference path and the cross-platform portable fallback.**
 
-The current collector can:
+The interactive graph UI is the next major phase and is **not implemented yet**.
 
-- launch an agent or arbitrary command as an ExecWeave session;
-- capture the root process and discover descendant processes;
-- record parent/child process relationships;
-- observe filesystem changes under a selected working directory;
-- observe per-process outbound network connections when the OS exposes them;
-- emit all observations as graph-ready JSONL events with a shared session ID.
+### What works now
 
-The interactive graph UI is **not implemented yet**.
+- graph-ready JSONL event stream;
+- monotonic per-run event sequence numbers;
+- root and descendant process capture;
+- Linux syscall-backed short-lived process capture;
+- Linux process-attributed file open/create/delete/rename events;
+- Linux process-attributed IPv4/IPv6/Unix-socket `connect()` events;
+- portable psutil/watchdog fallback on Linux, macOS, and Windows;
+- explicit causal vs session-observation labels;
+- backend diagnostics and automatic selection;
+- Phase 1 overhead benchmark harness;
+- cross-platform CI plus Linux native integration tests.
 
 ## Quick start
-
-Clone the repository and install it in editable mode:
 
 ```bash
 git clone https://github.com/Irish-kw/ExecWeave.git
@@ -41,125 +42,112 @@ cd ExecWeave
 python -m pip install -e ".[dev]"
 ```
 
-Run an AI agent under ExecWeave:
+On Debian/Ubuntu, install the Linux reference backend:
+
+```bash
+sudo apt-get install strace
+```
+
+Check what ExecWeave will use:
+
+```bash
+execweave doctor
+```
+
+Run an agent:
 
 ```bash
 execweave run -- claude
-```
-
-or:
-
-```bash
 execweave run -- codex
 execweave run -- gemini
 execweave run -- opencode
+```
+
+Or any command:
+
+```bash
 execweave run -- python my_agent.py
 ```
 
-ExecWeave writes the local event stream to:
+Events are stored locally at:
 
 ```text
 .execweave/runs/<session-id>.jsonl
 ```
 
-Choose another directory to observe:
+Choose a backend explicitly:
 
 ```bash
-execweave run --watch-root /path/to/project -- claude
+execweave run --backend strace -- claude
+execweave run --backend portable -- claude
 ```
 
-Disable individual collectors while debugging:
+`auto` is the default. It prefers `strace` on Linux when available and otherwise uses `portable`.
 
-```bash
-execweave run --no-files -- claude
-execweave run --no-network -- claude
-```
-
-See [`docs/phase-1-runtime-collection.md`](docs/phase-1-runtime-collection.md) for the Phase 1 design, limitations, and acceptance criteria.
-
-## Why ExecWeave?
-
-A modern coding agent may perform hundreds or thousands of actions during one task:
-
-```text
-read source files
-→ execute shell commands
-→ spawn child processes
-→ install packages
-→ modify code
-→ access credentials
-→ connect to external services
-→ run tests
-→ interact with Git
-```
-
-Most tools expose this as CLI output, logs, traces, or a process tree.
-
-ExecWeave is designed around a different representation:
-
-```text
-                         ┌── READ ─────→ package.json
-                         │
-AI Agent ──→ Shell ──────┼── SPAWN ────→ npm
-    │                    │                 │
-    │                    │                 └──→ node
-    │                    │
-    │                    └── CONNECT ──→ registry.npmjs.org
-    │
-    ├── READ ───────────────→ src/app.ts
-    │
-    ├── WRITE ──────────────→ src/app.ts
-    │
-    └── Git ────────────────→ github.com
-```
-
-The goal is to answer:
-
-> **What did this agent actually do on my machine?**
+See [`docs/phase-1-runtime-collection.md`](docs/phase-1-runtime-collection.md) for backend guarantees, limitations, privacy behavior, and acceptance criteria.
 
 ## Graph-first event model
 
-Phase 1 does not write arbitrary log lines. Every runtime observation is represented in a graph-ready form:
+Every observation is represented as:
 
 ```text
 source --RELATION--> target
 ```
 
-Examples:
+Examples from the Linux reference backend:
 
 ```text
 session --LAUNCHED--> process
 process --SPAWNED--> process
+process --EXECUTED--> executable
+process --OPENED_READ--> file
+process --OPENED_WRITE--> file
+process --DELETED--> file
 process --CONNECTED_TO--> network_endpoint
-session --OBSERVED_FILE_CHANGE--> file
 ```
 
-A simplified event looks like:
+A simplified event:
 
 ```json
 {
-  "schema_version": "0.1",
+  "schema_version": "0.2",
+  "sequence": 42,
   "session_id": "...",
-  "event_type": "network.connection",
-  "relation": "CONNECTED_TO",
+  "event_type": "filesystem.open",
+  "relation": "OPENED_READ",
   "source": {
     "type": "process",
-    "id": "process:1234:1780000000000000"
+    "id": "process:<session-id>:1234"
   },
   "target": {
-    "type": "network_endpoint",
-    "id": "endpoint:github.com:443"
+    "type": "file",
+    "id": "file:/home/user/project/README.md"
+  },
+  "attributes": {
+    "attribution": "syscall",
+    "causal": true,
+    "backend": "strace"
   }
 }
 ```
 
-Process IDs include both the PID and process creation time because operating systems reuse PIDs.
+## No fake causality
 
-### Causality matters
+ExecWeave distinguishes what the telemetry proves from what merely happened during the same session.
 
-ExecWeave should not claim more than the telemetry can prove.
+Linux syscall-backed event:
 
-The current filesystem watcher knows that a file changed during an ExecWeave session, but it cannot yet prove which process caused the change. These events therefore use:
+```text
+process --OPENED_WRITE--> file
+```
+
+Portable filesystem fallback:
+
+```text
+session --OBSERVED_FILE_CHANGE--> file
+```
+
+The portable event is marked:
 
 ```json
 {
@@ -168,74 +156,9 @@ The current filesystem watcher knows that a file changed during an ExecWeave ses
 }
 ```
 
-Future eBPF, ETW, and Endpoint Security collectors can provide stronger process-attributed edges.
+A directory watcher cannot prove which process changed a file, so ExecWeave does not pretend it can.
 
-## Vision
-
-ExecWeave aims to become a **live heterogeneous runtime behavior graph for AI agents running on a single machine**.
-
-```mermaid
-graph TD
-    A[AI Agent] --> B[Agent / Tool telemetry]
-    A --> C[Operating System]
-    B --> D[ExecWeave Collector]
-    C --> E[Runtime telemetry]
-    E --> D
-    D --> F[Event Store]
-    F --> G[Graph Builder]
-    G --> H[Interactive Graph UI]
-```
-
-The long-term graph can connect:
-
-### Nodes
-
-```text
-Agent
-Session
-Process
-Command
-File
-Directory
-Domain
-IP
-Socket
-Tool
-MCP Server
-Repository
-Credential
-Resource
-```
-
-### Relationships
-
-```text
-LAUNCHED
-SPAWNED
-EXECUTED
-READ
-WROTE
-DELETED
-CONNECTED_TO
-CALLED
-USED
-MODIFIED
-DOWNLOADED
-UPLOADED
-BELONGS_TO
-TRIGGERED
-```
-
-## What makes ExecWeave different?
-
-ExecWeave is not intended to be only another:
-
-- LLM trace viewer;
-- token dashboard;
-- prompt observability platform;
-- terminal recorder;
-- process tree;
-- agent workflow visualizer.
+## Why a graph?
 
 A process tree might show:
 
@@ -246,150 +169,119 @@ agent
         └── ssh
 ```
 
-ExecWeave ultimately wants to show the runtime relationships around those processes:
+ExecWeave is designed to eventually show the relationships around those processes:
 
 ```text
-                     ┌── READ ─────→ ~/.ssh/config
+                     ┌── OPENED_READ ──→ ~/.ssh/config
                      │
-Agent → bash → git ──┼── USE ──────→ SSH key
+Agent → bash → git ──┼── EXECUTED ─────→ ssh
                      │
-                     ├── READ ─────→ repository
+                     ├── OPENED_READ ──→ repository
                      │
-                     └── CONNECT ──→ github.com
+                     └── CONNECTED_TO ─→ github.com / IP endpoint
 ```
 
-## Roadmap
+The runtime event stream is the evidence layer for that graph.
 
-### Phase 1 — Runtime collection
+## Backends
 
-Initial polling/watcher MVP:
+### Linux reference: `strace`
 
-- [x] Launch an explicit ExecWeave session
-- [x] Define a graph-ready runtime event schema
-- [x] Capture the root process
-- [x] Discover parent/child process relationships
-- [x] Observe filesystem changes
-- [x] Observe outbound network connections
-- [x] Correlate observations with one session ID
-- [ ] Reliably capture very short-lived processes
-- [ ] Process-attributed filesystem telemetry on Linux
-- [ ] Process-attributed filesystem telemetry on Windows
-- [ ] Process-attributed filesystem telemetry on macOS
-- [ ] Runtime overhead benchmarks
+ExecWeave follows descendants with `strace -ff` and parses process, filesystem, and network syscalls into graph-ready events. This path reliably captures short-lived children that polling can miss.
 
-### Phase 2 — Execution graph
+Raw strace files are deleted after parsing by default. Keep them only when debugging:
 
-- [ ] Build runtime events into a graph
-- [ ] Entity resolution and deduplication
-- [ ] Temporal graph relationships
-- [ ] Graph filtering
-- [ ] Query causal/runtime paths
+```bash
+execweave run --keep-native-trace -- claude
+```
 
-### Phase 3 — Interactive UI
+### Portable fallback
 
-- [ ] Live graph updates
-- [ ] Expand/collapse nodes
-- [ ] Search processes, files, and endpoints
-- [ ] Inspect node and edge details
-- [ ] Timeline + graph synchronization
+The portable collector uses psutil and watchdog. It runs on Linux, macOS, and Windows without a native tracing backend.
 
-### Phase 4 — Agent integrations
+It provides useful runtime evidence, but its limitations remain explicit: very short-lived processes can be missed, and filesystem changes are session-correlated rather than process-attributed.
 
-- [ ] Claude Code
-- [ ] OpenAI Codex
-- [ ] Gemini CLI
-- [ ] OpenCode
-- [ ] MCP
-- [ ] Generic agent SDK / OpenTelemetry integration
+## Phase 1 roadmap
 
-### Phase 5 — Security and analysis
+- [x] Explicit ExecWeave session wrapper
+- [x] Graph-ready event schema
+- [x] Event ordering / sequence numbers
+- [x] Root process capture
+- [x] Parent/child process capture
+- [x] Portable filesystem observation
+- [x] Portable network observation
+- [x] Linux reliable short-lived process capture
+- [x] Linux process-attributed filesystem syscall telemetry
+- [x] Linux process-attributed network syscall telemetry
+- [x] Backend diagnostics and automatic selection
+- [x] Cross-platform portable fallback
+- [x] Raw native trace cleanup by default
+- [x] Unit + Linux native integration tests
+- [x] Runtime overhead benchmark harness
 
-- [ ] Sensitive-resource detection
-- [ ] Credential access detection
-- [ ] Unknown-destination detection
-- [ ] Behavioral comparison
-- [ ] Runtime anomaly detection
-- [ ] Causal provenance
-- [ ] Data-flow tracking
-- [ ] Execution replay
-- [ ] Runtime policy / allow / warn / block
+Phase 1 is intentionally **not** claiming native ETW/Endpoint Security/eBPF support yet. Those are future collector backends that should feed the same event model.
 
-## Platform direction
+## Benchmark
 
-The first collector is intentionally simple so the event model can stabilize before OS-specific instrumentation becomes the foundation.
+```bash
+execweave benchmark --backend portable --iterations 5
+execweave benchmark --backend strace --iterations 5
+```
 
-Planned telemetry sources include:
-
-- **Linux:** eBPF, procfs, audit events
-- **Windows:** ETW and Windows process/filesystem telemetry
-- **macOS:** Endpoint Security, FSEvents, process telemetry
-- **Agent layer:** agent SDKs, OpenTelemetry, MCP integrations
+The harness reports baseline and instrumented timings plus an overhead ratio. Results are machine-specific; the project does not publish an overhead claim from this smoke benchmark.
 
 ## Privacy
 
-ExecWeave is intended to be **local-first**.
+ExecWeave is **local-first**.
 
-Runtime telemetry can contain sensitive information such as file paths, command-line arguments, repository names, network destinations, agent prompts, and secret-related metadata.
+- Events stay on the machine by default.
+- File contents are not traced.
+- Byte buffers from `read()`/`write()` are not collected.
+- Raw Linux syscall traces are deleted after parsing unless explicitly retained.
+- `execve` argument values are not copied into graph events.
 
-ExecWeave should minimize unnecessary collection, avoid transmitting telemetry outside the machine by default, and redact or hash sensitive values where possible.
+Runtime metadata can still be sensitive. Review event files before sharing them.
+
+## Next: Phase 2 — Execution Graph
+
+Phase 2 will materialize the event stream into the thing ExecWeave is ultimately about:
+
+- entity resolution and deduplication;
+- process/file/network graph construction;
+- temporal relationships;
+- graph filtering;
+- causal/runtime path queries;
+- exportable graph snapshots.
+
+Phase 3 will build the live interactive UI on top of that graph.
 
 ## Contributing
 
 **Contributions are very welcome.**
 
-ExecWeave is early enough that contributors can still influence its architecture and event model.
+High-impact areas now include:
 
-Areas where help is especially useful:
+- Linux eBPF backend;
+- Windows ETW backend;
+- macOS Endpoint Security backend;
+- graph entity resolution;
+- interactive graph visualization;
+- OpenTelemetry / MCP integrations;
+- privacy and redaction;
+- reproducible agent workloads;
+- performance evaluation;
+- README and documentation translations.
 
-- Linux eBPF collectors
-- Windows ETW collectors
-- macOS Endpoint Security collectors
-- process/file/network attribution
-- graph modeling and entity resolution
-- interactive graph visualization
-- OpenTelemetry and MCP integrations
-- tests and reproducible agent workloads
-- performance/overhead measurement
-- security research and provenance analysis
-- README and documentation translations
-
-For small changes, feel free to fork the repository and open a pull request.
-
-For larger architecture or telemetry changes, please open an issue first and describe the platform, event source, privilege requirements, and expected graph relationships.
-
-### README translations
-
-`README.md` is the canonical English source. Localized READMEs use locale-qualified filenames such as `README.zh-TW.md`, `README.zh-CN.md`, `README.ja.md`, and `README.ko.md`.
-
-Translations are welcome. Please keep the structure, code examples, links, roadmap status, and technical meaning synchronized with the canonical README.
-
-> **Early contributors are especially welcome.**
+For small changes, fork the repository and open a pull request. For a new collector or architecture change, open an issue first and document the telemetry source, privilege requirements, expected graph relationships, and causal guarantees.
 
 ## Design principles
 
-### Local first
-
-Users should be able to inspect agent behavior without uploading sensitive runtime telemetry to a third party.
-
-### Runtime truth over assumptions
-
-Whenever possible, ExecWeave should visualize what actually happened on the operating system rather than only what an agent framework says happened.
-
-### Graph over log
-
-Logs are useful evidence, but relationships between runtime entities should be first-class data.
-
-### Framework agnostic
-
-ExecWeave should not depend on one model provider or agent framework.
-
-### Explainable attribution
-
-Users should be able to see why two nodes are connected and which raw event supports that edge.
-
-### No fake causality
-
-Temporal correlation should not be presented as causal attribution.
+- **Local first** — runtime evidence stays local by default.
+- **Runtime truth over assumptions** — prefer OS evidence over framework claims.
+- **Graph over log** — relationships are first-class data.
+- **Framework agnostic** — no dependency on one agent/model provider.
+- **Explainable attribution** — every edge should say why it exists.
+- **No fake causality** — temporal correlation is not causal proof.
 
 ## License
 
