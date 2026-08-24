@@ -21,18 +21,22 @@ class ProcessSnapshot:
     name: str
     cmdline: list[str]
     exe: str | None
+    create_time: float
 
     @property
     def entity(self) -> Entity:
+        # PID alone is not a stable identity because operating systems reuse PIDs.
+        identity = f"{self.pid}:{int(self.create_time * 1_000_000)}"
         return Entity(
             type="process",
-            id=f"process:{self.pid}",
+            id=f"process:{identity}",
             name=self.name,
             attributes={
                 "pid": self.pid,
                 "ppid": self.ppid,
                 "cmdline": self.cmdline,
                 "exe": self.exe,
+                "create_time": self.create_time,
             },
         )
 
@@ -46,6 +50,7 @@ def _safe_process_snapshot(proc: psutil.Process) -> ProcessSnapshot | None:
                 name=proc.name(),
                 cmdline=proc.cmdline(),
                 exe=_safe_exe(proc),
+                create_time=proc.create_time(),
             )
     except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
         return None
@@ -113,7 +118,7 @@ class RuntimeCollector:
         self.collect_filesystem = collect_filesystem
         self.collect_network = collect_network
         self._seen_processes: dict[int, ProcessSnapshot] = {}
-        self._seen_connections: set[tuple[int, str | None, str | None, str]] = set()
+        self._seen_connections: set[tuple[str, str | None, str | None, str]] = set()
 
     def run(self, command: list[str]) -> int:
         if not command:
@@ -146,7 +151,7 @@ class RuntimeCollector:
                 session_id=self.session_id,
                 session_entity=session,
                 sink=self.sink,
-                excluded_roots=[self.sink.path.parent.parent],
+                excluded_roots=[self.sink.path],
             )
             watcher.start()
 
@@ -192,21 +197,33 @@ class RuntimeCollector:
             pass
 
         current: dict[int, ProcessSnapshot] = {}
+        process_objects: dict[int, psutil.Process] = {}
         for proc in processes:
             snapshot = _safe_process_snapshot(proc)
             if snapshot is None:
                 continue
             current[snapshot.pid] = snapshot
+            process_objects[snapshot.pid] = proc
+
+        # Resolve the whole current tree before emitting new SPAWNED edges so a
+        # child can point at a parent discovered in the same polling interval.
+        for snapshot in current.values():
             if snapshot.pid not in self._seen_processes:
-                parent_snapshot = self._seen_processes.get(snapshot.ppid)
+                parent_snapshot = current.get(snapshot.ppid) or self._seen_processes.get(snapshot.ppid)
                 parent = (
                     parent_snapshot.entity
                     if parent_snapshot is not None
-                    else Entity(type="process", id=f"process:{snapshot.ppid}", name=str(snapshot.ppid))
+                    else Entity(
+                        type="process_reference",
+                        id=f"process-pid:{snapshot.ppid}",
+                        name=str(snapshot.ppid),
+                        attributes={"pid": snapshot.ppid, "unresolved": True},
+                    )
                 )
                 self._record_process_start(snapshot, parent=parent, relation="SPAWNED")
+
             if self.collect_network:
-                self._sample_network(proc, snapshot)
+                self._sample_network(process_objects[snapshot.pid], snapshot)
 
         self._mark_disappeared_processes(set(current))
 
@@ -256,7 +273,7 @@ class RuntimeCollector:
                 continue
             local = _format_address(connection.laddr)
             status = str(getattr(connection, "status", ""))
-            key = (snapshot.pid, local, remote, status)
+            key = (snapshot.entity.id, local, remote, status)
             if key in self._seen_connections:
                 continue
             self._seen_connections.add(key)
@@ -268,6 +285,10 @@ class RuntimeCollector:
                     relation="CONNECTED_TO",
                     source=snapshot.entity,
                     target=endpoint,
-                    attributes={"local_address": local, "remote_address": remote, "status": status},
+                    attributes={
+                        "local_address": local,
+                        "remote_address": remote,
+                        "status": status,
+                    },
                 )
             )
