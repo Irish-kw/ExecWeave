@@ -25,7 +25,6 @@ class ProcessSnapshot:
 
     @property
     def entity(self) -> Entity:
-        # PID alone is not a stable identity because operating systems reuse PIDs.
         identity = f"{self.pid}:{int(self.create_time * 1_000_000)}"
         return Entity(
             type="process",
@@ -44,21 +43,18 @@ class ProcessSnapshot:
 def _safe_process_snapshot(proc: psutil.Process) -> ProcessSnapshot | None:
     try:
         with proc.oneshot():
+            try:
+                exe = proc.exe()
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                exe = None
             return ProcessSnapshot(
                 pid=proc.pid,
                 ppid=proc.ppid(),
                 name=proc.name(),
                 cmdline=proc.cmdline(),
-                exe=_safe_exe(proc),
+                exe=exe,
                 create_time=proc.create_time(),
             )
-    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-        return None
-
-
-def _safe_exe(proc: psutil.Process) -> str | None:
-    try:
-        return proc.exe()
     except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
         return None
 
@@ -94,12 +90,9 @@ def infer_agent_name(command: Iterable[str]) -> str:
 
 
 class RuntimeCollector:
-    """Phase 1 local runtime collector.
+    """Portable polling collector used on all platforms and as a fallback backend."""
 
-    The collector launches one command as an ExecWeave session and observes the
-    resulting process tree. Process/network observations are process-attributed.
-    Filesystem changes are session-correlated only in this initial polling MVP.
-    """
+    backend_name = "portable"
 
     def __init__(
         self,
@@ -107,14 +100,14 @@ class RuntimeCollector:
         session_id: str,
         sink: JsonlSink,
         watch_root: Path,
-        poll_interval: float = 0.25,
+        poll_interval: float = 0.10,
         collect_filesystem: bool = True,
         collect_network: bool = True,
     ) -> None:
         self.session_id = session_id
         self.sink = sink
         self.watch_root = watch_root.expanduser().resolve()
-        self.poll_interval = max(0.05, poll_interval)
+        self.poll_interval = max(0.02, poll_interval)
         self.collect_filesystem = collect_filesystem
         self.collect_network = collect_network
         self._seen_processes: dict[int, ProcessSnapshot] = {}
@@ -130,9 +123,12 @@ class RuntimeCollector:
             type="session",
             id=f"session:{self.session_id}",
             name=self.session_id,
-            attributes={"command": command, "cwd": str(self.watch_root)},
+            attributes={
+                "command": command,
+                "cwd": str(self.watch_root),
+                "backend": self.backend_name,
+            },
         )
-
         self.sink.emit(
             RuntimeEvent.create(
                 session_id=self.session_id,
@@ -140,18 +136,19 @@ class RuntimeCollector:
                 relation="STARTED_SESSION",
                 source=agent,
                 target=session,
-                attributes={"collector_pid": os.getpid()},
+                attributes={"collector_pid": os.getpid(), "backend": self.backend_name},
             )
         )
 
         watcher: FileWatcher | None = None
+        internal_root = self.watch_root / ".execweave"
         if self.collect_filesystem:
             watcher = FileWatcher(
                 root=self.watch_root,
                 session_id=self.session_id,
                 session_entity=session,
                 sink=self.sink,
-                excluded_roots=[self.sink.path],
+                excluded_roots=[internal_root, self.sink.path],
             )
             watcher.start()
 
@@ -160,9 +157,9 @@ class RuntimeCollector:
         try:
             process = subprocess.Popen(command, cwd=str(self.watch_root))
             root = psutil.Process(process.pid)
-            root_snapshot = _safe_process_snapshot(root)
-            if root_snapshot is not None:
-                self._record_process_start(root_snapshot, parent=session, relation="LAUNCHED")
+            snapshot = _safe_process_snapshot(root)
+            if snapshot is not None:
+                self._record_process_start(snapshot, parent=session, relation="LAUNCHED")
 
             while process.poll() is None:
                 self._sample_process_tree(root)
@@ -184,6 +181,7 @@ class RuntimeCollector:
                     attributes={
                         "return_code": return_code,
                         "root_pid": process.pid if process is not None else None,
+                        "backend": self.backend_name,
                     },
                 )
             )
@@ -205,11 +203,11 @@ class RuntimeCollector:
             current[snapshot.pid] = snapshot
             process_objects[snapshot.pid] = proc
 
-        # Resolve the whole current tree before emitting new SPAWNED edges so a
-        # child can point at a parent discovered in the same polling interval.
         for snapshot in current.values():
             if snapshot.pid not in self._seen_processes:
-                parent_snapshot = current.get(snapshot.ppid) or self._seen_processes.get(snapshot.ppid)
+                parent_snapshot = current.get(snapshot.ppid) or self._seen_processes.get(
+                    snapshot.ppid
+                )
                 parent = (
                     parent_snapshot.entity
                     if parent_snapshot is not None
@@ -221,13 +219,18 @@ class RuntimeCollector:
                     )
                 )
                 self._record_process_start(snapshot, parent=parent, relation="SPAWNED")
-
             if self.collect_network:
                 self._sample_network(process_objects[snapshot.pid], snapshot)
 
         self._mark_disappeared_processes(set(current))
 
-    def _record_process_start(self, snapshot: ProcessSnapshot, *, parent: Entity, relation: str) -> None:
+    def _record_process_start(
+        self,
+        snapshot: ProcessSnapshot,
+        *,
+        parent: Entity,
+        relation: str,
+    ) -> None:
         if snapshot.pid in self._seen_processes:
             return
         self._seen_processes[snapshot.pid] = snapshot
@@ -238,15 +241,15 @@ class RuntimeCollector:
                 relation=relation,
                 source=parent,
                 target=snapshot.entity,
+                attributes={
+                    "attribution": "polling",
+                    "causal": relation == "LAUNCHED",
+                    "backend": self.backend_name,
+                },
             )
         )
 
     def _mark_disappeared_processes(self, active_pids: set[int]) -> None:
-        """Emit EXITED only after the operating system confirms the PID is gone.
-
-        A child can be re-parented after the root agent exits, so absence from the
-        current descendant tree alone is not enough evidence that it exited.
-        """
         for pid in list(self._seen_processes):
             if pid in active_pids or psutil.pid_exists(pid):
                 continue
@@ -257,6 +260,7 @@ class RuntimeCollector:
                     event_type="process.exited",
                     relation="EXITED",
                     source=snapshot.entity,
+                    attributes={"attribution": "polling", "backend": self.backend_name},
                 )
             )
 
@@ -289,6 +293,9 @@ class RuntimeCollector:
                         "local_address": local,
                         "remote_address": remote,
                         "status": status,
+                        "attribution": "process_polling",
+                        "causal": True,
+                        "backend": self.backend_name,
                     },
                 )
             )
