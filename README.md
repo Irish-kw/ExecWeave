@@ -1,5 +1,10 @@
 # ExecWeave
 
+<p align="center">
+  <strong>English</strong> |
+  <a href="README.zh-TW.md">繁體中文</a>
+</p>
+
 **See what AI agents actually do on your machine.**
 
 ExecWeave is an open-source project for turning the runtime behavior of AI agents into an interactive execution graph.
@@ -343,10 +348,17 @@ Areas where help is especially useful:
 - tests and reproducible agent workloads
 - performance/overhead measurement
 - security research and provenance analysis
+- README and documentation translations
 
 For small changes, feel free to fork the repository and open a pull request.
 
 For larger architecture or telemetry changes, please open an issue first and describe the platform, event source, privilege requirements, and expected graph relationships.
+
+### README translations
+
+`README.md` is the canonical English source. Localized READMEs use locale-qualified filenames such as `README.zh-TW.md`, `README.ja.md`, and `README.ko.md`.
+
+Translations are welcome. Please keep the structure, code examples, links, roadmap status, and technical meaning synchronized with the canonical README.
 
 > **Early contributors are especially welcome.**
 
