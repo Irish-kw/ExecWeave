@@ -2,7 +2,10 @@
 
 <p align="center">
   <strong>English</strong> |
-  <a href="README.zh-TW.md">繁體中文</a>
+  <a href="README.zh-TW.md">繁體中文</a> |
+  <a href="README.zh-CN.md">简体中文</a> |
+  <a href="README.ja.md">日本語</a> |
+  <a href="README.ko.md">한국어</a>
 </p>
 
 **See what AI agents actually do on your machine.**
@@ -356,7 +359,7 @@ For larger architecture or telemetry changes, please open an issue first and des
 
 ### README translations
 
-`README.md` is the canonical English source. Localized READMEs use locale-qualified filenames such as `README.zh-TW.md`, `README.ja.md`, and `README.ko.md`.
+`README.md` is the canonical English source. Localized READMEs use locale-qualified filenames such as `README.zh-TW.md`, `README.zh-CN.md`, `README.ja.md`, and `README.ko.md`.
 
 Translations are welcome. Please keep the structure, code examples, links, roadmap status, and technical meaning synchronized with the canonical README.
 
