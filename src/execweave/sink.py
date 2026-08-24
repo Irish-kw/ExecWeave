@@ -14,9 +14,13 @@ class JsonlSink:
         self.path = Path(path).expanduser().resolve()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
+        self._sequence = 0
 
     def emit(self, event: RuntimeEvent) -> None:
-        line = json.dumps(event.to_dict(), ensure_ascii=False, sort_keys=True)
+        payload = event.to_dict()
         with self._lock:
+            self._sequence += 1
+            payload["sequence"] = self._sequence
+            line = json.dumps(payload, ensure_ascii=False, sort_keys=True)
             with self.path.open("a", encoding="utf-8") as handle:
                 handle.write(line + "\n")
