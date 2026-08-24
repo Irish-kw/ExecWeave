@@ -225,8 +225,13 @@ class RuntimeCollector:
         )
 
     def _mark_disappeared_processes(self, active_pids: set[int]) -> None:
+        """Emit EXITED only after the operating system confirms the PID is gone.
+
+        A child can be re-parented after the root agent exits, so absence from the
+        current descendant tree alone is not enough evidence that it exited.
+        """
         for pid in list(self._seen_processes):
-            if pid in active_pids:
+            if pid in active_pids or psutil.pid_exists(pid):
                 continue
             snapshot = self._seen_processes.pop(pid)
             self.sink.emit(
