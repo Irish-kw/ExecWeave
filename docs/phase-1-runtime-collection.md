@@ -1,88 +1,106 @@
 # Phase 1 — Runtime Collection
 
-ExecWeave Phase 1 establishes a graph-ready local event stream before the interactive graph UI is built.
+Phase 1 establishes a graph-ready, local runtime event stream that Phase 2 can turn into an execution graph.
 
-## Current MVP
+## Status
 
-Install from a local checkout:
+**Phase 1 is complete for the Linux reference path and portable fallback.**
+
+ExecWeave now provides two collection backends:
+
+- `strace` — Linux syscall-backed collection. Captures short-lived descendants and process-attributed filesystem/network actions from syscall evidence.
+- `portable` — psutil + watchdog fallback for Linux, macOS, and Windows. Process/network events are polled; filesystem changes are session-correlated and explicitly non-causal.
+
+`auto` prefers `strace` on Linux when it is installed and otherwise selects `portable`.
 
 ```bash
+execweave doctor
+execweave run --backend auto -- claude
+```
+
+## Install
+
+```bash
+git clone https://github.com/Irish-kw/ExecWeave.git
+cd ExecWeave
 python -m pip install -e ".[dev]"
 ```
 
-Run an AI agent or any other command under ExecWeave:
+On Debian/Ubuntu, install the Linux reference backend with:
+
+```bash
+sudo apt-get install strace
+```
+
+Then:
 
 ```bash
 execweave run -- claude
-```
-
-Other examples:
-
-```bash
 execweave run -- codex
 execweave run -- gemini
 execweave run -- opencode
 execweave run -- python my_agent.py
 ```
 
-By default, ExecWeave watches the current directory and writes events to:
+Events are written locally to:
 
 ```text
 .execweave/runs/<session-id>.jsonl
 ```
 
-Use another working/watch directory:
+Raw `strace` files are deleted after parsing by default. Keep them only for debugging:
 
 ```bash
-execweave run --watch-root /path/to/repo -- claude
+execweave run --keep-native-trace -- claude
 ```
 
-Disable collectors individually while debugging:
+## Backend capability model
 
-```bash
-execweave run --no-files -- claude
-execweave run --no-network -- claude
-```
+### Linux `strace` backend
 
-## Event model
+The native Phase 1 reference backend follows descendants with `strace -ff` and records syscall-backed edges.
 
-Every observation is emitted in a graph-ready form:
+It can produce relationships such as:
 
 ```text
-source --RELATION--> target
+session --LAUNCHED--> process
+process --SPAWNED--> process
+process --EXECUTED--> executable
+process --OPENED_READ--> file
+process --OPENED_WRITE--> file
+process --DELETED--> file
+process --RENAMED_TO--> file
+process --CHANGED_CWD_TO--> directory
+process --CONNECTED_TO--> network_endpoint
+process --EXITED--> ...
 ```
 
-Example process event:
+These events include:
 
 ```json
 {
-  "schema_version": "0.1",
-  "event_type": "process.started",
-  "relation": "SPAWNED",
-  "source": {
-    "type": "process",
-    "id": "process:1234:1780000000000000"
-  },
-  "target": {
-    "type": "process",
-    "id": "process:1240:1780000001000000"
-  }
+  "attribution": "syscall",
+  "causal": true,
+  "backend": "strace"
 }
 ```
 
-Example network event:
+`OPENED_READ` and `OPENED_WRITE` describe the access mode proven by the open syscall. They intentionally do **not** claim that a later byte-level `read()` or `write()` occurred. Byte-level data-flow tracking belongs to a later collector.
+
+### Portable backend
+
+The portable backend launches the command directly and uses psutil/watchdog.
+
+It can produce:
 
 ```text
+session --LAUNCHED--> process
+process --SPAWNED--> process
 process --CONNECTED_TO--> network_endpoint
-```
-
-Filesystem events in the current MVP are deliberately weaker:
-
-```text
 session --OBSERVED_FILE_CHANGE--> file
 ```
 
-They include:
+Filesystem changes remain explicit session observations:
 
 ```json
 {
@@ -91,106 +109,135 @@ They include:
 }
 ```
 
-This distinction is intentional. A directory watcher can prove that a file changed during a session, but it cannot prove which process caused that change. ExecWeave should never present temporal correlation as causal attribution.
+This prevents ExecWeave from presenting temporal correlation as causal attribution.
 
-## What is collected now
+## Event ordering and identity
 
-### Session
+The JSONL sink adds a monotonically increasing `sequence` number to every event in a run. Timestamps are retained separately.
 
-- command
-- working directory
-- start/finish
-- return code
+Portable process IDs use PID + process creation time because operating systems reuse PIDs.
 
-### Process
-
-- PID
-- parent PID
-- process creation time
-- executable
-- command line
-- parent/child relationships
-
-Process node IDs include both PID and creation time because operating systems reuse PIDs.
-
-### Network
-
-For observed processes, ExecWeave records outbound remote endpoints when the operating system exposes the connection to the current user.
-
-### Filesystem
-
-The current watcher records create, modify, delete, and move events under the selected watch root.
-
-## Important limitations
-
-This is the first collector, not the final security sensor.
-
-### Short-lived processes
-
-Process discovery currently uses polling. A process that starts and exits completely between two polling intervals may be missed.
-
-Planned Linux collectors will use lower-level event sources such as eBPF to remove this gap.
-
-### Filesystem attribution
-
-The current filesystem watcher is session-correlated, not process-attributed.
-
-Planned OS-specific collectors should eventually produce stronger edges such as:
+The Linux syscall backend scopes process IDs to the ExecWeave session:
 
 ```text
-process --READ--> file
-process --WROTE--> file
-process --DELETED--> file
+process:<session-id>:<pid>
 ```
 
-only when the underlying telemetry supports that claim.
+A process identity is therefore never globally inferred from PID alone.
 
-### Network permissions
+## Short-lived processes
 
-Some operating systems restrict per-process socket inspection. Missing network events do not currently imply that no connection occurred.
+The portable backend can miss a process that starts and exits entirely between polling intervals.
 
-### Agent intent
+The Linux reference backend removes this Phase 1 gap by tracing process syscalls and following descendants with `strace -ff`. CI includes an integration test that launches a short-lived child and checks that a `SPAWNED` edge is emitted.
 
-The Phase 1 runtime collector sees system behavior. Agent/tool/MCP semantic integrations will later provide the intent-side events that can be correlated with runtime behavior.
+## Filesystem path attribution
 
-## Phase 1 acceptance criteria
+The Linux parser tracks per-process working directories and handles common `*at` syscalls. Relative paths are resolved against the best syscall evidence available.
 
-Phase 1 should eventually provide reliable versions of:
+Path attribution can still be imperfect for uncommon dirfd patterns. Raw syscall names and paths are retained as event attributes so downstream consumers can audit how an edge was produced.
+
+## Network attribution
+
+The Linux backend records successful `connect()` calls for:
+
+- IPv4
+- IPv6
+- Unix-domain sockets
+
+The portable backend uses per-process socket inspection when the operating system exposes it to the current user.
+
+A missing event should never be interpreted as proof that no network action happened on a backend that lacks permission or coverage.
+
+## Privacy
+
+Runtime telemetry can contain sensitive paths, executable names, command arguments, and endpoints.
+
+Phase 1 follows these defaults:
+
+- all event data stays local;
+- raw syscall trace files are deleted after parsing unless `--keep-native-trace` is requested;
+- file contents are not traced;
+- byte buffers from `read()`/`write()` are not collected;
+- `execve` arguments are not copied into graph events beyond an argument count.
+
+The session wrapper still records the command supplied to ExecWeave, so users should avoid putting secrets directly on command lines.
+
+## Diagnostics
+
+```bash
+execweave doctor
+```
+
+Example:
+
+```json
+{
+  "auto_selected": "strace",
+  "platform": "linux",
+  "portable": true,
+  "strace": true
+}
+```
+
+## Overhead benchmark harness
+
+Phase 1 includes a repeatable smoke benchmark:
+
+```bash
+execweave benchmark --backend portable --iterations 5
+execweave benchmark --backend strace --iterations 5
+```
+
+or:
+
+```bash
+python benchmarks/phase1_overhead.py
+```
+
+It reports raw baseline/instrumented timings, medians, and an overhead ratio. These are environment-specific measurements, not a published performance claim.
+
+## Acceptance criteria
 
 - [x] Explicit ExecWeave session wrapper
 - [x] Graph-ready event schema
+- [x] Monotonic event sequence numbers
 - [x] Root process capture
-- [x] Parent/child process discovery MVP
-- [x] Filesystem observation MVP
-- [x] Network connection observation MVP
-- [x] Session correlation
-- [ ] Reliable short-lived process capture
-- [ ] Process-attributed filesystem access on Linux
-- [ ] Process-attributed filesystem access on Windows
-- [ ] Process-attributed filesystem access on macOS
-- [ ] OS-specific collector capability reporting
-- [ ] Performance/overhead benchmarks
+- [x] Parent/child process capture
+- [x] Portable filesystem observation
+- [x] Portable per-process network observation
+- [x] Linux reliable short-lived process capture
+- [x] Linux process-attributed filesystem syscall telemetry
+- [x] Linux process-attributed network syscall telemetry
+- [x] Backend auto-selection and capability diagnostics
+- [x] Raw native trace cleanup by default
+- [x] Cross-platform portable fallback
+- [x] Unit tests for parser and backend selection
+- [x] Linux native integration test in CI
+- [x] Overhead benchmark harness
 
-## Next collector milestone
+## Explicitly out of Phase 1
 
-The next major implementation target is a Linux event-driven collector that can capture process execution and process-attributed filesystem/network activity without relying on polling.
+The following remain future work rather than being falsely marked complete:
 
-The existing JSONL schema is intentionally separated from the collection mechanism so eBPF, ETW, Endpoint Security, or future collectors can feed the same graph pipeline.
+- Windows ETW process-attributed filesystem backend
+- macOS Endpoint Security process-attributed backend
+- Linux eBPF backend to reduce ptrace overhead
+- DNS-to-domain correlation
+- byte-level read/write data-flow tracking
+- agent/tool/MCP semantic telemetry
+- graph materialization and interactive visualization
+
+Those capabilities can feed the same event model without changing the Phase 1 contract.
+
+## Why `strace` before eBPF?
+
+Phase 1 needs a correctness-oriented reference implementation of process/file/network attribution and event semantics. `strace` is simple to inspect, easy to test, and captures short-lived descendants without inventing causality.
+
+An eBPF backend is a natural next optimization for lower overhead and always-on collection, but it should implement the same graph event semantics rather than defining them implicitly.
 
 ## Contributing
 
-Phase 1 is a good place to contribute because several collector backends can be developed independently.
+Useful next contributions include Linux eBPF, Windows ETW, macOS Endpoint Security, path/entity resolution, overhead evaluation, privacy/redaction, and reproducible agent workloads.
 
-Useful contribution areas include:
-
-- Linux eBPF telemetry
-- Windows ETW telemetry
-- macOS Endpoint Security telemetry
-- process attribution
-- socket attribution
-- filesystem attribution
-- tests and reproducible workloads
-- event schema review
-- overhead measurement
-
-If you want to work on a larger collector change, please open an issue describing the telemetry source, supported platform, expected events, and privilege requirements before implementation.
+For a new collector backend, please preserve the distinction between proven causal attribution and session-level observation.
