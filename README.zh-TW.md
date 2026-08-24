@@ -2,7 +2,10 @@
 
 <p align="center">
   <a href="README.md">English</a> |
-  <strong>繁體中文</strong>
+  <strong>繁體中文</strong> |
+  <a href="README.zh-CN.md">简体中文</a> |
+  <a href="README.ja.md">日本語</a> |
+  <a href="README.ko.md">한국어</a>
 </p>
 
 **看清楚 AI Agent 在你的電腦上實際做了什麼。**
@@ -356,7 +359,7 @@ ExecWeave 還處在足夠早期的階段，因此 contributor 不只是修小 bu
 
 ### README 多語言翻譯
 
-`README.md` 是 canonical English source。其他語言 README 使用 locale-qualified filename，例如 `README.zh-TW.md`、`README.ja.md`、`README.ko.md`。
+`README.md` 是 canonical English source。其他語言 README 使用 locale-qualified filename，例如 `README.zh-TW.md`、`README.zh-CN.md`、`README.ja.md`、`README.ko.md`。
 
 歡迎協助新增其他語言。請盡可能保持章節結構、code example、link、roadmap 狀態與技術語意和英文 README 同步。
 
