@@ -35,7 +35,7 @@ MCP tool names following Claude Code's `mcp__<server>__<tool>` convention are no
 
 ## Install the hook configuration
 
-First install ExecWeave so the console script is available:
+First install ExecWeave so the console scripts are available:
 
 ```bash
 python -m pip install -e ".[dev]"
@@ -59,9 +59,47 @@ Claude Code's `/hooks` menu can be used to inspect which hooks are currently con
 
 The adapter uses command hooks and is fail-open by default: a telemetry parsing or filesystem error is written to stderr but returns success so ExecWeave observability does not block an Agent tool call. `--strict` is available for debugging the hook itself, not as a runtime security policy.
 
-## Sidecar location
+## Recommended: one-command runtime + semantic recording
 
-By default each Claude session writes to its own file under the project working directory:
+After the hooks are installed, use the run-bound workflow:
+
+```bash
+execweave-claude-record --open -- claude
+```
+
+On Linux, `--backend auto` still prefers the stronger `strace` backend when available. On macOS and Windows it uses the portable backend.
+
+`execweave-claude-record` binds a sidecar path that is unique to this ExecWeave run **inside the dedicated CLI process**. Claude and its hook commands inherit that path, so two independently launched ExecWeave Claude-record processes do not need to guess which semantic sidecar belongs to which runtime capture.
+
+If Claude emits semantic hook events, the run directory contains both raw and merged artifacts:
+
+```text
+.execweave/runs/<run-id>/
+├── events.jsonl              # runtime evidence only
+├── graph.json                # runtime-only graph
+├── viewer.html               # runtime-only viewer
+├── semantic.jsonl            # Claude hook semantic evidence only
+├── events.semantic.jsonl     # validated merged stream
+├── graph.semantic.json       # runtime + semantic graph
+└── viewer.semantic.html      # runtime + semantic viewer
+```
+
+`--open` opens `viewer.semantic.html` when semantic evidence was observed. If the hooks are not installed or no supported hook event fires, ExecWeave reports `semantic_status: "no_events"` and falls back to the runtime-only viewer instead of guessing or failing the run.
+
+Choose a directory explicitly if desired:
+
+```bash
+execweave-claude-record \
+  --output-dir my-claude-run \
+  --open \
+  -- claude
+```
+
+The run-bound workflow preserves the original `events.jsonl`; semantic evidence is merged only into a separate `events.semantic.jsonl`.
+
+## Standalone hook sidecar location
+
+When `execweave-claude-hook` is used outside the run-bound recorder, each Claude session writes by default to:
 
 ```text
 <cwd>/.execweave/semantic/claude/<Claude-session-id>.jsonl
@@ -81,24 +119,16 @@ or an explicit hook command such as:
 execweave-claude-hook --sidecar /path/to/semantic.jsonl
 ```
 
-For parallel sessions, prefer the automatic session-scoped path instead of pointing multiple Claude sessions at one fixed sidecar.
+For parallel standalone sessions, prefer the automatic session-scoped path instead of pointing multiple Claude sessions at one fixed sidecar.
 
-## Build a combined graph
+## Advanced: manual merge
 
-Capture OS runtime behavior normally:
-
-```bash
-execweave run --output run.jsonl -- claude
-```
-
-With the hooks enabled, Claude writes its semantic sidecar independently while the session runs.
-
-Then merge the appropriate Claude sidecar into a **new** event stream:
+The generic semantic pipeline remains available when you already have a runtime capture and a semantic sidecar:
 
 ```bash
 execweave semantic-merge \
   run.jsonl \
-  .execweave/semantic/claude/<Claude-session-id>.jsonl \
+  semantic.jsonl \
   --output run.semantic.jsonl
 
 execweave validate run.semantic.jsonl
@@ -106,7 +136,7 @@ execweave graph run.semantic.jsonl --output run.semantic.graph.json
 execweave view run.semantic.graph.json --output run.semantic.html --open
 ```
 
-The original `run.jsonl` and Claude sidecar remain unchanged.
+The original runtime stream and semantic sidecar remain unchanged.
 
 ## Important Tool → Process limitation
 
