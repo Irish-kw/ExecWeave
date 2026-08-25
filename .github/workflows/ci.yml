@@ -39,7 +39,9 @@ jobs:
       - name: Build portable standalone viewer
         run: execweave view phase1-portable.graph.json --output phase1-portable.html
       - name: Condense portable graph smoke
-        run: execweave graph-condense phase1-portable.graph.json --output phase1-portable.compact.graph.json --threshold 2
+        run: execweave graph-condense phase1-portable.graph.json --output phase1-portable.compact.graph.json --threshold 2 --keep-expansion
+      - name: Build expandable condensed viewer
+        run: execweave view phase1-portable.compact.graph.json --output phase1-portable.compact.html
       - name: Analyze portable graph smoke
         run: execweave analyze phase1-portable.graph.json --output phase1-portable.analysis.json
       - name: One-command record workflow smoke
