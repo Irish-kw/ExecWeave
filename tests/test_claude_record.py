@@ -57,8 +57,18 @@ def test_claude_record_binds_hook_sidecar_and_builds_semantic_graph(
     assert result.merged_event_stream is not None and result.merged_event_stream.exists()
     assert result.semantic_graph is not None and result.semantic_graph.exists()
     assert result.semantic_viewer is not None and result.semantic_viewer.exists()
+    assert result.correlation_status == "completed_no_matches"
+    assert result.correlated_event_stream == (output_dir / "events.correlated.jsonl").resolve()
+    assert result.correlated_graph == (output_dir / "graph.correlated.json").resolve()
+    assert result.correlated_viewer == (output_dir / "viewer.correlated.html").resolve()
+    assert result.correlated_event_stream.exists()
+    assert result.correlated_graph.exists()
+    assert result.correlated_viewer.exists()
+    assert result.correlation is not None
+    assert result.correlation.correlated_tool_calls == 0
     assert validate_event_stream(result.runtime.event_stream).valid is True
     assert validate_event_stream(result.merged_event_stream).valid is True
+    assert validate_event_stream(result.correlated_event_stream).valid is True
     assert os.environ["EXECWEAVE_SEMANTIC_SIDECAR"] == "parent-value-must-be-restored"
 
     graph = load_graph(result.semantic_graph)
@@ -89,6 +99,11 @@ def test_claude_record_without_hook_events_falls_back_to_runtime_graph(tmp_path:
     assert result.merged_event_stream is None
     assert result.semantic_graph is None
     assert result.semantic_viewer is None
+    assert result.correlation_status == "not_run_no_semantic_events"
+    assert result.correlated_event_stream is None
+    assert result.correlated_graph is None
+    assert result.correlated_viewer is None
+    assert result.correlation is None
     assert result.runtime.graph.exists()
     assert result.runtime.viewer.exists()
 
@@ -108,6 +123,24 @@ def test_claude_record_restores_missing_environment_variable(tmp_path: Path, mon
     assert "EXECWEAVE_SEMANTIC_SIDECAR" not in os.environ
 
 
+def test_claude_record_rejects_invalid_correlation_window_before_command(tmp_path: Path) -> None:
+    marker = tmp_path / "should-not-run-invalid-window.txt"
+    code = f"from pathlib import Path; Path({str(marker)!r}).write_text('ran')"
+
+    with pytest.raises(ValueError, match="correlation_window_ms must be greater than zero"):
+        record_claude_to_viewer(
+            [sys.executable, "-c", code],
+            watch_root=tmp_path,
+            output_dir=tmp_path / "invalid-window",
+            backend="portable",
+            correlation_window_ms=0,
+            collect_filesystem=False,
+            collect_network=False,
+        )
+
+    assert not marker.exists()
+
+
 def test_claude_record_preflight_rejects_semantic_conflict_before_command(
     tmp_path: Path,
 ) -> None:
@@ -115,6 +148,28 @@ def test_claude_record_preflight_rejects_semantic_conflict_before_command(
     output_dir.mkdir()
     (output_dir / "semantic.jsonl").write_text("existing\n", encoding="utf-8")
     marker = tmp_path / "should-not-run.txt"
+    code = f"from pathlib import Path; Path({str(marker)!r}).write_text('ran')"
+
+    with pytest.raises(FileExistsError, match="Claude semantic artifacts already exist"):
+        record_claude_to_viewer(
+            [sys.executable, "-c", code],
+            watch_root=tmp_path,
+            output_dir=output_dir,
+            backend="portable",
+            collect_filesystem=False,
+            collect_network=False,
+        )
+
+    assert not marker.exists()
+
+
+def test_claude_record_preflight_rejects_correlated_conflict_before_command(
+    tmp_path: Path,
+) -> None:
+    output_dir = tmp_path / "existing-correlated"
+    output_dir.mkdir()
+    (output_dir / "events.correlated.jsonl").write_text("existing\n", encoding="utf-8")
+    marker = tmp_path / "should-not-run-correlated.txt"
     code = f"from pathlib import Path; Path({str(marker)!r}).write_text('ran')"
 
     with pytest.raises(FileExistsError, match="Claude semantic artifacts already exist"):
