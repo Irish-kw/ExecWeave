@@ -103,16 +103,20 @@ def test_graph_rejects_invalid_stream(tmp_path: Path) -> None:
         build_execution_graph(stream)
 
 
-def test_graph_writer_refuses_existing_nonempty_output(tmp_path: Path) -> None:
+def test_graph_writer_refuses_existing_nonempty_output_and_preserves_metadata(
+    tmp_path: Path,
+) -> None:
     stream = tmp_path / "run.jsonl"
     _emit_complete_stream(stream)
     graph = build_execution_graph(stream)
     output = tmp_path / "run.graph.json"
+    metadata = {"correlation": {"skipped_ambiguous": 2}}
 
-    written = write_execution_graph(graph, output)
+    written = write_execution_graph(graph, output, metadata=metadata)
     assert written == output.resolve()
     payload = json.loads(output.read_text(encoding="utf-8"))
     assert payload["graph_schema_version"] == "0.1"
+    assert payload["metadata"] == metadata
 
     with pytest.raises(FileExistsError):
         write_execution_graph(graph, output)
