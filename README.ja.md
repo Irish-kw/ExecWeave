@@ -130,6 +130,18 @@ v0.6.1 以降、すべての recorder は child command を起動する前に共
 
 Portable filesystem observation は process-causal ではなく session-correlated です。Future native collectors は Linux eBPF、Windows ETW、macOS Endpoint Security を予定しています。
 
+## v0.6.2 Safety Patch
+
+v0.6.2 は長時間・high-cardinality session の resource safety を強化しますが、**evidence semantics と graph schema 0.1 は変更しません**。
+
+- filesystem root、user home、users-home parent など過度に広い recursive scope では recursive filesystem observation をそのまま開始せず、process / network / semantic collection は継続できます。
+- Standalone / Live Viewer は safety budget（1,500 nodes、4,000 edges、または推定 5,000 SVG elements）を超えると SVG materialization を停止し、browser memory exhaustion を避けます。Canonical `graph.json` evidence artifact は完全なままです。
+- Viewer layout/fit は巨大 array を `Math.min` / `Math.max` に spread せず、node drag 中の edge redraw は animation-frame throttling されます。
+- Live server は byte offset から `events.jsonl` の追記分だけを tail し、in-memory `GraphAccumulator` で incrementally update します。各 `/graph.json` request で全 event history を replay せず、newline がまだない trailing partial JSONL line は buffer されます。
+- event count / aggregate count だけの変化では stats/edge labels のみ更新し、full topology redraw を行いません。Viewer budget 超過後の live `/graph.json` は counts-only compact payload になり、collection と session 終了時の canonical validation/full `graph.json` は維持されます。
+
+これは polling + incremental ingestion の Safety Patch であり、SSE、SQLite、Rust、Canvas への architecture migration ではありません。
+
 ## Viewer / Graph / Security
 
 Standalone Viewer は local self-contained で、pan/zoom、inspection、filters、**observed only**、search、Timeline replay、cluster expansion、focused neighborhood、Saved Views、明示的な edge semantics を備えます。
@@ -144,7 +156,7 @@ Security findings は evidence limit を維持し、possible sensitive-file → 
 
 ## Current status
 
-ExecWeave `main` は現在 **v0.6.1**。Runtime collection、execution graph、5 種の Agent/IDE integration、OpenRouter/LiteLLM、Ollama/llama.cpp/vLLM/LM Studio、exact Gateway ↔ Runtime identity、公開済み PyPI packaging、reference overhead benchmark、cross-platform command-launcher compatibility、cross-platform CI が baseline に含まれます。
+ExecWeave `main` は現在 **v0.6.2**。Runtime collection、execution graph、5 種の Agent/IDE integration、OpenRouter/LiteLLM、Ollama/llama.cpp/vLLM/LM Studio、exact Gateway ↔ Runtime identity、公開済み PyPI packaging、reference overhead benchmark、cross-platform command-launcher compatibility、large-graph browser safety guards、incremental Live JSONL tail/cache、cross-platform CI が baseline に含まれます。
 
 ## Privacy
 

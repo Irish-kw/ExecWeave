@@ -167,6 +167,18 @@ Portable filesystem observation 是 session-correlated，不是 process-causal�
 
 未來 native collectors 包含 Linux eBPF、Windows ETW、macOS Endpoint Security。
 
+## v0.6.2 Safety Patch
+
+v0.6.2 強化長時間與高 cardinality session 的資源安全，但**不改變 evidence semantics 或 graph schema 0.1**：
+
+- 過度寬廣的 recursive filesystem scope（例如 filesystem root、使用者 home 或 users-home parent）不再直接進行 recursive filesystem observation；process、network、semantic collection 仍可繼續。
+- Standalone 與 Live Viewer 在超過安全預算（1,500 nodes、4,000 edges，或估計 5,000 SVG elements）時停止 SVG materialization，避免 browser memory 被大型 graph 拖垮；canonical `graph.json` evidence artifact 仍保持完整。
+- Viewer layout/fit 不再把任意大型 array spread 給 `Math.min` / `Math.max`，node dragging 的 edge redraw 也改為 animation-frame throttling。
+- Live server 以 byte offset 只 tail `events.jsonl` 新增資料，透過 in-memory `GraphAccumulator` 增量更新，不再每次 `/graph.json` request 重播整份 event history；尚未完成且沒有 newline 的 trailing JSONL line 會先 buffer。
+- 僅 event count / aggregate count 變化時，Live UI 只更新 stats/edge labels，不做完整 topology redraw。超過 Viewer 預算後，live `/graph.json` 改回傳 counts-only compact payload；collection 與 session 結束後的 canonical validation/full `graph.json` 不受影響。
+
+這是 polling + incremental ingestion 的 Safety Patch，不是 SSE、SQLite、Rust 或 Canvas 架構切換。
+
 ## Viewer 與 Graph
 
 Standalone Viewer 完全 local、自包含，包含 pan/zoom、node/edge inspection、filters、**observed only**、search、Timeline ↔ Graph replay、cluster expansion、1/2-hop focus、Saved Views、edge semantics 與 Correlation Summary。
@@ -190,7 +202,7 @@ Possible sensitive-file → network path 不等於 byte-level exfiltration；sec
 
 ## 目前狀態
 
-ExecWeave `main` 目前為 **v0.6.1**。Baseline 已包含 runtime collection、graph materialization/query、standalone/live Viewer、五種 Agent/IDE semantic integrations、保守 Tool → Process correlation、OpenRouter/LiteLLM、Ollama/llama.cpp/vLLM/LM Studio、exact Gateway ↔ Model Runtime request identity、已發布的 PyPI wheel/sdist packaging、可重跑 overhead benchmark、跨平台 command launcher compatibility，以及跨平台 CI。
+ExecWeave `main` 目前為 **v0.6.2**。Baseline 已包含 runtime collection、graph materialization/query、standalone/live Viewer、五種 Agent/IDE semantic integrations、保守 Tool → Process correlation、OpenRouter/LiteLLM、Ollama/llama.cpp/vLLM/LM Studio、exact Gateway ↔ Model Runtime request identity、已發布的 PyPI packaging、可重跑 overhead benchmark、跨平台 command launcher compatibility、large-graph browser safety guards、incremental Live JSONL tail/cache，以及跨平台 CI。
 
 ## 隱私
 

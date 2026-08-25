@@ -223,6 +223,18 @@ Portable filesystem watching is session-correlated rather than process-causal, a
 
 Future native collectors remain planned for Linux eBPF, Windows ETW, and macOS Endpoint Security.
 
+## v0.6.2 safety patch
+
+v0.6.2 hardens long-running and high-cardinality sessions without changing evidence semantics or graph schema 0.1:
+
+- Broad recursive filesystem scopes such as a filesystem root, user home, or users-home parent are no longer recursively observed as-is; process, network, and semantic collection can continue.
+- Standalone and Live Viewers stop SVG materialization above the safety budget (1,500 nodes, 4,000 edges, or an estimated 5,000 SVG elements) instead of exhausting browser memory. The canonical `graph.json` evidence artifact remains complete.
+- Viewer layout/fit no longer spreads arbitrarily large arrays into `Math.min` / `Math.max`, and edge redraw during node dragging is animation-frame throttled.
+- The Live server tails only newly appended `events.jsonl` bytes from a byte offset and incrementally updates an in-memory `GraphAccumulator`. `/graph.json` polling no longer replays the full event history; an incomplete trailing JSONL line is buffered until its newline arrives.
+- Event-count or aggregate-count-only changes refresh Live stats/edge labels without a full topology redraw. After the Viewer budget is exceeded, live `/graph.json` switches to a counts-only compact payload while collection and the final canonical validation/full `graph.json` continue unchanged.
+
+This is a polling + incremental-ingestion safety patch, not an SSE, SQLite, Rust, or Canvas architecture migration.
+
 ## Layered artifacts
 
 A provider-integrated run can produce:
@@ -274,9 +286,9 @@ Security findings remain explicit about evidence limits. A possible sensitive-fi
 
 ## Current status
 
-ExecWeave `main` is currently **v0.6.1** and under active development.
+ExecWeave `main` is currently **v0.6.2** and under active development.
 
-The baseline includes runtime collection, graph materialization/querying, standalone/live Viewer, Claude/Codex/Gemini/Cursor/OpenCode semantic integrations, conservative Tool → Process correlation, OpenRouter/LiteLLM gateway metadata, Ollama/llama.cpp/vLLM/LM Studio runtime metadata, exact Gateway ↔ Model Runtime request identity, published PyPI wheel/sdist packaging, reproducible overhead benchmarking, cross-platform command-launcher compatibility, and cross-platform CI on Python 3.10/3.12.
+The baseline includes runtime collection, graph materialization/querying, standalone/live Viewer, Claude/Codex/Gemini/Cursor/OpenCode semantic integrations, conservative Tool → Process correlation, OpenRouter/LiteLLM gateway metadata, Ollama/llama.cpp/vLLM/LM Studio runtime metadata, exact Gateway ↔ Model Runtime request identity, published PyPI wheel/sdist packaging, reproducible overhead benchmarking, cross-platform command-launcher compatibility, large-graph browser safety guards, incremental Live JSONL tail/cache, and cross-platform CI on Python 3.10/3.12.
 
 ## Privacy
 

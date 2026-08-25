@@ -130,6 +130,18 @@ execweave run --backend strace -- your-command
 
 Portable filesystem observation 是 session-correlated，不是 process-causal。未来 native collectors 包括 Linux eBPF、Windows ETW、macOS Endpoint Security。
 
+## v0.6.2 Safety Patch
+
+v0.6.2 提升长时间与高 cardinality session 的资源安全，但**不改变 evidence semantics 或 graph schema 0.1**：
+
+- 对 filesystem root、用户 home、users-home parent 等过宽 recursive scope，不再直接进行 recursive filesystem observation；process、network、semantic collection 仍可继续。
+- Standalone 与 Live Viewer 超过安全预算（1,500 nodes、4,000 edges，或估算 5,000 SVG elements）后停止 SVG materialization，避免大型 graph 耗尽浏览器内存；canonical `graph.json` evidence artifact 仍保持完整。
+- Viewer layout/fit 不再把任意大型 array spread 到 `Math.min` / `Math.max`，node dragging 的 edge redraw 采用 animation-frame throttling。
+- Live server 通过 byte offset 只 tail `events.jsonl` 新增 bytes，并由 in-memory `GraphAccumulator` 增量更新；每次 `/graph.json` 不再重播完整 event history，未完成且没有 newline 的 trailing JSONL line 会先 buffer。
+- 只有 event count / aggregate count 变化时，Live UI 只更新 stats/edge labels，不重新绘制整个 topology。超过 Viewer 预算后，live `/graph.json` 返回 counts-only compact payload；collection 与 session 结束时的 canonical validation/full `graph.json` 不受影响。
+
+这是 polling + incremental ingestion 的 Safety Patch，不是 SSE、SQLite、Rust 或 Canvas 架构切换。
+
 ## Viewer / Graph / Security
 
 Standalone Viewer 完全 local、自包含，支持 pan/zoom、inspection、filters、**observed only**、search、Timeline replay、cluster expansion、focused neighborhood、Saved Views 与明确 edge semantics。
@@ -144,7 +156,7 @@ Security findings 会保留 evidence limits；possible sensitive-file → networ
 
 ## 当前状态
 
-ExecWeave `main` 当前为 **v0.6.1**，baseline 已包含 runtime collection、execution graph、五种 Agent/IDE integrations、OpenRouter/LiteLLM、Ollama/llama.cpp/vLLM/LM Studio、exact Gateway ↔ Runtime identity、已发布的 PyPI packaging、reference overhead benchmark、跨平台 command launcher compatibility 与 cross-platform CI。
+ExecWeave `main` 当前为 **v0.6.2**，baseline 已包含 runtime collection、execution graph、五种 Agent/IDE integrations、OpenRouter/LiteLLM、Ollama/llama.cpp/vLLM/LM Studio、exact Gateway ↔ Runtime identity、已发布的 PyPI packaging、reference overhead benchmark、cross-platform command launcher compatibility、large-graph browser safety guards、incremental Live JSONL tail/cache 与 cross-platform CI。
 
 ## 隐私
 
