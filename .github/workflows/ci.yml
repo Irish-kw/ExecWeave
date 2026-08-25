@@ -38,6 +38,10 @@ jobs:
         run: execweave graph phase1-portable.jsonl --output phase1-portable.graph.json
       - name: Build portable standalone viewer
         run: execweave view phase1-portable.graph.json --output phase1-portable.html
+      - name: One-command record workflow smoke
+        run: execweave record --backend portable --no-files --no-network --output-dir record-smoke -- python -c "print('execweave record smoke')"
+      - name: Validate record workflow stream
+        run: execweave validate record-smoke/events.jsonl
       - name: Linux strace end-to-end smoke
         if: runner.os == 'Linux'
         run: execweave run --backend strace --no-network --output phase1-strace.jsonl -- python -c "from pathlib import Path; p=Path('ci-phase1.txt'); p.write_text('ok'); p.read_text(); p.unlink()"
