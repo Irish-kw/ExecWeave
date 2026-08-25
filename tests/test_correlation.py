@@ -308,3 +308,97 @@ def test_next_tool_call_clips_matching_window(tmp_path: Path) -> None:
         if "CORRELATED_WITH_PROCESS" in line
     )
     assert inference["source"]["id"] == "tool-call:2"
+
+
+def test_unique_portable_argv_tail_match_handles_macos_framework_launcher(tmp_path: Path) -> None:
+    code = "import time; time.sleep(1.2); print('execweave-correlation-smoke')"
+    command = (
+        '"/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12" '
+        f'-c "{code}"'
+    )
+    events, session, _, _ = _base(command)
+    process = _entity(
+        "process",
+        "process:4591:1",
+        "Python",
+        {
+            "pid": 4591,
+            "ppid": 4589,
+            "exe": "/Library/Frameworks/Python.framework/Versions/3.12/Resources/Python.app/Contents/MacOS/Python",
+            "cmdline": [
+                "/Library/Frameworks/Python.framework/Versions/3.12/Resources/Python.app/Contents/MacOS/Python",
+                "-c",
+                code,
+            ],
+        },
+    )
+    events.append(
+        _event(
+            3,
+            "2026-08-25T00:00:01.100Z",
+            "process.started",
+            "SPAWNED",
+            session,
+            process,
+            {"backend": "portable", "attribution": "polling", "causal": False},
+        )
+    )
+    _finish(events, session, 4)
+    source = tmp_path / "macos-launcher.jsonl"
+    output = tmp_path / "macos-launcher-correlated.jsonl"
+    _write(source, events)
+
+    result = correlate_tool_process(source, output)
+
+    assert result.correlated_tool_calls == 1
+    inference = next(
+        json.loads(line)
+        for line in output.read_text(encoding="utf-8").splitlines()
+        if "CORRELATED_WITH_PROCESS" in line
+    )
+    assert inference["target"]["id"] == process["id"]
+    assert inference["attributes"]["inference_method"] == "unique_process_argv_tail_match"
+    assert inference["attributes"]["confidence"] == 0.8
+    assert inference["attributes"]["inferred"] is True
+    assert inference["attributes"]["causal"] is False
+
+
+def test_ambiguous_argv_tail_matches_emit_no_bridge(tmp_path: Path) -> None:
+    code = "print('same-tail')"
+    command = '"/launcher/python3.12" -c "print(\'same-tail\')"'
+    events, session, _, _ = _base(command)
+    for sequence, pid, executable in (
+        (3, 101, "/framework/PythonA"),
+        (4, 102, "/framework/PythonB"),
+    ):
+        process = _entity(
+            "process",
+            f"process:{pid}:1",
+            f"Python{pid}",
+            {
+                "pid": pid,
+                "exe": executable,
+                "cmdline": [executable, "-c", code],
+            },
+        )
+        events.append(
+            _event(
+                sequence,
+                f"2026-08-25T00:00:01.{sequence}00Z",
+                "process.started",
+                "SPAWNED",
+                session,
+                process,
+                {"backend": "portable", "attribution": "polling", "causal": False},
+            )
+        )
+    _finish(events, session, 5)
+    source = tmp_path / "ambiguous-tail.jsonl"
+    output = tmp_path / "ambiguous-tail-correlated.jsonl"
+    _write(source, events)
+
+    result = correlate_tool_process(source, output)
+
+    assert result.correlated_tool_calls == 0
+    assert result.skipped_ambiguous == 1
+    assert "CORRELATED_WITH_PROCESS" not in output.read_text(encoding="utf-8")
