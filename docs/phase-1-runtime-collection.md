@@ -54,6 +54,35 @@ Raw `strace` files are deleted after parsing by default. Keep them only for debu
 execweave run --keep-native-trace -- claude
 ```
 
+## End-to-end Phase 1 verification
+
+A Phase 1 run can be checked without building the Phase 2 graph yet:
+
+```bash
+execweave doctor
+execweave run --output run.jsonl -- python my_agent.py
+execweave validate run.jsonl
+execweave benchmark --backend auto --iterations 5
+```
+
+`execweave validate` verifies the event-stream contract, including:
+
+- valid JSONL records;
+- one session ID per file;
+- unique event IDs;
+- contiguous sequence numbers starting at 1;
+- valid timestamps;
+- required event/entity fields;
+- exactly one `session.started` and one `session.finished` for a completed run.
+
+For an interrupted run that legitimately lacks `session.finished`:
+
+```bash
+execweave validate --allow-incomplete run.jsonl
+```
+
+ExecWeave also refuses to reuse an existing non-empty output file by default. This prevents a second run from silently appending a new session with a restarted sequence counter into the same event stream.
+
 ## Backend capability model
 
 ### Linux `strace` backend
@@ -72,6 +101,7 @@ process --DELETED--> file
 process --RENAMED_TO--> file
 process --CHANGED_CWD_TO--> directory
 process --CONNECTED_TO--> network_endpoint
+process --CONNECT_ATTEMPTED--> network_endpoint
 process --EXITED--> ...
 ```
 
@@ -125,6 +155,8 @@ process:<session-id>:<pid>
 
 A process identity is therefore never globally inferred from PID alone.
 
+The strace parser also performs a process-parent pre-pass before emitting graph events. This prevents a child process from being mislabeled as a session root when a child trace record and the parent `clone()`/`fork()` record have the same timestamp across separate trace files.
+
 ## Short-lived processes
 
 The portable backend can miss a process that starts and exits entirely between polling intervals.
@@ -139,11 +171,25 @@ Path attribution can still be imperfect for uncommon dirfd patterns. Raw syscall
 
 ## Network attribution
 
-The Linux backend records successful `connect()` calls for:
+The Linux backend records `connect()` syscall evidence for:
 
 - IPv4
 - IPv6
 - Unix-domain sockets
+
+Successful calls produce:
+
+```text
+process --CONNECTED_TO--> endpoint
+```
+
+Failed or asynchronous calls, including the common non-blocking `EINPROGRESS` case, are preserved as:
+
+```text
+process --CONNECT_ATTEMPTED--> endpoint
+```
+
+The event retains the syscall result and errno. ExecWeave therefore does not incorrectly report an asynchronous connection attempt as either a confirmed connection or as no network behavior at all.
 
 The portable backend uses per-process socket inspection when the operating system exposes it to the current user.
 
@@ -197,6 +243,21 @@ python benchmarks/phase1_overhead.py
 
 It reports raw baseline/instrumented timings, medians, and an overhead ratio. These are environment-specific measurements, not a published performance claim.
 
+## CI contract
+
+The GitHub Actions matrix runs on Linux, macOS, and Windows with supported Python versions.
+
+In addition to unit tests and linting, CI now performs:
+
+1. `execweave doctor`;
+2. a portable end-to-end run;
+3. `execweave validate` on that portable stream;
+4. a Linux `strace` end-to-end run;
+5. validation of the native Linux stream;
+6. a Phase 1 benchmark smoke test.
+
+This means Phase 1 is tested as an actual CLI workflow, not only as isolated Python functions.
+
 ## Acceptance criteria
 
 - [x] Explicit ExecWeave session wrapper
@@ -209,11 +270,16 @@ It reports raw baseline/instrumented timings, medians, and an overhead ratio. Th
 - [x] Linux reliable short-lived process capture
 - [x] Linux process-attributed filesystem syscall telemetry
 - [x] Linux process-attributed network syscall telemetry
+- [x] Preserve asynchronous/failed network connection attempts
+- [x] Stable parent attribution across equal-timestamp trace records
 - [x] Backend auto-selection and capability diagnostics
 - [x] Raw native trace cleanup by default
 - [x] Cross-platform portable fallback
-- [x] Unit tests for parser and backend selection
+- [x] Event-stream integrity validator
+- [x] Protection against accidental multi-session append
+- [x] Unit tests for parser, validator, and backend selection
 - [x] Linux native integration test in CI
+- [x] End-to-end CLI smoke validation in CI
 - [x] Overhead benchmark harness
 
 ## Explicitly out of Phase 1
