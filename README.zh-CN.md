@@ -54,6 +54,7 @@ ExecWeave 当前版本为 **v0.4.0**。
 - [x] node deduplication
 - [x] edge aggregation
 - [x] graph summary / filtering / path query
+- [x] N-hop focused graph artifact
 - [x] large-run leaf condensation
 - [x] optional exact cluster expansion evidence
 
@@ -65,7 +66,10 @@ ExecWeave 当前版本为 **v0.4.0**。
 - [x] Timeline ↔ Graph synchronization
 - [x] evidence-sequence slider + Play/Pause replay
 - [x] progressive cluster expansion
-- [ ] saved filters / focused subgraphs
+- [x] 1-hop / 2-hop focused runtime neighborhood
+- [x] browser-local Saved View presets
+
+Phase 3 Viewer baseline 已包含 replay、按需 cluster 展开、focused neighborhood 与本地保存的 view preset。
 
 ### Security Analysis
 
@@ -95,7 +99,23 @@ execweave graph run.jsonl --output run.graph.json
 execweave view run.graph.json --output run.html --open
 ```
 
-大型 run：
+### Focus 一个 runtime neighborhood
+
+```bash
+execweave graph-focus run.graph.json PROCESS_NODE_ID \
+  --hops 2 \
+  --direction both \
+  --causal-only \
+  --output focused.graph.json
+
+execweave view focused.graph.json --output focused.html --open
+```
+
+`--direction` 支持 `in`、`out`、`both`；可重复使用 `--relation` 限制 traversal edge。所有限制都在 traversal **之前**应用，`graph-focus` 只复制原有 node 与 evidence edge，不会创建 shortcut 或新的 causal relationship。
+
+Viewer 中也可点击 node，选择 **Focus 1 hop** 或 **Focus 2 hops**；**Clear focus** 恢复当前 filter 下的完整 Graph。
+
+### 大型 Graph condensation
 
 ```bash
 execweave graph-condense run.graph.json \
@@ -105,9 +125,7 @@ execweave graph-condense run.graph.json \
 
 只折叠单一 incoming relationship、且没有 downstream behavior 的 file/directory/executable leaf。Process、Agent、Session、Socket、Network Endpoint 默认不会折叠。
 
-### 可逐步展开的 condensed Graph
-
-默认 `graph-condense` 仍保持真正精简。要让 Viewer 可以按需展开 cluster：
+要让 Viewer 可以按需展开 cluster：
 
 ```bash
 execweave graph-condense run.graph.json \
@@ -130,7 +148,13 @@ Standalone Viewer 根据 Graph edge 的 `first_sequence` / `last_sequence` 提�
 
 如果 aggregated edge 在当前 sequence 只包含部分 evidence，Viewer 会显示 `partial`，不会提前显示最终 `count`。
 
-Timeline 可以与 node type、relation、causal-only、search filter 和 progressive cluster expansion 一起使用。
+Timeline 可以与 node type、relation、causal-only、search、focused neighborhood 和 progressive cluster expansion 一起使用。
+
+## Saved Views
+
+Viewer 的 **Save view** 会保存当前 node/relation/causal filter、search、timeline 位置、focus 状态和已展开 cluster。
+
+Preset 默认只保存在浏览器本地 storage，并且**只包含 UI state，不包含 Graph node、edge、event evidence、file content 或 prompt**。如果浏览器不允许 local storage，会安全退化为当前页面 session 内的临时 preset。
 
 ## Graph-first event model
 
@@ -160,7 +184,7 @@ Live server 只绑定 localhost。详细说明见 [`docs/live-graph.md`](docs/li
 
 ## Privacy
 
-ExecWeave 是 **local-first**。Runtime event、Graph、Viewer 默认留在本机；无外部 CDN；不采集 file content 或 `read()`/`write()` byte buffer。
+ExecWeave 是 **local-first**。Runtime event、Graph、Viewer 默认留在本机；Saved View 只保存 UI state；无外部 CDN；不采集 file content 或 `read()`/`write()` byte buffer。
 
 ## 文档
 
@@ -171,7 +195,7 @@ ExecWeave 是 **local-first**。Runtime event、Graph、Viewer 默认留在本�
 
 ## Contributing
 
-欢迎 Linux eBPF、Windows ETW、macOS Endpoint Security、Graph entity resolution、live/large-graph visualization、OpenTelemetry/MCP、privacy/redaction、testing、performance evaluation 和翻译贡献。
+欢迎 Linux eBPF、Windows ETW、macOS Endpoint Security、Graph entity resolution、Agent/Tool/MCP semantic telemetry、OpenTelemetry/MCP、privacy/redaction、testing、performance evaluation 和翻译贡献。
 
 ## License
 
