@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import ipaddress
-from collections import Counter
+from collections import Counter, defaultdict, deque
 from dataclasses import asdict, dataclass, field
 from pathlib import PurePath
 from typing import Any
@@ -135,12 +135,71 @@ def _edge_sequence(edge: dict[str, Any], key: str) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
+def _causal_spawn_adjacency(
+    edges: list[dict[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
+    adjacency: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for edge in edges:
+        if edge.get("relation") != "SPAWNED" or edge.get("causal") is not True:
+            continue
+        source = edge.get("source")
+        target = edge.get("target")
+        if isinstance(source, str) and isinstance(target, str):
+            adjacency[source].append(edge)
+    for values in adjacency.values():
+        values.sort(
+            key=lambda edge: (
+                _edge_sequence(edge, "first_sequence") or 0,
+                str(edge.get("target") or ""),
+            )
+        )
+    return dict(adjacency)
+
+
+def _descendant_spawn_paths(
+    process_id: str,
+    adjacency: dict[str, list[dict[str, Any]]],
+    *,
+    after_sequence: int | None,
+    max_depth: int = 4,
+) -> list[tuple[str, list[dict[str, Any]]]]:
+    """Return chronological causal SPAWNED paths created after a source observation."""
+    results: list[tuple[str, list[dict[str, Any]]]] = []
+    queue: deque[tuple[str, list[dict[str, Any]], set[str], int | None]] = deque()
+    queue.append((process_id, [], {process_id}, after_sequence))
+
+    while queue:
+        current, path, seen, minimum_sequence = queue.popleft()
+        if len(path) >= max_depth:
+            continue
+        for edge in adjacency.get(current, []):
+            child = edge.get("target")
+            if not isinstance(child, str) or child in seen:
+                continue
+            spawn_sequence = _edge_sequence(edge, "first_sequence")
+            if minimum_sequence is not None:
+                if spawn_sequence is None or spawn_sequence < minimum_sequence:
+                    continue
+            next_path = [*path, edge]
+            results.append((child, next_path))
+            queue.append(
+                (
+                    child,
+                    next_path,
+                    {*seen, child},
+                    spawn_sequence if spawn_sequence is not None else minimum_sequence,
+                )
+            )
+    return results
+
+
 def analyze_graph(graph: dict[str, Any]) -> dict[str, Any]:
     """Run conservative, explainable rules over one execution graph.
 
-    Findings never upgrade co-occurrence into byte-level data-flow. In particular,
-    sensitive-file access followed by an external connection is reported as a possible
-    exfiltration path, not as proof that file contents were transmitted.
+    Findings never upgrade co-occurrence into byte-level data-flow. Sensitive-file
+    access followed by network activity is a prioritization signal, not proof that
+    file contents were transmitted. The same rule applies across child processes:
+    SPAWNED proves process lineage, not data inheritance or IPC.
     """
     nodes = _node_map(graph)
     edges = [edge for edge in graph.get("edges", []) if isinstance(edge, dict)]
@@ -207,6 +266,7 @@ def analyze_graph(graph: dict[str, Any]) -> dict[str, Any]:
             if causal:
                 external_by_process.setdefault(source_id, []).append(edge)
 
+    # Same-process correlation with strict chronological ordering when sequences exist.
     for process_id in sorted(set(sensitive_by_process).intersection(external_by_process)):
         for file_edge in sensitive_by_process[process_id]:
             file_target = str(file_edge.get("target") or "")
@@ -249,6 +309,78 @@ def analyze_graph(graph: dict[str, Any]) -> dict[str, Any]:
                     )
                 )
 
+    # Graph-native delegated path: sensitive access -> causal SPAWNED chain -> network.
+    # This proves chronological process lineage only. It does not prove inheritance,
+    # IPC, taint propagation, or that the child received bytes from the sensitive file.
+    spawn_adjacency = _causal_spawn_adjacency(edges)
+    for source_process, file_edges in sorted(sensitive_by_process.items()):
+        for file_edge in file_edges:
+            file_target = str(file_edge.get("target") or "")
+            file_last = _edge_sequence(file_edge, "last_sequence")
+            for descendant, spawn_path in _descendant_spawn_paths(
+                source_process,
+                spawn_adjacency,
+                after_sequence=file_last,
+            ):
+                spawn_last = _edge_sequence(spawn_path[-1], "first_sequence")
+                for net_edge in external_by_process.get(descendant, []):
+                    net_first = _edge_sequence(net_edge, "first_sequence")
+                    if spawn_last is not None:
+                        if net_first is None or net_first < spawn_last:
+                            continue
+                    relation = str(net_edge.get("relation") or "")
+                    net_target = str(net_edge.get("target") or "")
+                    process_chain = [source_process]
+                    process_chain.extend(str(edge.get("target") or "") for edge in spawn_path)
+                    spawn_edge_ids = [str(edge.get("id") or "") for edge in spawn_path]
+                    spawn_event_ids = [
+                        event_id
+                        for edge in spawn_path
+                        for event_id in _event_ids(edge, 8)
+                    ]
+                    findings.append(
+                        Finding(
+                            rule_id="possible-delegated-sensitive-file-to-network-path",
+                            severity="medium" if relation == "CONNECTED_TO" else "low",
+                            title=(
+                                "Sensitive-file access was followed by child-process "
+                                "external network activity"
+                            ),
+                            summary=(
+                                f"{source_process} accessed {file_target}, then a causal SPAWNED "
+                                f"chain reached {descendant}, which later produced {relation} "
+                                f"evidence for {net_target}. Process lineage is proven, but "
+                                "ExecWeave has not proven data inheritance, IPC, or exfiltration."
+                            ),
+                            node_ids=[source_process, file_target, *process_chain[1:], net_target],
+                            edge_ids=[
+                                str(file_edge.get("id") or ""),
+                                *spawn_edge_ids,
+                                str(net_edge.get("id") or ""),
+                            ],
+                            evidence_event_ids=[
+                                *_event_ids(file_edge, 8),
+                                *spawn_event_ids,
+                                *_event_ids(net_edge, 8),
+                            ],
+                            attributes={
+                                "delegation_hops": len(spawn_path),
+                                "process_chain": process_chain,
+                                "file_last_sequence": file_last,
+                                "spawn_sequences": [
+                                    _edge_sequence(edge, "first_sequence")
+                                    for edge in spawn_path
+                                ],
+                                "network_first_sequence": net_first,
+                                "causal_process_lineage": True,
+                                "data_inheritance_proven": False,
+                                "ipc_proven": False,
+                                "data_flow_proven": False,
+                                "exfiltration_proven": False,
+                            },
+                        )
+                    )
+
     findings.sort(
         key=lambda finding: (
             _SEVERITY_ORDER.get(finding.severity, 99),
@@ -258,7 +390,7 @@ def analyze_graph(graph: dict[str, Any]) -> dict[str, Any]:
     )
     counts = Counter(finding.severity for finding in findings)
     return {
-        "analysis_schema_version": "0.1",
+        "analysis_schema_version": "0.2",
         "session_id": graph.get("session_id"),
         "finding_count": len(findings),
         "severity_counts": {
@@ -267,6 +399,7 @@ def analyze_graph(graph: dict[str, Any]) -> dict[str, Any]:
         "limitations": [
             "Findings are rule-based prioritization signals, not proof of malicious intent.",
             "Sensitive-file-to-network findings do not prove byte-level data flow or exfiltration.",
+            "SPAWNED lineage does not prove data inheritance, IPC, or taint propagation.",
             "Collector coverage and attribution strength depend on the backend.",
         ],
         "findings": [finding.to_dict() for finding in findings],
