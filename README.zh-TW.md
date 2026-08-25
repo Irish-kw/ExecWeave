@@ -10,11 +10,19 @@
 
 **看見 AI Agent 在你的電腦上實際做了什麼。**
 
-ExecWeave 是一個開源、local-first 的 observability 專案，會把 AI Agent 的活動轉成互動式執行圖，同時把 observed evidence 與 inference 明確分開。
+ExecWeave 是開源、local-first 的 observability 專案，會把 AI Agent 活動轉成互動式 execution graph，同時明確區分 observed evidence 與 inference。
 
 > **Event 是 ground truth；Graph 是 materialized view。**
 
-## 快速開始
+## 安裝
+
+ExecWeave v0.6.0 已整理成標準 Python wheel / sdist。GitHub 端已是 PyPI-ready；第一次 Trusted Publisher release 正式發布前，可直接從 GitHub 以 pip 安裝：
+
+```bash
+python -m pip install "execweave @ git+https://github.com/Irish-kw/ExecWeave.git@main"
+```
+
+開發者安裝：
 
 ```bash
 git clone https://github.com/Irish-kw/ExecWeave.git
@@ -22,21 +30,62 @@ cd ExecWeave
 python -m pip install -e ".[dev]"
 ```
 
-即時觀察任意 command：
+第一次 PyPI release 發布後即可使用：
+
+```bash
+python -m pip install execweave
+```
+
+即時觀察 command：
 
 ```bash
 execweave live --open -- claude
 ```
 
-或建立完整 artifact pipeline：
+建立完整 artifact pipeline：
 
 ```bash
 execweave record --open -- python my_agent.py
 ```
 
+## 效能與空間佔用
+
+ExecWeave 內建可重跑的 package-level overhead benchmark，而且 reference result 是從 **實際安裝的 wheel** 執行，不是 editable source checkout。
+
+比較圖採用類似 LLM 公司常見的 quality/cost trade-off 表達：
+
+- **X 軸：**額外 peak process-tree RSS，低 → 高。
+- **Y 軸：**runtime overhead，低 → 高。
+- **Bubble 面積：**每次 run 產生的 median artifact size。
+- **理想區域：**左下角。
+
+![ExecWeave overhead trade-off](docs/benchmarks/v0.6.0-github-actions.svg)
+
+Reference 環境：GitHub Actions Ubuntu runner、Intel Xeon Platinum 8573C、4 logical CPUs、Python 3.12.14、`n=7`。
+
+| Profile | Median wall time | Runtime overhead | 額外 peak RSS | Median artifacts/run |
+| --- | ---: | ---: | ---: | ---: |
+| ExecWeave OFF | 236.221 ms | 0.0% | 0.0 MB | 0 KB |
+| Portable ON | 391.580 ms | 65.768% | 27.852 MB | 741.355 KB |
+| Strace ON | 1226.076 ms | 419.038% | 37.653 MB | 572.838 KB |
+
+同一個 build 產生約 **113 KB wheel**、**198 KB sdist**；安裝後 ExecWeave distribution 本身約 **849 KB**，此數字不包含 Python 與 dependency footprint。
+
+這是一個刻意很短、file/process-heavy 的 **reference microbenchmark**，不是所有 Agent workload 的普遍 overhead 主張。因為 OFF baseline 只有數百毫秒，百分比 overhead 會被放大；部署或容量評估前應在目標機器與實際 workload 上重跑。
+
+```bash
+execweave-overhead \
+  --iterations 7 \
+  --strace auto \
+  --output-json benchmark-results.json \
+  --output-svg benchmark-overhead.svg
+```
+
+原始 JSON、SVG 與方法說明：[`docs/benchmarks/`](docs/benchmarks/)。
+
 ## Evidence layers
 
-ExecWeave 刻意把四種 evidence 分層，而不是壓成同一條 trace：
+ExecWeave 刻意把 evidence 分成四層，不把它們壓成同一條 trace：
 
 ```text
 Agent / IDE semantic evidence
@@ -48,115 +97,56 @@ Model runtime / inference-server evidence
 OS runtime evidence: process / file / network
 ```
 
-只有底層 telemetry 足以支持時，relationship 才會被標成 causal。
+只有底層 telemetry 足以支持時，relationship 才能標為 causal。
 
 ## Agent / IDE integrations
 
-### Claude Code
+目前支援 Claude Code、OpenAI Codex、Gemini CLI、Cursor、OpenCode。Provider-integrated run 會分開保存 runtime、semantic、correlated artifacts。
 
-```bash
-execweave-claude-hook --print-config
-execweave-claude-record --open -- claude
-```
-
-### OpenAI Codex
-
-```bash
-execweave-codex-hook --print-config
-execweave-codex-record --open -- codex
-```
-
-### Gemini CLI
-
-```bash
-execweave-gemini-hook --print-config
-execweave-gemini-record --open -- gemini
-```
-
-### Cursor
-
-```bash
-execweave-cursor-hook --print-config
-execweave-cursor-record --open -- cursor
-```
-
-Cursor 提供穩定的 `tool_use_id`，因此 pre/post hooks 可以共享精確的 logical tool-call identity。
-
-### OpenCode
-
-```bash
-execweave-opencode-plugin --install
-execweave-opencode-record --open -- opencode
-```
-
-Project-local OpenCode plugin 使用精確的 `sessionID + callID`，而且刻意不轉送 tool output。
-
-Provider-integrated run 會把 runtime、semantic、correlated artifacts 分開保存。Tool → Process bridge 仍是保守的 derived evidence：
+Tool → Process bridge 永遠是保守 derived evidence：
 
 ```text
 inferred: true
 causal: false
 ```
 
-候選模糊或無 match 時不建立 edge。
+ambiguous / no-match 不建立 edge。
 
-## Inference Gateway integrations
+## Inference Gateway
 
-目前支援 **OpenRouter** 與 **LiteLLM Proxy**。Gateway 被建模成 `inference_gateway`，不是 local model runtime。
+目前支援 OpenRouter 與 LiteLLM Proxy。Requested model、resolved model、provider、deployment 都是不同 evidence；沒有 authoritative metadata 時不推測 provider/deployment。
 
-### OpenRouter
-
-```bash
-execweave-inference-gateway event \
-  --gateway openrouter \
-  --requested-model openrouter/auto \
-  --provider-name OpenAI \
-  --sidecar gateway.jsonl
-```
-
-### LiteLLM Proxy
+若 Gateway 與 Model Runtime 都具有 caller 明確提供的 shared request identity，可建立 exact link：
 
 ```bash
-execweave-inference-gateway event \
+execweave-inference-link \
   --gateway litellm \
-  --requested-model assistant \
-  --resolved-model azure/gpt-5 \
-  --provider-name Azure \
-  --deployment-id deployment-west \
-  --sidecar gateway.jsonl
+  --gateway-request-id gw-123 \
+  --runtime vllm \
+  --runtime-request-id rt-456 \
+  --shared-request-id trace-789 \
+  --sidecar inference.jsonl
 ```
 
-ExecWeave 會分開保存：
+其語義固定為：
 
 ```text
-requested model → resolved model → routed provider → deployment
+identity_exact: true
+inferred: false
+causal: false
 ```
 
-Provider 與 deployment 只有在 caller/adapter 有明確 routing metadata 時才建立；ExecWeave 不會從 `azure/...` 之類的 model string 自行推測。Gateway events 保持 `causal: false`。Prompt、response、reasoning content 不保存。
+Raw shared ID 不落盤，只保存 SHA-256-derived identity hash。
 
-## Model Runtime integrations
+## Model Runtime
 
-目前支援 **Ollama**、**llama.cpp**、**vLLM** 與 **LM Studio**。
+目前支援 **Ollama、llama.cpp、vLLM、LM Studio**。OpenAI-compatible runtimes 共用 response/usage 與 model-catalog parser，但保留 runtime-specific evidence semantics。
 
-```bash
-execweave-model-runtime event --runtime ollama --sidecar model-runtime.jsonl
-execweave-model-runtime event --runtime llamacpp --sidecar model-runtime.jsonl
-execweave-model-runtime event --runtime vllm --sidecar model-runtime.jsonl
-execweave-model-runtime event --runtime lmstudio --sidecar model-runtime.jsonl
-```
-
-```bash
-execweave-model-runtime probe --runtime ollama --sidecar model-runtime.jsonl
-execweave-model-runtime probe --runtime llamacpp --metrics --sidecar model-runtime.jsonl
-execweave-model-runtime probe --runtime vllm --sidecar model-runtime.jsonl
-execweave-model-runtime probe --runtime lmstudio --sidecar model-runtime.jsonl
-```
-
-llama.cpp、vLLM、LM Studio 共用 OpenAI-compatible response/usage 與 `/v1/models` catalog parser；runtime-specific metadata 仍留在各自 adapter。vLLM catalog 使用 `SERVES_MODEL`，LM Studio catalog 使用 `ADVERTISES_MODEL`，不會因 model 出現在 catalog 就宣稱它已載入記憶體。敏感的本機 model path 會 redaction，llama.cpp GGUF path 維持更嚴格處理。
+Prompt、generated content、reasoning content 不保存；敏感 local model path 會 redaction。LM Studio catalog 使用 `ADVERTISES_MODEL`，不把「出現在 catalog」誤當成「已載入記憶體」。
 
 ## Runtime evidence
 
-Portable collector 支援 Linux、macOS、Windows；Linux 另外有 syscall-backed `strace` reference backend。
+Portable collector 支援 Linux、macOS、Windows；Linux 另有 syscall-backed `strace` reference backend。
 
 ```bash
 execweave doctor
@@ -164,42 +154,21 @@ execweave run --backend portable -- your-command
 execweave run --backend strace -- your-command
 ```
 
-Portable filesystem watching 是 session-correlated，不是 process-causal；短命 process 也可能在 polling interval 間被漏掉。Linux `strace` 則在 command 結束後產生 process-attributed syscall evidence。
+Portable filesystem observation 是 session-correlated，不是 process-causal；短命 process 可能在 polling interval 間被漏掉。Linux `strace` 則提供 process-attributed syscall evidence。
 
-未來 native collectors 包含 Linux eBPF、Windows ETW 與 macOS Endpoint Security。
+未來 native collectors 包含 Linux eBPF、Windows ETW、macOS Endpoint Security。
 
-## Layered artifacts
+## Viewer 與 Graph
 
-Provider-integrated run 可產生：
+Standalone Viewer 完全 local、自包含，包含 pan/zoom、node/edge inspection、filters、**observed only**、search、Timeline ↔ Graph replay、cluster expansion、1/2-hop focus、Saved Views、edge semantics 與 Correlation Summary。
 
-```text
-.execweave/runs/<run-id>/
-├── events.jsonl
-├── graph.json
-├── viewer.html
-├── semantic.jsonl
-├── events.semantic.jsonl
-├── graph.semantic.json
-├── viewer.semantic.html
-├── events.correlated.jsonl
-├── graph.correlated.json
-└── viewer.correlated.html
-```
-
-Derived correlation layer 不會重寫 raw evidence。
-
-## Interactive Viewer
-
-Standalone Viewer 完全 local、自包含，目前包含 pan / zoom、node/edge inspection、filters、**observed only**、search、Timeline ↔ Graph replay、progressive cluster expansion、1/2-hop focus、Saved Views、observed/non-causal/inferred styling 與 Correlation Summary。
-
-## Graph operations
+常用 graph command：
 
 ```bash
 execweave graph-summary run.graph.json
 execweave graph-filter run.graph.json --output causal.graph.json --causal-only
 execweave graph-focus run.graph.json NODE_ID --hops 2 --output focused.graph.json
 execweave path run.graph.json SOURCE TARGET --causal-only
-execweave graph-condense run.graph.json --output compact.graph.json --threshold 8 --keep-expansion
 ```
 
 ## Security analysis
@@ -208,24 +177,15 @@ execweave graph-condense run.graph.json --output compact.graph.json --threshold 
 execweave analyze run.graph.json --output analysis.json
 ```
 
-安全 findings 會保留 evidence limits。Sensitive-file → network 的 possible path 不代表 byte-level exfiltration：
-
-```json
-{
-  "data_flow_proven": false,
-  "exfiltration_proven": false
-}
-```
+Possible sensitive-file → network path 不等於 byte-level exfiltration；security findings 會保留 evidence limits。
 
 ## 目前狀態
 
-ExecWeave 目前為 **v0.5.0**，持續開發中。
-
-目前 baseline 已包含 runtime collection、Graph materialization/query、standalone/live Viewer、Claude/Codex/Gemini/Cursor/OpenCode native semantic integrations、保守 Tool → Process correlation、OpenRouter/LiteLLM gateway metadata、Ollama/llama.cpp/vLLM/LM Studio runtime metadata，以及跨平台 CI。
+ExecWeave 目前為 **v0.6.0**。Baseline 已包含 runtime collection、graph materialization/query、standalone/live Viewer、五種 Agent/IDE semantic integrations、保守 Tool → Process correlation、OpenRouter/LiteLLM、Ollama/llama.cpp/vLLM/LM Studio、exact Gateway ↔ Model Runtime request identity、PyPI-ready packaging、可重跑 overhead benchmark，以及跨平台 CI。
 
 ## 隱私
 
-ExecWeave 是 local-first。Runtime events、semantic sidecars、graphs、reports 與 Viewers 預設都留在本機。專案不刻意擷取 file content 或 raw read/write byte buffers；native adapters 也預設避開 prompt/transcript/tool output，但 command、path、endpoint metadata、identifier 與 model metadata 本身仍可能敏感。
+ExecWeave 是 local-first。Runtime events、semantic sidecars、graphs、reports、Viewers 預設留在本機。專案不刻意擷取 file content 或 raw read/write byte buffers；native adapters 也預設避開 prompt/transcript/tool output，但 command、path、endpoint metadata、identifier、model metadata 仍可能敏感。
 
 分享 artifacts 前請先檢查。
 
@@ -242,11 +202,8 @@ ExecWeave 是 local-first。Runtime events、semantic sidecars、graphs、report
 - [`OpenCode Plugin`](docs/opencode-plugin.zh-TW.md)
 - [`Inference Gateway / OpenRouter / LiteLLM`](docs/inference-gateway.zh-TW.md)
 - [`Model Runtime / Ollama / llama.cpp / vLLM / LM Studio`](docs/model-runtime.zh-TW.md)
+- [`Performance Benchmarks`](docs/benchmarks/README.md)
 - [`Security Analysis`](docs/security-analysis.zh-TW.md)
-
-## Contributing
-
-歡迎貢獻，尤其是 native OS collectors、更多 Agent/IDE adapters、inference gateways、OpenAI-compatible model runtimes、entity/correlation methods、privacy/redaction、Graph UX 與 performance evaluation。
 
 ## License
 

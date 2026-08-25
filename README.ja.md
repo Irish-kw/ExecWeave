@@ -10,11 +10,19 @@
 
 **AI エージェントが実際にマシン上で何をしたのかを見る。**
 
-ExecWeave は、AI エージェントの活動をインタラクティブな実行グラフへ変換する、ローカルファーストのオープンソース observability プロジェクトです。観測された evidence と inference を明確に分離します。
+ExecWeave は、AI エージェントの活動をインタラクティブな execution graph に変換する local-first のオープンソース observability プロジェクトです。Observed evidence と inference を明確に分離します。
 
 > **Event is ground truth. The graph is a materialized view.**
 
-## Quick start
+## Installation
+
+ExecWeave v0.6.0 は標準 Python wheel / sdist としてパッケージ化済みです。GitHub 側は PyPI-ready で、最初の Trusted Publisher release までは GitHub から直接 pip install できます。
+
+```bash
+python -m pip install "execweave @ git+https://github.com/Irish-kw/ExecWeave.git@main"
+```
+
+開発用：
 
 ```bash
 git clone https://github.com/Irish-kw/ExecWeave.git
@@ -22,21 +30,39 @@ cd ExecWeave
 python -m pip install -e ".[dev]"
 ```
 
-任意のコマンドを live で観測：
+最初の PyPI release 後は：
 
 ```bash
-execweave live --open -- claude
+python -m pip install execweave
 ```
 
-完全な artifact pipeline：
+## Performance / footprint
+
+Reference benchmark は editable checkout ではなく、実際にインストールした wheel から実行されます。X 軸は追加 peak process-tree RSS、Y 軸は runtime overhead、bubble 面積は run ごとの median artifact size です。どちらの軸も低→高で、左下が望ましい領域です。
+
+![ExecWeave overhead trade-off](docs/benchmarks/v0.6.0-github-actions.svg)
+
+Reference environment: GitHub Actions Ubuntu runner, Intel Xeon Platinum 8573C, 4 logical CPUs, Python 3.12.14, `n=7`.
+
+| Profile | Median wall time | Runtime overhead | Additional peak RSS | Median artifacts/run |
+| --- | ---: | ---: | ---: | ---: |
+| ExecWeave OFF | 236.221 ms | 0.0% | 0.0 MB | 0 KB |
+| Portable ON | 391.580 ms | 65.768% | 27.852 MB | 741.355 KB |
+| Strace ON | 1226.076 ms | 419.038% | 37.653 MB | 572.838 KB |
+
+同じ build で wheel は約 **113 KB**、sdist は約 **198 KB**、インストール後の ExecWeave distribution は約 **849 KB** でした。Python と dependency footprint は含みません。
+
+これは短時間かつ file/process-heavy な **reference microbenchmark** であり、すべての Agent workload に対する一般的な overhead の主張ではありません。Target host と実 workload で再実行してください。
 
 ```bash
-execweave record --open -- python my_agent.py
+execweave-overhead --iterations 7 --strace auto \
+  --output-json benchmark-results.json \
+  --output-svg benchmark-overhead.svg
 ```
+
+Raw data / methodology: [`docs/benchmarks/`](docs/benchmarks/)。
 
 ## Evidence layers
-
-ExecWeave は異なる evidence を一つの trace に潰さず、次の層として扱います：
 
 ```text
 Agent / IDE semantic evidence
@@ -48,50 +74,17 @@ Model runtime / inference-server evidence
 OS runtime evidence: process / file / network
 ```
 
-関係を causal とするのは、基礎 telemetry がその主張を直接支える場合だけです。
+基礎 telemetry が直接支える場合だけ relationship を causal とします。
 
-## Agent / IDE integrations
+## Integrations
 
-### Claude Code
+Agent / IDE: Claude Code, OpenAI Codex, Gemini CLI, Cursor, OpenCode.
 
-```bash
-execweave-claude-hook --print-config
-execweave-claude-record --open -- claude
-```
+Inference Gateway: OpenRouter, LiteLLM Proxy. Requested model / resolved model / provider / deployment は別の evidence として保持し、authoritative metadata がない場合は routing fact を推測しません。
 
-### OpenAI Codex
+Model Runtime: Ollama, llama.cpp, vLLM, LM Studio. Prompt / generated content / reasoning content は保存しません。Sensitive local model path は redact されます。LM Studio catalog は `ADVERTISES_MODEL` として扱い、catalog visibility を loaded-memory evidence とみなしません。
 
-```bash
-execweave-codex-hook --print-config
-execweave-codex-record --open -- codex
-```
-
-### Gemini CLI
-
-```bash
-execweave-gemini-hook --print-config
-execweave-gemini-record --open -- gemini
-```
-
-### Cursor
-
-```bash
-execweave-cursor-hook --print-config
-execweave-cursor-record --open -- cursor
-```
-
-Cursor の安定した `tool_use_id` を使い、pre/post hook 間で exact logical tool-call identity を保ちます。
-
-### OpenCode
-
-```bash
-execweave-opencode-plugin --install
-execweave-opencode-record --open -- opencode
-```
-
-project-local plugin は exact `sessionID + callID` を使い、tool output は転送しません。
-
-Provider-integrated run では runtime / semantic / correlated artifact を別々に保存します。Tool → Process bridge は保守的な derived evidence です：
+Tool → Process correlation は常に：
 
 ```text
 inferred: true
@@ -100,63 +93,19 @@ causal: false
 
 ambiguous / no-match の場合は edge を作りません。
 
-## Inference gateway integrations
-
-現在は **OpenRouter** と **LiteLLM Proxy** をサポートします。Gateway は local model runtime ではなく `inference_gateway` として扱います。
-
-### OpenRouter
-
-```bash
-execweave-inference-gateway event \
-  --gateway openrouter \
-  --requested-model openrouter/auto \
-  --provider-name OpenAI \
-  --sidecar gateway.jsonl
-```
-
-### LiteLLM Proxy
-
-```bash
-execweave-inference-gateway event \
-  --gateway litellm \
-  --requested-model assistant \
-  --resolved-model azure/gpt-5 \
-  --provider-name Azure \
-  --deployment-id deployment-west \
-  --sidecar gateway.jsonl
-```
-
-ExecWeave は次を別々の evidence として保持します：
+Gateway と Model Runtime の双方に明示的な shared request identity がある場合だけ、`SAME_INFERENCE_REQUEST` を作れます：
 
 ```text
-requested model → resolved model → routed provider → deployment
+identity_exact: true
+inferred: false
+causal: false
 ```
 
-Provider / deployment edge は authoritative routing metadata がある場合だけ生成します。`azure/...` のような model string から provider や deployment を推測しません。Gateway events は `causal: false` のままです。Prompt、response、reasoning content は保存しません。
-
-## Model runtime integrations
-
-現在は **Ollama**、**llama.cpp**、**vLLM**、**LM Studio** をサポートします。
-
-```bash
-execweave-model-runtime event --runtime ollama --sidecar model-runtime.jsonl
-execweave-model-runtime event --runtime llamacpp --sidecar model-runtime.jsonl
-execweave-model-runtime event --runtime vllm --sidecar model-runtime.jsonl
-execweave-model-runtime event --runtime lmstudio --sidecar model-runtime.jsonl
-```
-
-```bash
-execweave-model-runtime probe --runtime ollama --sidecar model-runtime.jsonl
-execweave-model-runtime probe --runtime llamacpp --metrics --sidecar model-runtime.jsonl
-execweave-model-runtime probe --runtime vllm --sidecar model-runtime.jsonl
-execweave-model-runtime probe --runtime lmstudio --sidecar model-runtime.jsonl
-```
-
-llama.cpp、vLLM、LM Studio は OpenAI-compatible response/usage と `/v1/models` catalog parser を共有しますが、runtime-specific metadata は各 adapter に残します。vLLM catalog は `SERVES_MODEL`、LM Studio catalog は `ADVERTISES_MODEL` であり、catalog に存在するだけで loaded model とは見なしません。Sensitive local model path は redact され、llama.cpp の GGUF path はより厳格に処理します。
+Raw shared ID は保存せず、SHA-256-derived identity hash のみ保持します。
 
 ## Runtime evidence
 
-portable collector は Linux / macOS / Windows で動作し、Linux には syscall-backed `strace` reference backend もあります。
+Portable collector は Linux / macOS / Windows で動作し、Linux には syscall-backed `strace` reference backend もあります。
 
 ```bash
 execweave doctor
@@ -164,57 +113,37 @@ execweave run --backend portable -- your-command
 execweave run --backend strace -- your-command
 ```
 
-portable filesystem event は process-causal ではなく session-correlated です。短命 process は polling interval の間に見逃す場合があります。Linux `strace` path は command 終了後に process-attributed syscall evidence を生成します。
+Portable filesystem observation は process-causal ではなく session-correlated です。Future native collectors は Linux eBPF、Windows ETW、macOS Endpoint Security を予定しています。
 
-## Interactive Viewer
+## Viewer / Graph / Security
 
-Standalone Viewer はローカル・self-contained です。現在の baseline には pan / zoom、node/edge inspection、filters、**observed only**、search、Timeline ↔ Graph replay、progressive cluster expansion、1/2-hop focus、Saved Views、observed/non-causal/inferred styling、Correlation Summary が含まれます。
-
-## Security analysis
+Standalone Viewer は local self-contained で、pan/zoom、inspection、filters、**observed only**、search、Timeline replay、cluster expansion、focused neighborhood、Saved Views、明示的な edge semantics を備えます。
 
 ```bash
+execweave graph-summary run.graph.json
+execweave graph-focus run.graph.json NODE_ID --hops 2 --output focused.graph.json
 execweave analyze run.graph.json --output analysis.json
 ```
 
-sensitive-file → network の可能性は byte-level exfiltration の証明ではありません：
-
-```json
-{
-  "data_flow_proven": false,
-  "exfiltration_proven": false
-}
-```
+Security findings は evidence limit を維持し、possible sensitive-file → network path を byte-level exfiltration の証明として扱いません。
 
 ## Current status
 
-ExecWeave は現在 **v0.5.0** で、active development 中です。
-
-runtime collection、graph materialization/query、standalone/live Viewer、Claude/Codex/Gemini/Cursor/OpenCode semantic integration、conservative Tool → Process correlation、OpenRouter/LiteLLM gateway metadata、Ollama/llama.cpp/vLLM/LM Studio runtime metadata、cross-platform CI が baseline として実装されています。
+ExecWeave は現在 **v0.6.0**。Runtime collection、execution graph、5 種の Agent/IDE integration、OpenRouter/LiteLLM、Ollama/llama.cpp/vLLM/LM Studio、exact Gateway ↔ Runtime identity、PyPI-ready packaging、reference overhead benchmark、cross-platform CI が baseline に含まれます。
 
 ## Privacy
 
-ExecWeave は local-first です。runtime events、semantic sidecars、graphs、reports、Viewers は既定でローカルに残ります。native adapters は prompt/transcript/tool output を既定で保存しません。ただし command、path、endpoint metadata、identifier、model metadata は sensitive な場合があります。
-
-共有前に artifact を確認してください。
+ExecWeave は local-first です。Runtime events、semantic sidecars、graphs、reports、Viewers は既定でローカルに残ります。File content や raw read/write buffers を意図的に収集しません。Artifact 共有前に command、path、endpoint、identifier、model metadata を確認してください。
 
 ## Documentation
 
 - [`Phase 1 — Runtime Collection`](docs/phase-1-runtime-collection.ja.md)
 - [`Phase 2 — Execution Graph`](docs/phase-2-execution-graph.ja.md)
-- [`Live Graph`](docs/live-graph.ja.md)
 - [`Semantic Telemetry`](docs/semantic-telemetry.ja.md)
-- [`Claude Code Hooks`](docs/claude-code-hooks.ja.md)
-- [`OpenAI Codex Hooks`](docs/codex-hooks.ja.md)
-- [`Gemini CLI Hooks`](docs/gemini-hooks.ja.md)
-- [`Cursor Hooks`](docs/cursor-hooks.ja.md)
-- [`OpenCode Plugin`](docs/opencode-plugin.ja.md)
-- [`Inference Gateway / OpenRouter / LiteLLM`](docs/inference-gateway.ja.md)
-- [`Model Runtime / Ollama / llama.cpp / vLLM / LM Studio`](docs/model-runtime.ja.md)
+- [`Inference Gateway`](docs/inference-gateway.ja.md)
+- [`Model Runtime`](docs/model-runtime.ja.md)
+- [`Performance Benchmarks`](docs/benchmarks/README.md)
 - [`Security Analysis`](docs/security-analysis.ja.md)
-
-## Contributing
-
-native OS collector、追加 Agent/IDE adapter、inference gateway、OpenAI-compatible runtime、correlation、privacy/redaction、graph UX、performance evaluation への貢献を歓迎します。
 
 ## License
 

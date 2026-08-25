@@ -14,12 +14,26 @@ ExecWeave is an open-source, local-first observability project that turns AI-age
 
 > **Event is ground truth. The graph is a materialized view.**
 
-## Quick start
+## Install
+
+ExecWeave v0.6.0 is packaged as a standard Python wheel/sdist. The repository is PyPI-ready; until the first Trusted Publisher release is made, install the package directly from GitHub:
+
+```bash
+python -m pip install "execweave @ git+https://github.com/Irish-kw/ExecWeave.git@main"
+```
+
+For development:
 
 ```bash
 git clone https://github.com/Irish-kw/ExecWeave.git
 cd ExecWeave
 python -m pip install -e ".[dev]"
+```
+
+Once the first PyPI release is published, installation becomes:
+
+```bash
+python -m pip install execweave
 ```
 
 Watch any command live:
@@ -33,6 +47,39 @@ Or build the full artifact pipeline:
 ```bash
 execweave record --open -- python my_agent.py
 ```
+
+## Performance and footprint
+
+ExecWeave includes a reproducible package-level overhead benchmark that is run from an installed wheel. The reference plot follows the same trade-off style commonly used for model quality/cost comparisons:
+
+- **X-axis:** additional peak process-tree RSS, low → high.
+- **Y-axis:** runtime overhead, low → high.
+- **Bubble area:** median artifact size per run.
+- **Preferred region:** lower-left.
+
+![ExecWeave overhead trade-off](docs/benchmarks/v0.6.0-github-actions.svg)
+
+Reference environment: GitHub Actions Ubuntu runner, Intel Xeon Platinum 8573C, 4 logical CPUs, Python 3.12.14, `n=7`.
+
+| Profile | Median wall time | Runtime overhead | Additional peak RSS | Median artifacts/run |
+| --- | ---: | ---: | ---: | ---: |
+| ExecWeave OFF | 236.221 ms | 0.0% | 0.0 MB | 0 KB |
+| Portable ON | 391.580 ms | 65.768% | 27.852 MB | 741.355 KB |
+| Strace ON | 1226.076 ms | 419.038% | 37.653 MB | 572.838 KB |
+
+The same build produced an approximately **113 KB wheel** and **198 KB sdist**. The installed ExecWeave distribution footprint was about **849 KB**, excluding Python and dependency footprints.
+
+This is a deliberately short, file/process-heavy **reference microbenchmark**, not a universal workload claim. Percentage overhead is amplified because the uninstrumented baseline is only a few hundred milliseconds. Re-run `execweave-overhead` on the target host and representative workload before making capacity decisions.
+
+```bash
+execweave-overhead \
+  --iterations 7 \
+  --strace auto \
+  --output-json benchmark-results.json \
+  --output-svg benchmark-overhead.svg
+```
+
+Raw reference data and methodology: [`docs/benchmarks/`](docs/benchmarks/).
 
 ## Evidence layers
 
@@ -102,20 +149,7 @@ Ambiguity produces no edge.
 
 ## Inference gateway integrations
 
-### OpenRouter
-
-OpenRouter is modeled as an `inference_gateway`, not as a local model runtime.
-
-```bash
-execweave-inference-gateway event \
-  --gateway openrouter \
-  --requested-model openrouter/auto \
-  --sidecar gateway.jsonl
-```
-
-### LiteLLM Proxy
-
-LiteLLM is also modeled as an `inference_gateway`.
+OpenRouter and LiteLLM Proxy are modeled as `inference_gateway`, not as local model runtimes.
 
 ```bash
 execweave-inference-gateway event \
@@ -129,39 +163,40 @@ execweave-inference-gateway event \
 
 ExecWeave keeps requested model, resolved model, routed provider, and deployment identity distinct. Provider/deployment edges are only emitted when authoritative metadata is supplied; they are never inferred from a model-name prefix.
 
-Whitelisted usage can include token counts, cache/reasoning counts, cost, and generation timing metadata. Prompt, response, and reasoning text are not persisted.
+When the caller has an explicit shared identity across Gateway and Model Runtime observations, the two request nodes can be linked without collapsing layers:
+
+```bash
+execweave-inference-link \
+  --gateway litellm \
+  --gateway-request-id gw-123 \
+  --runtime vllm \
+  --runtime-request-id rt-456 \
+  --shared-request-id trace-789 \
+  --sidecar inference.jsonl
+```
+
+`SAME_INFERENCE_REQUEST` is exact identity evidence, not causal evidence:
+
+```text
+identity_exact: true
+inferred: false
+causal: false
+```
+
+The raw shared request ID is not persisted; only a SHA-256-derived identity hash is stored.
 
 ## Model runtime integrations
 
-### Ollama
+Current model-runtime integrations are **Ollama**, **llama.cpp**, **vLLM**, and **LM Studio**.
 
 ```bash
 execweave-model-runtime event --runtime ollama --sidecar model-runtime.jsonl
-execweave-model-runtime probe --runtime ollama --sidecar model-runtime.jsonl
-```
-
-### llama.cpp
-
-```bash
 execweave-model-runtime event --runtime llamacpp --sidecar model-runtime.jsonl
-execweave-model-runtime probe --runtime llamacpp --metrics --sidecar model-runtime.jsonl
-```
-
-### vLLM
-
-```bash
 execweave-model-runtime event --runtime vllm --sidecar model-runtime.jsonl
-execweave-model-runtime probe --runtime vllm --sidecar model-runtime.jsonl
-```
-
-### LM Studio
-
-```bash
 execweave-model-runtime event --runtime lmstudio --sidecar model-runtime.jsonl
-execweave-model-runtime probe --runtime lmstudio --sidecar model-runtime.jsonl
 ```
 
-This layer models `model_runtime`, `inference_request`, `model`, and runtime snapshots. OpenAI-compatible runtimes share response/usage and model-catalog parsing while retaining runtime-specific evidence semantics. It records selected model/token/timing/runtime metadata without prompt, generated, or reasoning content. Sensitive local model paths are redacted; llama.cpp keeps stricter GGUF-path redaction.
+OpenAI-compatible runtimes share response/usage and model-catalog parsing while retaining runtime-specific evidence semantics. Prompt, generated, and reasoning content are not stored. Sensitive local model paths are redacted; llama.cpp keeps stricter GGUF-path redaction.
 
 LM Studio model-catalog visibility is represented as `ADVERTISES_MODEL`, not as proof that model weights are loaded in memory.
 
@@ -201,19 +236,7 @@ Raw evidence is never rewritten by the derived correlation layer.
 
 ## Interactive Viewer
 
-The standalone Viewer is local and self-contained. Current baseline includes:
-
-- pan / zoom / draggable nodes
-- node and edge inspection
-- node-type / relation / causal filters
-- **observed only** filter
-- search
-- evidence-sequence Timeline ↔ Graph replay
-- progressive cluster expansion
-- 1-hop / 2-hop focused neighborhoods
-- browser-local Saved Views
-- explicit observed / non-causal / inferred edge styling
-- Correlation Summary
+The standalone Viewer is local and self-contained. Current baseline includes pan/zoom, draggable nodes, node/edge inspection, node-type/relation/causal filters, **observed only**, search, evidence-sequence replay, progressive cluster expansion, focused neighborhoods, Saved Views, explicit edge semantics, and Correlation Summary.
 
 ## Graph operations
 
@@ -242,9 +265,9 @@ Security findings remain explicit about evidence limits. A possible sensitive-fi
 
 ## Current status
 
-ExecWeave is currently **v0.5.0** and under active development.
+ExecWeave is currently **v0.6.0** and under active development.
 
-Implemented baseline includes runtime collection, graph materialization/querying, standalone/live Viewer, native Claude/Codex/Gemini/Cursor/OpenCode semantic integrations, conservative Tool → Process correlation, OpenRouter/LiteLLM gateway metadata, Ollama/llama.cpp/vLLM/LM Studio runtime metadata, and cross-platform CI on Python 3.10/3.12.
+The baseline includes runtime collection, graph materialization/querying, standalone/live Viewer, Claude/Codex/Gemini/Cursor/OpenCode semantic integrations, conservative Tool → Process correlation, OpenRouter/LiteLLM gateway metadata, Ollama/llama.cpp/vLLM/LM Studio runtime metadata, exact Gateway ↔ Model Runtime request identity, PyPI-ready wheel/sdist packaging, reproducible overhead benchmarking, and cross-platform CI on Python 3.10/3.12.
 
 ## Privacy
 
@@ -265,11 +288,12 @@ Review artifacts before sharing them.
 - [`OpenCode Plugin`](docs/opencode-plugin.md)
 - [`Inference Gateway / OpenRouter / LiteLLM`](docs/inference-gateway.md)
 - [`Model Runtime / Ollama / llama.cpp / vLLM / LM Studio`](docs/model-runtime.md)
+- [`Performance Benchmarks`](docs/benchmarks/README.md)
 - [`Security Analysis`](docs/security-analysis.md)
 
 ## Contributing
 
-Contributions are welcome, especially around native OS collectors, additional Agent/IDE adapters, inference gateways, OpenAI-compatible model runtimes, entity/correlation methods, privacy/redaction, graph UX, and performance evaluation.
+Contributions are welcome, especially around native OS collectors, additional Agent/IDE adapters, inference gateways, model runtimes, entity/correlation methods, privacy/redaction, graph UX, and performance evaluation.
 
 ## License
 

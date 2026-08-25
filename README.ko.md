@@ -10,11 +10,19 @@
 
 **AI 에이전트가 실제로 머신에서 무엇을 했는지 확인하세요.**
 
-ExecWeave는 AI 에이전트 활동을 인터랙티브 실행 그래프로 변환하는 로컬 우선 오픈소스 observability 프로젝트입니다. 관측된 evidence와 inference를 명확히 분리합니다.
+ExecWeave는 AI 에이전트 활동을 인터랙티브 execution graph로 변환하는 local-first 오픈소스 observability 프로젝트입니다. Observed evidence와 inference를 명확히 분리합니다.
 
 > **Event is ground truth. The graph is a materialized view.**
 
-## Quick start
+## Installation
+
+ExecWeave v0.6.0은 표준 Python wheel / sdist로 패키징되어 있습니다. GitHub 쪽은 PyPI-ready이며, 첫 Trusted Publisher release 전까지 GitHub에서 직접 pip install할 수 있습니다.
+
+```bash
+python -m pip install "execweave @ git+https://github.com/Irish-kw/ExecWeave.git@main"
+```
+
+개발 설치:
 
 ```bash
 git clone https://github.com/Irish-kw/ExecWeave.git
@@ -22,21 +30,39 @@ cd ExecWeave
 python -m pip install -e ".[dev]"
 ```
 
-아무 명령이나 live로 관찰:
+첫 PyPI release 이후:
 
 ```bash
-execweave live --open -- claude
+python -m pip install execweave
 ```
 
-전체 artifact pipeline:
+## Performance / footprint
+
+Reference benchmark는 editable source가 아니라 실제 설치된 wheel에서 실행됩니다. X축은 additional peak process-tree RSS, Y축은 runtime overhead, bubble 면적은 run당 median artifact size입니다. 두 축 모두 낮음→높음이며 왼쪽 아래가 선호 영역입니다.
+
+![ExecWeave overhead trade-off](docs/benchmarks/v0.6.0-github-actions.svg)
+
+Reference environment: GitHub Actions Ubuntu runner, Intel Xeon Platinum 8573C, 4 logical CPUs, Python 3.12.14, `n=7`.
+
+| Profile | Median wall time | Runtime overhead | Additional peak RSS | Median artifacts/run |
+| --- | ---: | ---: | ---: | ---: |
+| ExecWeave OFF | 236.221 ms | 0.0% | 0.0 MB | 0 KB |
+| Portable ON | 391.580 ms | 65.768% | 27.852 MB | 741.355 KB |
+| Strace ON | 1226.076 ms | 419.038% | 37.653 MB | 572.838 KB |
+
+같은 build에서 wheel은 약 **113 KB**, sdist는 약 **198 KB**, 설치된 ExecWeave distribution은 약 **849 KB**였습니다. Python과 dependency footprint는 제외합니다.
+
+이 수치는 매우 짧고 file/process-heavy한 **reference microbenchmark** 결과이며 모든 Agent workload에 대한 일반적 overhead 주장이 아닙니다. 실제 배포 전 target host와 대표 workload에서 다시 실행해야 합니다.
 
 ```bash
-execweave record --open -- python my_agent.py
+execweave-overhead --iterations 7 --strace auto \
+  --output-json benchmark-results.json \
+  --output-svg benchmark-overhead.svg
 ```
+
+Raw data / methodology: [`docs/benchmarks/`](docs/benchmarks/).
 
 ## Evidence layers
-
-ExecWeave는 서로 다른 evidence를 하나의 trace로 평탄화하지 않고 다음 계층으로 모델링합니다:
 
 ```text
 Agent / IDE semantic evidence
@@ -48,115 +74,38 @@ Model runtime / inference-server evidence
 OS runtime evidence: process / file / network
 ```
 
-관계가 causal이라고 표시되는 것은 기반 telemetry가 그 주장을 직접 뒷받침할 때뿐입니다.
+기반 telemetry가 직접 뒷받침할 때만 relationship을 causal이라고 표시합니다.
 
-## Agent / IDE integrations
+## Integrations
 
-### Claude Code
+Agent / IDE: Claude Code, OpenAI Codex, Gemini CLI, Cursor, OpenCode.
 
-```bash
-execweave-claude-hook --print-config
-execweave-claude-record --open -- claude
-```
+Inference Gateway: OpenRouter, LiteLLM Proxy. Requested model / resolved model / provider / deployment을 서로 다른 evidence로 보존하며 authoritative metadata가 없으면 routing fact를 추측하지 않습니다.
 
-### OpenAI Codex
+Model Runtime: Ollama, llama.cpp, vLLM, LM Studio. Prompt / generated content / reasoning content는 저장하지 않습니다. Sensitive local model path는 redact합니다. LM Studio catalog는 `ADVERTISES_MODEL`로 표현하며 catalog visibility를 loaded-memory evidence로 간주하지 않습니다.
 
-```bash
-execweave-codex-hook --print-config
-execweave-codex-record --open -- codex
-```
-
-### Gemini CLI
-
-```bash
-execweave-gemini-hook --print-config
-execweave-gemini-record --open -- gemini
-```
-
-### Cursor
-
-```bash
-execweave-cursor-hook --print-config
-execweave-cursor-record --open -- cursor
-```
-
-Cursor의 안정적인 `tool_use_id`를 사용해 pre/post hook 사이의 exact logical tool-call identity를 유지합니다.
-
-### OpenCode
-
-```bash
-execweave-opencode-plugin --install
-execweave-opencode-record --open -- opencode
-```
-
-project-local plugin은 exact `sessionID + callID`를 사용하며 tool output을 전달하지 않습니다.
-
-Provider-integrated run은 runtime / semantic / correlated artifact를 분리해 보존합니다. Tool → Process bridge는 보수적인 derived evidence입니다:
+Tool → Process correlation은 항상:
 
 ```text
 inferred: true
 causal: false
 ```
 
-ambiguous 또는 no-match이면 edge를 만들지 않습니다.
+ambiguous / no-match이면 edge를 만들지 않습니다.
 
-## Inference gateway integrations
-
-현재 **OpenRouter**와 **LiteLLM Proxy**를 지원합니다. Gateway는 local model runtime이 아니라 `inference_gateway`로 모델링됩니다.
-
-### OpenRouter
-
-```bash
-execweave-inference-gateway event \
-  --gateway openrouter \
-  --requested-model openrouter/auto \
-  --provider-name OpenAI \
-  --sidecar gateway.jsonl
-```
-
-### LiteLLM Proxy
-
-```bash
-execweave-inference-gateway event \
-  --gateway litellm \
-  --requested-model assistant \
-  --resolved-model azure/gpt-5 \
-  --provider-name Azure \
-  --deployment-id deployment-west \
-  --sidecar gateway.jsonl
-```
-
-ExecWeave는 다음을 서로 다른 evidence로 유지합니다:
+Gateway와 Model Runtime 양쪽에 명시적 shared request identity가 있을 때만 `SAME_INFERENCE_REQUEST`를 생성할 수 있습니다:
 
 ```text
-requested model → resolved model → routed provider → deployment
+identity_exact: true
+inferred: false
+causal: false
 ```
 
-Provider / deployment edge는 authoritative routing metadata가 있을 때만 생성합니다. `azure/...` 같은 model string에서 provider나 deployment를 추측하지 않습니다. Gateway events는 `causal: false`로 유지됩니다. Prompt, response, reasoning content는 저장하지 않습니다.
-
-## Model runtime integrations
-
-현재 **Ollama**, **llama.cpp**, **vLLM**, **LM Studio**를 지원합니다.
-
-```bash
-execweave-model-runtime event --runtime ollama --sidecar model-runtime.jsonl
-execweave-model-runtime event --runtime llamacpp --sidecar model-runtime.jsonl
-execweave-model-runtime event --runtime vllm --sidecar model-runtime.jsonl
-execweave-model-runtime event --runtime lmstudio --sidecar model-runtime.jsonl
-```
-
-```bash
-execweave-model-runtime probe --runtime ollama --sidecar model-runtime.jsonl
-execweave-model-runtime probe --runtime llamacpp --metrics --sidecar model-runtime.jsonl
-execweave-model-runtime probe --runtime vllm --sidecar model-runtime.jsonl
-execweave-model-runtime probe --runtime lmstudio --sidecar model-runtime.jsonl
-```
-
-llama.cpp, vLLM, LM Studio는 OpenAI-compatible response/usage와 `/v1/models` catalog parser를 공유하지만 runtime-specific metadata는 각 adapter에 남깁니다. vLLM catalog는 `SERVES_MODEL`, LM Studio catalog는 `ADVERTISES_MODEL`을 사용하므로 catalog에 존재한다는 사실만으로 loaded model이라고 주장하지 않습니다. 민감한 local model path는 redact하며 llama.cpp GGUF path는 더 엄격하게 처리합니다.
+Raw shared ID는 저장하지 않고 SHA-256-derived identity hash만 보존합니다.
 
 ## Runtime evidence
 
-portable collector는 Linux / macOS / Windows에서 동작하고, Linux에는 syscall-backed `strace` reference backend도 있습니다.
+Portable collector는 Linux / macOS / Windows에서 동작하고 Linux에는 syscall-backed `strace` reference backend가 있습니다.
 
 ```bash
 execweave doctor
@@ -164,57 +113,37 @@ execweave run --backend portable -- your-command
 execweave run --backend strace -- your-command
 ```
 
-portable filesystem event는 process-causal이 아니라 session-correlated입니다. 짧게 실행되는 process는 polling interval 사이에서 놓칠 수 있습니다. Linux `strace` path는 command 종료 후 process-attributed syscall evidence를 생성합니다.
+Portable filesystem observation은 process-causal이 아니라 session-correlated입니다. Future native collectors는 Linux eBPF, Windows ETW, macOS Endpoint Security를 계획하고 있습니다.
 
-## Interactive Viewer
+## Viewer / Graph / Security
 
-Standalone Viewer는 로컬 self-contained입니다. 현재 baseline에는 pan/zoom, node/edge inspection, filters, **observed only**, search, Timeline ↔ Graph replay, progressive cluster expansion, 1/2-hop focus, Saved Views, observed/non-causal/inferred styling, Correlation Summary가 포함됩니다.
-
-## Security analysis
+Standalone Viewer는 local self-contained이며 pan/zoom, inspection, filters, **observed only**, search, Timeline replay, cluster expansion, focused neighborhood, Saved Views, 명시적 edge semantics를 지원합니다.
 
 ```bash
+execweave graph-summary run.graph.json
+execweave graph-focus run.graph.json NODE_ID --hops 2 --output focused.graph.json
 execweave analyze run.graph.json --output analysis.json
 ```
 
-sensitive-file → network 가능성은 byte-level exfiltration 증명이 아닙니다:
-
-```json
-{
-  "data_flow_proven": false,
-  "exfiltration_proven": false
-}
-```
+Security findings는 evidence limit를 유지하며 possible sensitive-file → network path를 byte-level exfiltration 증명으로 취급하지 않습니다.
 
 ## Current status
 
-ExecWeave는 현재 **v0.5.0**이며 active development 중입니다.
-
-runtime collection, graph materialization/query, standalone/live Viewer, Claude/Codex/Gemini/Cursor/OpenCode semantic integration, conservative Tool → Process correlation, OpenRouter/LiteLLM gateway metadata, Ollama/llama.cpp/vLLM/LM Studio runtime metadata, cross-platform CI가 baseline으로 구현되어 있습니다.
+ExecWeave는 현재 **v0.6.0**입니다. Runtime collection, execution graph, 5개 Agent/IDE integration, OpenRouter/LiteLLM, Ollama/llama.cpp/vLLM/LM Studio, exact Gateway ↔ Runtime identity, PyPI-ready packaging, reference overhead benchmark, cross-platform CI가 baseline에 포함됩니다.
 
 ## Privacy
 
-ExecWeave는 local-first입니다. runtime events, semantic sidecars, graphs, reports, Viewers는 기본적으로 로컬에 남습니다. native adapters는 prompt/transcript/tool output을 기본적으로 저장하지 않습니다. 다만 command, path, endpoint metadata, identifier, model metadata는 민감할 수 있습니다.
-
-공유 전 artifact를 검토하세요.
+ExecWeave는 local-first입니다. Runtime events, semantic sidecars, graphs, reports, Viewers는 기본적으로 로컬에 남습니다. File content나 raw read/write buffers를 의도적으로 수집하지 않습니다. Artifact를 공유하기 전에 command, path, endpoint, identifier, model metadata를 검토하세요.
 
 ## Documentation
 
 - [`Phase 1 — Runtime Collection`](docs/phase-1-runtime-collection.ko.md)
 - [`Phase 2 — Execution Graph`](docs/phase-2-execution-graph.ko.md)
-- [`Live Graph`](docs/live-graph.ko.md)
 - [`Semantic Telemetry`](docs/semantic-telemetry.ko.md)
-- [`Claude Code Hooks`](docs/claude-code-hooks.ko.md)
-- [`OpenAI Codex Hooks`](docs/codex-hooks.ko.md)
-- [`Gemini CLI Hooks`](docs/gemini-hooks.ko.md)
-- [`Cursor Hooks`](docs/cursor-hooks.ko.md)
-- [`OpenCode Plugin`](docs/opencode-plugin.ko.md)
-- [`Inference Gateway / OpenRouter / LiteLLM`](docs/inference-gateway.ko.md)
-- [`Model Runtime / Ollama / llama.cpp / vLLM / LM Studio`](docs/model-runtime.ko.md)
+- [`Inference Gateway`](docs/inference-gateway.ko.md)
+- [`Model Runtime`](docs/model-runtime.ko.md)
+- [`Performance Benchmarks`](docs/benchmarks/README.md)
 - [`Security Analysis`](docs/security-analysis.ko.md)
-
-## Contributing
-
-native OS collector, 추가 Agent/IDE adapter, inference gateway, OpenAI-compatible runtime, correlation, privacy/redaction, graph UX, performance evaluation 기여를 환영합니다.
 
 ## License
 
