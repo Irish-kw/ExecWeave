@@ -10,10 +10,33 @@ def main() -> int:
     parser.add_argument("graph", type=Path)
     args = parser.parse_args()
     graph = json.loads(args.graph.read_text(encoding="utf-8"))
+    nodes = [node for node in graph.get("nodes", []) if isinstance(node, dict)]
     edges = [edge for edge in graph.get("edges", []) if isinstance(edge, dict)]
     inferred = [edge for edge in edges if edge.get("relation") == "CORRELATED_WITH_PROCESS"]
     if len(inferred) != 1:
-        raise RuntimeError(f"expected exactly one correlated process edge, found {len(inferred)}")
+        processes = [
+            {
+                "id": node.get("id"),
+                "name": node.get("name"),
+                "attributes": node.get("attributes"),
+            }
+            for node in nodes
+            if node.get("type") == "process"
+        ]
+        commands = [
+            {
+                "id": node.get("id"),
+                "name": node.get("name"),
+                "attributes": node.get("attributes"),
+            }
+            for node in nodes
+            if node.get("type") == "command"
+        ]
+        raise RuntimeError(
+            "expected exactly one correlated process edge, "
+            f"found {len(inferred)}; commands={json.dumps(commands, sort_keys=True)}; "
+            f"processes={json.dumps(processes, sort_keys=True)}"
+        )
     edge = inferred[0]
     if edge.get("inferred") is not True:
         raise RuntimeError("correlation edge is not marked inferred=true")
