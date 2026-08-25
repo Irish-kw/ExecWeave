@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 from execweave.claude_adapter import append_semantic_records, claude_hook_to_semantic_events
-from execweave.claude_hook_cli import main as claude_hook_main
+from execweave.claude_hook_cli import claude_hook_config, main as claude_hook_main
 
 
 def _base(event: str) -> dict:
@@ -162,6 +162,53 @@ def test_append_semantic_records_writes_jsonl(tmp_path: Path) -> None:
     assert len(lines) == 3
     assert lines[-1]["relation"] == "DECLARED_TARGET"
     assert not output.with_name(output.name + ".lock").exists()
+
+
+def test_hook_config_covers_supported_events() -> None:
+    config = claude_hook_config("custom-execweave-hook")
+    hooks = config["hooks"]
+
+    assert set(hooks) == {
+        "SessionStart",
+        "PreToolUse",
+        "PostToolUse",
+        "PostToolUseFailure",
+        "SubagentStart",
+        "SubagentStop",
+    }
+    for event_name, groups in hooks.items():
+        assert groups[0]["hooks"][0]["command"] == "custom-execweave-hook"
+        if event_name in {"PreToolUse", "PostToolUse", "PostToolUseFailure"}:
+            assert groups[0]["matcher"] == "*"
+
+
+def test_hook_cli_auto_scopes_sidecar_by_claude_session(monkeypatch, tmp_path: Path) -> None:
+    payload = {
+        **_base("PreToolUse"),
+        "session_id": "session/unsafe:id",
+        "cwd": str(tmp_path),
+        "tool_name": "Read",
+        "tool_use_id": "toolu_read",
+        "tool_input": {"file_path": str(tmp_path / "README.md")},
+    }
+    monkeypatch.delenv("EXECWEAVE_SEMANTIC_SIDECAR", raising=False)
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(payload)))
+
+    assert claude_hook_main([]) == 0
+    output = tmp_path / ".execweave" / "semantic" / "claude" / "session_unsafe_id.jsonl"
+    assert output.exists()
+    records = [json.loads(line) for line in output.read_text(encoding="utf-8").splitlines()]
+    assert [record["relation"] for record in records] == [
+        "REQUESTED_TOOL_CALL",
+        "USES_TOOL",
+        "DECLARED_TARGET",
+    ]
+
+
+def test_hook_cli_print_config(capsys) -> None:
+    assert claude_hook_main(["--print-config", "--command", "custom-hook"]) == 0
+    config = json.loads(capsys.readouterr().out)
+    assert config["hooks"]["PreToolUse"][0]["hooks"][0]["command"] == "custom-hook"
 
 
 def test_hook_cli_is_fail_open_by_default(monkeypatch, tmp_path: Path, capsys) -> None:
