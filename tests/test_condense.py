@@ -93,6 +93,25 @@ def test_condense_graph_groups_repetitive_file_leaves() -> None:
     assert original["node_count"] == 12
 
 
+def test_condense_graph_canonicalizes_windows_style_paths() -> None:
+    graph = _graph(4)
+    for index, node in enumerate(
+        [item for item in graph["nodes"] if item["type"] == "file"]
+    ):
+        old_id = node["id"]
+        new_id = f"file:C:\\repo\\src\\file_{index}.py"
+        node["id"] = new_id
+        node["name"] = f"file_{index}.py"
+        for edge in graph["edges"]:
+            if edge.get("target") == old_id:
+                edge["target"] = new_id
+                edge["id"] = f"{edge['source']}--OPENED_READ-->{new_id}"
+
+    condensed = condense_graph(graph, threshold=4)
+    cluster = next(node for node in condensed["nodes"] if node["type"] == "file_cluster")
+    assert cluster["attributes"]["directory_bucket"] == "C:/repo/src"
+
+
 def test_condense_graph_does_not_collapse_small_groups() -> None:
     original = _graph(3)
     condensed = condense_graph(original, threshold=4)
