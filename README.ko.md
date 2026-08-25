@@ -52,6 +52,7 @@ ExecWeave는 현재 **v0.4.0**입니다.
 ### Phase 2
 - [x] Event → Graph
 - [x] deduplication / aggregation / query
+- [x] N-hop focused graph artifact
 - [x] large-run leaf condensation
 - [x] optional exact cluster expansion evidence
 - [ ] stronger entity resolution
@@ -65,7 +66,10 @@ ExecWeave는 현재 **v0.4.0**입니다.
 - [x] Timeline ↔ Graph synchronization
 - [x] evidence-sequence slider + Play/Pause replay
 - [x] progressive cluster expansion
-- [ ] saved filters / focused subgraphs
+- [x] 1-hop / 2-hop focused runtime neighborhood
+- [x] browser-local Saved View presets
+
+Phase 3 Viewer baseline에는 replay, 필요 시 cluster expansion, focused neighborhood, 로컬 Saved View가 포함됩니다.
 
 ### Security Analysis
 
@@ -97,7 +101,23 @@ execweave graph run.jsonl --output run.graph.json
 execweave view run.graph.json --output run.html --open
 ```
 
-큰 run:
+### Runtime neighborhood에 focus하기
+
+```bash
+execweave graph-focus run.graph.json PROCESS_NODE_ID \
+  --hops 2 \
+  --direction both \
+  --causal-only \
+  --output focused.graph.json
+
+execweave view focused.graph.json --output focused.html --open
+```
+
+`--direction`은 `in`, `out`, `both`를 지원합니다. `--relation`을 반복해 traversal edge를 제한할 수 있습니다. 모든 제한은 traversal **전에** 적용되며 `graph-focus`는 기존 node와 evidence edge만 복사합니다. Shortcut이나 새로운 causal relationship을 만들지 않습니다.
+
+Viewer에서도 node를 클릭해 **Focus 1 hop** / **Focus 2 hops**를 선택할 수 있습니다. **Clear focus**로 현재 filter 조건의 전체 Graph로 돌아갑니다.
+
+### Large Graph condensation
 
 ```bash
 execweave graph-condense run.graph.json \
@@ -107,9 +127,7 @@ execweave graph-condense run.graph.json \
 
 single incoming relationship을 가지며 downstream behavior가 없는 file/directory/executable leaf만 collapse합니다. Process, Agent, Session, Socket, Network Endpoint는 기본적으로 collapse하지 않습니다.
 
-### Progressive cluster expansion
-
-기본 `graph-condense` 결과는 계속 compact합니다. Viewer에서 cluster를 필요할 때만 펼치려면:
+Viewer에서 cluster를 필요할 때만 펼치려면:
 
 ```bash
 execweave graph-condense run.graph.json \
@@ -132,7 +150,13 @@ Standalone Viewer는 Graph edge의 `first_sequence` / `last_sequence`를 사용�
 
 Aggregated edge에 현재 sequence 이후의 evidence가 남아 있다면 `partial`로 표시하며, 최종 `count`를 과거 시점에 미리 노출하지 않습니다.
 
-Timeline은 node type, relation, causal-only, search filter, progressive cluster expansion과 함께 사용할 수 있습니다.
+Timeline은 node type, relation, causal-only, search, focused neighborhood, progressive cluster expansion과 함께 사용할 수 있습니다.
+
+## Saved Views
+
+Viewer의 **Save view**는 현재 node/relation/causal filter, search, timeline 위치, focus 상태, expanded clusters를 저장합니다.
+
+Preset은 기본적으로 browser-local storage에 저장되며 **UI state만 포함합니다. Graph node, edge, event evidence, file content, prompt는 저장하지 않습니다**. Local storage를 사용할 수 없으면 현재 page session 안에서만 유지되는 preset으로 안전하게 fallback합니다.
 
 ## Graph-first event model
 
@@ -168,7 +192,7 @@ Live server는 `127.0.0.1`에만 bind합니다. 자세한 내용은 [`docs/live-
 
 ## Privacy
 
-ExecWeave는 **local-first**입니다. runtime event, Graph, Viewer는 기본적으로 로컬에 남으며 외부 CDN이 필요하지 않습니다. file content나 `read()` / `write()` byte buffer는 수집하지 않습니다.
+ExecWeave는 **local-first**입니다. runtime event, Graph, Viewer는 기본적으로 로컬에 남습니다. Saved View는 UI state만 저장합니다. 외부 CDN이 필요하지 않으며 file content나 `read()` / `write()` byte buffer는 수집하지 않습니다.
 
 ## Documentation
 
@@ -179,7 +203,7 @@ ExecWeave는 **local-first**입니다. runtime event, Graph, Viewer는 기본적
 
 ## Contributing
 
-Linux eBPF, Windows ETW, macOS Endpoint Security, Graph entity resolution, live/large-graph visualization, OpenTelemetry/MCP, privacy/redaction, testing, performance evaluation, 번역 contribution을 환영합니다.
+Linux eBPF, Windows ETW, macOS Endpoint Security, Graph entity resolution, Agent/Tool/MCP semantic telemetry, OpenTelemetry/MCP, privacy/redaction, testing, performance evaluation, 번역 contribution을 환영합니다.
 
 `README.md`가 canonical English source입니다.
 
