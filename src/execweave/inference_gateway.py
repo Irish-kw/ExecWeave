@@ -67,6 +67,16 @@ def _provider_entity(provider: str) -> dict[str, Any]:
     )
 
 
+def _deployment_entity(gateway: str, deployment: str) -> dict[str, Any]:
+    slug = hashlib.sha256(deployment.encode("utf-8", errors="replace")).hexdigest()[:24]
+    return _entity(
+        "inference_deployment",
+        f"inference-deployment:{gateway}:{slug}",
+        name=deployment,
+        attributes={"gateway": gateway, "deployment_id": deployment},
+    )
+
+
 def _event(
     *,
     timestamp: str,
@@ -111,69 +121,93 @@ def _request_id(payload: dict[str, Any], explicit: str | None) -> str:
     return hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()[:32]
 
 
+def _copy_int(mapping: dict[str, Any], source: str, target: str, attrs: dict[str, Any]) -> None:
+    value = mapping.get(source)
+    if isinstance(value, int) and not isinstance(value, bool) and target not in attrs:
+        attrs[target] = value
+
+
 def _usage_attributes(payload: dict[str, Any]) -> dict[str, Any]:
     attrs: dict[str, Any] = {"protocol": "openai_compatible"}
     usage = payload.get("usage")
     if not isinstance(usage, dict):
         return attrs
-    for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
-        value = usage.get(key)
-        if isinstance(value, int) and not isinstance(value, bool):
-            attrs[key] = value
+    for source, target in (
+        ("prompt_tokens", "prompt_tokens"),
+        ("input_tokens", "prompt_tokens"),
+        ("completion_tokens", "completion_tokens"),
+        ("output_tokens", "completion_tokens"),
+        ("total_tokens", "total_tokens"),
+    ):
+        _copy_int(usage, source, target, attrs)
     cost = usage.get("cost")
     if isinstance(cost, (int, float)) and not isinstance(cost, bool):
         attrs["cost_usd"] = float(cost)
-    prompt_details = usage.get("prompt_tokens_details")
-    if isinstance(prompt_details, dict):
+    for detail_key in ("prompt_tokens_details", "input_tokens_details"):
+        details = usage.get(detail_key)
+        if not isinstance(details, dict):
+            continue
         for source, target in (
             ("cached_tokens", "cached_prompt_tokens"),
             ("cache_write_tokens", "cache_write_tokens"),
         ):
-            value = prompt_details.get(source)
-            if isinstance(value, int) and not isinstance(value, bool):
-                attrs[target] = value
-    completion_details = usage.get("completion_tokens_details")
-    if isinstance(completion_details, dict):
-        reasoning = completion_details.get("reasoning_tokens")
-        if isinstance(reasoning, int) and not isinstance(reasoning, bool):
-            attrs["reasoning_tokens"] = reasoning
+            _copy_int(details, source, target, attrs)
+    for detail_key in ("completion_tokens_details", "output_tokens_details"):
+        details = usage.get(detail_key)
+        if isinstance(details, dict):
+            _copy_int(details, "reasoning_tokens", "reasoning_tokens", attrs)
+    for source, target in (
+        ("cache_creation_input_tokens", "cache_write_tokens"),
+        ("cache_read_input_tokens", "cached_prompt_tokens"),
+    ):
+        _copy_int(usage, source, target, attrs)
     return attrs
 
 
-def openrouter_response_to_events(
+def gateway_response_to_events(
     payload: dict[str, Any],
     *,
+    gateway_name: str,
+    endpoint: str,
     requested_model: str | None = None,
+    resolved_model: str | None = None,
     provider_name: str | None = None,
-    endpoint: str = "https://openrouter.ai/api/v1",
+    deployment_id: str | None = None,
     request_id: str | None = None,
     timestamp: str | None = None,
 ) -> list[dict[str, Any]]:
     observed_at = timestamp or _now()
-    gateway = _gateway_entity("openrouter", endpoint)
+    gateway = _gateway_entity(gateway_name, endpoint)
     native_id = _request_id(payload, request_id)
-    resolved_model = payload.get("model")
+    response_model = payload.get("model")
+    resolved = resolved_model
+    if not isinstance(resolved, str) or not resolved:
+        resolved = response_model if isinstance(response_model, str) and response_model else None
+
     attrs = _usage_attributes(payload)
     if isinstance(requested_model, str) and requested_model:
         attrs["requested_model"] = requested_model
-    if isinstance(resolved_model, str) and resolved_model:
-        attrs["resolved_model"] = resolved_model
+    if isinstance(resolved, str) and resolved:
+        attrs["resolved_model"] = resolved
     if isinstance(provider_name, str) and provider_name:
         attrs["provider_name"] = provider_name
+    if isinstance(deployment_id, str) and deployment_id:
+        attrs["deployment_id"] = deployment_id
+
     request = _entity(
         "inference_request",
-        f"inference-request:openrouter:{native_id}",
+        f"inference-request:{gateway_name}:{native_id}",
         name=native_id,
-        attributes={"gateway": "openrouter", **attrs},
+        attributes={"gateway": gateway_name, **attrs},
     )
     events = [
         _event(
             timestamp=observed_at,
-            event_type="inference_gateway.openrouter.response.observed",
+            event_type=f"inference_gateway.{gateway_name}.response.observed",
             relation="SERVED_INFERENCE",
             source=gateway,
             target=request,
-            gateway="openrouter",
+            gateway=gateway_name,
             attributes=attrs,
         )
     ]
@@ -181,23 +215,23 @@ def openrouter_response_to_events(
         events.append(
             _event(
                 timestamp=observed_at,
-                event_type="inference_gateway.openrouter.model.requested",
+                event_type=f"inference_gateway.{gateway_name}.model.requested",
                 relation="REQUESTED_MODEL",
                 source=request,
                 target=_model_entity(requested_model),
-                gateway="openrouter",
+                gateway=gateway_name,
                 attributes=attrs,
             )
         )
-    if isinstance(resolved_model, str) and resolved_model:
+    if isinstance(resolved, str) and resolved:
         events.append(
             _event(
                 timestamp=observed_at,
-                event_type="inference_gateway.openrouter.model.resolved",
+                event_type=f"inference_gateway.{gateway_name}.model.resolved",
                 relation="ROUTED_TO_MODEL",
                 source=request,
-                target=_model_entity(resolved_model),
-                gateway="openrouter",
+                target=_model_entity(resolved),
+                gateway=gateway_name,
                 attributes=attrs,
             )
         )
@@ -205,15 +239,75 @@ def openrouter_response_to_events(
         events.append(
             _event(
                 timestamp=observed_at,
-                event_type="inference_gateway.openrouter.provider.resolved",
+                event_type=f"inference_gateway.{gateway_name}.provider.resolved",
                 relation="ROUTED_TO_PROVIDER",
                 source=request,
                 target=_provider_entity(provider_name),
-                gateway="openrouter",
+                gateway=gateway_name,
+                attributes=attrs,
+            )
+        )
+    if isinstance(deployment_id, str) and deployment_id:
+        events.append(
+            _event(
+                timestamp=observed_at,
+                event_type=f"inference_gateway.{gateway_name}.deployment.resolved",
+                relation="ROUTED_TO_DEPLOYMENT",
+                source=request,
+                target=_deployment_entity(gateway_name, deployment_id),
+                gateway=gateway_name,
                 attributes=attrs,
             )
         )
     return events
+
+
+def openrouter_response_to_events(
+    payload: dict[str, Any],
+    *,
+    requested_model: str | None = None,
+    resolved_model: str | None = None,
+    provider_name: str | None = None,
+    deployment_id: str | None = None,
+    endpoint: str = "https://openrouter.ai/api/v1",
+    request_id: str | None = None,
+    timestamp: str | None = None,
+) -> list[dict[str, Any]]:
+    return gateway_response_to_events(
+        payload,
+        gateway_name="openrouter",
+        endpoint=endpoint,
+        requested_model=requested_model,
+        resolved_model=resolved_model,
+        provider_name=provider_name,
+        deployment_id=deployment_id,
+        request_id=request_id,
+        timestamp=timestamp,
+    )
+
+
+def litellm_response_to_events(
+    payload: dict[str, Any],
+    *,
+    requested_model: str | None = None,
+    resolved_model: str | None = None,
+    provider_name: str | None = None,
+    deployment_id: str | None = None,
+    endpoint: str = "http://localhost:4000",
+    request_id: str | None = None,
+    timestamp: str | None = None,
+) -> list[dict[str, Any]]:
+    return gateway_response_to_events(
+        payload,
+        gateway_name="litellm",
+        endpoint=endpoint,
+        requested_model=requested_model,
+        resolved_model=resolved_model,
+        provider_name=provider_name,
+        deployment_id=deployment_id,
+        request_id=request_id,
+        timestamp=timestamp,
+    )
 
 
 def openrouter_generation_to_events(

@@ -58,8 +58,46 @@ def main() -> int:
                 }
             },
         )
+        run_cli(
+            [
+                "event",
+                "--gateway",
+                "litellm",
+                "--requested-model",
+                "assistant",
+                "--resolved-model",
+                "azure/gpt-5",
+                "--provider-name",
+                "Azure",
+                "--deployment-id",
+                "deployment-west",
+                "--sidecar",
+                str(sidecar),
+            ],
+            {
+                "id": "ci-litellm-1",
+                "model": "proxy-alias-response",
+                "output": [
+                    {"content": [{"type": "output_text", "text": "PRIVATE_LITELLM_RESPONSE"}]}
+                ],
+                "reasoning": {"summary": "PRIVATE_LITELLM_REASONING"},
+                "usage": {
+                    "input_tokens": 7,
+                    "output_tokens": 4,
+                    "total_tokens": 11,
+                    "cache_read_input_tokens": 2,
+                    "output_tokens_details": {"reasoning_tokens": 1},
+                },
+            },
+        )
         text = sidecar.read_text(encoding="utf-8")
-        for secret in ("PRIVATE_RESPONSE", "PRIVATE_PROMPT", "PRIVATE_COMPLETION"):
+        for secret in (
+            "PRIVATE_RESPONSE",
+            "PRIVATE_PROMPT",
+            "PRIVATE_COMPLETION",
+            "PRIVATE_LITELLM_RESPONSE",
+            "PRIVATE_LITELLM_REASONING",
+        ):
             if secret in text:
                 raise RuntimeError(f"gateway sidecar leaked content: {secret}")
         records = [json.loads(line) for line in text.splitlines() if line.strip()]
@@ -69,11 +107,17 @@ def main() -> int:
             "REQUESTED_MODEL",
             "ROUTED_TO_MODEL",
             "ROUTED_TO_PROVIDER",
+            "ROUTED_TO_DEPLOYMENT",
             "REPORTED_GENERATION_METADATA",
         }
         missing = expected - relations
         if missing:
             raise RuntimeError(f"gateway smoke missing relations: {sorted(missing)}")
+        litellm_records = [r for r in records if r["attributes"].get("gateway") == "litellm"]
+        if not litellm_records or any(
+            r["attributes"].get("causal") is not False for r in litellm_records
+        ):
+            raise RuntimeError("LiteLLM gateway evidence must remain non-causal")
     print("Inference gateway CLI smoke passed")
     return 0
 

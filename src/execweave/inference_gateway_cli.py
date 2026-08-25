@@ -8,10 +8,13 @@ from pathlib import Path
 
 from .inference_gateway import (
     append_gateway_records,
+    litellm_response_to_events,
     openrouter_generation_to_events,
     openrouter_response_to_events,
     sanitize_gateway_endpoint,
 )
+
+_GATEWAYS = ("openrouter", "litellm")
 
 
 def _sidecar(value: Path | None) -> Path:
@@ -36,6 +39,13 @@ def _read_json_stdin() -> dict:
     return payload
 
 
+def _default_endpoint(gateway: str) -> str:
+    return {
+        "openrouter": "https://openrouter.ai/api/v1",
+        "litellm": "http://localhost:4000",
+    }[gateway]
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="execweave-inference-gateway",
@@ -44,10 +54,12 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     event = sub.add_parser("event", help="Convert one final gateway response into metadata events.")
-    event.add_argument("--gateway", choices=["openrouter"], required=True)
-    event.add_argument("--endpoint", default="https://openrouter.ai/api/v1")
+    event.add_argument("--gateway", choices=_GATEWAYS, required=True)
+    event.add_argument("--endpoint", default=None)
     event.add_argument("--requested-model", default=None)
+    event.add_argument("--resolved-model", default=None)
     event.add_argument("--provider-name", default=None)
+    event.add_argument("--deployment-id", default=None)
     event.add_argument("--request-id", default=None)
     event.add_argument("--sidecar", type=Path, default=None)
 
@@ -56,7 +68,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Convert OpenRouter generation metadata into routing/performance events.",
     )
     generation.add_argument("--gateway", choices=["openrouter"], required=True)
-    generation.add_argument("--endpoint", default="https://openrouter.ai/api/v1")
+    generation.add_argument("--endpoint", default=None)
     generation.add_argument("--sidecar", type=Path, default=None)
     return parser
 
@@ -66,12 +78,18 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         payload = _read_json_stdin()
-        endpoint = sanitize_gateway_endpoint(args.endpoint)
+        endpoint = sanitize_gateway_endpoint(args.endpoint or _default_endpoint(args.gateway))
         if args.command == "event":
-            records = openrouter_response_to_events(
+            converters = {
+                "openrouter": openrouter_response_to_events,
+                "litellm": litellm_response_to_events,
+            }
+            records = converters[args.gateway](
                 payload,
                 requested_model=args.requested_model,
+                resolved_model=args.resolved_model,
                 provider_name=args.provider_name,
+                deployment_id=args.deployment_id,
                 endpoint=endpoint,
                 request_id=args.request_id,
             )
