@@ -30,7 +30,7 @@ jobs:
         run: pytest -q
       - name: Claude hook command smoke
         run: python scripts/check_claude_hook.py
-      - name: Claude run-bound semantic record smoke
+      - name: Claude run-bound semantic and correlation smoke
         run: execweave-claude-record --backend auto --no-files --no-network --output-dir claude-record-smoke -- python scripts/emit_claude_hook_smoke.py
       - name: Validate Claude runtime stream
         run: execweave validate claude-record-smoke/events.jsonl
@@ -38,14 +38,12 @@ jobs:
         run: execweave validate claude-record-smoke/events.semantic.jsonl
       - name: Verify Claude semantic graph
         run: python scripts/check_claude_record_graph.py claude-record-smoke/graph.semantic.json
-      - name: Correlate Claude Tool to Process
-        run: execweave correlate claude-record-smoke/events.semantic.jsonl --output claude-record-smoke/events.correlated.jsonl
-      - name: Validate correlated stream
+      - name: Validate automatic correlated stream
         run: execweave validate claude-record-smoke/events.correlated.jsonl
-      - name: Materialize correlated graph
-        run: execweave graph claude-record-smoke/events.correlated.jsonl --output claude-record-smoke/graph.correlated.json
-      - name: Verify conservative correlation edge
+      - name: Verify automatic conservative correlation edge
         run: python scripts/check_correlation_graph.py claude-record-smoke/graph.correlated.json
+      - name: Check correlated standalone viewer JavaScript syntax
+        run: python scripts/check_viewer_js.py claude-record-smoke/viewer.correlated.html --output claude-record-smoke/viewer.correlated.js
       - name: Collector diagnostics
         run: execweave doctor
       - name: Portable end-to-end smoke
