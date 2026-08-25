@@ -6,7 +6,7 @@ from pathlib import Path
 from urllib.request import urlopen
 
 from execweave.cli import build_parser
-from execweave.live import run_live
+from execweave.live import _LIVE_HTML, run_live
 from execweave.validate import validate_event_stream
 
 
@@ -32,6 +32,18 @@ def test_live_cli_arguments() -> None:
     assert args.open_browser is True
     assert args.no_files is True
     assert args.command == ["--", "python", "agent.py"]
+
+
+def test_live_viewer_has_large_graph_and_array_safety_guards() -> None:
+    assert "LARGE GRAPH PROTECTIVE MODE" in _LIVE_HTML
+    assert "withinRenderBudget" in _LIVE_HTML
+    assert "MAX_DOM_ELEMENTS=5000" in _LIVE_HTML
+    assert "No evidence is deleted or reclassified" in _LIVE_HTML
+    assert "Math.max(0,...depth.values())" not in _LIVE_HTML
+    assert "Math.min(...xs)" not in _LIVE_HTML
+    assert "const signature=`${data.node_count||0}:${data.edge_count||0}`" in _LIVE_HTML
+    assert "${data.edge_count||0}:${data.event_count||0}" not in _LIVE_HTML
+    assert "refreshEdgeLabels" in _LIVE_HTML
 
 
 def test_live_graph_serves_snapshot_and_writes_final_artifacts(tmp_path: Path) -> None:
