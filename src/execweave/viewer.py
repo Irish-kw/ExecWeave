@@ -7,6 +7,9 @@ from typing import Any
 
 from .graph_ops import load_graph
 
+VIEWER_MAX_NODES = 1500
+VIEWER_MAX_EDGES = 4000
+
 
 def _safe_embedded_json(payload: dict[str, Any]) -> str:
     return (
@@ -15,6 +18,69 @@ def _safe_embedded_json(payload: dict[str, Any]) -> str:
         .replace(">", "\\u003e")
         .replace("&", "\\u0026")
     )
+
+
+def _graph_render_counts(graph: dict[str, Any]) -> tuple[int, int]:
+    """Count every node/edge that the standalone viewer could materialize.
+
+    Expansion members are included even while collapsed because the current
+    standalone viewer embeds them in the page. This keeps the safety guard tied
+    to browser memory pressure rather than only to the initially visible graph.
+    """
+
+    nodes = graph.get("nodes")
+    edges = graph.get("edges")
+    node_count = len(nodes) if isinstance(nodes, list) else 0
+    edge_count = len(edges) if isinstance(edges, list) else 0
+
+    expansion = graph.get("expansion")
+    clusters = expansion.get("clusters") if isinstance(expansion, dict) else None
+    if isinstance(clusters, dict):
+        for entry in clusters.values():
+            if not isinstance(entry, dict):
+                continue
+            members = entry.get("nodes")
+            member_edges = entry.get("edges")
+            if isinstance(members, list):
+                node_count += len(members)
+            if isinstance(member_edges, list):
+                edge_count += len(member_edges)
+    return node_count, edge_count
+
+
+def _render_protective_html(graph: dict[str, Any], node_count: int, edge_count: int) -> str:
+    event_count = graph.get("event_count")
+    event_text = str(event_count) if isinstance(event_count, int) else "unknown"
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ExecWeave — Large Graph Protective Mode</title>
+<style>
+:root{{color-scheme:dark;--bg:#0b0f14;--panel:#111821;--text:#e8edf3;--muted:#9eb0c4;--border:#2a3949;--accent:#73b7ff}}
+*{{box-sizing:border-box}}html,body{{margin:0;min-height:100%;background:var(--bg);color:var(--text);font:15px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}}
+main{{max-width:760px;margin:8vh auto;padding:28px;border:1px solid var(--border);border-radius:12px;background:var(--panel)}}
+h1{{margin:0 0 12px;font-size:23px}}.badge{{display:inline-block;margin-bottom:18px;padding:4px 9px;border:1px solid var(--accent);border-radius:999px;color:var(--accent);font-size:12px;font-weight:700;letter-spacing:.04em}}
+.stats{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:22px 0}}.stat{{padding:12px;border:1px solid var(--border);border-radius:8px}}.stat strong{{display:block;font-size:22px}}.stat span,p{{color:var(--muted)}}code{{color:var(--text)}}
+@media(max-width:620px){{main{{margin:18px;padding:20px}}.stats{{grid-template-columns:1fr}}}}
+</style>
+</head>
+<body>
+<main>
+  <div class="badge">LARGE GRAPH PROTECTIVE MODE</div>
+  <h1>Rendering disabled to protect browser memory.</h1>
+  <p>The underlying ExecWeave graph exceeds the standalone SVG safety budget. No evidence was deleted or reclassified; only browser rendering was withheld.</p>
+  <div class="stats">
+    <div class="stat"><strong>{node_count}</strong><span>possible nodes</span></div>
+    <div class="stat"><strong>{edge_count}</strong><span>possible edges</span></div>
+    <div class="stat"><strong>{event_text}</strong><span>events</span></div>
+  </div>
+  <p>Safety budget: at most <strong>{VIEWER_MAX_NODES}</strong> possible nodes and <strong>{VIEWER_MAX_EDGES}</strong> possible edges in this SVG viewer. Use <code>graph-focus</code>, <code>graph-filter</code>, or <code>graph-condense</code> to create a smaller view. The full graph and raw evidence remain in the run artifacts.</p>
+</main>
+</body>
+</html>
+"""
 
 
 _VIEWER_TEMPLATE = """<!doctype html>
@@ -101,9 +167,9 @@ const timeline=document.getElementById('timeline'),sequenceFilter=document.getEl
 const presetSelect=document.getElementById('preset-select'),savePresetButton=document.getElementById('save-preset'),deletePresetButton=document.getElementById('delete-preset');
 const presetStorageKey=`execweave.viewer.presets.v1:${graph.session_id||'graph'}`;
 const sequenceOf=(edge,key)=>Number.isInteger(edge[key])?edge[key]:null;
-const maxSequence=Math.max(0,...possibleEdges.map(edge=>sequenceOf(edge,'last_sequence')??sequenceOf(edge,'first_sequence')??0));
+let maxSequence=0;possibleEdges.forEach(edge=>{const value=sequenceOf(edge,'last_sequence')??sequenceOf(edge,'first_sequence')??0;if(value>maxSequence)maxSequence=value});
 let selectedSequence=maxSequence,playTimer=null,expandedClusters=new Set(),focusState=null,currentNodes=[],currentEdges=[],visibleNodes=[],visibleEdges=[],nodeById=new Map(),positions=new Map(),nodeElements=new Map(),edgeElements=[];
-let transform={x:40,y:40,scale:1},panStart=null,dragNode=null,presets={},presetStorageAvailable=true;
+let transform={x:40,y:40,scale:1},panStart=null,dragNode=null,presets={},presetStorageAvailable=true,edgeRenderFrame=null;
 
 function uniqueById(values){const seen=new Set();return values.filter(value=>{if(!value||!value.id||seen.has(value.id))return false;seen.add(value.id);return true})}
 function materializedGraph(){
@@ -173,7 +239,7 @@ function computeLayout(){
   visibleEdges.forEach(e=>{if(!nodeById.has(e.source)||!nodeById.has(e.target))return;indegree.set(e.target,(indegree.get(e.target)||0)+1);outgoing.get(e.source).push(e.target)});
   const roots=ids.filter(id=>(indegree.get(id)||0)===0);if(!roots.length&&ids.length)roots.push(ids[0]);const depth=new Map(),q=roots.map(id=>[id,0]);q.forEach(([id,d])=>depth.set(id,d));
   for(let i=0;i<q.length;i++){const [id,d]=q[i];for(const next of outgoing.get(id)||[]){if(!depth.has(next)){depth.set(next,d+1);q.push([next,d+1])}}}
-  const max=Math.max(0,...depth.values());ids.forEach(id=>{if(!depth.has(id))depth.set(id,max+1)});const layers=new Map();ids.forEach(id=>{const d=depth.get(id);if(!layers.has(d))layers.set(d,[]);layers.get(d).push(id)});
+  let maxDepth=0;depth.forEach(value=>{if(value>maxDepth)maxDepth=value});ids.forEach(id=>{if(!depth.has(id))depth.set(id,maxDepth+1)});const layers=new Map();ids.forEach(id=>{const d=depth.get(id);if(!layers.has(d))layers.set(d,[]);layers.get(d).push(id)});
   [...layers.entries()].sort((a,b)=>a[0]-b[0]).forEach(([d,layer])=>{layer.sort((a,b)=>String(nodeById.get(a).type).localeCompare(String(nodeById.get(b).type))||a.localeCompare(b));layer.forEach((id,i)=>positions.set(id,{x:d*250,y:i*88}))});
 }
 function applyTransform(){viewport.setAttribute('transform',`translate(${transform.x} ${transform.y}) scale(${transform.scale})`)}
@@ -194,12 +260,13 @@ function renderEdges(){
   edgeLayer.replaceChildren();labelLayer.replaceChildren();edgeElements=[];
   visibleEdges.forEach(edge=>{if(!positions.has(edge.source)||!positions.has(edge.target))return;const d=edgePath(edge),line=document.createElementNS('http://www.w3.org/2000/svg','path');line.setAttribute('d',d);line.setAttribute('marker-end','url(#arrow)');line.classList.add('edge');if(edge.identity_exact===true)line.classList.add('identity');else if(edge.inferred===true)line.classList.add('inferred');else if(edge.causal===true)line.classList.add('causal');else if(edge.causal===false)line.classList.add('noncausal');edgeLayer.appendChild(line);const hit=document.createElementNS('http://www.w3.org/2000/svg','path');hit.setAttribute('d',d);hit.classList.add('edge-hit');hit.addEventListener('click',ev=>{ev.stopPropagation();showDetails('Edge',edge)});edgeLayer.appendChild(hit);const a=anchor(edge.source,true),b=anchor(edge.target,false),text=document.createElementNS('http://www.w3.org/2000/svg','text');text.setAttribute('x',String((a.x+b.x)/2));text.setAttribute('y',String((a.y+b.y)/2-7));text.setAttribute('text-anchor','middle');text.classList.add('edge-label');text.textContent=edgeLabel(edge);labelLayer.appendChild(text);edgeElements.push({edge,visible:line,hit,text})});
 }
+function scheduleEdgeRender(){if(edgeRenderFrame!==null)return;edgeRenderFrame=requestAnimationFrame(()=>{edgeRenderFrame=null;renderEdges()})}
 function renderNodes(){
   nodeLayer.replaceChildren();nodeElements=new Map();
-  visibleNodes.forEach(node=>{const p=positions.get(node.id);if(!p)return;const g=document.createElementNS('http://www.w3.org/2000/svg','g');g.classList.add('node');if(expansionClusters[node.id])g.classList.add('cluster');g.setAttribute('transform',`translate(${p.x} ${p.y})`);const r=document.createElementNS('http://www.w3.org/2000/svg','rect');r.setAttribute('width','170');r.setAttribute('height','58');r.setAttribute('fill',colorForType(node.type));g.appendChild(r);const type=document.createElementNS('http://www.w3.org/2000/svg','text');type.setAttribute('x','12');type.setAttribute('y','18');type.classList.add('node-type');type.textContent=node.type||'unknown';g.appendChild(type);const label=document.createElementNS('http://www.w3.org/2000/svg','text');label.setAttribute('x','12');label.setAttribute('y','39');label.textContent=labelFor(node);g.appendChild(label);g.addEventListener('pointerdown',ev=>{ev.stopPropagation();const pt=svgPoint(ev);dragNode={id:node.id,dx:pt.x-p.x,dy:pt.y-p.y};g.setPointerCapture(ev.pointerId)});g.addEventListener('pointermove',ev=>{if(!dragNode||dragNode.id!==node.id)return;const pt=svgPoint(ev),np={x:pt.x-dragNode.dx,y:pt.y-dragNode.dy};positions.set(node.id,np);g.setAttribute('transform',`translate(${np.x} ${np.y})`);renderEdges()});g.addEventListener('pointerup',ev=>{dragNode=null;try{g.releasePointerCapture(ev.pointerId)}catch(_){}});g.addEventListener('click',ev=>{ev.stopPropagation();document.querySelectorAll('.node.selected').forEach(el=>el.classList.remove('selected'));g.classList.add('selected');showDetails('Node',node)});nodeLayer.appendChild(g);nodeElements.set(node.id,g)});
+  visibleNodes.forEach(node=>{const p=positions.get(node.id);if(!p)return;const g=document.createElementNS('http://www.w3.org/2000/svg','g');g.classList.add('node');if(expansionClusters[node.id])g.classList.add('cluster');g.setAttribute('transform',`translate(${p.x} ${p.y})`);const r=document.createElementNS('http://www.w3.org/2000/svg','rect');r.setAttribute('width','170');r.setAttribute('height','58');r.setAttribute('fill',colorForType(node.type));g.appendChild(r);const type=document.createElementNS('http://www.w3.org/2000/svg','text');type.setAttribute('x','12');type.setAttribute('y','18');type.classList.add('node-type');type.textContent=node.type||'unknown';g.appendChild(type);const label=document.createElementNS('http://www.w3.org/2000/svg','text');label.setAttribute('x','12');label.setAttribute('y','39');label.textContent=labelFor(node);g.appendChild(label);g.addEventListener('pointerdown',ev=>{ev.stopPropagation();const pt=svgPoint(ev);dragNode={id:node.id,dx:pt.x-p.x,dy:pt.y-p.y};g.setPointerCapture(ev.pointerId)});g.addEventListener('pointermove',ev=>{if(!dragNode||dragNode.id!==node.id)return;const pt=svgPoint(ev),np={x:pt.x-dragNode.dx,y:pt.y-dragNode.dy};positions.set(node.id,np);g.setAttribute('transform',`translate(${np.x} ${np.y})`);scheduleEdgeRender()});g.addEventListener('pointerup',ev=>{dragNode=null;scheduleEdgeRender();try{g.releasePointerCapture(ev.pointerId)}catch(_){}});g.addEventListener('click',ev=>{ev.stopPropagation();document.querySelectorAll('.node.selected').forEach(el=>el.classList.remove('selected'));g.classList.add('selected');showDetails('Node',node)});nodeLayer.appendChild(g);nodeElements.set(node.id,g)});
 }
 function svgPoint(ev){const rect=svg.getBoundingClientRect();return{x:(ev.clientX-rect.left-transform.x)/transform.scale,y:(ev.clientY-rect.top-transform.y)/transform.scale}}
-function fit(){if(!positions.size)return;const xs=[...positions.values()].map(p=>p.x),ys=[...positions.values()].map(p=>p.y),minX=Math.min(...xs),maxX=Math.max(...xs)+170,minY=Math.min(...ys),maxY=Math.max(...ys)+58,box=svg.getBoundingClientRect(),width=Math.max(1,maxX-minX),height=Math.max(1,maxY-minY),scale=Math.min(1.25,Math.max(.08,Math.min((box.width-70)/width,(box.height-70)/height)));transform={x:35-minX*scale,y:35-minY*scale,scale};applyTransform()}
+function fit(){if(!positions.size)return;let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;positions.forEach(p=>{if(p.x<minX)minX=p.x;if(p.x>maxX)maxX=p.x;if(p.y<minY)minY=p.y;if(p.y>maxY)maxY=p.y});maxX+=170;maxY+=58;const box=svg.getBoundingClientRect(),width=Math.max(1,maxX-minX),height=Math.max(1,maxY-minY),scale=Math.min(1.25,Math.max(.08,Math.min((box.width-70)/width,(box.height-70)/height)));transform={x:35-minX*scale,y:35-minY*scale,scale};applyTransform()}
 function applySearch(){const q=search.value.trim().toLowerCase();if(!q){nodeElements.forEach(el=>el.classList.remove('dim'));edgeElements.forEach(i=>{i.visible.classList.remove('dim');i.text.classList.remove('dim')});return}const matched=new Set();visibleNodes.forEach(n=>{if(`${n.id} ${n.name||''} ${n.type||''}`.toLowerCase().includes(q))matched.add(n.id)});nodeElements.forEach((el,id)=>el.classList.toggle('dim',!matched.has(id)));edgeElements.forEach(i=>{const keep=matched.has(i.edge.source)||matched.has(i.edge.target)||String(i.edge.relation).toLowerCase().includes(q);i.visible.classList.toggle('dim',!keep);i.text.classList.toggle('dim',!keep)})}
 function stopPlayback(){if(playTimer!==null){clearInterval(playTimer);playTimer=null}playButton.textContent='Play'}
 function setSequence(value){selectedSequence=Math.max(0,Math.min(maxSequence,Number(value)||0));sequenceFilter.value=String(selectedSequence);sequenceLabel.textContent=`${selectedSequence} / ${maxSequence}`;applyGraphFilters()}
@@ -232,7 +299,7 @@ function deletePreset(){const name=presetSelect.value;if(!name||!presets[name])r
 svg.addEventListener('pointerdown',ev=>{if(ev.target.closest?.('.node'))return;panStart={x:ev.clientX,y:ev.clientY,tx:transform.x,ty:transform.y};svg.classList.add('panning');svg.setPointerCapture(ev.pointerId)});
 svg.addEventListener('pointermove',ev=>{if(!panStart)return;transform.x=panStart.tx+ev.clientX-panStart.x;transform.y=panStart.ty+ev.clientY-panStart.y;applyTransform()});
 svg.addEventListener('pointerup',ev=>{panStart=null;svg.classList.remove('panning');try{svg.releasePointerCapture(ev.pointerId)}catch(_){}});
-svg.addEventListener('wheel',ev=>{ev.preventDefault();const rect=svg.getBoundingClientRect(),mx=ev.clientX-rect.left,my=ev.clientY-rect.top,old=transform.scale,next=Math.min(4,Math.max(.08,old*Math.exp(-ev.deltaY*.0012))),gx=(mx-transform.x)/old,gy=(my-transform.y)/old;transform.scale=next;transform.x=mx-gx*next;transform.y=my-gy*next;applyTransform()},{passive:false});
+svg.addEventListener('wheel',ev=>{ev.preventDefault();const rect=svg.getBoundingClientRect(),mx=e.clientX-rect.left,my=e.clientY-rect.top,old=transform.scale,next=Math.min(4,Math.max(.08,old*Math.exp(-ev.deltaY*.0012))),gx=(mx-transform.x)/old,gy=(my-transform.y)/old;transform.scale=next;transform.x=mx-gx*next;transform.y=my-gy*next;applyTransform()},{passive:false});
 search.addEventListener('input',applySearch);
 [typeFilter,relationFilter,causalFilter,observedOnlyFilter].forEach(el=>el.addEventListener('change',applyGraphFilters));
 sequenceFilter.addEventListener('input',()=>{stopPlayback();setSequence(sequenceFilter.value)});
@@ -254,6 +321,9 @@ renderCorrelationSummary();loadPresets();applyGraphFilters();
 
 
 def render_graph_html(graph: dict[str, Any]) -> str:
+    node_count, edge_count = _graph_render_counts(graph)
+    if node_count > VIEWER_MAX_NODES or edge_count > VIEWER_MAX_EDGES:
+        return _render_protective_html(graph, node_count, edge_count)
     return _VIEWER_TEMPLATE.replace("__GRAPH_DATA__", _safe_embedded_json(graph))
 
 
