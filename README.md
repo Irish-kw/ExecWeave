@@ -124,6 +124,7 @@ ExecWeave is currently **v0.4.0**.
 - graph filtering
 - directed path queries
 - large-run graph condensation for repetitive leaf resources
+- optional exact expansion payload for condensed clusters
 
 ### Phase 3 — Interactive Viewer
 
@@ -134,6 +135,9 @@ ExecWeave is currently **v0.4.0**.
 - evidence-sequence Timeline ↔ Graph playback
 - timeline slider plus Play/Pause replay
 - no future-count leakage: partially observed aggregated edges are marked `partial`
+- progressive cluster expansion for condensed graphs
+- expand one cluster without expanding the rest of the graph
+- collapse expanded clusters back to the compact view
 - pan / zoom
 - draggable nodes
 - node and edge inspection
@@ -142,7 +146,7 @@ ExecWeave is currently **v0.4.0**.
 - causal/non-causal edge styling
 - automatic directional layout
 
-Progressive cluster expansion remains future work.
+Saved filters and additional focused-subgraph workflows remain future work.
 
 ### Security analysis
 
@@ -179,6 +183,23 @@ execweave graph-condense run.graph.json \
 ```
 
 A cluster is only created for equivalent **leaf** resources with one incoming relationship and no outgoing behavior.
+
+The default output stays truly compact. If you want the Viewer to expand clusters on demand, explicitly embed the original collapsed evidence:
+
+```bash
+execweave graph-condense run.graph.json \
+  --output run.expandable.graph.json \
+  --threshold 8 \
+  --keep-expansion
+
+execweave view run.expandable.graph.json \
+  --output run.expandable.html \
+  --open
+```
+
+Expandable clusters have a dashed outline. Click a cluster, choose **Expand cluster**, and only that cluster is replaced by its original member nodes and evidence edges. **Collapse clusters** restores the compact view.
+
+`--keep-expansion` copies the original observed nodes and edges into an expansion payload. It does not invent new causal relationships.
 
 ### Analyze the graph
 
@@ -297,7 +318,7 @@ execweave live --open -- claude
 
 The standalone viewer contains an **Evidence sequence** slider. Drag it backward to inspect an earlier graph state or press **Play** to replay the run. An edge is introduced only after its `first_sequence`; if an aggregated relationship has later evidence that has not happened yet, the Viewer labels it `partial` instead of exposing the final count early.
 
-Timeline playback composes with node-type, relation, causal-only, and search filters.
+Timeline playback composes with node-type, relation, causal-only, search filters, and progressively expanded clusters.
 
 Useful live options:
 
@@ -346,6 +367,7 @@ Runtime metadata can still include sensitive paths, commands, and endpoints. Rev
 - [x] Temporal metadata
 - [x] Summary / filter / path query
 - [x] Large-run leaf-resource condensation
+- [x] Optional exact expansion evidence for clusters
 - [ ] Stronger entity resolution
 - [ ] Time-window graph snapshots
 - [ ] Compact evidence indexing for very large runs
@@ -357,7 +379,7 @@ Runtime metadata can still include sensitive paths, commands, and endpoints. Rev
 - [x] Portable live graph updates during execution
 - [x] Initial large-graph condensation
 - [x] Timeline ↔ Graph synchronization
-- [ ] Progressive cluster expansion in the viewer
+- [x] Progressive cluster expansion in the viewer
 - [ ] Saved filters and focused subgraphs
 
 ### Security / research layers
