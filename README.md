@@ -131,14 +131,18 @@ ExecWeave is currently **v0.4.0**.
 
 - standalone HTML with no CDN or external JavaScript dependency
 - localhost live graph updates using the portable collector
+- evidence-sequence Timeline ↔ Graph playback
+- timeline slider plus Play/Pause replay
+- no future-count leakage: partially observed aggregated edges are marked `partial`
 - pan / zoom
 - draggable nodes
 - node and edge inspection
+- node-type / relation / causal-only filters
 - search
 - causal/non-causal edge styling
 - automatic directional layout
 
-Progressive cluster expansion and Timeline ↔ Graph synchronization remain future work.
+Progressive cluster expansion remains future work.
 
 ### Security analysis
 
@@ -291,6 +295,10 @@ execweave view run.graph.json --output run.html --open
 execweave live --open -- claude
 ```
 
+The standalone viewer contains an **Evidence sequence** slider. Drag it backward to inspect an earlier graph state or press **Play** to replay the run. An edge is introduced only after its `first_sequence`; if an aggregated relationship has later evidence that has not happened yet, the Viewer labels it `partial` instead of exposing the final count early.
+
+Timeline playback composes with node-type, relation, causal-only, and search filters.
+
 Useful live options:
 
 ```bash
@@ -348,8 +356,8 @@ Runtime metadata can still include sensitive paths, commands, and endpoints. Rev
 - [x] Pan / zoom / drag / search / details
 - [x] Portable live graph updates during execution
 - [x] Initial large-graph condensation
+- [x] Timeline ↔ Graph synchronization
 - [ ] Progressive cluster expansion in the viewer
-- [ ] Timeline ↔ Graph synchronization
 - [ ] Saved filters and focused subgraphs
 
 ### Security / research layers
