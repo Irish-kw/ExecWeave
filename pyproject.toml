@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "execweave"
-version = "0.2.0"
-description = "Turn AI-agent runtime behavior into a graph-ready local event stream."
+version = "0.3.0"
+description = "Turn AI-agent runtime behavior into a local interactive execution graph."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
