@@ -15,6 +15,7 @@ from .graph_ops import (
     load_graph,
     write_graph_payload,
 )
+from .live import run_live
 from .sink import JsonlSink
 from .validate import validate_event_stream
 from .viewer import build_viewer_from_graph
@@ -46,6 +47,47 @@ def _add_collection_arguments(parser: argparse.ArgumentParser) -> None:
         "--keep-native-trace",
         action="store_true",
         help="Keep raw Linux strace files after parsing (off by default)",
+    )
+
+
+def _add_live_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--watch-root",
+        type=Path,
+        default=None,
+        help="Working directory to observe (default: current directory)",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=None,
+        help="Artifact directory (default: .execweave/runs/<session-id>/)",
+    )
+    parser.add_argument(
+        "--interval",
+        type=float,
+        default=0.10,
+        help="Portable collector polling interval in seconds (default: 0.10)",
+    )
+    parser.add_argument("--no-files", action="store_true", help="Disable filesystem observation")
+    parser.add_argument("--no-network", action="store_true", help="Disable network observation")
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=0,
+        help="Localhost port. 0 selects an available port automatically (default: 0)",
+    )
+    parser.add_argument(
+        "--linger",
+        type=float,
+        default=2.0,
+        help="Seconds to keep the live server open after the command exits (default: 2.0)",
+    )
+    parser.add_argument(
+        "--open",
+        action="store_true",
+        dest="open_browser",
+        help="Open the live graph in the default browser",
     )
 
 
@@ -84,6 +126,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Open the generated viewer after the command exits",
     )
     record.add_argument("command", nargs=argparse.REMAINDER, help="Command to execute")
+
+    live = subparsers.add_parser(
+        "live",
+        help="Run a command with the portable collector and stream its graph to localhost",
+    )
+    _add_live_arguments(live)
+    live.add_argument("command", nargs=argparse.REMAINDER, help="Command to execute")
 
     subparsers.add_parser("doctor", help="Show runtime collector availability")
 
@@ -287,7 +336,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.subcommand == "record":
         command = _clean_command(args.command)
         if not command:
-            parser.error("execweave record requires a command, e.g. execweave record --open -- claude")
+            parser.error(
+                "execweave record requires a command, e.g. execweave record --open -- claude"
+            )
         watch_root = (args.watch_root or Path.cwd()).expanduser().resolve()
         try:
             result = record_to_viewer(
@@ -302,6 +353,29 @@ def main(argv: list[str] | None = None) -> int:
                 open_browser=args.open_browser,
             )
         except (FileExistsError, RuntimeError, ValueError) as exc:
+            parser.error(str(exc))
+        print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+        return result.return_code
+
+    if args.subcommand == "live":
+        command = _clean_command(args.command)
+        if not command:
+            parser.error("execweave live requires a command, e.g. execweave live --open -- claude")
+        watch_root = (args.watch_root or Path.cwd()).expanduser().resolve()
+        try:
+            result = run_live(
+                command,
+                watch_root=watch_root,
+                output_dir=args.output_dir,
+                poll_interval=args.interval,
+                collect_filesystem=not args.no_files,
+                collect_network=not args.no_network,
+                port=args.port,
+                open_browser=args.open_browser,
+                linger_seconds=args.linger,
+                announce=lambda url: print(f"ExecWeave live: {url}", flush=True),
+            )
+        except (FileExistsError, RuntimeError, ValueError, OSError) as exc:
             parser.error(str(exc))
         print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
         return result.return_code
