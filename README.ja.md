@@ -28,6 +28,35 @@ execweave live --open -- claude
 
 Live MVP は `127.0.0.1` のみに bind し、portable collector を使います。終了後も `events.jsonl`、`graph.json`、`viewer.html` を保存します。
 
+### Claude Code: runtime + semantic graph
+
+ExecWeave には Claude Code native hook adapter があり、Agent / Tool / MCP / Model の logical evidence を runtime evidence と同じ run に保存できます。
+
+```bash
+execweave-claude-hook --print-config
+execweave-claude-record --open -- claude
+```
+
+Semantic hooks が発火した場合、同じ run directory に runtime-only、semantic-only、merged artifacts を分離して保存します。`semantic.jsonl`、`events.semantic.jsonl`、`graph.semantic.json`、`viewer.semantic.html` が生成されます。
+
+Claude hook は logical tool call を認識できますが、実際の Bash child PID は提供しません。そのため ExecWeave は Tool → Process を直接 observed / causal edge として捏造しません。
+
+保守的な bridge が必要な場合は、明示的に correlation stage を実行できます。
+
+```bash
+execweave correlate run.semantic.jsonl \
+  --output run.correlated.jsonl
+execweave graph run.correlated.jsonl \
+  --output run.correlated.graph.json
+execweave view run.correlated.graph.json \
+  --output run.correlated.html \
+  --open
+```
+
+`CORRELATED_WITH_PROCESS` は bounded tool-call window 内で候補が**一意**で、exact executable / process / cmdline identity evidence がある場合だけ生成されます。macOS Python framework のような launcher process では、完全一致する非空の `argv[1:]` のみ fallback として利用します。候補が複数、または match がない場合は edge を生成しません。
+
+Correlation edge は常に `inferred: true`、`causal: false` のままで、inference method、supporting event IDs、heuristic confidence を保持します。Confidence は probability ではありません。
+
 Linux でより強い syscall-backed attribution を使う場合：
 
 ```bash
@@ -68,8 +97,24 @@ ExecWeave は現在 **v0.4.0** です。
 - [x] progressive cluster expansion
 - [x] 1-hop / 2-hop focused runtime neighborhood
 - [x] browser-local Saved View presets
+- [x] causal observed / non-causal observed / inferred の独立 styling
+- [x] inferred edge に `· inferred` を明示
 
-Phase 3 の Viewer baseline は replay、必要時の cluster expansion、focused neighborhood、ローカル Saved View を含みます。
+### Semantic Telemetry
+
+- [x] provider-agnostic semantic JSONL sidecar
+- [x] raw runtime evidence を書き換えない validated `semantic-merge`
+- [x] `agent` / `tool_call` / `tool` / `mcp_server` / `model` / `command` entities
+- [x] provider が PID を実際に提供した場合のみ conservative `process_reference` resolution
+- [x] Claude Code native session/tool/subagent/model hooks
+- [x] MCP name normalization
+- [x] Linux / macOS / Windows の run-bound `execweave-claude-record`
+- [x] conservative Tool → Process correlation v0.1
+- [x] unique-candidate hard requirement。ambiguous / no-match では edge を生成しない
+- [x] inference method / supporting event IDs / bounded time window / heuristic confidence
+- [x] correlation edge は常に `causal: false`
+
+追加 provider adapter、より強い identity resolution、より豊富な correlation evidence は今後の課題です。
 
 ### Security Analysis
 
@@ -100,6 +145,24 @@ execweave validate run.jsonl
 execweave graph run.jsonl --output run.graph.json
 execweave view run.graph.json --output run.html --open
 ```
+
+### Semantic sidecar を merge する
+
+```bash
+execweave semantic-merge run.jsonl semantic.jsonl \
+  --output run.semantic.jsonl
+```
+
+### Semantic tool call と runtime process evidence を correlate する
+
+```bash
+execweave correlate run.semantic.jsonl \
+  --output run.correlated.jsonl
+execweave graph run.correlated.jsonl \
+  --output run.correlated.graph.json
+```
+
+この stage は新しい derived stream を生成し、入力 evidence は書き換えません。`CORRELATED_WITH_PROCESS` は bounded evidence が既定 heuristic の下で一つの候補だけを支持したことを意味し、provider が PID を提供したことや causality の証明を意味しません。
 
 ### Runtime neighborhood に focus する
 
@@ -171,15 +234,18 @@ session --LAUNCHED--> process
 process --SPAWNED--> process
 process --OPENED_READ--> file
 process --CONNECTED_TO--> network_endpoint
+agent --REQUESTED_TOOL_CALL--> tool_call
+tool_call --DECLARED_COMMAND--> command
+tool_call --CORRELATED_WITH_PROCESS--> process   # inferred only
 ```
-
-Repeated evidence は同一 edge に aggregation され、`count` が増加します。
 
 ## Fake causality を作らない
 
 Linux syscall-backed evidence は process-level causal edge を提供できます。portable filesystem watcher は session-level observation のため `causal: false` を維持します。
 
-Temporal correlation は causal proof ではなく、file/network activity の共起も data-flow proof ではありません。
+Claude hook に child PID がない場合、semantic evidence は OS attribution として扱いません。Correlation stage が一意な候補を見つけた場合でも edge は `inferred: true` / `causal: false` のままです。時間的に近いだけでは不十分で、ambiguous なら edge を生成しません。
+
+file/network activity の共起も byte-level data-flow proof ではありません。
 
 ## Live Graph
 
@@ -192,18 +258,22 @@ Live server は `127.0.0.1` のみに bind します。詳細は [`docs/live-gra
 
 ## Privacy
 
-ExecWeave は **local-first** です。runtime event、Graph、Viewer はデフォルトでローカルに残ります。Saved View は UI state だけを保存します。外部 CDN は不要で、file content や `read()` / `write()` byte buffer は収集しません。
+ExecWeave は **local-first** です。runtime event、Graph、Viewer、semantic sidecar、merged graph はデフォルトでローカルに残ります。Saved View は UI state だけを保存します。外部 CDN は不要で、file content や `read()` / `write()` byte buffer は収集しません。
+
+Runtime / semantic metadata には sensitive path、command、endpoint、provider identifier が含まれる可能性があります。Artifact を共有する前に確認してください。
 
 ## Documentation
 
 - [`Phase 1 — Runtime Collection`](docs/phase-1-runtime-collection.md)
 - [`Phase 2 — Execution Graph`](docs/phase-2-execution-graph.md)
 - [`Live Graph`](docs/live-graph.md)
+- [`Semantic Telemetry`](docs/semantic-telemetry.md)
+- [`Claude Code Hooks`](docs/claude-code-hooks.md)
 - [`Security Analysis`](docs/security-analysis.md)
 
 ## Contributing
 
-Linux eBPF、Windows ETW、macOS Endpoint Security、Graph entity resolution、Agent/Tool/MCP semantic telemetry、OpenTelemetry/MCP、privacy/redaction、testing、performance evaluation、翻訳の contribution を歓迎します。
+Linux eBPF、Windows ETW、macOS Endpoint Security、Graph entity resolution、追加 Agent/Tool/MCP provider adapter、より強い semantic/runtime correlation evidence、OpenTelemetry/MCP、privacy/redaction、testing、performance evaluation、翻訳の contribution を歓迎します。
 
 `README.md` が canonical English source です。
 
