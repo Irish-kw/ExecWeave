@@ -8,6 +8,7 @@ from uuid import uuid4
 from .analysis import analyze_graph
 from .backends import backend_diagnostics, create_collector, resolve_backend
 from .benchmark import format_benchmark, run_benchmark
+from .correlation import correlate_tool_process
 from .focus import focus_graph
 from .graph import build_execution_graph, write_execution_graph
 from .graph_ops import (
@@ -166,6 +167,19 @@ def build_parser() -> argparse.ArgumentParser:
     semantic_merge.add_argument("semantic", type=Path, help="Semantic sidecar JSONL")
     semantic_merge.add_argument("--output", type=Path, required=True)
 
+    correlate = subparsers.add_parser(
+        "correlate",
+        help="Add conservative inferred Tool-to-Process correlation edges to a new event stream",
+    )
+    correlate.add_argument("path", type=Path, help="Validated merged/runtime JSONL stream")
+    correlate.add_argument("--output", type=Path, required=True)
+    correlate.add_argument(
+        "--max-window-ms",
+        type=int,
+        default=3000,
+        help="Maximum Tool-to-Process matching window in milliseconds (default: 3000)",
+    )
+
     graph = subparsers.add_parser(
         "graph", help="Materialize a validated event stream into an execution graph"
     )
@@ -313,6 +327,18 @@ def main(argv: list[str] | None = None) -> int:
     if args.subcommand == "semantic-merge":
         try:
             result = merge_semantic_sidecar(args.runtime, args.semantic, args.output)
+        except (FileExistsError, ValueError) as exc:
+            parser.error(str(exc))
+        print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+        return 0
+
+    if args.subcommand == "correlate":
+        try:
+            result = correlate_tool_process(
+                args.path,
+                args.output,
+                max_window_ms=args.max_window_ms,
+            )
         except (FileExistsError, ValueError) as exc:
             parser.error(str(exc))
         print(json.dumps(result.to_dict(), indent=2, sort_keys=True))

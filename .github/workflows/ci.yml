@@ -38,6 +38,14 @@ jobs:
         run: execweave validate claude-record-smoke/events.semantic.jsonl
       - name: Verify Claude semantic graph
         run: python scripts/check_claude_record_graph.py claude-record-smoke/graph.semantic.json
+      - name: Correlate Claude Tool to Process
+        run: execweave correlate claude-record-smoke/events.semantic.jsonl --output claude-record-smoke/events.correlated.jsonl
+      - name: Validate correlated stream
+        run: execweave validate claude-record-smoke/events.correlated.jsonl
+      - name: Materialize correlated graph
+        run: execweave graph claude-record-smoke/events.correlated.jsonl --output claude-record-smoke/graph.correlated.json
+      - name: Verify conservative correlation edge
+        run: python scripts/check_correlation_graph.py claude-record-smoke/graph.correlated.json
       - name: Collector diagnostics
         run: execweave doctor
       - name: Portable end-to-end smoke

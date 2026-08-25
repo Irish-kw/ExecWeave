@@ -59,6 +59,11 @@ class GraphEdge:
     backends: set[str] = field(default_factory=set)
     attributions: set[str] = field(default_factory=set)
     causal_values: set[bool] = field(default_factory=set)
+    inferred_values: set[bool] = field(default_factory=set)
+    inference_methods: set[str] = field(default_factory=set)
+    confidence_values: list[float] = field(default_factory=list)
+    confidence_semantics: set[str] = field(default_factory=set)
+    supporting_event_ids: set[str] = field(default_factory=set)
 
     def observe(self, event: dict[str, Any]) -> None:
         self.count += 1
@@ -91,6 +96,23 @@ class GraphEdge:
             causal = attributes.get("causal")
             if isinstance(causal, bool):
                 self.causal_values.add(causal)
+            inferred = attributes.get("inferred")
+            if isinstance(inferred, bool):
+                self.inferred_values.add(inferred)
+            method = attributes.get("inference_method")
+            if isinstance(method, str) and method:
+                self.inference_methods.add(method)
+            confidence = attributes.get("confidence")
+            if isinstance(confidence, (int, float)) and not isinstance(confidence, bool):
+                self.confidence_values.append(float(confidence))
+            semantics = attributes.get("confidence_semantics")
+            if isinstance(semantics, str) and semantics:
+                self.confidence_semantics.add(semantics)
+            supporting = attributes.get("supporting_event_ids")
+            if isinstance(supporting, list):
+                self.supporting_event_ids.update(
+                    value for value in supporting if isinstance(value, str) and value
+                )
 
     def to_dict(self) -> dict[str, Any]:
         if self.causal_values == {True}:
@@ -99,6 +121,12 @@ class GraphEdge:
             causal = False
         else:
             causal = None
+        if self.inferred_values == {True}:
+            inferred: bool | None = True
+        elif self.inferred_values == {False}:
+            inferred = False
+        else:
+            inferred = None
         return {
             "id": self.id,
             "source": self.source,
@@ -114,6 +142,12 @@ class GraphEdge:
             "backends": sorted(self.backends),
             "attributions": sorted(self.attributions),
             "causal": causal,
+            "inferred": inferred,
+            "inference_methods": sorted(self.inference_methods),
+            "confidence_min": min(self.confidence_values) if self.confidence_values else None,
+            "confidence_max": max(self.confidence_values) if self.confidence_values else None,
+            "confidence_semantics": sorted(self.confidence_semantics),
+            "supporting_event_ids": sorted(self.supporting_event_ids),
         }
 
 
