@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from execweave.graph_ops import condense_graph
 from execweave.viewer import render_graph_html, write_graph_html
 
 
@@ -36,6 +37,37 @@ def _graph(*, with_sequence: bool = True) -> dict:
     }
 
 
+def _expandable_graph() -> dict:
+    process_id = "process:p1"
+    nodes = [{"id": process_id, "type": "process", "name": "python"}]
+    edges = []
+    for index in range(4):
+        node_id = f"file:/repo/src/file_{index}.py"
+        nodes.append({"id": node_id, "type": "file", "name": f"file_{index}.py"})
+        edges.append(
+            {
+                "id": f"edge-{index}",
+                "source": process_id,
+                "target": node_id,
+                "relation": "OPENED_READ",
+                "count": 1,
+                "causal": True,
+                "first_sequence": index + 1,
+                "last_sequence": index + 1,
+            }
+        )
+    graph = {
+        "graph_schema_version": "0.1",
+        "session_id": "s1",
+        "event_count": 4,
+        "node_count": len(nodes),
+        "edge_count": len(edges),
+        "nodes": nodes,
+        "edges": edges,
+    }
+    return condense_graph(graph, threshold=4, include_expansion=True)
+
+
 def test_viewer_is_standalone_and_escapes_embedded_graph_data() -> None:
     html = render_graph_html(_graph())
     assert "ExecWeave" in html
@@ -65,6 +97,19 @@ def test_viewer_contains_timeline_playback_and_partial_edge_semantics() -> None:
     assert "edgeExistsAt" in html
     assert "partial" in html
     assert "future counts are never shown early" in html
+
+
+def test_viewer_contains_progressive_cluster_expansion() -> None:
+    graph = _expandable_graph()
+    html = render_graph_html(graph)
+    cluster_id = next(iter(graph["expansion"]["clusters"]))
+
+    assert cluster_id in html
+    assert 'id="collapse-clusters"' in html
+    assert "Expand cluster" in html
+    assert "materializedGraph" in html
+    assert "expandedClusters" in html
+    assert "graph-condense --keep-expansion" in html
 
 
 def test_viewer_safely_handles_graphs_without_sequence_metadata() -> None:
