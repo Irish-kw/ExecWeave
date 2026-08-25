@@ -28,6 +28,35 @@ execweave live --open -- claude
 
 Live MVP 只绑定 `127.0.0.1`，使用 portable collector。结束后仍会保存 `events.jsonl`、`graph.json` 和 `viewer.html`。
 
+### Claude Code：runtime + semantic graph
+
+ExecWeave 已内置 Claude Code native hook adapter，可以把 Agent / Tool / MCP / Model 的 logical evidence 与 runtime evidence 放在同一个 run 中。
+
+```bash
+execweave-claude-hook --print-config
+execweave-claude-record --open -- claude
+```
+
+当 semantic hooks 触发时，同一个 run directory 会同时保存 runtime-only、semantic-only 和 merged artifacts，包括 `semantic.jsonl`、`events.semantic.jsonl`、`graph.semantic.json` 与 `viewer.semantic.html`。
+
+Claude hook 知道 logical tool call，但不会提供实际 Bash child PID。因此 ExecWeave **不会把 Tool → Process 伪装成直接 observed 或 causal edge**。
+
+需要保守的 bridge 时，可以显式执行：
+
+```bash
+execweave correlate run.semantic.jsonl \
+  --output run.correlated.jsonl
+execweave graph run.correlated.jsonl \
+  --output run.correlated.graph.json
+execweave view run.correlated.graph.json \
+  --output run.correlated.html \
+  --open
+```
+
+只有 bounded tool-call window 内存在**唯一候选**，并且有 exact executable / process / cmdline identity evidence 时才会生成 `CORRELATED_WITH_PROCESS`。对于 macOS Python framework 这类 launcher process，也只允许完整、非空、逐项完全一致的 `argv[1:]` fallback。Ambiguous 或 no-match 不生成 edge。
+
+所有 correlation edge 都保持 `inferred: true`、`causal: false`，并记录 inference method、supporting event IDs 和 heuristic confidence；confidence 明确不是 probability。
+
 Linux 上需要更强 syscall-backed attribution：
 
 ```bash
@@ -68,8 +97,24 @@ ExecWeave 当前版本为 **v0.4.0**。
 - [x] progressive cluster expansion
 - [x] 1-hop / 2-hop focused runtime neighborhood
 - [x] browser-local Saved View presets
+- [x] causal observed / non-causal observed / inferred 独立样式
+- [x] inferred edge 明确显示 `· inferred`
 
-Phase 3 Viewer baseline 已包含 replay、按需 cluster 展开、focused neighborhood 与本地保存的 view preset。
+### Semantic Telemetry
+
+- [x] provider-agnostic semantic JSONL sidecar
+- [x] validated `semantic-merge`，不重写原始 runtime evidence
+- [x] `agent` / `tool_call` / `tool` / `mcp_server` / `model` / `command` entities
+- [x] provider 实际提供 PID 时才做 conservative `process_reference` resolution
+- [x] Claude Code native session/tool/subagent/model hooks
+- [x] MCP 名称 normalization
+- [x] Linux / macOS / Windows 的 run-bound `execweave-claude-record`
+- [x] conservative Tool → Process correlation v0.1
+- [x] unique-candidate hard requirement；ambiguous / no-match 不建 edge
+- [x] inference method / supporting event IDs / bounded time window / heuristic confidence
+- [x] correlation edge 始终保持 `causal: false`
+
+更多 provider adapter、更强 identity resolution 和更丰富的 correlation evidence 仍是后续工作。
 
 ### Security Analysis
 
@@ -98,6 +143,24 @@ execweave validate run.jsonl
 execweave graph run.jsonl --output run.graph.json
 execweave view run.graph.json --output run.html --open
 ```
+
+### Merge semantic sidecar
+
+```bash
+execweave semantic-merge run.jsonl semantic.jsonl \
+  --output run.semantic.jsonl
+```
+
+### Correlate semantic tool call 与 runtime process evidence
+
+```bash
+execweave correlate run.semantic.jsonl \
+  --output run.correlated.jsonl
+execweave graph run.correlated.jsonl \
+  --output run.correlated.graph.json
+```
+
+该阶段生成新的 derived stream，不会重写 input evidence。`CORRELATED_WITH_PROCESS` 表示 bounded evidence 在既定 heuristic 下只支持一个候选，不表示 provider 提供了 PID，也不表示 causality 已被证明。
 
 ### Focus 一个 runtime neighborhood
 
@@ -169,9 +232,12 @@ session --LAUNCHED--> process
 process --SPAWNED--> process
 process --OPENED_READ--> file
 process --CONNECTED_TO--> network_endpoint
+agent --REQUESTED_TOOL_CALL--> tool_call
+tool_call --DECLARED_COMMAND--> command
+tool_call --CORRELATED_WITH_PROCESS--> process   # inferred only
 ```
 
-ExecWeave 不会把 temporal correlation 当成 causal proof，也不会把 file/network co-occurrence 当成 byte-level data flow。
+ExecWeave 不会把 temporal correlation 当成 causal proof，也不会把 file/network co-occurrence 当成 byte-level data flow。即使 correlation stage 找到唯一候选，也保持 `inferred: true` / `causal: false`；仅仅时间接近不足以生成 edge。
 
 ## Live Graph
 
@@ -184,18 +250,22 @@ Live server 只绑定 localhost。详细说明见 [`docs/live-graph.md`](docs/li
 
 ## Privacy
 
-ExecWeave 是 **local-first**。Runtime event、Graph、Viewer 默认留在本机；Saved View 只保存 UI state；无外部 CDN；不采集 file content 或 `read()`/`write()` byte buffer。
+ExecWeave 是 **local-first**。Runtime event、Graph、Viewer、semantic sidecar 和 merged graph 默认留在本机；Saved View 只保存 UI state；无外部 CDN；不采集 file content 或 `read()`/`write()` byte buffer。
+
+Runtime / semantic metadata 仍可能包含敏感 path、command、endpoint 和 provider identifier，分享 artifact 前请检查。
 
 ## 文档
 
 - [`Phase 1 — Runtime Collection`](docs/phase-1-runtime-collection.md)
 - [`Phase 2 — Execution Graph`](docs/phase-2-execution-graph.md)
 - [`Live Graph`](docs/live-graph.md)
+- [`Semantic Telemetry`](docs/semantic-telemetry.md)
+- [`Claude Code Hooks`](docs/claude-code-hooks.md)
 - [`Security Analysis`](docs/security-analysis.md)
 
 ## Contributing
 
-欢迎 Linux eBPF、Windows ETW、macOS Endpoint Security、Graph entity resolution、Agent/Tool/MCP semantic telemetry、OpenTelemetry/MCP、privacy/redaction、testing、performance evaluation 和翻译贡献。
+欢迎 Linux eBPF、Windows ETW、macOS Endpoint Security、Graph entity resolution、更多 Agent/Tool/MCP provider adapter、更强 semantic/runtime correlation evidence、OpenTelemetry/MCP、privacy/redaction、testing、performance evaluation 和翻译贡献。
 
 ## License
 
