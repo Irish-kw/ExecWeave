@@ -79,6 +79,7 @@ ExecWeave 目前版本為 **v0.4.0**。
 - [x] repeated edge aggregation
 - [x] temporal metadata
 - [x] graph summary / filtering / directed path query
+- [x] N-hop focused graph artifact
 - [x] large-run leaf-resource condensation
 - [x] cluster optional exact expansion evidence
 
@@ -92,7 +93,10 @@ ExecWeave 目前版本為 **v0.4.0**。
 - [x] Timeline ↔ Graph synchronization
 - [x] evidence-sequence slider + Play/Pause replay
 - [x] progressive cluster expansion
-- [ ] saved filters / focused subgraphs
+- [x] 1-hop / 2-hop focused runtime neighborhood
+- [x] browser-local Saved View presets
+
+Phase 3 的 viewer baseline 已包含 replay、cluster 按需展開、focused neighborhood 與本機保存的 view preset。
 
 ### Security Analysis
 
@@ -124,7 +128,25 @@ execweave graph run.jsonl --output run.graph.json
 execweave view run.graph.json --output run.html --open
 ```
 
-大型 run 可以先壓縮 repetitive leaf resource：
+### Focus 一個 runtime neighborhood
+
+```bash
+execweave graph-focus run.graph.json PROCESS_NODE_ID \
+  --hops 2 \
+  --direction both \
+  --causal-only \
+  --output focused.graph.json
+
+execweave view focused.graph.json \
+  --output focused.html \
+  --open
+```
+
+`--direction` 支援 `in`、`out`、`both`；可以重複使用 `--relation` 限定 traversal edge。所有限制都會在 traversal **之前**套用，`graph-focus` 只複製原本存在的 node 與 evidence edge，不會創造 shortcut 或新的 causal relationship。
+
+Viewer 中也能直接點 node，選 **Focus 1 hop** 或 **Focus 2 hops**；按 **Clear focus** 回到目前 filter 下的完整 Graph。
+
+### 大型 Graph condensation
 
 ```bash
 execweave graph-condense run.graph.json \
@@ -134,9 +156,7 @@ execweave graph-condense run.graph.json \
 
 只有「單一 incoming relationship 且沒有 downstream behavior」的 file/directory/executable leaf 才會被折疊。Process、Agent、Session、Socket、Network Endpoint 預設不折疊。
 
-### 可逐步展開的 condensed Graph
-
-一般 `graph-condense` 仍維持真正精簡。如果希望 Viewer 可以按需展開 cluster，明確加入：
+如果希望 Viewer 可以按需展開 cluster：
 
 ```bash
 execweave graph-condense run.graph.json \
@@ -159,7 +179,13 @@ Standalone Viewer 會依 Graph edge 的 `first_sequence` / `last_sequence` 提�
 
 把滑桿往回拉，就能看到 Agent 的行為圖依 evidence 順序逐步長出來。若同一條 aggregated edge 在目前 sequence 只出現部分 evidence，Viewer 會顯示 `partial`，**不會提前把最終 `count` 洩漏到過去時間點**。
 
-Timeline 可以和 node type、relation、causal-only、search，以及逐步展開的 cluster 一起使用。
+Timeline 可以和 node type、relation、causal-only、search、focused neighborhood，以及逐步展開的 cluster 一起使用。
+
+## Saved Views
+
+Viewer 的 **Save view** 會保存目前的 node/relation/causal filter、search、timeline 位置、focus 狀態與已展開 cluster。
+
+Preset 預設只存放在瀏覽器本機 storage，而且**只包含 UI state，不包含 Graph node、edge、event evidence、file content 或 prompt**。如果瀏覽器不允許 local storage，會安全退化成目前頁面 session 內的暫存 preset，不影響 Viewer 使用。
 
 ## Graph-first event model
 
@@ -199,7 +225,7 @@ Live HTTP server 只綁定 `127.0.0.1`，預設不暴露到 LAN。詳細契約�
 
 ## Privacy
 
-ExecWeave 是 **local-first**：runtime event、Graph、Viewer 預設留在本機；不需要外部 CDN；不蒐集 file content 或 `read()` / `write()` byte buffer；raw Linux syscall trace 預設解析後刪除。
+ExecWeave 是 **local-first**：runtime event、Graph、Viewer 預設留在本機；Saved View 只保存 UI state；不需要外部 CDN；不蒐集 file content 或 `read()` / `write()` byte buffer；raw Linux syscall trace 預設解析後刪除。
 
 Runtime metadata 仍可能包含敏感 path、command、endpoint，分享 artifact 前請檢查。
 
@@ -212,7 +238,7 @@ Runtime metadata 仍可能包含敏感 path、command、endpoint，分享 artifa
 
 ## Contributing
 
-**非常歡迎一起貢獻 ExecWeave。** 特別需要 Linux eBPF、Windows ETW、macOS Endpoint Security、Graph entity resolution、live/large-graph visualization、OpenTelemetry/MCP、privacy/redaction、testing 與 performance evaluation。
+**非常歡迎一起貢獻 ExecWeave。** 特別需要 Linux eBPF、Windows ETW、macOS Endpoint Security、Graph entity resolution、Agent/Tool/MCP semantic telemetry、OpenTelemetry/MCP、privacy/redaction、testing 與 performance evaluation。
 
 `README.md` 是 canonical English source，README 與文件翻譯也非常歡迎貢獻。
 
