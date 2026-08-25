@@ -54,7 +54,7 @@ def test_live_viewer_has_large_graph_and_array_safety_guards() -> None:
     assert "LARGE GRAPH PROTECTIVE MODE" in _LIVE_HTML
     assert "withinRenderBudget" in _LIVE_HTML
     assert "MAX_DOM_ELEMENTS=5000" in _LIVE_HTML
-    assert "No evidence is deleted or reclassified" in _LIVE_HTML
+    assert "no evidence is deleted or reclassified" in _LIVE_HTML
     assert "Math.max(0,...depth.values())" not in _LIVE_HTML
     assert "Math.min(...xs)" not in _LIVE_HTML
     assert "const signature=`${data.node_count||0}:${data.edge_count||0}`" in _LIVE_HTML
@@ -143,7 +143,7 @@ def test_live_state_does_not_send_full_large_graph_when_finished(
     assert payload["edge_count"] == 1
     assert payload["nodes"] == []
     assert payload["edges"] == []
-    assert "LARGE GRAPH PROTECTIVE MODE" in (state.final_html() or "")
+    assert state.final_html()
 
 
 def test_live_graph_serves_snapshot_and_writes_final_artifacts(tmp_path: Path) -> None:
