@@ -16,10 +16,16 @@ ExecWeave は、AI エージェントの活動をインタラクティブな exe
 
 ## Installation
 
-ExecWeave v0.6.0 は標準 Python wheel / sdist としてパッケージ化済みです。GitHub 側は PyPI-ready で、最初の Trusted Publisher release までは GitHub から直接 pip install できます。
+ExecWeave は PyPI で正式公開されています。最新の公開 release は次でインストールできます。
 
 ```bash
-python -m pip install "execweave @ git+https://github.com/Irish-kw/ExecWeave.git@main"
+python -m pip install -U execweave
+```
+
+`main` は現在の PyPI release より新しい patch を含む場合があります。最新 mainline を直接試す場合：
+
+```bash
+python -m pip install --upgrade --force-reinstall "execweave @ git+https://github.com/Irish-kw/ExecWeave.git@main"
 ```
 
 開発用：
@@ -28,12 +34,6 @@ python -m pip install "execweave @ git+https://github.com/Irish-kw/ExecWeave.git
 git clone https://github.com/Irish-kw/ExecWeave.git
 cd ExecWeave
 python -m pip install -e ".[dev]"
-```
-
-最初の PyPI release 後は：
-
-```bash
-python -m pip install execweave
 ```
 
 ## Performance / footprint
@@ -113,6 +113,8 @@ execweave run --backend portable -- your-command
 execweave run --backend strace -- your-command
 ```
 
+v0.6.1 以降、すべての recorder は child command を起動する前に共通の cross-platform launcher resolver を使用します。Linux / macOS は通常の PATH executable behavior を維持します。Windows は PATH/PATHEXT に従って `.exe`、`.cmd`、`.bat` を解決し、明示的な `.ps1` は PowerShell 経由で起動します。専用 Windows CI では `cmd.exe` と Windows PowerShell の両方から Codex / Cursor recorder を実際に起動し、通常の Windows / macOS / Ubuntu matrix でも Cursor semantic/correlation integration を継続して検証します。
+
 Portable filesystem observation は process-causal ではなく session-correlated です。Future native collectors は Linux eBPF、Windows ETW、macOS Endpoint Security を予定しています。
 
 ## Viewer / Graph / Security
@@ -129,7 +131,7 @@ Security findings は evidence limit を維持し、possible sensitive-file → 
 
 ## Current status
 
-ExecWeave は現在 **v0.6.0**。Runtime collection、execution graph、5 種の Agent/IDE integration、OpenRouter/LiteLLM、Ollama/llama.cpp/vLLM/LM Studio、exact Gateway ↔ Runtime identity、PyPI-ready packaging、reference overhead benchmark、cross-platform CI が baseline に含まれます。
+ExecWeave `main` は現在 **v0.6.1**。Runtime collection、execution graph、5 種の Agent/IDE integration、OpenRouter/LiteLLM、Ollama/llama.cpp/vLLM/LM Studio、exact Gateway ↔ Runtime identity、公開済み PyPI packaging、reference overhead benchmark、cross-platform command-launcher compatibility、cross-platform CI が baseline に含まれます。
 
 ## Privacy
 
