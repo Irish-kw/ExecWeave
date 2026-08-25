@@ -160,6 +160,37 @@ def test_unique_strace_exec_match_creates_bridge(tmp_path: Path) -> None:
     assert inference["attributes"]["confidence"] == 0.9
 
 
+def test_quoted_windows_executable_path_preserves_backslashes(tmp_path: Path) -> None:
+    command = '"C:\\Program Files\\Python\\python.exe" task.py'
+    events, session, _, _ = _base(command)
+    process = _entity(
+        "process",
+        "process:win:1",
+        "python.exe",
+        {"pid": 91, "cmdline": [r"C:\Program Files\Python\python.exe", "task.py"]},
+    )
+    events.append(
+        _event(
+            3,
+            "2026-08-25T00:00:01.100Z",
+            "process.started",
+            "SPAWNED",
+            session,
+            process,
+            {"backend": "portable", "attribution": "polling", "causal": False},
+        )
+    )
+    _finish(events, session, 4)
+    source = tmp_path / "windows.jsonl"
+    output = tmp_path / "windows-correlated.jsonl"
+    _write(source, events)
+
+    result = correlate_tool_process(source, output)
+
+    assert result.correlated_tool_calls == 1
+    assert "CORRELATED_WITH_PROCESS" in output.read_text(encoding="utf-8")
+
+
 def test_ambiguous_matching_processes_emit_no_bridge(tmp_path: Path) -> None:
     events, session, _, _ = _base("python task.py")
     for sequence, pid, timestamp in (

@@ -75,7 +75,6 @@ class _Declaration:
     timestamp: datetime
     tool_call: dict[str, Any]
     command_entity: dict[str, Any]
-    command: str
     command_head: str | None
 
 
@@ -190,23 +189,30 @@ def _first_token(command: str) -> str | None:
     text = command.lstrip()
     if not text:
         return None
-    if text[0] in {"'", '"'}:
-        quote = text[0]
-        escaped = False
-        chars: list[str] = []
-        for char in text[1:]:
-            if escaped:
-                chars.append(char)
-                escaped = False
-                continue
-            if char == "\\" and quote == '"':
-                escaped = True
-                continue
-            if char == quote:
-                return "".join(chars)
-            chars.append(char)
-        return None
-    return text.split(None, 1)[0]
+    if text[0] not in {"'", '"'}:
+        return text.split(None, 1)[0]
+
+    quote = text[0]
+    chars: list[str] = []
+    index = 1
+    while index < len(text):
+        char = text[index]
+        if char == quote:
+            return "".join(chars)
+        # Preserve ordinary backslashes so quoted Windows paths remain intact.
+        # Only consume a backslash when it escapes the active double quote.
+        if (
+            char == "\\"
+            and quote == '"'
+            and index + 1 < len(text)
+            and text[index + 1] == '"'
+        ):
+            chars.append('"')
+            index += 2
+            continue
+        chars.append(char)
+        index += 1
+    return None
 
 
 def _command_head(command: str) -> str | None:
@@ -242,7 +248,6 @@ def _declarations(events: list[dict[str, Any]]) -> list[_Declaration]:
                 timestamp=_parse_timestamp(event.get("timestamp"), context=f"event {index}"),
                 tool_call=deepcopy(source),
                 command_entity=deepcopy(target),
-                command=command,
                 command_head=_command_head(command),
             )
         )
@@ -300,8 +305,8 @@ def _candidate_processes(
                 continue
             if not isinstance(target, dict) or target.get("type") != "executable":
                 continue
-            executable_name = target.get("name")
-            if _normalize_executable(executable_name) != command_head:
+            executable = target.get("name")
+            if _normalize_executable(executable) != command_head:
                 executable_id = target.get("id")
                 if not isinstance(executable_id, str) or not executable_id.startswith("executable:"):
                     continue
@@ -323,6 +328,7 @@ def _candidate_processes(
             cmdline_match = True
         if process is None:
             continue
+
         process_id = process.get("id")
         if not isinstance(process_id, str) or not process_id:
             continue
@@ -355,6 +361,7 @@ def _derived_event(
     declaration_event_id = declaration.event.get("event_id")
     if isinstance(declaration_event_id, str) and declaration_event_id:
         support.add(declaration_event_id)
+
     process_id = str(candidate.process.get("id"))
     tool_call_id = str(declaration.tool_call.get("id"))
     digest_source = "|".join(
@@ -424,6 +431,7 @@ def correlate_tool_process(
         if declaration.command_head is None:
             skipped_unsupported += 1
             continue
+
         window_end = declaration.timestamp + timedelta(milliseconds=max_window_ms)
         tool_call_id = declaration.tool_call.get("id")
         if isinstance(tool_call_id, str):
@@ -448,11 +456,10 @@ def correlate_tool_process(
         if len(candidates) != 1:
             skipped_ambiguous += 1
             continue
-        candidate = next(iter(candidates.values()))
         derived.append(
             _derived_event(
                 declaration,
-                candidate,
+                next(iter(candidates.values())),
                 session_id=session_id,
                 max_window_ms=max_window_ms,
             )
@@ -462,6 +469,7 @@ def correlate_tool_process(
     finishes = [event for event in events if event.get("event_type") == "session.finished"]
     if len(starts) != 1 or len(finishes) != 1:
         raise ValueError("input event stream must contain exactly one session start and finish")
+
     body = [
         deepcopy(event)
         for event in events
@@ -479,18 +487,26 @@ def correlate_tool_process(
         event["sequence"] = sequence
 
     output.parent.mkdir(parents=True, exist_ok=True)
-    fd, temp_name = tempfile.mkstemp(prefix=".execweave-correlate-", suffix=".jsonl", dir=output.parent)
+    fd, temp_name = tempfile.mkstemp(
+        prefix=".execweave-correlate-",
+        suffix=".jsonl",
+        dir=output.parent,
+    )
     os.close(fd)
     temp_path = Path(temp_name)
     try:
         temp_path.write_text(
-            "".join(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n" for event in correlated),
+            "".join(
+                json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n"
+                for event in correlated
+            ),
             encoding="utf-8",
         )
         correlated_validation = validate_event_stream(temp_path, require_complete_session=True)
         if not correlated_validation.valid:
             raise ValueError(
-                "correlated event stream is invalid: " + "; ".join(correlated_validation.errors)
+                "correlated event stream is invalid: "
+                + "; ".join(correlated_validation.errors)
             )
         temp_path.replace(output)
     finally:
