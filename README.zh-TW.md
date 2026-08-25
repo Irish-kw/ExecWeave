@@ -16,10 +16,16 @@ ExecWeave 是開源、local-first 的 observability 專案，會把 AI Agent 活
 
 ## 安裝
 
-ExecWeave v0.6.0 已整理成標準 Python wheel / sdist。GitHub 端已是 PyPI-ready；第一次 Trusted Publisher release 正式發布前，可直接從 GitHub 以 pip 安裝：
+ExecWeave 已正式發布到 PyPI，標準安裝方式為：
 
 ```bash
-python -m pip install "execweave @ git+https://github.com/Irish-kw/ExecWeave.git@main"
+python -m pip install -U execweave
+```
+
+`main` 可能比目前 PyPI release 更新。若要直接測試最新 mainline：
+
+```bash
+python -m pip install --upgrade --force-reinstall "execweave @ git+https://github.com/Irish-kw/ExecWeave.git@main"
 ```
 
 開發者安裝：
@@ -28,12 +34,6 @@ python -m pip install "execweave @ git+https://github.com/Irish-kw/ExecWeave.git
 git clone https://github.com/Irish-kw/ExecWeave.git
 cd ExecWeave
 python -m pip install -e ".[dev]"
-```
-
-第一次 PyPI release 發布後即可使用：
-
-```bash
-python -m pip install execweave
 ```
 
 即時觀察 command：
@@ -154,6 +154,8 @@ execweave run --backend portable -- your-command
 execweave run --backend strace -- your-command
 ```
 
+自 v0.6.1 起，所有 recorder 在啟動 child command 前都先走共用的跨平台 launcher resolver。Linux / macOS 保持正常 PATH executable 行為；Windows 會依 PATH/PATHEXT 正確解析 `.exe`、`.cmd`、`.bat`，若明確傳入 `.ps1` 則交給 PowerShell 啟動。專用 Windows CI 會實際從 `cmd.exe` 與 Windows PowerShell 啟動 Codex / Cursor recorder；完整 Cursor semantic/correlation integration 也持續由 Windows、macOS、Ubuntu matrix 驗證。
+
 Portable filesystem observation 是 session-correlated，不是 process-causal；短命 process 可能在 polling interval 間被漏掉。Linux `strace` 則提供 process-attributed syscall evidence。
 
 未來 native collectors 包含 Linux eBPF、Windows ETW、macOS Endpoint Security。
@@ -181,7 +183,7 @@ Possible sensitive-file → network path 不等於 byte-level exfiltration；sec
 
 ## 目前狀態
 
-ExecWeave 目前為 **v0.6.0**。Baseline 已包含 runtime collection、graph materialization/query、standalone/live Viewer、五種 Agent/IDE semantic integrations、保守 Tool → Process correlation、OpenRouter/LiteLLM、Ollama/llama.cpp/vLLM/LM Studio、exact Gateway ↔ Model Runtime request identity、PyPI-ready packaging、可重跑 overhead benchmark，以及跨平台 CI。
+ExecWeave `main` 目前為 **v0.6.1**。Baseline 已包含 runtime collection、graph materialization/query、standalone/live Viewer、五種 Agent/IDE semantic integrations、保守 Tool → Process correlation、OpenRouter/LiteLLM、Ollama/llama.cpp/vLLM/LM Studio、exact Gateway ↔ Model Runtime request identity、已發布的 PyPI wheel/sdist packaging、可重跑 overhead benchmark、跨平台 command launcher compatibility，以及跨平台 CI。
 
 ## 隱私
 
