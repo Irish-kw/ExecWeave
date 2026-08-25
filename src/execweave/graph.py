@@ -259,13 +259,21 @@ def build_execution_graph(
     )
 
 
-def write_execution_graph(graph: ExecutionGraph, path: str | Path) -> Path:
+def write_execution_graph(
+    graph: ExecutionGraph,
+    path: str | Path,
+    *,
+    metadata: dict[str, Any] | None = None,
+) -> Path:
     output = Path(path).expanduser().resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     if output.exists() and output.stat().st_size > 0:
         raise FileExistsError(f"ExecWeave graph output already exists: {output}")
+    payload = graph.to_dict()
+    if metadata is not None:
+        payload["metadata"] = metadata
     output.write_text(
-        json.dumps(graph.to_dict(), ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
     return output
