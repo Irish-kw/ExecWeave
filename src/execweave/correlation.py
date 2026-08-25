@@ -85,6 +85,7 @@ class _Candidate:
     latest_timestamp_text: str
     supporting_event_ids: set[str] = field(default_factory=set)
     has_exec_match: bool = False
+    has_process_exe_match: bool = False
     has_cmdline_match: bool = False
 
     def observe(
@@ -93,6 +94,7 @@ class _Candidate:
         *,
         timestamp: datetime,
         exec_match: bool = False,
+        process_exe_match: bool = False,
         cmdline_match: bool = False,
     ) -> None:
         if timestamp >= self.latest_timestamp:
@@ -102,6 +104,7 @@ class _Candidate:
         if isinstance(event_id, str) and event_id:
             self.supporting_event_ids.add(event_id)
         self.has_exec_match = self.has_exec_match or exec_match
+        self.has_process_exe_match = self.has_process_exe_match or process_exe_match
         self.has_cmdline_match = self.has_cmdline_match or cmdline_match
 
     def method_and_confidence(self) -> tuple[str, float]:
@@ -109,6 +112,10 @@ class _Candidate:
             return "unique_exec_and_cmdline_match", 0.95
         if self.has_exec_match:
             return "unique_exec_basename_match", 0.90
+        if self.has_process_exe_match and self.has_cmdline_match:
+            return "unique_process_exe_and_cmdline_match", 0.90
+        if self.has_process_exe_match:
+            return "unique_process_exe_match", 0.85
         return "unique_process_cmdline_match", 0.80
 
 
@@ -297,6 +304,7 @@ def _candidate_processes(
 
         process: dict[str, Any] | None = None
         exec_match = False
+        process_exe_match = False
         cmdline_match = False
         if event_type == "process.exec" and relation == "EXECUTED":
             source = event.get("source")
@@ -319,13 +327,15 @@ def _candidate_processes(
             if not isinstance(target, dict) or target.get("type") != "process":
                 continue
             attributes = target.get("attributes") or {}
-            cmdline = attributes.get("cmdline") if isinstance(attributes, dict) else None
-            if not isinstance(cmdline, list) or not cmdline or not isinstance(cmdline[0], str):
+            if not isinstance(attributes, dict):
                 continue
-            if _normalize_executable(cmdline[0]) != command_head:
+            process_exe_match = _normalize_executable(attributes.get("exe")) == command_head
+            cmdline = attributes.get("cmdline")
+            if isinstance(cmdline, list) and cmdline and isinstance(cmdline[0], str):
+                cmdline_match = _normalize_executable(cmdline[0]) == command_head
+            if not process_exe_match and not cmdline_match:
                 continue
             process = deepcopy(target)
-            cmdline_match = True
         if process is None:
             continue
 
@@ -344,6 +354,7 @@ def _candidate_processes(
             event,
             timestamp=timestamp,
             exec_match=exec_match,
+            process_exe_match=process_exe_match,
             cmdline_match=cmdline_match,
         )
     return candidates
