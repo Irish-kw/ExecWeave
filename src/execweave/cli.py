@@ -8,6 +8,13 @@ from uuid import uuid4
 from .backends import backend_diagnostics, create_collector, resolve_backend
 from .benchmark import format_benchmark, run_benchmark
 from .graph import build_execution_graph, write_execution_graph
+from .graph_ops import (
+    filter_graph,
+    find_paths,
+    graph_summary,
+    load_graph,
+    write_graph_payload,
+)
 from .sink import JsonlSink
 from .validate import validate_event_stream
 
@@ -88,6 +95,26 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Allow graph construction from an interrupted but structurally valid run",
     )
+
+    summary = subparsers.add_parser("graph-summary", help="Summarize an execution graph")
+    summary.add_argument("path", type=Path, help="Path to a graph JSON file")
+
+    graph_filter = subparsers.add_parser("graph-filter", help="Filter an execution graph")
+    graph_filter.add_argument("path", type=Path, help="Path to a graph JSON file")
+    graph_filter.add_argument("--output", type=Path, required=True)
+    graph_filter.add_argument("--node-type", action="append", default=[])
+    graph_filter.add_argument("--relation", action="append", default=[])
+    graph_filter.add_argument("--backend", action="append", default=[])
+    graph_filter.add_argument("--causal-only", action="store_true")
+
+    path_query = subparsers.add_parser("path", help="Find directed paths in an execution graph")
+    path_query.add_argument("graph", type=Path, help="Path to a graph JSON file")
+    path_query.add_argument("source", help="Exact source node ID")
+    path_query.add_argument("target", help="Exact target node ID")
+    path_query.add_argument("--max-depth", type=int, default=6)
+    path_query.add_argument("--max-paths", type=int, default=20)
+    path_query.add_argument("--relation", action="append", default=[])
+    path_query.add_argument("--causal-only", action="store_true")
     return parser
 
 
@@ -141,6 +168,64 @@ def main(argv: list[str] | None = None) -> int:
             "output": str(written),
         }
         print(json.dumps(summary, indent=2, sort_keys=True))
+        return 0
+
+    if args.subcommand == "graph-summary":
+        try:
+            payload = load_graph(args.path)
+        except ValueError as exc:
+            parser.error(str(exc))
+        print(json.dumps(graph_summary(payload), indent=2, sort_keys=True))
+        return 0
+
+    if args.subcommand == "graph-filter":
+        try:
+            payload = load_graph(args.path)
+            filtered = filter_graph(
+                payload,
+                node_types=args.node_type,
+                relations=args.relation,
+                causal_only=args.causal_only,
+                backends=args.backend,
+            )
+            written = write_graph_payload(filtered, args.output)
+        except (FileExistsError, ValueError) as exc:
+            parser.error(str(exc))
+        print(
+            json.dumps(
+                {**graph_summary(filtered), "output": str(written)},
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 0
+
+    if args.subcommand == "path":
+        try:
+            payload = load_graph(args.graph)
+            paths = find_paths(
+                payload,
+                source=args.source,
+                target=args.target,
+                max_depth=args.max_depth,
+                max_paths=args.max_paths,
+                relations=args.relation,
+                causal_only=args.causal_only,
+            )
+        except ValueError as exc:
+            parser.error(str(exc))
+        print(
+            json.dumps(
+                {
+                    "source": args.source,
+                    "target": args.target,
+                    "path_count": len(paths),
+                    "paths": paths,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
         return 0
 
     command = _clean_command(args.command)
