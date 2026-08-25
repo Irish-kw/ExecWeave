@@ -86,7 +86,21 @@ When semantic hooks fire, the same run directory keeps the evidence layers separ
 └── viewer.semantic.html      # runtime + semantic viewer
 ```
 
-The native Claude hook knows the logical tool call, but Claude's hook payload does not expose the actual Bash child PID. ExecWeave therefore does **not** invent an exact Tool → Process edge from timing or command similarity. See [`docs/claude-code-hooks.md`](docs/claude-code-hooks.md).
+The native Claude hook knows the logical tool call, but Claude's hook payload does not expose the actual Bash child PID. ExecWeave therefore does **not** relabel a Tool → Process relationship as directly observed or causal evidence.
+
+When a conservative bridge is useful, run the explicit correlation stage:
+
+```bash
+execweave correlate run.semantic.jsonl \
+  --output run.correlated.jsonl
+execweave graph run.correlated.jsonl \
+  --output run.correlated.graph.json
+execweave view run.correlated.graph.json \
+  --output run.correlated.html \
+  --open
+```
+
+`execweave correlate` emits `CORRELATED_WITH_PROCESS` only when a process candidate is unique inside the bounded tool-call window and has exact supporting identity evidence. It prefers exact executable/process/cmdline identity and can fall back to an exact, non-empty `argv[1:]` match for launcher processes such as the macOS Python framework. Ambiguous or unmatched calls produce no bridge. Every bridge remains `inferred: true`, `causal: false`, records its inference method and supporting event IDs, and uses a heuristic confidence score that is explicitly **not a probability**. See [`docs/claude-code-hooks.md`](docs/claude-code-hooks.md).
 
 ### Stronger Linux post-run evidence
 
@@ -182,14 +196,15 @@ ExecWeave is currently **v0.4.0**.
 - node and edge inspection
 - node-type / relation / causal-only filters
 - search
-- causal/non-causal edge styling
+- distinct causal / non-causal observed / inferred edge styling
+- inferred relationships are labeled explicitly instead of looking observed
 - automatic directional layout
 
-The Phase 3 viewer baseline now covers replay, progressive expansion, focused neighborhoods, and locally saved views.
+The Phase 3 viewer baseline now covers replay, progressive expansion, focused neighborhoods, locally saved views, and explicit inferred-edge semantics.
 
 ### Semantic telemetry
 
-**Generic semantic merge plus the first native provider adapter are implemented.**
+**Generic semantic merge, the first native provider adapter, and conservative semantic/runtime correlation are implemented.**
 
 - provider-agnostic semantic JSONL sidecars
 - validated `semantic-merge` into a new event stream without rewriting raw runtime evidence
@@ -198,9 +213,14 @@ The Phase 3 viewer baseline now covers replay, progressive expansion, focused ne
 - native Claude Code hooks for session/tool/subagent/model semantics
 - MCP normalization from `mcp__<server>__<tool>` names
 - run-bound `execweave-claude-record` workflow across Linux, macOS, and Windows
-- explicit provider-vs-OS evidence boundary; Claude hooks do not fabricate Tool → Process attribution
+- explicit provider-vs-OS evidence boundary; Claude hooks do not fabricate observed Tool → Process attribution
+- `execweave correlate` for conservative Tool → Process inferred bridges
+- exact executable/process/cmdline identity matching, plus exact non-empty argv-tail fallback for launcher processes
+- unique-candidate requirement; ambiguous and unmatched calls emit no bridge
+- explicit inference method, supporting event IDs, bounded time window, and heuristic confidence metadata
+- inferred bridges always remain `causal: false`
 
-Additional provider adapters and explicit confidence-bearing semantic/runtime correlation remain future work.
+Additional provider adapters, stronger identity resolution, and richer correlation evidence remain future work.
 
 ### Security analysis
 
@@ -240,6 +260,20 @@ execweave view run.semantic.graph.json \
 ```
 
 The raw runtime stream and semantic sidecar remain unchanged. See [`docs/semantic-telemetry.md`](docs/semantic-telemetry.md) for the generic contract.
+
+### Correlate a semantic tool call with runtime process evidence
+
+```bash
+execweave correlate run.semantic.jsonl \
+  --output run.correlated.jsonl
+execweave graph run.correlated.jsonl \
+  --output run.correlated.graph.json
+execweave view run.correlated.graph.json \
+  --output run.correlated.html \
+  --open
+```
+
+This stage derives a new stream; it does not rewrite the input evidence. A `CORRELATED_WITH_PROCESS` edge means “the bounded evidence supports one unique candidate under the declared heuristic,” not “the provider supplied this PID” and not “causality was proven.”
 
 ### Focus on one runtime neighborhood
 
@@ -342,6 +376,14 @@ tool_call --DECLARED_COMMAND--> command
 tool_call --VIA_MCP--> mcp_server
 ```
 
+Derived correlation example:
+
+```text
+tool_call --CORRELATED_WITH_PROCESS--> process
+```
+
+The derived edge is explicitly inferred and non-causal; it is not merged into the observed evidence class.
+
 Repeated evidence is aggregated. If one process opens the same file 17 times, the graph stores one relationship with `count = 17` instead of 17 overlapping lines.
 
 ## No fake causality
@@ -371,7 +413,9 @@ and therefore marks it `causal: false`.
 
 Provider hooks are also kept distinct from OS attribution. A Claude hook can prove that a logical tool invocation was requested, but without a provider-supplied PID it does not prove which exact process implemented that tool call.
 
-Temporal correlation is not presented as causal proof, and same-process file/network activity is not presented as byte-level data flow.
+The optional correlation stage may derive a unique candidate from bounded exact evidence, but the resulting edge stays `inferred: true` and `causal: false`. Temporal proximity alone is insufficient, ambiguity produces no edge, and the confidence field is a heuristic score rather than a probability.
+
+Same-process file/network activity is not presented as byte-level data flow.
 
 ## Backends
 
@@ -418,6 +462,8 @@ execweave live --open -- claude
 ```
 
 The standalone viewer contains an **Evidence sequence** slider. Drag it backward to inspect an earlier graph state or press **Play** to replay the run. An edge is introduced only after its `first_sequence`; if an aggregated relationship has later evidence that has not happened yet, the Viewer labels it `partial` instead of exposing the final count early.
+
+Causal observed, non-causal observed, and inferred relationships use distinct edge styles. Inferred edges are labeled `· inferred`; selecting one exposes its inference method, confidence range, and supporting event IDs from the graph metadata. The Viewer never upgrades an inferred relationship into observed or causal evidence.
 
 Click a node to focus on its 1-hop or 2-hop runtime neighborhood. Focus follows only evidence allowed by the current timeline, relation, and causal filters.
 
@@ -490,6 +536,7 @@ Runtime and semantic metadata can still include sensitive paths, commands, endpo
 - [x] Progressive cluster expansion in the viewer
 - [x] Focused 1-hop / 2-hop runtime neighborhoods
 - [x] Browser-local Saved View presets
+- [x] Explicit inferred-edge visualization
 
 ### Semantic / security / research layers
 
@@ -497,8 +544,9 @@ Runtime and semantic metadata can still include sensitive paths, commands, endpo
 - [x] Generic Agent / Tool / MCP semantic telemetry contract
 - [x] Native Claude Code hook adapter
 - [x] Run-bound Claude runtime + semantic recording
+- [x] Explicit confidence-bearing semantic/runtime correlation v0.1
 - [ ] Additional provider adapters
-- [ ] Explicit confidence-bearing semantic/runtime correlation
+- [ ] Stronger cross-provider identity resolution
 - [ ] credential and secret entities
 - [ ] byte-level data-flow / taint tracking
 - [ ] anomaly detection
@@ -519,7 +567,7 @@ Runtime and semantic metadata can still include sensitive paths, commands, endpo
 
 **Contributions are very welcome.**
 
-High-impact areas include Linux eBPF, Windows ETW, macOS Endpoint Security, graph entity resolution, additional Agent/Tool/MCP provider adapters, explicit semantic/runtime correlation, OpenTelemetry/MCP integrations, privacy/redaction, reproducible agent workloads, and performance evaluation.
+High-impact areas include Linux eBPF, Windows ETW, macOS Endpoint Security, graph entity resolution, additional Agent/Tool/MCP provider adapters, stronger semantic/runtime correlation evidence, OpenTelemetry/MCP integrations, privacy/redaction, reproducible agent workloads, and performance evaluation.
 
 For a new collector or architecture change, open an issue first and describe the telemetry source, privilege requirements, expected graph relationships, and causal guarantees.
 
