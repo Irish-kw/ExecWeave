@@ -16,10 +16,16 @@ ExecWeave 是开源、local-first 的 observability 项目，将 AI Agent 活动
 
 ## 安装
 
-ExecWeave v0.6.0 已整理为标准 Python wheel / sdist。GitHub 端已经 PyPI-ready；第一次 Trusted Publisher release 正式发布前，可直接通过 GitHub 使用 pip 安装：
+ExecWeave 已正式发布到 PyPI。安装最新已发布版本：
 
 ```bash
-python -m pip install "execweave @ git+https://github.com/Irish-kw/ExecWeave.git@main"
+python -m pip install -U execweave
+```
+
+`main` 可能比当前 PyPI release 更新。若要直接测试最新 mainline：
+
+```bash
+python -m pip install --upgrade --force-reinstall "execweave @ git+https://github.com/Irish-kw/ExecWeave.git@main"
 ```
 
 开发安装：
@@ -28,12 +34,6 @@ python -m pip install "execweave @ git+https://github.com/Irish-kw/ExecWeave.git
 git clone https://github.com/Irish-kw/ExecWeave.git
 cd ExecWeave
 python -m pip install -e ".[dev]"
-```
-
-第一次 PyPI release 发布后即可使用：
-
-```bash
-python -m pip install execweave
 ```
 
 ## 性能与空间占用
@@ -113,6 +113,8 @@ execweave run --backend portable -- your-command
 execweave run --backend strace -- your-command
 ```
 
+从 v0.6.1 开始，所有 recorder 在启动 child command 前都会使用共享的跨平台 launcher resolver。Linux / macOS 保持正常 PATH executable 行为；Windows 通过 PATH/PATHEXT 正确解析 `.exe`、`.cmd`、`.bat`，显式 `.ps1` 则交给 PowerShell 启动。专用 Windows CI 会从 `cmd.exe` 和 Windows PowerShell 实际启动 Codex / Cursor recorder；完整 Cursor semantic/correlation integration 同时由 Windows、macOS、Ubuntu matrix 覆盖。
+
 Portable filesystem observation 是 session-correlated，不是 process-causal。未来 native collectors 包括 Linux eBPF、Windows ETW、macOS Endpoint Security。
 
 ## Viewer / Graph / Security
@@ -129,7 +131,7 @@ Security findings 会保留 evidence limits；possible sensitive-file → networ
 
 ## 当前状态
 
-ExecWeave 当前为 **v0.6.0**，baseline 已包含 runtime collection、execution graph、五种 Agent/IDE integrations、OpenRouter/LiteLLM、Ollama/llama.cpp/vLLM/LM Studio、exact Gateway ↔ Runtime identity、PyPI-ready packaging、reference overhead benchmark 与 cross-platform CI。
+ExecWeave `main` 当前为 **v0.6.1**，baseline 已包含 runtime collection、execution graph、五种 Agent/IDE integrations、OpenRouter/LiteLLM、Ollama/llama.cpp/vLLM/LM Studio、exact Gateway ↔ Runtime identity、已发布的 PyPI packaging、reference overhead benchmark、跨平台 command launcher compatibility 与 cross-platform CI。
 
 ## 隐私
 
