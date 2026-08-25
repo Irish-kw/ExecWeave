@@ -60,8 +60,10 @@ ExecWeave는 현재 **v0.4.0**입니다.
 - [x] standalone Viewer
 - [x] portable Live Graph
 - [x] pan / zoom / drag / search / details
+- [x] node type / relation / causal-only filter
+- [x] Timeline ↔ Graph synchronization
+- [x] evidence-sequence slider + Play/Pause replay
 - [ ] progressive cluster expansion
-- [ ] Timeline ↔ Graph synchronization
 
 ### Security Analysis
 
@@ -70,7 +72,7 @@ execweave analyze run.graph.json
 execweave analyze run.graph.json --output analysis.json
 ```
 
-현재 rule layer는 sensitive-file access, external endpoint, 같은 process의 possible sensitive-file → network path를 우선 표시합니다.
+현재 rule layer는 sensitive-file access, external endpoint, possible sensitive-file → network path를 우선 표시합니다.
 
 이는 exfiltration 증명이 아닙니다. Report는 명시적으로 다음 값을 유지합니다.
 
@@ -102,6 +104,14 @@ execweave graph-condense run.graph.json \
 ```
 
 single incoming relationship을 가지며 downstream behavior가 없는 file/directory/executable leaf만 collapse합니다. Process, Agent, Session, Socket, Network Endpoint는 기본적으로 collapse하지 않습니다.
+
+## Timeline ↔ Graph
+
+Standalone Viewer는 Graph edge의 `first_sequence` / `last_sequence`를 사용해 **Evidence sequence** slider와 Play/Pause replay를 제공합니다.
+
+Slider를 뒤로 이동하면 runtime evidence 순서에 따라 Graph가 어떻게 형성됐는지 볼 수 있습니다. Aggregated edge에 현재 sequence 이후의 evidence가 남아 있다면 `partial`로 표시하며, 최종 `count`를 과거 시점에 미리 노출하지 않습니다.
+
+Timeline은 node type, relation, causal-only, search filter와 함께 사용할 수 있습니다.
 
 ## Graph-first event model
 
