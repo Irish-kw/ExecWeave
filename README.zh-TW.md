@@ -80,6 +80,7 @@ ExecWeave 目前版本為 **v0.4.0**。
 - [x] temporal metadata
 - [x] graph summary / filtering / directed path query
 - [x] large-run leaf-resource condensation
+- [x] cluster optional exact expansion evidence
 
 ### Phase 3 — Interactive Viewer
 
@@ -90,7 +91,8 @@ ExecWeave 目前版本為 **v0.4.0**。
 - [x] causal / non-causal styling
 - [x] Timeline ↔ Graph synchronization
 - [x] evidence-sequence slider + Play/Pause replay
-- [ ] progressive cluster expansion
+- [x] progressive cluster expansion
+- [ ] saved filters / focused subgraphs
 
 ### Security Analysis
 
@@ -103,15 +105,7 @@ execweave analyze run.graph.json --output analysis.json
 
 目前會標記 sensitive-file access、external endpoint，以及 possible sensitive-file → network path。
 
-例如：
-
-```text
-process
-  ├── OPENED_READ ──→ ~/.ssh/id_ed25519
-  └── CONNECTED_TO ─→ external endpoint
-```
-
-這只能說明「先有 sensitive-file access evidence，之後有 external network evidence」，**不能證明檔案內容真的被送出去**。Report 會明確保留：
+這只能說明 evidence 的關係與順序，**不能證明檔案內容真的被送出去**。Report 會明確保留：
 
 ```json
 {
@@ -140,13 +134,32 @@ execweave graph-condense run.graph.json \
 
 只有「單一 incoming relationship 且沒有 downstream behavior」的 file/directory/executable leaf 才會被折疊。Process、Agent、Session、Socket、Network Endpoint 預設不折疊。
 
+### 可逐步展開的 condensed Graph
+
+一般 `graph-condense` 仍維持真正精簡。如果希望 Viewer 可以按需展開 cluster，明確加入：
+
+```bash
+execweave graph-condense run.graph.json \
+  --output run.expandable.graph.json \
+  --threshold 8 \
+  --keep-expansion
+
+execweave view run.expandable.graph.json \
+  --output run.expandable.html \
+  --open
+```
+
+可展開 cluster 會以虛線外框顯示。點擊 cluster 後選 **Expand cluster**，只會把該 cluster 換回原始 member nodes 與 evidence edges，其他 cluster 維持折疊。按 **Collapse clusters** 可全部還原成 compact view。
+
+`--keep-expansion` 只是把原始 observed nodes/edges 保存到 expansion payload，**不會創造新的 causal relationship**。
+
 ## Timeline ↔ Graph
 
-Standalone Viewer 現在會依 Graph edge 的 `first_sequence` / `last_sequence` 提供 **Evidence sequence** 滑桿與 Play/Pause replay。
+Standalone Viewer 會依 Graph edge 的 `first_sequence` / `last_sequence` 提供 **Evidence sequence** 滑桿與 Play/Pause replay。
 
 把滑桿往回拉，就能看到 Agent 的行為圖依 evidence 順序逐步長出來。若同一條 aggregated edge 在目前 sequence 只出現部分 evidence，Viewer 會顯示 `partial`，**不會提前把最終 `count` 洩漏到過去時間點**。
 
-Timeline 可以和 node type、relation、causal-only 與 search filter 一起使用。
+Timeline 可以和 node type、relation、causal-only、search，以及逐步展開的 cluster 一起使用。
 
 ## Graph-first event model
 
