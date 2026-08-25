@@ -16,10 +16,16 @@ ExecWeave는 AI 에이전트 활동을 인터랙티브 execution graph로 변환
 
 ## Installation
 
-ExecWeave v0.6.0은 표준 Python wheel / sdist로 패키징되어 있습니다. GitHub 쪽은 PyPI-ready이며, 첫 Trusted Publisher release 전까지 GitHub에서 직접 pip install할 수 있습니다.
+ExecWeave는 PyPI에 정식 공개되어 있습니다. 최신 공개 release 설치:
 
 ```bash
-python -m pip install "execweave @ git+https://github.com/Irish-kw/ExecWeave.git@main"
+python -m pip install -U execweave
+```
+
+`main`은 현재 PyPI release보다 더 새로운 patch를 포함할 수 있습니다. 최신 mainline을 직접 테스트하려면:
+
+```bash
+python -m pip install --upgrade --force-reinstall "execweave @ git+https://github.com/Irish-kw/ExecWeave.git@main"
 ```
 
 개발 설치:
@@ -28,12 +34,6 @@ python -m pip install "execweave @ git+https://github.com/Irish-kw/ExecWeave.git
 git clone https://github.com/Irish-kw/ExecWeave.git
 cd ExecWeave
 python -m pip install -e ".[dev]"
-```
-
-첫 PyPI release 이후:
-
-```bash
-python -m pip install execweave
 ```
 
 ## Performance / footprint
@@ -113,6 +113,8 @@ execweave run --backend portable -- your-command
 execweave run --backend strace -- your-command
 ```
 
+v0.6.1부터 모든 recorder는 child command 실행 전에 공통 cross-platform launcher resolver를 사용합니다. Linux / macOS는 일반적인 PATH executable 동작을 유지합니다. Windows는 PATH/PATHEXT를 통해 `.exe`, `.cmd`, `.bat`를 올바르게 해석하고, 명시적인 `.ps1`은 PowerShell로 실행합니다. 전용 Windows CI는 `cmd.exe`와 Windows PowerShell 양쪽에서 Codex / Cursor recorder를 실제 실행하며, 일반 Windows / macOS / Ubuntu matrix에서도 Cursor semantic/correlation integration을 계속 검증합니다.
+
 Portable filesystem observation은 process-causal이 아니라 session-correlated입니다. Future native collectors는 Linux eBPF, Windows ETW, macOS Endpoint Security를 계획하고 있습니다.
 
 ## Viewer / Graph / Security
@@ -129,7 +131,7 @@ Security findings는 evidence limit를 유지하며 possible sensitive-file → 
 
 ## Current status
 
-ExecWeave는 현재 **v0.6.0**입니다. Runtime collection, execution graph, 5개 Agent/IDE integration, OpenRouter/LiteLLM, Ollama/llama.cpp/vLLM/LM Studio, exact Gateway ↔ Runtime identity, PyPI-ready packaging, reference overhead benchmark, cross-platform CI가 baseline에 포함됩니다.
+ExecWeave `main`은 현재 **v0.6.1**입니다. Runtime collection, execution graph, 5개 Agent/IDE integration, OpenRouter/LiteLLM, Ollama/llama.cpp/vLLM/LM Studio, exact Gateway ↔ Runtime identity, 공개된 PyPI packaging, reference overhead benchmark, cross-platform command-launcher compatibility, cross-platform CI가 baseline에 포함됩니다.
 
 ## Privacy
 
