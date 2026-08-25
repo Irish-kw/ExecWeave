@@ -44,6 +44,16 @@ def test_viewer_is_standalone_and_escapes_embedded_graph_data() -> None:
     assert "\\u003c/script\\u003e" in html
 
 
+def test_viewer_contains_focus_filters() -> None:
+    html = render_graph_html(_graph())
+    assert 'id="type-filter"' in html
+    assert 'id="relation-filter"' in html
+    assert 'id="causal-filter"' in html
+    assert "All node types" in html
+    assert "All relations" in html
+    assert "applyGraphFilters" in html
+
+
 def test_write_graph_html_refuses_existing_nonempty_output(tmp_path: Path) -> None:
     output = tmp_path / "viewer.html"
     written = write_graph_html(_graph(), output)
