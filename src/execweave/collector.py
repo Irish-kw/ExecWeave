@@ -9,6 +9,7 @@ from typing import Iterable
 
 import psutil
 
+from .command import resolve_launch_command
 from .filesystem import FileWatcher
 from .schema import Entity, RuntimeEvent
 from .sink import JsonlSink
@@ -75,18 +76,20 @@ def infer_agent_name(command: Iterable[str]) -> str:
     parts = list(command)
     if not parts:
         return "unknown-agent"
-    executable = Path(parts[0]).name.lower()
+    basename = Path(parts[0]).name
+    executable = basename.lower()
+    for suffix in (".exe", ".cmd", ".bat", ".ps1"):
+        if executable.endswith(suffix):
+            executable = executable[: -len(suffix)]
+            break
     known = {
         "claude": "Claude Code",
-        "claude.exe": "Claude Code",
         "codex": "OpenAI Codex",
-        "codex.exe": "OpenAI Codex",
         "gemini": "Gemini CLI",
-        "gemini.exe": "Gemini CLI",
+        "cursor": "Cursor",
         "opencode": "OpenCode",
-        "opencode.exe": "OpenCode",
     }
-    return known.get(executable, Path(parts[0]).name)
+    return known.get(executable, basename)
 
 
 class RuntimeCollector:
@@ -117,6 +120,7 @@ class RuntimeCollector:
         if not command:
             raise ValueError("command must not be empty")
 
+        launch_command = resolve_launch_command(command)
         agent_name = infer_agent_name(command)
         agent = Entity(type="agent", id=f"agent:{agent_name}", name=agent_name)
         session = Entity(
@@ -155,7 +159,7 @@ class RuntimeCollector:
         process: subprocess.Popen[bytes] | None = None
         return_code = 1
         try:
-            process = subprocess.Popen(command, cwd=str(self.watch_root))
+            process = subprocess.Popen(launch_command, cwd=str(self.watch_root))
             root = psutil.Process(process.pid)
             snapshot = _safe_process_snapshot(root)
             if snapshot is not None:

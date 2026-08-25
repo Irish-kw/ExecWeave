@@ -1,0 +1,43 @@
+name: Windows Launcher Compatibility
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "scripts/check_windows_launchers.py"
+      - "pyproject.toml"
+      - ".github/workflows/windows-launcher.yml"
+  pull_request:
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "scripts/check_windows_launchers.py"
+      - "pyproject.toml"
+      - ".github/workflows/windows-launcher.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-launcher-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install package
+        run: python -m pip install -e ".[dev]"
+      - name: Command resolver tests
+        run: pytest -q tests/test_command.py
+      - name: CMD and Windows PowerShell Codex/Cursor smoke
+        run: python scripts/check_windows_launchers.py
