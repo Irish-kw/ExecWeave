@@ -39,6 +39,13 @@ class RecordResult:
         }
 
 
+def _preflight_artifacts(paths: list[Path]) -> None:
+    conflicts = [path for path in paths if path.exists() and path.stat().st_size > 0]
+    if conflicts:
+        rendered = ", ".join(str(path) for path in conflicts)
+        raise FileExistsError(f"ExecWeave record artifacts already exist: {rendered}")
+
+
 def record_to_viewer(
     command: list[str],
     *,
@@ -67,6 +74,7 @@ def record_to_viewer(
     event_path = run_dir / "events.jsonl"
     graph_path = run_dir / "graph.json"
     viewer_path = run_dir / "viewer.html"
+    _preflight_artifacts([event_path, graph_path, viewer_path])
 
     sink = JsonlSink(event_path)
     resolved = resolve_backend(backend)
