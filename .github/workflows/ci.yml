@@ -68,8 +68,24 @@ jobs:
         run: python scripts/check_correlation_graph.py cursor-record-smoke/graph.correlated.json
       - name: Check Cursor correlated viewer JavaScript syntax
         run: python scripts/check_viewer_js.py cursor-record-smoke/viewer.correlated.html --output cursor-record-smoke/viewer.correlated.js
+      - name: OpenCode plugin installer smoke
+        run: execweave-opencode-plugin --install --root opencode-plugin-smoke
+      - name: OpenCode run-bound semantic and correlation smoke
+        run: execweave-opencode-record --backend auto --no-files --no-network --output-dir opencode-record-smoke -- python scripts/emit_opencode_plugin_smoke.py
+      - name: Validate OpenCode runtime stream
+        run: execweave validate opencode-record-smoke/events.jsonl
+      - name: Validate OpenCode merged stream
+        run: execweave validate opencode-record-smoke/events.semantic.jsonl
+      - name: Validate OpenCode correlated stream
+        run: execweave validate opencode-record-smoke/events.correlated.jsonl
+      - name: Verify OpenCode conservative correlation edge
+        run: python scripts/check_correlation_graph.py opencode-record-smoke/graph.correlated.json
+      - name: Check OpenCode correlated viewer JavaScript syntax
+        run: python scripts/check_viewer_js.py opencode-record-smoke/viewer.correlated.html --output opencode-record-smoke/viewer.correlated.js
       - name: Model runtime CLI smoke
         run: python scripts/check_model_runtime_cli.py
+      - name: Inference gateway CLI smoke
+        run: python scripts/check_inference_gateway_cli.py
       - name: Collector diagnostics
         run: execweave doctor
       - name: Portable end-to-end smoke

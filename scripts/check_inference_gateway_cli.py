@@ -1,0 +1,82 @@
+from __future__ import annotations
+
+import json
+import subprocess
+import tempfile
+from pathlib import Path
+
+
+def run_cli(args: list[str], payload: dict) -> None:
+    subprocess.run(
+        ["execweave-inference-gateway", *args],
+        input=json.dumps(payload),
+        text=True,
+        check=True,
+        capture_output=True,
+    )
+
+
+def main() -> int:
+    with tempfile.TemporaryDirectory() as tmp:
+        sidecar = Path(tmp) / "gateway.jsonl"
+        run_cli(
+            [
+                "event",
+                "--gateway",
+                "openrouter",
+                "--requested-model",
+                "openrouter/auto",
+                "--provider-name",
+                "OpenAI",
+                "--sidecar",
+                str(sidecar),
+            ],
+            {
+                "id": "ci-openrouter-1",
+                "model": "openai/gpt-5.6-sol",
+                "choices": [{"message": {"content": "PRIVATE_RESPONSE"}}],
+                "usage": {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 5,
+                    "total_tokens": 15,
+                    "cost": 0.001,
+                    "prompt_tokens_details": {"cached_tokens": 3},
+                },
+            },
+        )
+        run_cli(
+            ["generation", "--gateway", "openrouter", "--sidecar", str(sidecar)],
+            {
+                "data": {
+                    "id": "ci-openrouter-1",
+                    "model": "openai/gpt-5.6-sol",
+                    "provider_name": "OpenAI",
+                    "latency": 0.2,
+                    "total_cost": 0.001,
+                    "prompt": "PRIVATE_PROMPT",
+                    "completion": "PRIVATE_COMPLETION",
+                }
+            },
+        )
+        text = sidecar.read_text(encoding="utf-8")
+        for secret in ("PRIVATE_RESPONSE", "PRIVATE_PROMPT", "PRIVATE_COMPLETION"):
+            if secret in text:
+                raise RuntimeError(f"gateway sidecar leaked content: {secret}")
+        records = [json.loads(line) for line in text.splitlines() if line.strip()]
+        relations = {record["relation"] for record in records}
+        expected = {
+            "SERVED_INFERENCE",
+            "REQUESTED_MODEL",
+            "ROUTED_TO_MODEL",
+            "ROUTED_TO_PROVIDER",
+            "REPORTED_GENERATION_METADATA",
+        }
+        missing = expected - relations
+        if missing:
+            raise RuntimeError(f"gateway smoke missing relations: {sorted(missing)}")
+    print("Inference gateway CLI smoke passed")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
