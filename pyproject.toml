@@ -31,6 +31,8 @@ execweave-codex-hook = "execweave.codex_hook_cli:main"
 execweave-codex-record = "execweave.codex_record:main"
 execweave-gemini-hook = "execweave.gemini_hook_cli:main"
 execweave-gemini-record = "execweave.gemini_record:main"
+execweave-cursor-hook = "execweave.cursor_hook_cli:main"
+execweave-cursor-record = "execweave.cursor_record:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/execweave"]
