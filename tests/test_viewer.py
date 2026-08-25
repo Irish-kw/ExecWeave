@@ -37,6 +37,35 @@ def _graph(*, with_sequence: bool = True) -> dict:
     }
 
 
+def _inferred_graph() -> dict:
+    return {
+        "graph_schema_version": "0.1",
+        "session_id": "s1",
+        "event_count": 3,
+        "node_count": 2,
+        "edge_count": 1,
+        "nodes": [
+            {"id": "tool-call:1", "type": "tool_call", "name": "Bash"},
+            {"id": "process:p1", "type": "process", "name": "python"},
+        ],
+        "edges": [
+            {
+                "id": "correlation:1",
+                "source": "tool-call:1",
+                "target": "process:p1",
+                "relation": "CORRELATED_WITH_PROCESS",
+                "count": 1,
+                "causal": False,
+                "inferred": True,
+                "inference_methods": ["unique_process_argv_tail_match"],
+                "confidence_min": 0.8,
+                "confidence_max": 0.8,
+                "supporting_event_ids": ["event-1", "event-2"],
+            }
+        ],
+    }
+
+
 def _expandable_graph() -> dict:
     process_id = "process:p1"
     nodes = [{"id": process_id, "type": "process", "name": "python"}]
@@ -119,6 +148,17 @@ def test_viewer_contains_timeline_playback_and_partial_edge_semantics() -> None:
     assert "edgeExistsAt" in html
     assert "partial" in html
     assert "future counts are never shown early" in html
+
+
+def test_viewer_distinguishes_inferred_edges_from_observed_edges() -> None:
+    html = render_graph_html(_inferred_graph())
+    assert "Inferred correlation" in html
+    assert "They are not observed or causal evidence" in html
+    assert ".edge.inferred" in html
+    assert "edge.inferred===true" in html
+    assert "· inferred" in html
+    assert '"inferred":true' in html
+    assert '"causal":false' in html
 
 
 def test_viewer_contains_progressive_cluster_expansion() -> None:
