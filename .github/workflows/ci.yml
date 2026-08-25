@@ -34,6 +34,18 @@ jobs:
         run: execweave run --backend portable --no-files --no-network --output phase1-portable.jsonl -- python -c "print('execweave portable smoke')"
       - name: Validate portable stream
         run: execweave validate phase1-portable.jsonl
+      - name: Build semantic telemetry sidecar
+        run: python scripts/make_semantic_smoke.py phase1-portable.jsonl phase1-semantic.jsonl
+      - name: Merge semantic telemetry
+        run: execweave semantic-merge phase1-portable.jsonl phase1-semantic.jsonl --output phase1-semantic-merged.jsonl
+      - name: Validate semantic merged stream
+        run: execweave validate phase1-semantic-merged.jsonl
+      - name: Materialize semantic graph
+        run: execweave graph phase1-semantic-merged.jsonl --output phase1-semantic.graph.json
+      - name: Verify semantic graph relations
+        run: python scripts/check_semantic_graph.py phase1-semantic.graph.json
+      - name: Build semantic standalone viewer
+        run: execweave view phase1-semantic.graph.json --output phase1-semantic.html
       - name: Materialize portable graph
         run: execweave graph phase1-portable.jsonl --output phase1-portable.graph.json
       - name: Build portable standalone viewer
