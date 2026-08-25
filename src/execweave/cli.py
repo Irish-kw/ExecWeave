@@ -8,6 +8,7 @@ from uuid import uuid4
 from .analysis import analyze_graph
 from .backends import backend_diagnostics, create_collector, resolve_backend
 from .benchmark import format_benchmark, run_benchmark
+from .focus import focus_graph
 from .graph import build_execution_graph, write_execution_graph
 from .graph_ops import (
     condense_graph,
@@ -183,6 +184,28 @@ def build_parser() -> argparse.ArgumentParser:
     graph_filter.add_argument("--backend", action="append", default=[])
     graph_filter.add_argument("--causal-only", action="store_true")
 
+    graph_focus = subparsers.add_parser(
+        "graph-focus",
+        help="Extract an evidence-preserving N-hop neighborhood around one or more nodes",
+    )
+    graph_focus.add_argument("path", type=Path, help="Path to a graph JSON file")
+    graph_focus.add_argument("anchor", nargs="+", help="Exact anchor node ID(s)")
+    graph_focus.add_argument("--output", type=Path, required=True)
+    graph_focus.add_argument(
+        "--hops",
+        type=int,
+        default=1,
+        help="Maximum traversal distance from each anchor (default: 1)",
+    )
+    graph_focus.add_argument(
+        "--direction",
+        choices=["both", "in", "out"],
+        default="both",
+        help="Traverse incoming, outgoing, or both edge directions (default: both)",
+    )
+    graph_focus.add_argument("--relation", action="append", default=[])
+    graph_focus.add_argument("--causal-only", action="store_true")
+
     graph_condense = subparsers.add_parser(
         "graph-condense",
         help="Collapse repetitive leaf resources into inspectable cluster nodes",
@@ -323,6 +346,33 @@ def main(argv: list[str] | None = None) -> int:
         print(
             json.dumps(
                 {**graph_summary(filtered), "output": str(written)},
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 0
+
+    if args.subcommand == "graph-focus":
+        try:
+            payload = load_graph(args.path)
+            focused = focus_graph(
+                payload,
+                anchors=args.anchor,
+                hops=args.hops,
+                direction=args.direction,
+                relations=args.relation,
+                causal_only=args.causal_only,
+            )
+            written = write_graph_payload(focused, args.output)
+        except (FileExistsError, ValueError) as exc:
+            parser.error(str(exc))
+        print(
+            json.dumps(
+                {
+                    **graph_summary(focused),
+                    "focus": focused.get("focus"),
+                    "output": str(written),
+                },
                 indent=2,
                 sort_keys=True,
             )
