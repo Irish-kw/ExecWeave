@@ -10,45 +10,11 @@
 
 **AI Agent があなたのマシン上で実際に何をしたのかを可視化します。**
 
-ExecWeave は、ローカル AI Agent の runtime activity を execution graph に変換する、open-source / local-first の observability プロジェクトです。長い CLI log を読む代わりに、Agent、session、process、file、executable、socket、network endpoint の関係を記録し、Graph として materialize し、ブラウザで開ける standalone HTML viewer を生成します。
+ExecWeave は open-source / local-first の AI Agent runtime observability プロジェクトです。Agent の runtime activity を evidence-backed execution graph に変換し、長い CLI log の代わりに process、file、executable、socket、network endpoint などの関係を可視化します。
 
 > **不透明な AI Agent の実行を、人間が理解できる Graph にする。**
 
-## 現在の状態
-
-### Phase 1 — Runtime Collection
-
-**Linux reference path と cross-platform portable fallback は完成しています。**
-
-現在は graph-ready JSONL、monotonic sequence、root/descendant process capture、Linux syscall-backed short-lived process capture、process-attributed filesystem/network evidence、non-blocking/failed connect attempt、portable fallback、causal/non-causal semantics、validator、diagnostics、benchmark、CI を提供します。
-
-### Phase 2 — Execution Graph
-
-**Graph materialization と query layer の最初のコアを実装済みです。**
-
-- validated JSONL → graph JSON
-- node deduplication
-- repeated edge aggregation
-- temporal first/last metadata
-- evidence event IDs
-- causality preservation
-- graph summary / filter
-- directed path query
-
-### Phase 3 — Interactive Viewer
-
-**ローカル Viewer MVP を実装済みです。**
-
-- standalone HTML
-- CDN / external JavaScript dependency なし
-- pan / zoom / node drag
-- node / edge details
-- graph search
-- causal / non-causal edge visualization
-
-Agent 実行中の live update は今後の作業です。
-
-## Quick start
+## 最速で試す
 
 ```bash
 git clone https://github.com/Irish-kw/ExecWeave.git
@@ -56,13 +22,86 @@ cd ExecWeave
 python -m pip install -e ".[dev]"
 ```
 
-Debian / Ubuntu で Linux reference backend を使う場合：
+### Agent 実行中に Live Graph を見る
+
+```bash
+execweave live --open -- claude
+```
+
+Live MVP は `127.0.0.1` のみに bind し、portable collector から実行中の graph snapshot をブラウザへ更新します。終了後も次の artifact を保存します。
+
+```text
+.execweave/runs/<session-id>/
+├── events.jsonl
+├── graph.json
+└── viewer.html
+```
+
+現在の Linux `strace` backend は command 終了後に trace を parse するため、live telemetry としては扱いません。
+
+### Linux でより強い syscall-backed attribution を使う
 
 ```bash
 sudo apt-get install strace
+execweave record --backend strace --open -- claude
 ```
 
-完全な流れ：
+その他：
+
+```bash
+execweave live --open -- codex
+execweave live --open -- gemini
+execweave live --open -- opencode
+execweave record --open -- python my_agent.py
+```
+
+## 現在の状態
+
+ExecWeave は現在 **v0.3.0** です。
+
+### Phase 1 — Runtime Collection
+
+Linux reference path と cross-platform portable fallback の最初の実用版を実装済みです。
+
+- graph-ready JSONL event stream
+- monotonic sequence
+- root / descendant process capture
+- Linux syscall-backed short-lived process capture
+- process-attributed filesystem/network evidence
+- non-blocking / failed connection attempt
+- Linux / macOS / Windows portable fallback
+- causal / non-causal attribution
+- validator / diagnostics / benchmark / CI configuration
+
+### Phase 2 — Execution Graph
+
+実装済み：
+
+- validated JSONL → graph JSON
+- node deduplication
+- repeated edge aggregation
+- temporal metadata
+- evidence event IDs
+- graph summary / filtering
+- directed path query
+- large-run leaf-resource condensation
+
+### Phase 3 — Interactive Viewer
+
+実装済み：
+
+- standalone local HTML viewer
+- localhost Live Graph MVP
+- CDN / external JavaScript 不要
+- pan / zoom / node drag
+- node / edge detail
+- search
+- causal / non-causal styling
+- directional layout
+
+Progressive cluster expansion と Timeline ↔ Graph synchronization は今後の課題です。
+
+## 手動 workflow
 
 ```bash
 execweave doctor
@@ -72,18 +111,19 @@ execweave graph run.jsonl --output run.graph.json
 execweave view run.graph.json --output run.html --open
 ```
 
-Codex、Gemini CLI、OpenCode、任意の Python Agent なども実行できます。
+大きな run は repetitive leaf resource を先にまとめられます。
 
 ```bash
-execweave run --output run.jsonl -- codex
-execweave run --output run.jsonl -- gemini
-execweave run --output run.jsonl -- opencode
-execweave run --output run.jsonl -- python my_agent.py
+execweave graph-condense run.graph.json \
+  --output run.compact.graph.json \
+  --threshold 8
+
+execweave view run.compact.graph.json --output run.compact.html --open
 ```
 
-## Graph-first event model
+single incoming relationship を持ち downstream behavior のない file/directory/executable leaf だけが collapse 対象です。Process、Agent、Session、Socket、Network Endpoint はデフォルトでは collapse しません。
 
-各 runtime observation は次の形式です。
+## Graph-first event model
 
 ```text
 source --RELATION--> target
@@ -101,137 +141,61 @@ process --CONNECTED_TO--> network_endpoint
 process --CONNECT_ATTEMPTED--> network_endpoint
 ```
 
-Phase 2 は repeated evidence を aggregate します。同じ process が同じ file を 17 回 open した場合、17 本の重複 edge ではなく、1 本の edge と `count = 17` を保存します。
+同じ relation の repeated evidence は 1 本の edge に集約され、`count` が増えます。
 
 ## Fake causality を作らない
 
-Linux syscall evidence では：
+Linux syscall evidence は process-level attribution を証明できます。一方 portable filesystem watcher は session 中に変更が起きたことしか証明できないため、`causal: false` の session observation として保持します。
 
-```text
-process --OPENED_WRITE--> file
-```
+ExecWeave は temporal correlation を causal proof として表示しません。
 
-を `causal: true` として表現できます。
-
-一方、portable filesystem watcher が証明できるのは：
-
-```text
-session --OBSERVED_FILE_CHANGE--> file
-```
-
-までなので `causal: false` とします。ExecWeave は temporal correlation を causal proof に格上げしません。
-
-## Backend
-
-### `strace`
-
-Linux reference backend は `strace -ff` で descendants を追跡し、process/filesystem/network syscall evidence を graph-ready event に変換します。
-
-Raw trace はデフォルトで parsing 後に削除されます。
+## Live Graph
 
 ```bash
-execweave run --keep-native-trace -- claude
+execweave live --open -- claude
+execweave live --port 8765 --open -- claude
+execweave live --linger 10 --open -- claude
 ```
 
-### `portable`
+Live HTTP server は `127.0.0.1` のみに bind し、デフォルトでは LAN に公開されません。詳細は [`docs/live-graph.md`](docs/live-graph.md) を参照してください。
 
-psutil + watchdog を使い、Linux / macOS / Windows で動作します。native sensor より弱い filesystem attribution は明示的に non-causal のまま保持します。
+## Privacy
 
-`auto` は Linux で `strace` が利用できる場合は `strace` を、そうでなければ `portable` を選択します。
+ExecWeave は **local-first** です。runtime event、Graph、Viewer はデフォルトでローカルに残り、外部 CDN は不要です。file content や `read()` / `write()` byte buffer は収集しません。raw Linux syscall trace はデフォルトで parse 後に削除します。
 
-## Event stream validation
-
-```bash
-execweave validate run.jsonl
-```
-
-Interrupted run：
-
-```bash
-execweave validate --allow-incomplete run.jsonl
-```
-
-Validator は JSON、schema、event ID、session ID、sequence、timestamp、entity fields、session lifecycle を検証します。
-
-## Graph query
-
-```bash
-execweave graph-summary run.graph.json
-```
-
-```bash
-execweave graph-filter run.graph.json --output causal.graph.json --causal-only
-```
-
-```bash
-execweave graph-filter run.graph.json \
-  --output process-network.graph.json \
-  --node-type process \
-  --node-type network_endpoint
-```
-
-```bash
-execweave path run.graph.json SOURCE_NODE_ID TARGET_NODE_ID --causal-only
-```
-
-詳細：[`docs/phase-2-execution-graph.md`](docs/phase-2-execution-graph.md)
-
-## Interactive Viewer
-
-```bash
-execweave view run.graph.json --output run.html --open
-```
-
-Viewer は standalone local HTML で、zoom、pan、node drag、search、node/edge details をサポートします。外部 CDN は必要ありません。
+Runtime metadata には sensitive path、command、endpoint が含まれる可能性があるため、artifact を共有する前に確認してください。
 
 ## Roadmap
 
 ### Phase 1
-
-- [x] Runtime event schema / collection
-- [x] Linux short-lived process capture
-- [x] Causal semantics
-- [x] Validation / diagnostics / benchmark
-- [x] Cross-platform portable fallback
+- [x] Runtime collection contract
+- [x] Linux reference backend
+- [x] Portable fallback
+- [x] Validation / causality semantics
 - [ ] Linux eBPF
 - [ ] Windows ETW
 - [ ] macOS Endpoint Security
 
 ### Phase 2
-
 - [x] Event → Graph
-- [x] Node dedup / edge aggregation
-- [x] Temporal metadata
-- [x] Summary / filter / path query
+- [x] Deduplication / aggregation / query
+- [x] Large-run leaf condensation
 - [ ] Stronger entity resolution
-- [ ] Time-window snapshot
-- [ ] Large-run evidence indexing
+- [ ] Time-window snapshots
 
 ### Phase 3
-
-- [x] Standalone local Viewer MVP
-- [x] Pan / zoom / drag / search / details
-- [ ] Live graph update
+- [x] Standalone Viewer
+- [x] Portable Live Graph
+- [x] Initial large-graph condensation
+- [ ] Progressive cluster expansion
 - [ ] Timeline ↔ Graph synchronization
-- [ ] Large graph clustering
-
-## Privacy
-
-ExecWeave は **local-first** です。Event、Graph、Viewer はデフォルトでローカルに残り、Viewer は CDN を必要としません。file contents と read/write byte buffers は収集しません。共有前に runtime metadata に機密 path / command / endpoint が含まれていないか確認してください。
 
 ## Contributing
 
-**Contributions are very welcome.**
+**ExecWeave への contribution を歓迎します。** Linux eBPF、Windows ETW、macOS Endpoint Security、Graph entity resolution、live/large-graph visualization、OpenTelemetry/MCP、privacy/redaction、testing、performance evaluation などの contribution を特に歓迎します。
 
-Linux eBPF、Windows ETW、macOS Endpoint Security、Graph entity resolution、large-graph UX、OpenTelemetry/MCP、privacy/redaction、reproducible workload、performance evaluation、documentation translation などを歓迎します。
-
-> **Early contributors are especially welcome.**
-
-## Documentation
-
-- [`Phase 1 — Runtime Collection`](docs/phase-1-runtime-collection.md)
-- [`Phase 2 — Execution Graph`](docs/phase-2-execution-graph.md)
+`README.md` が canonical English source です。翻訳の追加・更新も歓迎します。
 
 ## License
 
-See [`LICENSE`](LICENSE).
+[`LICENSE`](LICENSE) を参照してください。
