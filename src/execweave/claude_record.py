@@ -4,7 +4,7 @@ import argparse
 import json
 import os
 import webbrowser
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
 
