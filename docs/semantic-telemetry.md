@@ -2,15 +2,18 @@
 
 ExecWeave can combine provider/framework semantic events with OS runtime evidence without rewriting the original runtime capture.
 
-The design goal is a graph such as:
+The design goal is to place logical Agent/Tool/MCP evidence and machine-level process/file/network evidence in the same graph while preserving which source proved each relationship.
 
 ```text
-agent --CALLED_TOOL--> tool --SPAWNED_PROCESS--> process --OPENED_READ--> file
-  |
-  +--CALLED_MCP-----> mcp_server
+agent --REQUESTED_TOOL_CALL--> tool_call --USES_TOOL--> tool
+                                                     |
+                                                     +--DECLARED_COMMAND--> command
+
+process --OPENED_READ--> file
+process --CONNECTED_TO--> network_endpoint
 ```
 
-The semantic layer explains *which logical Agent/Tool/MCP action was requested*. The runtime layer explains *what the machine actually did*. ExecWeave keeps those evidence sources distinguishable instead of treating framework intent as OS truth.
+A provider hook can explain *which logical action was requested*. The runtime collector explains *what the machine actually did*. ExecWeave does not silently turn temporal proximity between the two into causal proof.
 
 ## Workflow
 
@@ -46,7 +49,7 @@ A semantic sidecar record is one JSON object per line. The adapter supplies only
 {
   "timestamp": "2026-08-25T10:00:02.123Z",
   "event_type": "semantic.tool.called",
-  "relation": "CALLED_TOOL",
+  "relation": "REQUESTED_TOOL_CALL",
   "source": {
     "type": "agent",
     "id": "agent:Claude Code",
@@ -54,16 +57,15 @@ A semantic sidecar record is one JSON object per line. The adapter supplies only
     "attributes": {}
   },
   "target": {
-    "type": "tool",
-    "id": "tool:claude-code:Bash",
+    "type": "tool_call",
+    "id": "tool-call:provider:session:call-id",
     "name": "Bash",
-    "attributes": {
-      "provider": "claude-code"
-    }
+    "attributes": {}
   },
   "attributes": {
     "attribution": "provider_hook",
-    "causal": true
+    "evidence_source": "provider_hook",
+    "causal": false
   }
 }
 ```
@@ -79,51 +81,25 @@ The sidecar does **not** need to provide:
 
 ## Recommended semantic entities
 
-ExecWeave's generic entity schema already supports additional node types. Current recommended semantic types are:
+ExecWeave's generic entity schema already supports additional node types.
 
 | Type | Example ID | Meaning |
 | --- | --- | --- |
 | `agent` | `agent:Claude Code` | Logical agent/client |
-| `tool` | `tool:claude-code:Bash` | Agent-visible tool |
-| `mcp_server` | `mcp:github` | MCP server/integration |
-| `model` | `model:anthropic:claude-sonnet` | Model identity when the adapter can observe it |
-| `process_reference` | `process-pid:1234` | Temporary bridge from semantic telemetry to an OS process |
+| `tool_call` | `tool-call:claude:session:tool-use-id` | One concrete logical tool invocation |
+| `tool` | `tool:claude:Bash` | Agent-visible tool |
+| `mcp_server` | `mcp-server:claude:github` | MCP server/integration |
+| `model` | `model:claude:claude-sonnet` | Model identity when the provider exposes it |
+| `command` | `command:sha256:...` | Declared command metadata from a semantic hook |
+| `process_reference` | `process-pid:1234` | Optional bridge when an upstream source actually provides a PID |
 
 Entity IDs should be stable enough to deduplicate repeated semantic observations inside one run.
 
-## Tool-to-process bridge
+## Optional process-reference bridge
 
-Provider hooks frequently know a PID but not ExecWeave's full process entity ID. Emit a `process_reference`:
+Some provider/framework adapters may know a child PID but not ExecWeave's full process entity ID. In that case they may emit a `process_reference` with the observed PID.
 
-```json
-{
-  "timestamp": "2026-08-25T10:00:02.456Z",
-  "event_type": "semantic.tool.process",
-  "relation": "SPAWNED_PROCESS",
-  "source": {
-    "type": "tool",
-    "id": "tool:claude-code:Bash",
-    "name": "Bash",
-    "attributes": {}
-  },
-  "target": {
-    "type": "process_reference",
-    "id": "process-pid:1234",
-    "name": "1234",
-    "attributes": {
-      "pid": 1234
-    }
-  },
-  "attributes": {
-    "attribution": "provider_hook",
-    "causal": true
-  }
-}
-```
-
-During merge, ExecWeave resolves this reference against process entities actually observed in the runtime stream.
-
-Resolution is conservative:
+During merge, ExecWeave resolves such references against process entities actually observed in the runtime stream. Resolution is conservative:
 
 1. an explicit `create_time` can uniquely identify the process;
 2. a PID with one runtime candidate resolves directly;
@@ -132,45 +108,29 @@ Resolution is conservative:
 
 A resolved event records the original-to-runtime process mapping in `attributes.resolved_process_references`.
 
-## MCP example
+**Do not emit a `process_reference` when the provider did not expose a PID.** A command string and nearby process timestamp are not enough to claim an exact Tool → Process relationship.
 
-```json
-{
-  "timestamp": "2026-08-25T10:00:03Z",
-  "event_type": "semantic.mcp.called",
-  "relation": "CALLED_MCP",
-  "source": {
-    "type": "agent",
-    "id": "agent:Claude Code",
-    "name": "Claude Code",
-    "attributes": {}
-  },
-  "target": {
-    "type": "mcp_server",
-    "id": "mcp:github",
-    "name": "GitHub MCP",
-    "attributes": {}
-  },
-  "attributes": {
-    "attribution": "provider_hook",
-    "causal": true
-  }
-}
+The current Claude Code native hook adapter follows this rule: Claude's hook input identifies tool calls but does not expose the child process PID, so the adapter does not invent `tool_call --SPAWNED_PROCESS--> process` edges.
+
+## Evidence and causality boundary
+
+Current provider adapters mark semantic edges `causal: false` even when a provider hook authoritatively reports that a logical tool event occurred. In ExecWeave, `causal: true` is reserved for stronger execution-level attribution rather than merely saying that two logical objects are related.
+
+This keeps statements such as these separate:
+
+```text
+Claude Code --REQUESTED_TOOL_CALL--> Bash call       semantic provider evidence
+process     --OPENED_READ---------> ~/.ssh/id_ed25519 OS runtime evidence
 ```
 
-Adapters may add more attributes such as tool-call IDs, provider names, model IDs, MCP tool names, or request/result metadata. Avoid storing secrets or full prompt/tool payloads by default.
+Those two observations do **not** by themselves prove:
 
-## Causality boundary
+```text
+Bash call --caused--> that exact process
+file bytes --flowed to--> a network endpoint
+```
 
-`semantic-merge` does **not** default semantic events to `causal: true`.
-
-The adapter must decide what its source can actually prove. Examples:
-
-- an authoritative provider hook saying a tool invocation occurred can reasonably mark `agent --CALLED_TOOL--> tool` as causal;
-- a timestamp-only guess that a tool caused a process should stay non-causal or omit `causal`;
-- OS file/network edges keep their original collector attribution and causality.
-
-Semantic intent is not treated as proof that a file was read, a socket was opened, or bytes were exfiltrated.
+Any future semantic/runtime correlation layer must expose its method and confidence explicitly and must remain distinguishable from observed OS attribution.
 
 ## Session boundary
 
@@ -178,6 +138,10 @@ Every semantic timestamp must fall inside the captured runtime session interval.
 
 ## Privacy
 
-Semantic sidecars can contain sensitive data even when ExecWeave itself does not collect file contents. Adapter authors should prefer identifiers and small metadata over full prompts, tool arguments, tool output, credentials, or secret values.
+Semantic sidecars can contain sensitive metadata even when ExecWeave itself does not collect file contents. Adapter authors should prefer identifiers and bounded metadata over full prompts, tool arguments, tool output, credentials, or secret values.
 
-The generic semantic merge layer is provider-agnostic. Provider-specific adapters are separate integrations and should document exactly which upstream fields they consume and what causal guarantees those fields support.
+The Claude Code adapter intentionally does not persist `Write` content or `tool_response`. Declared shell commands are retained because they are central to execution explanation, but are bounded in size and should still be treated as potentially sensitive metadata.
+
+The generic semantic merge layer is provider-agnostic. Provider-specific adapters are separate integrations and must document exactly which upstream fields they consume and what claims those fields support.
+
+See [`Claude Code Hooks`](claude-code-hooks.md) for the first native provider adapter.
