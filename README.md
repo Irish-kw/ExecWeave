@@ -12,11 +12,11 @@
 
 ExecWeave is an open-source, local-first runtime observability project that turns AI-agent activity into an interactive execution graph.
 
-Instead of forcing users to understand hundreds of CLI lines, ExecWeave connects agents, sessions, tools, MCP servers, processes, files, executables, sockets, and network endpoints into a graph backed by explicit evidence sources.
+Instead of reading hundreds of CLI lines, you can inspect how an agent, its tools, subprocesses, files, commands, and network activity connect to one another — while keeping observed evidence separate from inference.
 
-> **Turn opaque AI-agent execution into something humans can actually understand.**
+> **Event is ground truth. The graph is a materialized view.**
 
-## Fastest way to try it
+## Quick start
 
 ```bash
 git clone https://github.com/Irish-kw/ExecWeave.git
@@ -24,99 +24,11 @@ cd ExecWeave
 python -m pip install -e ".[dev]"
 ```
 
-### Watch the graph while the agent is running
+### Watch any command live
 
 ```bash
 execweave live --open -- claude
 ```
-
-The live MVP starts a server bound only to `127.0.0.1`, opens a browser, and updates the graph while the command is still running.
-
-```text
-AI Agent
-   ↓
-portable runtime collector
-   ↓
-events.jsonl grows
-   ↓
-execution graph snapshots
-   ↓
-127.0.0.1:<random-port>
-   ↓
-Live browser graph
-```
-
-When the command exits, ExecWeave validates the event stream and stores:
-
-```text
-.execweave/runs/<session-id>/
-├── events.jsonl
-├── graph.json
-└── viewer.html
-```
-
-The current live path intentionally uses the **portable** collector. The Linux `strace` backend is post-processed after the command exits, so presenting it as live would be misleading.
-
-### Claude Code: runtime + semantic graph
-
-ExecWeave also has a native Claude Code hook adapter for logical Agent / Tool / MCP evidence.
-
-Generate the hook settings fragment once:
-
-```bash
-execweave-claude-hook --print-config
-```
-
-Merge its `hooks` object into your Claude Code settings, then record runtime and semantic evidence together:
-
-```bash
-execweave-claude-record --open -- claude
-```
-
-When semantic hooks fire, the same run directory keeps the evidence layers separate and also builds a merged graph:
-
-```text
-.execweave/runs/<run-id>/
-├── events.jsonl              # runtime only
-├── graph.json                # runtime-only graph
-├── viewer.html               # runtime-only viewer
-├── semantic.jsonl            # Claude hook evidence only
-├── events.semantic.jsonl     # validated merged stream
-├── graph.semantic.json       # runtime + semantic graph
-└── viewer.semantic.html      # runtime + semantic viewer
-```
-
-The native Claude hook knows the logical tool call, but Claude's hook payload does not expose the actual Bash child PID. ExecWeave therefore does **not** relabel a Tool → Process relationship as directly observed or causal evidence.
-
-When a conservative bridge is useful, run the explicit correlation stage:
-
-```bash
-execweave correlate run.semantic.jsonl \
-  --output run.correlated.jsonl
-execweave graph run.correlated.jsonl \
-  --output run.correlated.graph.json
-execweave view run.correlated.graph.json \
-  --output run.correlated.html \
-  --open
-```
-
-`execweave correlate` emits `CORRELATED_WITH_PROCESS` only when a process candidate is unique inside the bounded tool-call window and has exact supporting identity evidence. It prefers exact executable/process/cmdline identity and can fall back to an exact, non-empty `argv[1:]` match for launcher processes such as the macOS Python framework. Ambiguous or unmatched calls produce no bridge. Every bridge remains `inferred: true`, `causal: false`, records its inference method and supporting event IDs, and uses a heuristic confidence score that is explicitly **not a probability**. See [`docs/claude-code-hooks.md`](docs/claude-code-hooks.md).
-
-### Stronger Linux post-run evidence
-
-On Debian/Ubuntu:
-
-```bash
-sudo apt-get install strace
-```
-
-Then record a run using syscall-backed attribution and open the final graph:
-
-```bash
-execweave record --backend strace --open -- claude
-```
-
-`execweave-claude-record` with `--backend auto` also prefers `strace` on Linux when it is available.
 
 Other examples:
 
@@ -127,226 +39,181 @@ execweave live --open -- opencode
 execweave record --open -- python my_agent.py
 ```
 
-Choose an explicit artifact directory:
-
-```bash
-execweave live --output-dir my-live-run --open -- claude
-execweave record --output-dir my-run --open -- claude
-execweave-claude-record --output-dir my-claude-run --open -- claude
-```
-
-ExecWeave refuses to silently overwrite existing non-empty artifacts.
-
-## Current status
-
-ExecWeave is currently **v0.4.0**.
-
-### Phase 1 — Runtime Collection
-
-**Complete for the Linux reference path and cross-platform portable fallback.**
-
-- graph-ready JSONL event stream
-- monotonic per-run sequence numbers
-- root and descendant process capture
-- Linux syscall-backed short-lived process capture
-- Linux process-attributed file open/create/delete/rename evidence
-- Linux IPv4/IPv6/Unix-socket connection evidence
-- preservation of asynchronous/failed connection attempts
-- psutil/watchdog portable fallback on Linux, macOS, and Windows
-- explicit causal vs non-causal/session-observation semantics
-- event-stream validation
-- backend diagnostics and auto-selection
-- benchmark harness and cross-platform CI configuration
-
-### Phase 2 — Execution Graph
-
-**Core materialization and query layer implemented.**
-
-- validated JSONL → graph JSON
-- node deduplication by stable entity ID
-- repeated edge aggregation
-- first/last temporal metadata
-- supporting event IDs
-- causality preservation
-- graph summary
-- graph filtering
-- directed path queries
-- evidence-preserving N-hop focused subgraphs
-- large-run graph condensation for repetitive leaf resources
-- optional exact expansion payload for condensed clusters
-
-### Phase 3 — Interactive Viewer
-
-**Standalone and live local viewer MVPs implemented.**
-
-- standalone HTML with no CDN or external JavaScript dependency
-- localhost live graph updates using the portable collector
-- evidence-sequence Timeline ↔ Graph playback
-- timeline slider plus Play/Pause replay
-- no future-count leakage: partially observed aggregated edges are marked `partial`
-- progressive cluster expansion for condensed graphs
-- expand one cluster without expanding the rest of the graph
-- collapse expanded clusters back to the compact view
-- 1-hop / 2-hop focused runtime neighborhoods from any visible node
-- focus recomputes under the current timeline / relation / causal evidence constraints
-- browser-local Saved View presets for filters, search, timeline, focus, and expanded clusters
-- Saved View presets store view state only, never graph evidence
-- pan / zoom
-- draggable nodes
-- node and edge inspection
-- node-type / relation / causal-only filters
-- search
-- distinct causal / non-causal observed / inferred edge styling
-- inferred relationships are labeled explicitly instead of looking observed
-- automatic directional layout
-
-The Phase 3 viewer baseline now covers replay, progressive expansion, focused neighborhoods, locally saved views, and explicit inferred-edge semantics.
-
-### Semantic telemetry
-
-**Generic semantic merge, the first native provider adapter, and conservative semantic/runtime correlation are implemented.**
-
-- provider-agnostic semantic JSONL sidecars
-- validated `semantic-merge` into a new event stream without rewriting raw runtime evidence
-- `agent`, `tool_call`, `tool`, `mcp_server`, `model`, and `command` graph entities
-- conservative PID-based `process_reference` resolution only when a source actually provides a PID
-- native Claude Code hooks for session/tool/subagent/model semantics
-- MCP normalization from `mcp__<server>__<tool>` names
-- run-bound `execweave-claude-record` workflow across Linux, macOS, and Windows
-- explicit provider-vs-OS evidence boundary; Claude hooks do not fabricate observed Tool → Process attribution
-- `execweave correlate` for conservative Tool → Process inferred bridges
-- exact executable/process/cmdline identity matching, plus exact non-empty argv-tail fallback for launcher processes
-- unique-candidate requirement; ambiguous and unmatched calls emit no bridge
-- explicit inference method, supporting event IDs, bounded time window, and heuristic confidence metadata
-- inferred bridges always remain `causal: false`
-
-Additional provider adapters, stronger identity resolution, and richer correlation evidence remain future work.
-
-### Security analysis
-
-**First conservative, explainable rule layer implemented.**
-
-- sensitive-file access findings
-- external endpoint findings
-- possible sensitive-file → network prioritization
-- explicit `data_flow_proven: false`
-- explicit `exfiltration_proven: false`
-
-ExecWeave does not turn co-occurrence into a data-flow claim.
-
-## Advanced manual workflow
-
-The one-command `live`, `record`, and Claude-specific record workflows are recommended. Each stage is also available separately.
-
-```bash
-execweave doctor
-execweave run --output run.jsonl -- claude
-execweave validate run.jsonl
-execweave graph run.jsonl --output run.graph.json
-execweave view run.graph.json --output run.html --open
-```
-
-### Merge a semantic sidecar manually
-
-```bash
-execweave semantic-merge run.jsonl semantic.jsonl \
-  --output run.semantic.jsonl
-execweave validate run.semantic.jsonl
-execweave graph run.semantic.jsonl \
-  --output run.semantic.graph.json
-execweave view run.semantic.graph.json \
-  --output run.semantic.html \
-  --open
-```
-
-The raw runtime stream and semantic sidecar remain unchanged. See [`docs/semantic-telemetry.md`](docs/semantic-telemetry.md) for the generic contract.
-
-### Correlate a semantic tool call with runtime process evidence
-
-```bash
-execweave correlate run.semantic.jsonl \
-  --output run.correlated.jsonl
-execweave graph run.correlated.jsonl \
-  --output run.correlated.graph.json
-execweave view run.correlated.graph.json \
-  --output run.correlated.html \
-  --open
-```
-
-This stage derives a new stream; it does not rewrite the input evidence. A `CORRELATED_WITH_PROCESS` edge means “the bounded evidence supports one unique candidate under the declared heuristic,” not “the provider supplied this PID” and not “causality was proven.”
-
-### Focus on one runtime neighborhood
-
-Extract a real graph artifact around one or more exact node IDs:
-
-```bash
-execweave graph-focus run.graph.json PROCESS_NODE_ID \
-  --hops 2 \
-  --direction both \
-  --causal-only \
-  --output focused.graph.json
-
-execweave view focused.graph.json \
-  --output focused.html \
-  --open
-```
-
-`--direction` accepts `in`, `out`, or `both`. `--relation` can be repeated to restrict traversal to selected relationship types. Filters are applied **before** traversal, and `graph-focus` only copies existing nodes and evidence edges; it never invents a shortcut or inferred causal relationship.
-
-The standalone Viewer provides the same idea interactively: click a node and choose **Focus 1 hop** or **Focus 2 hops**. **Clear focus** restores the current full filtered graph.
-
-### Condense a large graph
-
-Long agent runs can touch hundreds or thousands of low-value leaf files. Collapse repetitive file/directory/executable leaves while preserving processes, agents, sessions, sockets, and network endpoints:
-
-```bash
-execweave graph-condense run.graph.json \
-  --output run.compact.graph.json \
-  --threshold 8
-```
-
-A cluster is only created for equivalent **leaf** resources with one incoming relationship and no outgoing behavior.
-
-The default output stays truly compact. If you want the Viewer to expand clusters on demand, explicitly embed the original collapsed evidence:
-
-```bash
-execweave graph-condense run.graph.json \
-  --output run.expandable.graph.json \
-  --threshold 8 \
-  --keep-expansion
-
-execweave view run.expandable.graph.json \
-  --output run.expandable.html \
-  --open
-```
-
-Expandable clusters have a dashed outline. Click a cluster, choose **Expand cluster**, and only that cluster is replaced by its original member nodes and evidence edges. **Collapse clusters** restores the compact view.
-
-`--keep-expansion` copies the original observed nodes and edges into an expansion payload. It does not invent new causal relationships.
-
-### Analyze the graph
-
-```bash
-execweave analyze run.graph.json
-```
-
-Save the report too:
-
-```bash
-execweave analyze run.graph.json --output analysis.json
-```
-
-A finding such as:
+The live server binds only to `127.0.0.1` and updates the graph while the command is still running.
 
 ```text
-process
-  ├── OPENED_READ ──→ ~/.ssh/id_ed25519
-  └── CONNECTED_TO ─→ external endpoint
+AI agent / command
+       ↓
+runtime collector
+       ↓
+   events.jsonl
+       ↓
+execution graph
+       ↓
+local browser viewer
 ```
 
-is reported as a **possible sensitive-file-to-network path**, not as proof that the key bytes were transmitted.
+A normal run produces:
 
-## Graph-first event model
+```text
+.execweave/runs/<run-id>/
+├── events.jsonl
+├── graph.json
+└── viewer.html
+```
+
+The current live path intentionally uses the portable collector. Linux `strace` evidence is post-processed after the command exits, so ExecWeave does not present it as live telemetry.
+
+## Native agent integrations
+
+ExecWeave currently has native semantic adapters for **Claude Code** and **OpenAI Codex**.
+
+Provider hooks add logical Agent / Model / Tool / Command evidence. OS collectors independently record what the machine actually observed. ExecWeave does not collapse those two evidence classes into fake causality.
+
+### Claude Code
+
+Generate the hook settings fragment once:
+
+```bash
+execweave-claude-hook --print-config
+```
+
+Merge its `hooks` object into your Claude Code settings, then record one run:
+
+```bash
+execweave-claude-record --open -- claude
+```
+
+When hooks fire, ExecWeave automatically produces runtime, semantic, and conservatively correlated artifacts.
+
+See [`docs/claude-code-hooks.md`](docs/claude-code-hooks.md).
+
+### OpenAI Codex
+
+Generate the supported lifecycle-hook configuration fragment:
+
+```bash
+execweave-codex-hook --print-config
+```
+
+Merge the printed `hooks` object into your Codex `hooks.json`, then run:
+
+```bash
+execweave-codex-record --open -- codex
+```
+
+ExecWeave currently consumes Codex `SessionStart`, `PreToolUse`, and `PostToolUse` lifecycle events. For canonical `Bash` calls, the declared command becomes semantic evidence and can participate in the same conservative Tool → Process correlation used by Claude runs.
+
+`PostToolUse` is deliberately represented as neutral `TOOL_CALL_RETURNED`, not as success or failure, because the current provider payload does not expose a sufficiently reliable outcome signal for that claim.
+
+Codex lifecycle hooks are still evolving. Some `codex exec` and Windows execution paths have had upstream hook-coverage gaps, so the adapter records only the provider hooks actually delivered. The independent OS runtime collector continues to work when provider hooks are absent.
+
+See [`docs/codex-hooks.md`](docs/codex-hooks.md).
+
+## Layered run artifacts
+
+A provider-integrated run can produce:
+
+```text
+.execweave/runs/<run-id>/
+├── events.jsonl              # runtime evidence only
+├── graph.json                # runtime-only graph
+├── viewer.html               # runtime-only viewer
+├── semantic.jsonl            # provider hook evidence only
+├── events.semantic.jsonl     # validated runtime + semantic stream
+├── graph.semantic.json       # runtime + semantic graph
+├── viewer.semantic.html      # runtime + semantic viewer
+├── events.correlated.jsonl   # derived stream
+├── graph.correlated.json     # inferred bridges + correlation metadata
+└── viewer.correlated.html    # correlation-aware viewer
+```
+
+Raw runtime and provider sidecars remain separate. Correlation derives a new stream rather than rewriting observed evidence.
+
+## Tool → Process correlation
+
+A provider may tell ExecWeave:
+
+```text
+tool_call --DECLARED_COMMAND--> command
+```
+
+while OS telemetry independently observes processes. ExecWeave may derive:
+
+```text
+tool_call --CORRELATED_WITH_PROCESS--> process
+```
+
+only when the existing bounded matcher finds one uniquely supported candidate.
+
+Every bridge remains:
+
+```text
+inferred: true
+causal: false
+```
+
+Ambiguous, unmatched, compound, shell-builtin, or otherwise unsupported calls produce no bridge.
+
+The correlated Viewer includes a **Correlation Summary** with:
+
+- matched
+- ambiguous
+- no match
+- unsupported
+- considered tool calls
+- correlation window
+
+So a missing edge does not silently mean “nothing happened”; it may mean ExecWeave intentionally refused to infer a relationship from insufficient evidence.
+
+## Interactive Viewer
+
+The standalone Viewer is local and self-contained — no CDN or external JavaScript dependency is required.
+
+Current baseline includes:
+
+- pan / zoom / draggable nodes
+- node and edge inspection
+- node-type and relation filters
+- causal-only filter
+- **observed only** filter
+- search
+- evidence-sequence Timeline ↔ Graph replay
+- Play/Pause playback
+- progressive cluster expansion
+- 1-hop / 2-hop focused neighborhoods
+- browser-local Saved Views
+- explicit observed / non-causal / inferred edge styling
+- correlation summary for correlated graphs
+
+**Observed only** removes `inferred: true` relationships before focus traversal and layout, rather than merely hiding purple lines after the fact.
+
+Saved Views store UI state only; they do not copy graph evidence into browser storage.
+
+## Runtime evidence
+
+### Portable backend
+
+The portable collector uses `psutil` and `watchdog` on Linux, macOS, and Windows. It is also the current live-graph backend.
+
+It records process lineage and process-level network observations. Portable filesystem watching is session-correlated rather than process-attributed, and short-lived processes can be missed between polling intervals.
+
+### Linux `strace` backend
+
+On Debian/Ubuntu:
+
+```bash
+sudo apt-get install strace
+execweave record --backend strace --open -- claude
+```
+
+The Linux reference backend follows descendants and converts syscall evidence into process-attributed process, filesystem, and network events.
+
+`execweave-claude-record --backend auto` and `execweave-codex-record --backend auto` prefer `strace` on Linux when available.
+
+Future native collectors remain planned for Linux eBPF, Windows ETW, and macOS Endpoint Security.
+
+## Graph-first evidence model
 
 Every observation is represented as:
 
@@ -362,88 +229,58 @@ process --SPAWNED--> process
 process --EXECUTED--> executable
 process --OPENED_READ--> file
 process --OPENED_WRITE--> file
-process --DELETED--> file
 process --CONNECTED_TO--> network_endpoint
-process --CONNECT_ATTEMPTED--> network_endpoint
 ```
 
 Semantic examples:
 
 ```text
+agent --USED_MODEL--> model
 agent --REQUESTED_TOOL_CALL--> tool_call
 tool_call --USES_TOOL--> tool
 tool_call --DECLARED_COMMAND--> command
-tool_call --VIA_MCP--> mcp_server
 ```
 
-Derived correlation example:
+Derived example:
 
 ```text
 tool_call --CORRELATED_WITH_PROCESS--> process
 ```
 
-The derived edge is explicitly inferred and non-causal; it is not merged into the observed evidence class.
-
-Repeated evidence is aggregated. If one process opens the same file 17 times, the graph stores one relationship with `count = 17` instead of 17 overlapping lines.
+Repeated evidence is aggregated. If one process opens the same file 17 times, the graph stores one relationship with `count = 17` instead of drawing 17 overlapping lines.
 
 ## No fake causality
 
-Linux syscall-backed evidence can produce:
+ExecWeave deliberately distinguishes:
 
-```text
-process --OPENED_WRITE--> file
+- **observed causal evidence** — e.g. syscall-attributed process actions
+- **observed non-causal/session evidence** — e.g. portable filesystem changes
+- **provider semantic evidence** — what the agent/tool layer reports
+- **inferred relationships** — conservative bridges derived from multiple evidence sources
+
+Provider hooks do not currently provide the child OS PID needed to prove Tool → Process attribution. Temporal proximity alone is insufficient. Ambiguity produces no edge.
+
+Likewise, a process reading a sensitive file and later connecting to a network endpoint is not proof that those bytes were transmitted.
+
+## Security analysis
+
+ExecWeave includes an initial conservative analysis layer:
+
+```bash
+execweave analyze run.graph.json
+execweave analyze run.graph.json --output analysis.json
 ```
 
-with:
+It can flag sensitive-file access, external endpoints, and possible sensitive-file → network paths while explicitly preserving:
 
 ```json
 {
-  "attribution": "syscall",
-  "causal": true
+  "data_flow_proven": false,
+  "exfiltration_proven": false
 }
 ```
 
-The portable filesystem watcher can only prove:
-
-```text
-session --OBSERVED_FILE_CHANGE--> file
-```
-
-and therefore marks it `causal: false`.
-
-Provider hooks are also kept distinct from OS attribution. A Claude hook can prove that a logical tool invocation was requested, but without a provider-supplied PID it does not prove which exact process implemented that tool call.
-
-The optional correlation stage may derive a unique candidate from bounded exact evidence, but the resulting edge stays `inferred: true` and `causal: false`. Temporal proximity alone is insufficient, ambiguity produces no edge, and the confidence field is a heuristic score rather than a probability.
-
-Same-process file/network activity is not presented as byte-level data flow.
-
-## Backends
-
-### `strace` — Linux reference backend
-
-The Linux reference backend follows descendants with `strace -ff` and converts process, filesystem, and network syscall evidence into graph-ready events.
-
-Raw trace files are removed after parsing unless explicitly retained:
-
-```bash
-execweave run --keep-native-trace -- claude
-```
-
-### `portable` — cross-platform fallback and live backend
-
-The portable backend uses psutil and watchdog on Linux, macOS, and Windows. It is also the current live-graph backend because it emits observations while the command is running.
-
-Its limitations remain explicit: filesystem changes are session-correlated rather than process-attributed, and very short-lived processes can be missed between polling intervals.
-
-Future native collectors are planned for Linux eBPF, Windows ETW, and macOS Endpoint Security.
-
-## Event-stream integrity
-
-`execweave validate` checks valid JSONL, one session ID, unique event IDs, contiguous sequence numbers, timestamps, entity fields, and completed session lifecycle by default.
-
-ExecWeave also rejects accidental reuse of non-empty event/graph/viewer outputs rather than silently mixing runs.
-
-## Graph queries
+## Graph operations
 
 ```bash
 execweave graph-summary run.graph.json
@@ -452,107 +289,56 @@ execweave graph-focus run.graph.json NODE_ID --hops 2 --output focused.graph.jso
 execweave path run.graph.json SOURCE_NODE_ID TARGET_NODE_ID --causal-only
 ```
 
-See [`docs/phase-2-execution-graph.md`](docs/phase-2-execution-graph.md) for the graph contract.
-
-## Interactive viewer
+Large repetitive leaf resources can be condensed:
 
 ```bash
-execweave view run.graph.json --output run.html --open
-execweave live --open -- claude
+execweave graph-condense run.graph.json \
+  --output run.compact.graph.json \
+  --threshold 8
 ```
 
-The standalone viewer contains an **Evidence sequence** slider. Drag it backward to inspect an earlier graph state or press **Play** to replay the run. An edge is introduced only after its `first_sequence`; if an aggregated relationship has later evidence that has not happened yet, the Viewer labels it `partial` instead of exposing the final count early.
+Add `--keep-expansion` if you want the Viewer to restore original cluster members on demand.
 
-Causal observed, non-causal observed, and inferred relationships use distinct edge styles. Inferred edges are labeled `· inferred`; selecting one exposes its inference method, confidence range, and supporting event IDs from the graph metadata. The Viewer never upgrades an inferred relationship into observed or causal evidence.
+## Current status
 
-Click a node to focus on its 1-hop or 2-hop runtime neighborhood. Focus follows only evidence allowed by the current timeline, relation, and causal filters.
+ExecWeave is currently **v0.4.0** and under active development.
 
-Use **Save view** to persist the current node/relation/causal filters, search text, timeline position, focus, and expanded clusters in browser-local storage. Saved views contain only UI state — not graph nodes, edges, event evidence, file contents, or prompts. If browser storage is unavailable, the Viewer safely keeps presets only for the current page session.
+Implemented baseline:
 
-Useful live options:
+- cross-platform portable runtime collection
+- Linux syscall-backed reference collection
+- validated append-only JSONL evidence stream
+- execution-graph materialization and queries
+- standalone and live local Viewer
+- Timeline replay and focused neighborhoods
+- graph condensation and progressive expansion
+- Saved Views
+- native Claude Code semantic adapter + run-bound recorder
+- native OpenAI Codex semantic adapter + run-bound recorder
+- conservative Tool → Process correlation
+- correlation metadata and Viewer summary
+- explainable initial security-analysis rules
+- Ubuntu / macOS / Windows CI across Python 3.10 and 3.12
 
-```bash
-execweave live --port 8765 --open -- claude
-execweave live --linger 10 --open -- claude
-execweave live --no-files --open -- claude
-```
+Still ahead:
 
-The live HTTP server binds only to `127.0.0.1`. It is not exposed to the LAN by default.
+- Linux eBPF
+- Windows ETW
+- macOS Endpoint Security
+- more agent/provider adapters
+- stronger process/tool identity evidence
+- richer MCP normalization
+- performance and long-run scalability work
 
 ## Privacy
 
 ExecWeave is **local-first**.
 
-- runtime events stay local by default
-- graph construction is local
-- semantic sidecars and merged semantic graphs stay local by default
-- the Claude adapter does not persist `Write`/`Edit` content or `PostToolUse.tool_response`
-- declared shell commands are bounded but remain potentially sensitive metadata
-- standalone viewer data stays in the generated HTML
-- saved view presets contain UI state only and stay browser-local when storage is available
-- live serving binds to localhost only
-- no external CDN is required
-- file contents are not traced by the runtime collector
-- `read()` / `write()` byte buffers are not collected
-- raw Linux syscall traces are deleted after parsing unless explicitly retained
+By default, runtime events, semantic sidecars, graphs, reports, and Viewers stay on the local machine. The standalone Viewer does not require an external CDN.
 
-Runtime and semantic metadata can still include sensitive paths, commands, endpoints, and provider identifiers. Review artifacts before sharing them.
+ExecWeave does not intentionally capture file contents or raw read/write byte buffers. Native semantic adapters also avoid prompt/transcript contents by default, but commands, paths, endpoint metadata, session identifiers, and other runtime metadata can still be sensitive.
 
-## Roadmap
-
-### Phase 1
-
-- [x] Runtime collection contract
-- [x] Linux reference backend
-- [x] Portable fallback
-- [x] Causality semantics
-- [x] Event validation
-- [x] Diagnostics / benchmark / CI configuration
-- [ ] Linux eBPF backend
-- [ ] Windows ETW backend
-- [ ] macOS Endpoint Security backend
-
-### Phase 2
-
-- [x] Event → Graph materialization
-- [x] Node deduplication
-- [x] Edge aggregation
-- [x] Temporal metadata
-- [x] Summary / filter / path query
-- [x] N-hop focused graph artifacts
-- [x] Large-run leaf-resource condensation
-- [x] Optional exact expansion evidence for clusters
-- [ ] Stronger entity resolution
-- [ ] Time-window graph snapshots
-- [ ] Compact evidence indexing for very large runs
-
-### Phase 3
-
-- [x] Standalone local viewer MVP
-- [x] Pan / zoom / drag / search / details
-- [x] Portable live graph updates during execution
-- [x] Initial large-graph condensation
-- [x] Timeline ↔ Graph synchronization
-- [x] Progressive cluster expansion in the viewer
-- [x] Focused 1-hop / 2-hop runtime neighborhoods
-- [x] Browser-local Saved View presets
-- [x] Explicit inferred-edge visualization
-
-### Semantic / security / research layers
-
-- [x] Initial explainable rule analysis
-- [x] Generic Agent / Tool / MCP semantic telemetry contract
-- [x] Native Claude Code hook adapter
-- [x] Run-bound Claude runtime + semantic recording
-- [x] Explicit confidence-bearing semantic/runtime correlation v0.1
-- [ ] Additional provider adapters
-- [ ] Stronger cross-provider identity resolution
-- [ ] credential and secret entities
-- [ ] byte-level data-flow / taint tracking
-- [ ] anomaly detection
-- [ ] attack-path ranking
-- [ ] execution replay
-- [ ] runtime allow / warn / block policy
+Review artifacts before sharing them.
 
 ## Documentation
 
@@ -561,33 +347,30 @@ Runtime and semantic metadata can still include sensitive paths, commands, endpo
 - [`Live Graph`](docs/live-graph.md)
 - [`Semantic Telemetry`](docs/semantic-telemetry.md)
 - [`Claude Code Hooks`](docs/claude-code-hooks.md)
+- [`OpenAI Codex Hooks`](docs/codex-hooks.md)
 - [`Security Analysis`](docs/security-analysis.md)
 
 ## Contributing
 
 **Contributions are very welcome.**
 
-High-impact areas include Linux eBPF, Windows ETW, macOS Endpoint Security, graph entity resolution, additional Agent/Tool/MCP provider adapters, stronger semantic/runtime correlation evidence, OpenTelemetry/MCP integrations, privacy/redaction, reproducible agent workloads, and performance evaluation.
+Areas where help is especially useful:
 
-For a new collector or architecture change, open an issue first and describe the telemetry source, privilege requirements, expected graph relationships, and causal guarantees.
+- Linux eBPF
+- Windows ETW
+- macOS Endpoint Security
+- agent / tool / MCP provider adapters
+- process and entity resolution
+- provenance and correlation methods
+- graph visualization and large-run UX
+- privacy / redaction
+- testing and performance evaluation
+- documentation
 
-> **Early contributors are especially welcome.**
+Open an issue, propose an architecture change, add an integration, or submit a pull request.
 
-## Design principles
-
-- **Local first** — runtime evidence stays local by default.
-- **Runtime truth over assumptions** — prefer OS evidence over framework claims.
-- **Graph over log** — relationships are first-class data.
-- **Framework agnostic** — no dependency on one agent/model provider.
-- **Explainable attribution** — every edge should say why it exists.
-- **No fake causality** — temporal correlation is not causal proof.
+> **Let's make AI-agent execution understandable.**
 
 ## License
 
 See [`LICENSE`](LICENSE).
-
----
-
-**Open an issue. Propose an idea. Submit a pull request. Build an integration. Challenge the architecture.**
-
-> **Let's make AI-agent execution understandable.**
