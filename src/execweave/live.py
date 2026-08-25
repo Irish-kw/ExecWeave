@@ -12,10 +12,16 @@ from socketserver import TCPServer
 from uuid import uuid4
 
 from .backends import create_collector
-from .graph import build_execution_graph, write_execution_graph
+from .graph import GRAPH_SCHEMA_VERSION, GraphAccumulator, build_execution_graph, write_execution_graph
 from .sink import JsonlSink
 from .validate import validate_event_stream
-from .viewer import render_graph_html, write_graph_html
+from .viewer import (
+    VIEWER_MAX_DOM_ELEMENTS,
+    VIEWER_MAX_EDGES,
+    VIEWER_MAX_NODES,
+    render_graph_html,
+    write_graph_html,
+)
 
 
 _LIVE_HTML = r"""<!doctype html>
@@ -98,19 +104,52 @@ class LiveResult:
         }
 
 
+def _within_live_payload_budget(node_count: int, edge_count: int) -> bool:
+    estimated_dom = node_count * 4 + edge_count * 3
+    return (
+        node_count <= VIEWER_MAX_NODES
+        and edge_count <= VIEWER_MAX_EDGES
+        and estimated_dom <= VIEWER_MAX_DOM_ELEMENTS
+    )
+
+
+def _compact_live_graph(graph: dict[str, object]) -> dict[str, object]:
+    return {
+        "graph_schema_version": graph.get("graph_schema_version", GRAPH_SCHEMA_VERSION),
+        "session_id": graph.get("session_id", "unknown"),
+        "source_path": graph.get("source_path"),
+        "source_schema_versions": graph.get("source_schema_versions", []),
+        "event_count": graph.get("event_count", 0),
+        "node_count": graph.get("node_count", 0),
+        "edge_count": graph.get("edge_count", 0),
+        "nodes": [],
+        "edges": [],
+        "live_payload_compact": True,
+    }
+
+
 class _LiveState:
     def __init__(self, session_id: str, event_path: Path) -> None:
         self.session_id = session_id
         self.event_path = event_path
         self._lock = threading.Lock()
+        self._accumulator = GraphAccumulator(
+            session_id=session_id,
+            source_path=event_path,
+            retain_event_ids=False,
+        )
+        self._read_offset = 0
+        self._pending_bytes = b""
         self._last_graph: dict[str, object] = self._empty_graph()
         self._finished = False
         self._final_html: str | None = None
 
     def _empty_graph(self) -> dict[str, object]:
         return {
-            "graph_schema_version": "0.1",
+            "graph_schema_version": GRAPH_SCHEMA_VERSION,
             "session_id": self.session_id,
+            "source_path": str(self.event_path.resolve()),
+            "source_schema_versions": [],
             "event_count": 0,
             "node_count": 0,
             "edge_count": 0,
@@ -118,23 +157,87 @@ class _LiveState:
             "edges": [],
         }
 
-    def snapshot(self) -> dict[str, object]:
-        if self.event_path.exists() and self.event_path.stat().st_size > 0:
+    def _reset_incremental_state_locked(self) -> None:
+        self._accumulator = GraphAccumulator(
+            session_id=self.session_id,
+            source_path=self.event_path,
+            retain_event_ids=False,
+        )
+        self._read_offset = 0
+        self._pending_bytes = b""
+        self._last_graph = self._empty_graph()
+
+    def _snapshot_from_accumulator_locked(self) -> dict[str, object]:
+        if _within_live_payload_budget(
+            self._accumulator.node_count,
+            self._accumulator.edge_count,
+        ):
+            return self._accumulator.to_dict()
+        return _compact_live_graph(
+            {
+                "graph_schema_version": GRAPH_SCHEMA_VERSION,
+                "session_id": self.session_id,
+                "source_path": self._accumulator.source_path,
+                "source_schema_versions": sorted(self._accumulator.source_schema_versions),
+                "event_count": self._accumulator.event_count,
+                "node_count": self._accumulator.node_count,
+                "edge_count": self._accumulator.edge_count,
+            }
+        )
+
+    def _refresh_incremental_locked(self) -> None:
+        try:
+            file_size = self.event_path.stat().st_size
+        except OSError:
+            return
+        if file_size < self._read_offset:
+            self._reset_incremental_state_locked()
+        if file_size <= self._read_offset:
+            return
+
+        try:
+            with self.event_path.open("rb") as handle:
+                handle.seek(self._read_offset)
+                chunk = handle.read()
+        except OSError:
+            return
+        if not chunk:
+            return
+        self._read_offset += len(chunk)
+
+        buffered = self._pending_bytes + chunk
+        lines = buffered.split(b"\n")
+        self._pending_bytes = lines.pop()
+        applied = False
+        for raw_line in lines:
+            if not raw_line.strip():
+                continue
             try:
-                graph = build_execution_graph(self.event_path, allow_incomplete=True).to_dict()
-            except (OSError, ValueError, json.JSONDecodeError):
-                graph = None
-            if graph is not None:
-                with self._lock:
-                    self._last_graph = graph
+                event = json.loads(raw_line.decode("utf-8"))
+                self._accumulator.apply(event)
+            except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
+                continue
+            applied = True
+        if applied:
+            self._last_graph = self._snapshot_from_accumulator_locked()
+
+    def snapshot(self) -> dict[str, object]:
         with self._lock:
+            if not self._finished:
+                self._refresh_incremental_locked()
             payload = dict(self._last_graph)
             payload["live_finished"] = self._finished
             return payload
 
     def finish(self, graph: dict[str, object]) -> None:
+        node_count = int(graph.get("node_count", 0) or 0)
+        edge_count = int(graph.get("edge_count", 0) or 0)
         with self._lock:
-            self._last_graph = graph
+            self._last_graph = (
+                dict(graph)
+                if _within_live_payload_budget(node_count, edge_count)
+                else _compact_live_graph(graph)
+            )
             self._final_html = render_graph_html(graph)
             self._finished = True
 
