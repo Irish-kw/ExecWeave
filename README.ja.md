@@ -52,6 +52,7 @@ ExecWeave は現在 **v0.4.0** です。
 ### Phase 2
 - [x] Event → Graph
 - [x] deduplication / aggregation / query
+- [x] N-hop focused graph artifact
 - [x] large-run leaf condensation
 - [x] optional exact cluster expansion evidence
 - [ ] stronger entity resolution
@@ -65,7 +66,10 @@ ExecWeave は現在 **v0.4.0** です。
 - [x] Timeline ↔ Graph synchronization
 - [x] evidence-sequence slider + Play/Pause replay
 - [x] progressive cluster expansion
-- [ ] saved filters / focused subgraphs
+- [x] 1-hop / 2-hop focused runtime neighborhood
+- [x] browser-local Saved View presets
+
+Phase 3 の Viewer baseline は replay、必要時の cluster expansion、focused neighborhood、ローカル Saved View を含みます。
 
 ### Security Analysis
 
@@ -97,7 +101,23 @@ execweave graph run.jsonl --output run.graph.json
 execweave view run.graph.json --output run.html --open
 ```
 
-大きな run：
+### Runtime neighborhood に focus する
+
+```bash
+execweave graph-focus run.graph.json PROCESS_NODE_ID \
+  --hops 2 \
+  --direction both \
+  --causal-only \
+  --output focused.graph.json
+
+execweave view focused.graph.json --output focused.html --open
+```
+
+`--direction` は `in`、`out`、`both` を指定できます。`--relation` を複数回使って traversal edge を限定できます。制約は traversal **前**に適用され、`graph-focus` は既存の node と evidence edge だけをコピーします。Shortcut や新しい causal relationship は生成しません。
+
+Viewer でも node をクリックして **Focus 1 hop** / **Focus 2 hops** を選択できます。**Clear focus** で現在の filter 条件下の全 Graph に戻ります。
+
+### Large Graph condensation
 
 ```bash
 execweave graph-condense run.graph.json \
@@ -107,9 +127,7 @@ execweave graph-condense run.graph.json \
 
 single incoming relationship を持ち downstream behavior のない file/directory/executable leaf のみを collapse します。Process、Agent、Session、Socket、Network Endpoint はデフォルトでは collapse しません。
 
-### Progressive cluster expansion
-
-通常の `graph-condense` は compact のままです。Viewer で cluster を必要なときだけ展開するには：
+Viewer で cluster を必要なときだけ展開するには：
 
 ```bash
 execweave graph-condense run.graph.json \
@@ -132,7 +150,13 @@ Standalone Viewer は Graph edge の `first_sequence` / `last_sequence` を使�
 
 Aggregated edge に現在の sequence より後の evidence が残っている場合は `partial` と表示し、最終 `count` を過去の時点へ先取りして表示しません。
 
-Timeline は node type、relation、causal-only、search filter、progressive cluster expansion と組み合わせて使用できます。
+Timeline は node type、relation、causal-only、search、focused neighborhood、progressive cluster expansion と組み合わせて使用できます。
+
+## Saved Views
+
+Viewer の **Save view** は現在の node/relation/causal filter、search、timeline position、focus、expanded clusters を保存します。
+
+Preset はデフォルトで browser-local storage に保存され、**UI state のみを保持します。Graph node、edge、event evidence、file content、prompt は保存しません**。Local storage が利用できない場合は、現在の page session 内だけの preset に安全にフォールバックします。
 
 ## Graph-first event model
 
@@ -168,7 +192,7 @@ Live server は `127.0.0.1` のみに bind します。詳細は [`docs/live-gra
 
 ## Privacy
 
-ExecWeave は **local-first** です。runtime event、Graph、Viewer はデフォルトでローカルに残り、外部 CDN は不要です。file content や `read()` / `write()` byte buffer は収集しません。
+ExecWeave は **local-first** です。runtime event、Graph、Viewer はデフォルトでローカルに残ります。Saved View は UI state だけを保存します。外部 CDN は不要で、file content や `read()` / `write()` byte buffer は収集しません。
 
 ## Documentation
 
@@ -179,7 +203,7 @@ ExecWeave は **local-first** です。runtime event、Graph、Viewer はデフ�
 
 ## Contributing
 
-Linux eBPF、Windows ETW、macOS Endpoint Security、Graph entity resolution、live/large-graph visualization、OpenTelemetry/MCP、privacy/redaction、testing、performance evaluation、翻訳の contribution を歓迎します。
+Linux eBPF、Windows ETW、macOS Endpoint Security、Graph entity resolution、Agent/Tool/MCP semantic telemetry、OpenTelemetry/MCP、privacy/redaction、testing、performance evaluation、翻訳の contribution を歓迎します。
 
 `README.md` が canonical English source です。
 
