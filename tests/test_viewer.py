@@ -112,6 +112,7 @@ def test_viewer_contains_focus_filters() -> None:
     assert 'id="type-filter"' in html
     assert 'id="relation-filter"' in html
     assert 'id="causal-filter"' in html
+    assert 'id="observed-only-filter"' in html
     assert "All node types" in html
     assert "All relations" in html
     assert "applyGraphFilters" in html
@@ -133,6 +134,8 @@ def test_viewer_contains_saved_view_presets() -> None:
     assert 'id="save-preset"' in html
     assert 'id="delete-preset"' in html
     assert "snapshotView" in html
+    assert "observed_only:observedOnlyFilter.checked" in html
+    assert "state.observed_only===true" in html
     assert "loadPresets" in html
     assert "localStorage" in html
     assert "Graph evidence is never copied into preset storage" in html
@@ -159,6 +162,15 @@ def test_viewer_distinguishes_inferred_edges_from_observed_edges() -> None:
     assert "· inferred" in html
     assert '"inferred":true' in html
     assert '"causal":false' in html
+
+
+def test_viewer_observed_only_filter_removes_inferred_before_focus() -> None:
+    html = render_graph_html(_inferred_graph())
+    assert "observed only" in html
+    assert "observedOnlyFilter.checked" in html
+    assert "(!observedOnly||e.inferred!==true)" in html
+    assert "const eligible=evidenceEdges(currentNodes,currentEdges)" in html
+    assert "removes derived inferred relationships before focus traversal" in html
 
 
 def test_viewer_contains_progressive_cluster_expansion() -> None:
