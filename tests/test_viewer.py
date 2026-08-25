@@ -76,6 +76,42 @@ def _inferred_graph() -> dict:
     }
 
 
+def _identity_graph() -> dict:
+    return {
+        "graph_schema_version": "0.1",
+        "session_id": "s1",
+        "event_count": 3,
+        "node_count": 2,
+        "edge_count": 1,
+        "nodes": [
+            {
+                "id": "inference-request:gateway:litellm:gw-123",
+                "type": "inference_request",
+                "name": "LiteLLM request",
+            },
+            {
+                "id": "inference-request:runtime:vllm:rt-456",
+                "type": "inference_request",
+                "name": "vLLM request",
+            },
+        ],
+        "edges": [
+            {
+                "id": "identity:1",
+                "source": "inference-request:gateway:litellm:gw-123",
+                "target": "inference-request:runtime:vllm:rt-456",
+                "relation": "SAME_INFERENCE_REQUEST",
+                "count": 1,
+                "causal": False,
+                "inferred": False,
+                "identity_exact": True,
+                "identity_methods": ["shared_request_id"],
+                "identity_hashes": ["sha256:test-only"],
+            }
+        ],
+    }
+
+
 def _expandable_graph() -> dict:
     process_id = "process:p1"
     nodes = [{"id": process_id, "type": "process", "name": "python"}]
@@ -171,6 +207,20 @@ def test_viewer_distinguishes_inferred_edges_from_observed_edges() -> None:
     assert "edge.inferred===true" in html
     assert "· inferred" in html
     assert '"inferred":true' in html
+    assert '"causal":false' in html
+
+
+def test_viewer_distinguishes_exact_identity_from_noncausal_and_inferred_edges() -> None:
+    html = render_graph_html(_identity_graph())
+    assert "Exact identity" in html
+    assert ".edge.identity" in html
+    assert "edge.identity_exact===true" in html
+    assert "· exact identity" in html
+    assert "explicit shared identity evidence" in html
+    assert "non-causal and not inferred" in html
+    assert "Exact identity remains visible" in html
+    assert '"identity_exact":true' in html
+    assert '"inferred":false' in html
     assert '"causal":false' in html
 
 
