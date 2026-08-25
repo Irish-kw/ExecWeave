@@ -28,6 +28,35 @@ execweave live --open -- claude
 
 Live MVP는 `127.0.0.1`에만 bind하며 portable collector를 사용합니다. 종료 후에도 `events.jsonl`, `graph.json`, `viewer.html`을 저장합니다.
 
+### Claude Code: runtime + semantic graph
+
+ExecWeave에는 Claude Code native hook adapter가 있어 Agent / Tool / MCP / Model의 logical evidence를 runtime evidence와 같은 run에 저장할 수 있습니다.
+
+```bash
+execweave-claude-hook --print-config
+execweave-claude-record --open -- claude
+```
+
+Semantic hook이 실행되면 같은 run directory에 runtime-only, semantic-only, merged artifacts를 분리해 저장합니다. `semantic.jsonl`, `events.semantic.jsonl`, `graph.semantic.json`, `viewer.semantic.html`이 생성됩니다.
+
+Claude hook은 logical tool call을 알 수 있지만 실제 Bash child PID를 제공하지 않습니다. 따라서 ExecWeave는 Tool → Process를 직접 observed 또는 causal edge로 가장하지 않습니다.
+
+보수적인 bridge가 필요할 때는 correlation stage를 명시적으로 실행할 수 있습니다.
+
+```bash
+execweave correlate run.semantic.jsonl \
+  --output run.correlated.jsonl
+execweave graph run.correlated.jsonl \
+  --output run.correlated.graph.json
+execweave view run.correlated.graph.json \
+  --output run.correlated.html \
+  --open
+```
+
+`CORRELATED_WITH_PROCESS`는 bounded tool-call window 안에서 후보가 **유일**하고 exact executable / process / cmdline identity evidence가 있을 때만 생성됩니다. macOS Python framework 같은 launcher process의 경우에도 완전히 동일한 non-empty `argv[1:]`만 fallback으로 허용합니다. 후보가 여러 개이거나 match가 없으면 edge를 생성하지 않습니다.
+
+모든 correlation edge는 `inferred: true`, `causal: false`를 유지하고 inference method, supporting event IDs, heuristic confidence를 기록합니다. Confidence는 probability가 아닙니다.
+
 Linux에서 더 강한 syscall-backed attribution을 사용하려면:
 
 ```bash
@@ -68,8 +97,24 @@ ExecWeave는 현재 **v0.4.0**입니다.
 - [x] progressive cluster expansion
 - [x] 1-hop / 2-hop focused runtime neighborhood
 - [x] browser-local Saved View presets
+- [x] causal observed / non-causal observed / inferred 독립 styling
+- [x] inferred edge에 `· inferred` 명시
 
-Phase 3 Viewer baseline에는 replay, 필요 시 cluster expansion, focused neighborhood, 로컬 Saved View가 포함됩니다.
+### Semantic Telemetry
+
+- [x] provider-agnostic semantic JSONL sidecar
+- [x] raw runtime evidence를 변경하지 않는 validated `semantic-merge`
+- [x] `agent` / `tool_call` / `tool` / `mcp_server` / `model` / `command` entities
+- [x] provider가 PID를 실제로 제공할 때만 conservative `process_reference` resolution
+- [x] Claude Code native session/tool/subagent/model hooks
+- [x] MCP name normalization
+- [x] Linux / macOS / Windows의 run-bound `execweave-claude-record`
+- [x] conservative Tool → Process correlation v0.1
+- [x] unique-candidate hard requirement; ambiguous / no-match에서는 edge를 생성하지 않음
+- [x] inference method / supporting event IDs / bounded time window / heuristic confidence
+- [x] correlation edge는 항상 `causal: false`
+
+추가 provider adapter, 더 강한 identity resolution, 더 풍부한 correlation evidence는 향후 작업입니다.
 
 ### Security Analysis
 
@@ -100,6 +145,24 @@ execweave validate run.jsonl
 execweave graph run.jsonl --output run.graph.json
 execweave view run.graph.json --output run.html --open
 ```
+
+### Semantic sidecar merge
+
+```bash
+execweave semantic-merge run.jsonl semantic.jsonl \
+  --output run.semantic.jsonl
+```
+
+### Semantic tool call과 runtime process evidence correlate
+
+```bash
+execweave correlate run.semantic.jsonl \
+  --output run.correlated.jsonl
+execweave graph run.correlated.jsonl \
+  --output run.correlated.graph.json
+```
+
+이 단계는 새로운 derived stream을 만들며 input evidence를 수정하지 않습니다. `CORRELATED_WITH_PROCESS`는 bounded evidence가 정해진 heuristic 아래에서 하나의 후보만 지지한다는 의미이며 provider가 PID를 제공했다는 뜻도, causality가 증명되었다는 뜻도 아닙니다.
 
 ### Runtime neighborhood에 focus하기
 
@@ -171,6 +234,9 @@ session --LAUNCHED--> process
 process --SPAWNED--> process
 process --OPENED_READ--> file
 process --CONNECTED_TO--> network_endpoint
+agent --REQUESTED_TOOL_CALL--> tool_call
+tool_call --DECLARED_COMMAND--> command
+tool_call --CORRELATED_WITH_PROCESS--> process   # inferred only
 ```
 
 Repeated evidence는 같은 edge로 aggregation되며 `count`가 증가합니다.
@@ -179,7 +245,9 @@ Repeated evidence는 같은 edge로 aggregation되며 `count`가 증가합니다
 
 Linux syscall-backed evidence는 process-level causal edge를 제공할 수 있습니다. portable filesystem watcher는 session-level observation이므로 `causal: false`를 유지합니다.
 
-Temporal correlation은 causal proof가 아니며 file/network activity의 공존도 data-flow proof가 아닙니다.
+Claude hook이 child PID를 제공하지 않으면 semantic evidence를 OS attribution으로 취급하지 않습니다. Correlation stage가 유일한 후보를 찾더라도 edge는 `inferred: true` / `causal: false`를 유지합니다. 단순한 시간적 근접성만으로는 부족하며 ambiguous이면 edge를 생성하지 않습니다.
+
+file/network activity의 공존 역시 byte-level data-flow proof가 아닙니다.
 
 ## Live Graph
 
@@ -192,18 +260,22 @@ Live server는 `127.0.0.1`에만 bind합니다. 자세한 내용은 [`docs/live-
 
 ## Privacy
 
-ExecWeave는 **local-first**입니다. runtime event, Graph, Viewer는 기본적으로 로컬에 남습니다. Saved View는 UI state만 저장합니다. 외부 CDN이 필요하지 않으며 file content나 `read()` / `write()` byte buffer는 수집하지 않습니다.
+ExecWeave는 **local-first**입니다. runtime event, Graph, Viewer, semantic sidecar, merged graph는 기본적으로 로컬에 남습니다. Saved View는 UI state만 저장합니다. 외부 CDN이 필요하지 않으며 file content나 `read()` / `write()` byte buffer는 수집하지 않습니다.
+
+Runtime / semantic metadata에는 민감한 path, command, endpoint, provider identifier가 포함될 수 있습니다. Artifact를 공유하기 전에 확인하세요.
 
 ## Documentation
 
 - [`Phase 1 — Runtime Collection`](docs/phase-1-runtime-collection.md)
 - [`Phase 2 — Execution Graph`](docs/phase-2-execution-graph.md)
 - [`Live Graph`](docs/live-graph.md)
+- [`Semantic Telemetry`](docs/semantic-telemetry.md)
+- [`Claude Code Hooks`](docs/claude-code-hooks.md)
 - [`Security Analysis`](docs/security-analysis.md)
 
 ## Contributing
 
-Linux eBPF, Windows ETW, macOS Endpoint Security, Graph entity resolution, Agent/Tool/MCP semantic telemetry, OpenTelemetry/MCP, privacy/redaction, testing, performance evaluation, 번역 contribution을 환영합니다.
+Linux eBPF, Windows ETW, macOS Endpoint Security, Graph entity resolution, 추가 Agent/Tool/MCP provider adapter, 더 강한 semantic/runtime correlation evidence, OpenTelemetry/MCP, privacy/redaction, testing, performance evaluation, 번역 contribution을 환영합니다.
 
 `README.md`가 canonical English source입니다.
 
