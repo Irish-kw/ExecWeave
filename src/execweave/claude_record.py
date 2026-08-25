@@ -180,9 +180,16 @@ def record_claude_to_viewer(
         max_window_ms=correlation_window_ms,
     )
     correlated_execution_graph = build_execution_graph(correlated_event_stream)
-    write_execution_graph(correlated_execution_graph, correlated_graph)
+    correlation_metadata = {"correlation": correlation_result.to_dict()}
+    write_execution_graph(
+        correlated_execution_graph,
+        correlated_graph,
+        metadata=correlation_metadata,
+    )
+    correlated_graph_payload = correlated_execution_graph.to_dict()
+    correlated_graph_payload["metadata"] = correlation_metadata
     write_graph_html(
-        correlated_execution_graph.to_dict(),
+        correlated_graph_payload,
         correlated_viewer,
         open_browser=open_browser,
     )
