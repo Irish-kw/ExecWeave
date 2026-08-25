@@ -68,7 +68,7 @@ class GraphEdge:
     confidence_semantics: set[str] = field(default_factory=set)
     supporting_event_ids: set[str] = field(default_factory=set)
 
-    def observe(self, event: dict[str, Any]) -> None:
+    def observe(self, event: dict[str, Any], *, retain_event_id: bool = True) -> None:
         self.count += 1
         timestamp = event.get("timestamp")
         if isinstance(timestamp, str):
@@ -83,7 +83,7 @@ class GraphEdge:
                 max(self.last_sequence, sequence) if self.last_sequence is not None else sequence
             )
         event_id = event.get("event_id")
-        if isinstance(event_id, str):
+        if retain_event_id and isinstance(event_id, str):
             self.event_ids.append(event_id)
         event_type = event.get("event_type")
         if isinstance(event_type, str):
@@ -201,6 +201,107 @@ class ExecutionGraph:
 
 def _edge_id(source: str, relation: str, target: str) -> str:
     return f"{source}--{relation}-->{target}"
+
+
+class GraphAccumulator:
+    """Incrementally materialize graph state without retaining raw event objects.
+
+    This is intentionally a small, replaceable seam for live graph maintenance.
+    The canonical final graph builder still validates and materializes the complete
+    event stream independently. ``retain_event_ids=False`` is therefore suitable
+    for disposable live/browser state while preserving explicit inferred support
+    and exact-identity justification fields.
+    """
+
+    def __init__(
+        self,
+        *,
+        session_id: str,
+        source_path: str | Path,
+        retain_event_ids: bool = True,
+    ) -> None:
+        self.session_id = session_id
+        self.source_path = str(Path(source_path).expanduser().resolve())
+        self.retain_event_ids = retain_event_ids
+        self.source_schema_versions: set[str] = set()
+        self.event_count = 0
+        self.nodes: dict[str, GraphNode] = {}
+        self.edges: dict[tuple[str, str, str], GraphEdge] = {}
+
+    @property
+    def node_count(self) -> int:
+        return len(self.nodes)
+
+    @property
+    def edge_count(self) -> int:
+        return len(self.edges)
+
+    def apply(self, event: dict[str, Any]) -> None:
+        if not isinstance(event, dict):
+            raise TypeError("event must be a dictionary")
+        event_session = event.get("session_id")
+        if isinstance(event_session, str) and event_session != self.session_id:
+            raise ValueError(
+                f"event session_id {event_session!r} does not match accumulator {self.session_id!r}"
+            )
+
+        schema_version = event.get("schema_version")
+        if isinstance(schema_version, str) and schema_version:
+            self.source_schema_versions.add(schema_version)
+        self.event_count += 1
+
+        source = event.get("source")
+        target = event.get("target")
+        for entity in (source, target):
+            if not isinstance(entity, dict):
+                continue
+            entity_id = entity.get("id")
+            entity_type = entity.get("type")
+            if not isinstance(entity_id, str) or not isinstance(entity_type, str):
+                continue
+            node = self.nodes.get(entity_id)
+            if node is None:
+                node = GraphNode(
+                    id=entity_id,
+                    type=entity_type,
+                    name=entity.get("name") if isinstance(entity.get("name"), str) else None,
+                )
+                self.nodes[entity_id] = node
+            node.observe(entity, event)
+
+        if not isinstance(source, dict) or not isinstance(target, dict):
+            return
+        source_id = source.get("id")
+        target_id = target.get("id")
+        relation = event.get("relation")
+        if not all(isinstance(value, str) and value for value in (source_id, target_id, relation)):
+            return
+        key = (source_id, relation, target_id)
+        edge = self.edges.get(key)
+        if edge is None:
+            edge = GraphEdge(
+                id=_edge_id(source_id, relation, target_id),
+                source=source_id,
+                target=target_id,
+                relation=relation,
+            )
+            self.edges[key] = edge
+        edge.observe(event, retain_event_id=self.retain_event_ids)
+
+    def to_execution_graph(self) -> ExecutionGraph:
+        return ExecutionGraph(
+            session_id=self.session_id,
+            source_path=self.source_path,
+            source_schema_versions=sorted(self.source_schema_versions),
+            event_count=self.event_count,
+            nodes=sorted(self.nodes.values(), key=lambda node: (node.type, node.id)),
+            edges=sorted(
+                self.edges.values(), key=lambda edge: (edge.source, edge.relation, edge.target)
+            ),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return self.to_execution_graph().to_dict()
 
 
 def _load_events(path: Path) -> list[dict[str, Any]]:
