@@ -8,11 +8,11 @@
   <a href="README.ko.md">한국어</a>
 </p>
 
-**AI Agent があなたのマシン上で実際に何をしたのかを可視化します。**
+**AI エージェントが実際にマシン上で何をしたのかを見る。**
 
-ExecWeave は open-source / local-first の AI Agent runtime observability プロジェクトです。Agent、Tool、Command、Process、File、Network activity を interactive execution graph に変換し、observed evidence と inference を明確に分離します。
+ExecWeave は、AI エージェントの活動をインタラクティブな実行グラフへ変換する、ローカルファーストのオープンソース observability プロジェクトです。観測された evidence と推論された関係を明確に分離します。
 
-> **Event is ground truth. Graph is a materialized view.**
+> **Event is ground truth. The graph is a materialized view.**
 
 ## Quick start
 
@@ -22,21 +22,35 @@ cd ExecWeave
 python -m pip install -e ".[dev]"
 ```
 
-Live Graph:
+任意のコマンドを live で観測：
 
 ```bash
 execweave live --open -- claude
-execweave live --open -- codex
-execweave live --open -- gemini
 ```
 
-Live server は `127.0.0.1` のみに bind します。
+完全な artifact pipeline：
 
-## Native Agent Integrations
+```bash
+execweave record --open -- python my_agent.py
+```
 
-現在の native semantic adapter は **Claude Code、OpenAI Codex、Gemini CLI** の3つです。
+## Evidence layers
 
-Provider hook は Agent/Tool/Command/MCP layer の logical evidence を記録し、OS collector は machine-level runtime evidence を独立して収集します。ExecWeave は両者を fake causality に統合しません。
+ExecWeave は異なる evidence を一つの trace に潰さず、次の層として扱います：
+
+```text
+Agent / IDE semantic evidence
+          ↓
+Inference gateway / routing evidence
+          ↓
+Model runtime / inference-server evidence
+          ↓
+OS runtime evidence: process / file / network
+```
+
+関係を causal とするのは、基礎 telemetry がその主張を直接支える場合だけです。
+
+## Agent / IDE integrations
 
 ### Claude Code
 
@@ -45,18 +59,12 @@ execweave-claude-hook --print-config
 execweave-claude-record --open -- claude
 ```
 
-詳細: [`docs/claude-code-hooks.ja.md`](docs/claude-code-hooks.ja.md)
-
 ### OpenAI Codex
 
 ```bash
 execweave-codex-hook --print-config
 execweave-codex-record --open -- codex
 ```
-
-`SessionStart` / `PreToolUse` / `PostToolUse` を取り込みます。`PostToolUse` は neutral `TOOL_CALL_RETURNED` として扱い、success/failure を勝手に断定しません。
-
-詳細: [`docs/codex-hooks.ja.md`](docs/codex-hooks.ja.md)
 
 ### Gemini CLI
 
@@ -65,87 +73,128 @@ execweave-gemini-hook --print-config
 execweave-gemini-record --open -- gemini
 ```
 
-`SessionStart` / `BeforeTool` / `AfterTool` を取り込みます。`run_shell_command` は declared command evidence を生成し、file tools は declared target path、`mcp_context` は MCP server/tool entities に正規化されます。
+### Cursor
 
-現在の Gemini hook schema には `BeforeTool` と `AfterTool` で共有できる unique tool-call ID がありません。そのため direct identity edge は生成せず、`tool_fingerprint` は diagnostic hint としてのみ保持します。
-
-詳細: [`docs/gemini-hooks.ja.md`](docs/gemini-hooks.ja.md)
-
-## Layered artifacts
-
-Provider-integrated run は runtime-only、semantic、correlated artifacts を分離して保存します。
-
-```text
-.execweave/runs/<run-id>/
-├── events.jsonl
-├── graph.json
-├── viewer.html
-├── semantic.jsonl
-├── events.semantic.jsonl
-├── graph.semantic.json
-├── viewer.semantic.html
-├── events.correlated.jsonl
-├── graph.correlated.json
-└── viewer.correlated.html
+```bash
+execweave-cursor-hook --print-config
+execweave-cursor-record --open -- cursor
 ```
 
-Correlation は raw observed evidence を変更せず、derived stream を追加します。
+Cursor の安定した `tool_use_id` を使い、pre/post hook 間で exact logical tool-call identity を保ちます。
 
-## Tool → Process Correlation
+### OpenCode
 
-```text
-tool_call --CORRELATED_WITH_PROCESS--> process
+```bash
+execweave-opencode-plugin --install
+execweave-opencode-record --open -- opencode
 ```
 
-は bounded matcher が独立 runtime evidence から**一意な候補**を得た場合だけ生成されます。
+project-local plugin は exact `sessionID + callID` を使い、tool output は転送しません。
 
-常に：
+Provider-integrated run では runtime / semantic / correlated artifact を別々に保存します。Tool → Process bridge は常に derived evidence です：
 
 ```text
 inferred: true
 causal: false
 ```
 
-です。Ambiguous / no-match / compound / shell builtin / unsupported call は edge を生成しません。
+ambiguity がある場合は edge を作りません。
 
-## Viewer
+## Inference gateway integrations
 
-Standalone Viewer は pan/zoom/drag、node/edge details、node-type/relation filters、causal-only、**observed only**、search、Timeline replay、Play/Pause、cluster expansion、1/2-hop focus、Saved Views、Correlation Summary を備えています。
+### OpenRouter
 
-## Runtime Evidence
-
-Portable backend は Linux/macOS/Windows をサポートします。Linux では syscall-backed reference backend も利用できます。
+OpenRouter は local model runtime ではなく `inference_gateway` として扱います。
 
 ```bash
-sudo apt-get install strace
-execweave record --backend strace --open -- claude
+execweave-inference-gateway event \
+  --gateway openrouter \
+  --requested-model openrouter/auto \
+  --sidecar gateway.jsonl
 ```
 
-Claude/Codex/Gemini の各 recorder は `--backend auto` で Linux に `strace` があれば優先利用します。
+ExecWeave は次を分離して保持できます：
 
-## Fake causality を作らない
+```text
+requested model → resolved model → routed provider
+```
 
-ExecWeave は observed causal / observed non-causal / provider semantic / inferred relationship を明確に区別します。Provider hook が child PID を提供しない場合、時間的近接だけで Tool → Process edge を作りません。
+token count、cache/reasoning count、cost、generation timing などの whitelist metadata のみ保存し、prompt / response content は保存しません。
 
-また、process が sensitive file を読んだ後に external endpoint へ接続しただけでは、bytes が実際に送信された証明にはなりません。
+## Model runtime integrations
 
-## Security Analysis
+### Ollama
+
+```bash
+execweave-model-runtime event --runtime ollama --sidecar model-runtime.jsonl
+execweave-model-runtime probe --runtime ollama --sidecar model-runtime.jsonl
+```
+
+### llama.cpp
+
+```bash
+execweave-model-runtime event --runtime llamacpp --sidecar model-runtime.jsonl
+execweave-model-runtime probe --runtime llamacpp --metrics --sidecar model-runtime.jsonl
+```
+
+この層は `model_runtime`、`inference_request`、`model`、runtime snapshot を表現します。prompt や生成本文は保存せず、選択された token/timing/load metadata のみ記録します。llama.cpp の sensitive local model path は redact されます。
+
+将来の vLLM / LM Studio など OpenAI-compatible runtime はこの層を再利用できます。
+
+## Runtime evidence
+
+portable collector は Linux / macOS / Windows で動作し、Linux には syscall-backed `strace` reference backend もあります。
+
+```bash
+execweave doctor
+execweave run --backend portable -- your-command
+execweave run --backend strace -- your-command
+```
+
+portable filesystem event は process-causal ではなく session-correlated です。Linux `strace` path は command 終了後に process-attributed syscall evidence を生成します。
+
+## Interactive Viewer
+
+Standalone Viewer はローカル・self-contained です。現在の baseline：
+
+- pan / zoom / draggable nodes
+- node / edge inspection
+- node-type / relation / causal filters
+- **observed only** filter
+- search
+- evidence-sequence Timeline ↔ Graph replay
+- progressive cluster expansion
+- 1-hop / 2-hop focused neighborhoods
+- browser-local Saved Views
+- observed / non-causal / inferred edge styling
+- Correlation Summary
+
+## Security analysis
 
 ```bash
 execweave analyze run.graph.json --output analysis.json
 ```
 
-Report は `data_flow_proven: false` / `exfiltration_proven: false` を明示的に保持します。
+sensitive-file → network の可能性は byte-level exfiltration の証明ではありません：
+
+```json
+{
+  "data_flow_proven": false,
+  "exfiltration_proven": false
+}
+```
 
 ## Current status
 
-ExecWeave は現在 **v0.4.0** です。portable/strace runtime collection、execution graph、live/standalone Viewer、Timeline/focus/condensation/Saved Views、Claude/Codex/Gemini adapters、conservative correlation、Correlation Summary、初期 security analysis が baseline として実装済みです。
+ExecWeave は現在 **v0.5.0** で、active development 中です。
 
-今後は Linux eBPF、Windows ETW、macOS Endpoint Security、追加 provider adapter、より強い identity evidence、MCP normalization、long-run scalability を進めます。
+runtime collection、graph materialization/query、standalone/live Viewer、Claude/Codex/Gemini/Cursor/OpenCode semantic integration、conservative Tool → Process correlation、OpenRouter gateway metadata、Ollama/llama.cpp runtime metadata、Python 3.10/3.12 の cross-platform CI が baseline として実装されています。
 
 ## Privacy
 
-ExecWeave は **local-first** です。File content、raw read/write bytes、prompt/transcript content はデフォルトでは収集しません。Command/path/endpoint/session metadata は sensitive になり得るため、artifact 共有前に確認してください。
+ExecWeave は local-first です。runtime events、semantic sidecars、graphs、reports、Viewers は既定でローカルに残ります。native adapters は prompt/transcript/tool output を既定で保存しません。ただし command、path、endpoint metadata、identifier、model metadata は sensitive な場合があります。
+
+共有前に artifact を確認してください。
 
 ## Documentation
 
@@ -156,11 +205,15 @@ ExecWeave は **local-first** です。File content、raw read/write bytes、pro
 - [`Claude Code Hooks`](docs/claude-code-hooks.ja.md)
 - [`OpenAI Codex Hooks`](docs/codex-hooks.ja.md)
 - [`Gemini CLI Hooks`](docs/gemini-hooks.ja.md)
+- [`Cursor Hooks`](docs/cursor-hooks.ja.md)
+- [`OpenCode Plugin`](docs/opencode-plugin.ja.md)
+- [`Inference Gateway / OpenRouter`](docs/inference-gateway.ja.md)
+- [`Model Runtime / Ollama / llama.cpp`](docs/model-runtime.ja.md)
 - [`Security Analysis`](docs/security-analysis.ja.md)
 
 ## Contributing
 
-Linux eBPF、Windows ETW、macOS Endpoint Security、provider adapter、provenance/correlation、Graph UX、privacy/redaction、testing/performance、翻訳の contribution を歓迎します。
+native OS collector、追加 Agent/IDE adapter、inference gateway、OpenAI-compatible runtime、correlation、privacy/redaction、graph UX、performance evaluation への貢献を歓迎します。
 
 ## License
 

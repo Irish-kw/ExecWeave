@@ -8,9 +8,9 @@
   <a href="README.ko.md">한국어</a>
 </p>
 
-**看清 AI Agent 在你的电脑上实际做了什么。**
+**看见 AI Agent 在你的电脑上实际做了什么。**
 
-ExecWeave 是一个开源、local-first 的 AI Agent runtime observability 项目，把 Agent、Tool、Command、Process、File、Network activity 转成可交互 execution graph，同时严格区分 observed evidence 与 inference。
+ExecWeave 是一个开源、local-first 的 observability 项目，会把 AI Agent 活动转成互动式执行图，同时明确区分 observed evidence 与 inference。
 
 > **Event 是 ground truth；Graph 是 materialized view。**
 
@@ -22,21 +22,35 @@ cd ExecWeave
 python -m pip install -e ".[dev]"
 ```
 
-实时查看：
+实时观察任意 command：
 
 ```bash
 execweave live --open -- claude
-execweave live --open -- codex
-execweave live --open -- gemini
 ```
 
-Live server 只绑定 `127.0.0.1`。
+或建立完整 artifact pipeline：
 
-## Native Agent Integrations
+```bash
+execweave record --open -- python my_agent.py
+```
 
-ExecWeave 当前有三个 native semantic adapter：**Claude Code、OpenAI Codex、Gemini CLI**。
+## Evidence layers
 
-Provider hook 记录 Agent/Tool/Command/MCP 层的 logical evidence；OS collector 独立记录机器实际观察到的 runtime evidence。ExecWeave 不会把两类 evidence 直接包装成假的 causality。
+ExecWeave 刻意把四类 evidence 分层，而不是压成同一条 trace：
+
+```text
+Agent / IDE semantic evidence
+          ↓
+Inference gateway / routing evidence
+          ↓
+Model runtime / inference-server evidence
+          ↓
+OS runtime evidence: process / file / network
+```
+
+只有底层 telemetry 足以支持时，relationship 才会被标记为 causal。
+
+## Agent / IDE integrations
 
 ### Claude Code
 
@@ -45,18 +59,12 @@ execweave-claude-hook --print-config
 execweave-claude-record --open -- claude
 ```
 
-详见 [`docs/claude-code-hooks.zh-CN.md`](docs/claude-code-hooks.zh-CN.md)。
-
 ### OpenAI Codex
 
 ```bash
 execweave-codex-hook --print-config
 execweave-codex-record --open -- codex
 ```
-
-当前 adapter 接收 `SessionStart`、`PreToolUse`、`PostToolUse`。`PostToolUse` 只表示中性的 `TOOL_CALL_RETURNED`，不直接声称 success/failure。
-
-详见 [`docs/codex-hooks.zh-CN.md`](docs/codex-hooks.zh-CN.md)。
 
 ### Gemini CLI
 
@@ -65,13 +73,91 @@ execweave-gemini-hook --print-config
 execweave-gemini-record --open -- gemini
 ```
 
-当前 adapter 接收 `SessionStart`、`BeforeTool`、`AfterTool`。`run_shell_command` 会生成 declared command evidence；部分 file tools 会生成 declared target path；`mcp_context` 会被规范化成 MCP server/tool entities。
+### Cursor
 
-Gemini 当前 hook schema 没有可跨 `BeforeTool` / `AfterTool` 共享的 unique tool-call ID，所以 ExecWeave 不会伪造 direct identity edge。`tool_fingerprint` 仅作诊断 hint，不作为 call identity。
+```bash
+execweave-cursor-hook --print-config
+execweave-cursor-record --open -- cursor
+```
 
-详见 [`docs/gemini-hooks.zh-CN.md`](docs/gemini-hooks.zh-CN.md)。
+Cursor 提供稳定的 `tool_use_id`，因此 pre/post hooks 可以共享精确的 logical tool-call identity。
 
-## 分层 artifacts
+### OpenCode
+
+```bash
+execweave-opencode-plugin --install
+execweave-opencode-record --open -- opencode
+```
+
+Project-local OpenCode plugin 使用精确的 `sessionID + callID`，并且刻意不转发 tool output。
+
+Provider-integrated run 会把 runtime、semantic、correlated artifacts 分开保存。Tool → Process bridge 仍是保守的 derived evidence：
+
+```text
+inferred: true
+causal: false
+```
+
+候选模糊时不建立 edge。
+
+## Inference Gateway integrations
+
+### OpenRouter
+
+OpenRouter 被建模为 `inference_gateway`，而不是 local model runtime。
+
+```bash
+execweave-inference-gateway event \
+  --gateway openrouter \
+  --requested-model openrouter/auto \
+  --sidecar gateway.jsonl
+```
+
+ExecWeave 会分别保存：
+
+```text
+requested model → resolved model → routed provider
+```
+
+白名单 metadata 可包含 token counts、cache/reasoning counts、cost 与 generation timing；prompt 和 response content 不会保存。
+
+## Model Runtime integrations
+
+### Ollama
+
+```bash
+execweave-model-runtime event --runtime ollama --sidecar model-runtime.jsonl
+execweave-model-runtime probe --runtime ollama --sidecar model-runtime.jsonl
+```
+
+### llama.cpp
+
+```bash
+execweave-model-runtime event --runtime llamacpp --sidecar model-runtime.jsonl
+execweave-model-runtime probe --runtime llamacpp --metrics --sidecar model-runtime.jsonl
+```
+
+该层使用 `model_runtime`、`inference_request`、`model` 与 runtime snapshot。只保存选定的 token/timing/load metadata，不保存 prompt 或 generated content。敏感的 llama.cpp 本机 model path 会被 redaction。
+
+未来 vLLM、LM Studio 等 OpenAI-compatible runtime 可复用该层。
+
+## Runtime evidence
+
+Portable collector 支持 Linux、macOS、Windows；Linux 另有 syscall-backed `strace` reference backend。
+
+```bash
+execweave doctor
+execweave run --backend portable -- your-command
+execweave run --backend strace -- your-command
+```
+
+Portable filesystem watching 是 session-correlated，而不是 process-causal；短命 process 也可能在 polling interval 之间被漏掉。Linux `strace` 会在 command 结束后产生 process-attributed syscall evidence。
+
+未来 native collectors 包括 Linux eBPF、Windows ETW 和 macOS Endpoint Security。
+
+## Layered artifacts
+
+Provider-integrated run 可产生：
 
 ```text
 .execweave/runs/<run-id>/
@@ -87,85 +173,41 @@ Gemini 当前 hook schema 没有可跨 `BeforeTool` / `AfterTool` 共享的 uniq
 └── viewer.correlated.html
 ```
 
-Raw runtime 与 provider sidecar 保持分离；correlation 只生成新的 derived stream。
+Derived correlation layer 不会重写 raw evidence。
 
-## Tool → Process Correlation
+## Interactive Viewer
 
-只有 bounded matcher 从独立 runtime evidence 中找到**唯一候选**时，才可能生成：
+Standalone Viewer 完全 local、自包含，目前包括 pan/zoom、node/edge inspection、filters、**observed only**、search、Timeline ↔ Graph replay、progressive cluster expansion、1/2-hop focus、Saved Views、observed/non-causal/inferred styling 与 Correlation Summary。
 
-```text
-tool_call --CORRELATED_WITH_PROCESS--> process
-```
-
-并始终保持：
-
-```text
-inferred: true
-causal: false
-```
-
-Ambiguous、no-match、compound、shell builtin、unsupported call 都不会硬建 edge。Correlated Viewer 会显示 matched / ambiguous / no match / unsupported 等统计。
-
-## Viewer
-
-Standalone Viewer 支持：
-
-- pan / zoom / drag
-- node / edge details
-- node type / relation filters
-- causal-only / **observed only**
-- search
-- Timeline ↔ Graph replay
-- Play/Pause
-- progressive cluster expansion
-- 1-hop / 2-hop focus
-- Saved Views
-- observed / non-causal / inferred 独立样式
-- Correlation Summary
-
-## Runtime Evidence
-
-Portable backend 支持 Linux/macOS/Windows。Linux 还可使用 syscall-backed reference backend：
+## Graph operations
 
 ```bash
-sudo apt-get install strace
-execweave record --backend strace --open -- claude
+execweave graph-summary run.graph.json
+execweave graph-filter run.graph.json --output causal.graph.json --causal-only
+execweave graph-focus run.graph.json NODE_ID --hops 2 --output focused.graph.json
+execweave path run.graph.json SOURCE TARGET --causal-only
+execweave graph-condense run.graph.json --output compact.graph.json --threshold 8 --keep-expansion
 ```
 
-三个 provider recorder 的 `--backend auto` 在 Linux 有 `strace` 时都会优先使用它。
-
-## 不制造假的因果关系
-
-ExecWeave 区分 observed causal、observed non-causal、provider semantic、inferred relationship。Provider hook 没有 child OS PID 时，不会直接声称 Tool → Process。时间接近本身不足以生成 edge。
-
-同样地，process 先读敏感文件、之后连外，不等于已经证明这些 bytes 被传输。
-
-## Security Analysis
+## Security analysis
 
 ```bash
 execweave analyze run.graph.json --output analysis.json
 ```
 
-Report 会明确保留：
-
-```json
-{
-  "data_flow_proven": false,
-  "exfiltration_proven": false
-}
-```
+安全 findings 会保留 evidence limits。Sensitive-file → network 的 possible path 不代表 byte-level exfiltration。
 
 ## 当前状态
 
-ExecWeave 当前为 **v0.4.0**。
+ExecWeave 当前为 **v0.5.0**，持续开发中。
 
-已完成 baseline 包括 portable/strace runtime collection、execution graph、live/standalone Viewer、Timeline/focus/condensation/Saved Views、Claude/Codex/Gemini native adapters、conservative Tool→Process correlation、Correlation Summary 与初始 security analysis。
+Baseline 已包括 runtime collection、Graph materialization/query、standalone/live Viewer、Claude/Codex/Gemini/Cursor/OpenCode native semantic integrations、保守 Tool → Process correlation、OpenRouter gateway metadata、Ollama/llama.cpp runtime metadata，以及 Python 3.10/3.12 的跨平台 CI。
 
-后续重点：Linux eBPF、Windows ETW、macOS Endpoint Security、更多 provider adapter、更强 process/tool identity、MCP normalization 与 long-run scalability。
+## 隐私
 
-## Privacy
+ExecWeave 是 local-first。Runtime events、semantic sidecars、graphs、reports 与 Viewers 默认留在本机。项目不刻意采集 file content 或 raw read/write byte buffers；native adapters 也默认避开 prompt/transcript/tool output，但 command、path、endpoint metadata、identifier 与 model metadata 本身仍可能敏感。
 
-ExecWeave 是 **local-first**。默认不采集 file content、raw read/write byte buffer、prompt/transcript content。Command、path、endpoint、session ID 等 metadata 仍可能敏感，分享 artifact 前请检查。
+分享 artifacts 前请检查。
 
 ## 文档
 
@@ -176,12 +218,16 @@ ExecWeave 是 **local-first**。默认不采集 file content、raw read/write by
 - [`Claude Code Hooks`](docs/claude-code-hooks.zh-CN.md)
 - [`OpenAI Codex Hooks`](docs/codex-hooks.zh-CN.md)
 - [`Gemini CLI Hooks`](docs/gemini-hooks.zh-CN.md)
+- [`Cursor Hooks`](docs/cursor-hooks.zh-CN.md)
+- [`OpenCode Plugin`](docs/opencode-plugin.zh-CN.md)
+- [`Inference Gateway / OpenRouter`](docs/inference-gateway.zh-CN.md)
+- [`Model Runtime / Ollama / llama.cpp`](docs/model-runtime.zh-CN.md)
 - [`Security Analysis`](docs/security-analysis.zh-CN.md)
 
 ## Contributing
 
-欢迎 Linux eBPF、Windows ETW、macOS Endpoint Security、Agent/Tool/MCP provider adapter、provenance/correlation、Graph UX、privacy/redaction、testing/performance 与翻译贡献。
+欢迎贡献，尤其是 native OS collectors、更多 Agent/IDE adapters、inference gateways、OpenAI-compatible model runtimes、entity/correlation methods、privacy/redaction、Graph UX 与 performance evaluation。
 
 ## License
 
-见 [`LICENSE`](LICENSE)。
+请参阅 [`LICENSE`](LICENSE)。
