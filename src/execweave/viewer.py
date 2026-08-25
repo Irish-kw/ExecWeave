@@ -30,7 +30,7 @@ _VIEWER_TEMPLATE = """<!doctype html>
 header{grid-column:1/3;display:flex;align-items:center;gap:9px;padding:9px 14px;border-bottom:1px solid var(--border);background:var(--panel);flex-wrap:wrap}
 header strong{font-size:16px;margin-right:6px}.stats{color:var(--muted);white-space:nowrap;margin-right:auto}
 input,select{border:1px solid var(--border);border-radius:7px;padding:7px 9px;background:var(--panel2);color:var(--text);outline:none}input:focus,select:focus{border-color:var(--selected)}
-#search{width:min(280px,32vw)}.toggle{display:inline-flex;align-items:center;gap:5px;color:var(--muted);font-size:12px;white-space:nowrap}.toggle input{accent-color:var(--selected)}
+#search{width:min(240px,28vw)}#preset-select{max-width:160px}.toggle{display:inline-flex;align-items:center;gap:5px;color:var(--muted);font-size:12px;white-space:nowrap}.toggle input{accent-color:var(--selected)}
 .timeline{display:flex;align-items:center;gap:7px;width:100%;padding-top:2px;color:var(--muted);font-size:12px}.timeline input[type=range]{flex:1;min-width:120px;padding:0;accent-color:var(--selected)}#sequence-label{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:nowrap}
 #canvas-wrap{position:relative;min-width:0;min-height:0;overflow:hidden}#graph{width:100%;height:100%;display:block;cursor:grab;user-select:none}#graph.panning{cursor:grabbing}
 aside{overflow:auto;border-left:1px solid var(--border);background:var(--panel);padding:16px}aside h2{margin:0 0 12px;font-size:15px}aside h3{margin:18px 0 8px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
@@ -40,7 +40,7 @@ button{border:1px solid var(--border);background:var(--panel);color:var(--text);
 .node rect{stroke:var(--border);stroke-width:1.2;rx:9;ry:9}.node text{pointer-events:none;fill:var(--text)}.node .node-type{fill:var(--muted);font-size:10px}.node.selected rect{stroke:var(--selected);stroke-width:2.5}.node.dim{opacity:.13}.node.cluster rect{stroke:var(--selected);stroke-dasharray:6 4}
 .edge{fill:none;stroke:var(--edge);stroke-width:1.4;opacity:.75;cursor:pointer}.edge.causal{stroke:var(--causal)}.edge.noncausal{stroke:var(--noncausal);stroke-dasharray:6 5}.edge.dim{opacity:.06}.edge-hit{fill:none;stroke:transparent;stroke-width:12;cursor:pointer}.edge-label{fill:var(--muted);font-size:9px;pointer-events:none}.edge-label.dim{opacity:.08}
 .legend{display:flex;flex-wrap:wrap;gap:8px 12px}.legend span{display:inline-flex;align-items:center;gap:5px;color:var(--muted);font-size:12px}.dot{width:9px;height:9px;border-radius:50%;display:inline-block}
-@media(max-width:900px){#app{grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr) 220px}header{grid-column:1}aside{border-left:0;border-top:1px solid var(--border)}#search{width:170px}}
+@media(max-width:900px){#app{grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr) 220px}header{grid-column:1}aside{border-left:0;border-top:1px solid var(--border)}#search{width:160px}}
 </style>
 </head>
 <body>
@@ -51,6 +51,9 @@ button{border:1px solid var(--border);background:var(--panel);color:var(--text);
   <select id="relation-filter" title="Relation"><option value="">All relations</option></select>
   <label class="toggle"><input id="causal-filter" type="checkbox"> causal only</label>
   <input id="search" placeholder="Search visible graph…" autocomplete="off">
+  <select id="preset-select" title="Saved view presets"><option value="">Saved views</option></select>
+  <button id="save-preset" type="button">Save view</button>
+  <button id="delete-preset" type="button" disabled>Delete view</button>
   <div class="timeline" id="timeline">
     <button id="timeline-play" type="button">Play</button>
     <span>Evidence sequence</span>
@@ -72,6 +75,7 @@ button{border:1px solid var(--border);background:var(--panel);color:var(--text);
 </div>
 <aside>
   <h2>Selection</h2><div id="details" class="empty">Click a node or edge.</div>
+  <h3>Saved views</h3><div class="empty">Save the current node/relation/causal filters, search text, timeline position, focused neighborhood, and expanded clusters as a browser-local preset. Graph evidence is never copied into preset storage. If browser storage is unavailable, presets safely fall back to this page session only.</div>
   <h3>Focus</h3><div class="empty">Click a node, then choose <strong>Focus 1 hop</strong> or <strong>Focus 2 hops</strong>. Focus follows only evidence edges allowed by the current timeline, relation, and causal filters; it never creates inferred edges.</div>
   <h3>Clusters</h3><div class="empty">Expandable cluster nodes have a dashed outline. Click one, then choose <strong>Expand cluster</strong>. Only graphs created with <code>graph-condense --keep-expansion</code> carry the original member evidence.</div>
   <h3>Timeline</h3><div class="empty">Move the evidence-sequence slider or press Play to replay how the graph grew. Aggregated edges spanning future evidence are marked <code>partial</code>; future counts are never shown early.</div>
@@ -90,10 +94,12 @@ Object.values(expansionClusters).forEach(entry=>{(entry.nodes||[]).forEach(n=>po
 const svg=document.getElementById('graph'),viewport=document.getElementById('viewport'),edgeLayer=document.getElementById('edges'),labelLayer=document.getElementById('labels'),nodeLayer=document.getElementById('nodes');
 const details=document.getElementById('details'),search=document.getElementById('search'),stats=document.getElementById('stats'),typeFilter=document.getElementById('type-filter'),relationFilter=document.getElementById('relation-filter'),causalFilter=document.getElementById('causal-filter');
 const timeline=document.getElementById('timeline'),sequenceFilter=document.getElementById('sequence-filter'),sequenceLabel=document.getElementById('sequence-label'),playButton=document.getElementById('timeline-play'),collapseButton=document.getElementById('collapse-clusters'),clearFocusButton=document.getElementById('clear-focus');
+const presetSelect=document.getElementById('preset-select'),savePresetButton=document.getElementById('save-preset'),deletePresetButton=document.getElementById('delete-preset');
+const presetStorageKey=`execweave.viewer.presets.v1:${graph.session_id||'graph'}`;
 const sequenceOf=(edge,key)=>Number.isInteger(edge[key])?edge[key]:null;
 const maxSequence=Math.max(0,...possibleEdges.map(edge=>sequenceOf(edge,'last_sequence')??sequenceOf(edge,'first_sequence')??0));
 let selectedSequence=maxSequence,playTimer=null,expandedClusters=new Set(),focusState=null,currentNodes=[],currentEdges=[],visibleNodes=[],visibleEdges=[],nodeById=new Map(),positions=new Map(),nodeElements=new Map(),edgeElements=[];
-let transform={x:40,y:40,scale:1},panStart=null,dragNode=null;
+let transform={x:40,y:40,scale:1},panStart=null,dragNode=null,presets={},presetStorageAvailable=true;
 
 function uniqueById(values){const seen=new Set();return values.filter(value=>{if(!value||!value.id||seen.has(value.id))return false;seen.add(value.id);return true})}
 function materializedGraph(){
@@ -177,6 +183,31 @@ function applySearch(){const q=search.value.trim().toLowerCase();if(!q){nodeElem
 function stopPlayback(){if(playTimer!==null){clearInterval(playTimer);playTimer=null}playButton.textContent='Play'}
 function setSequence(value){selectedSequence=Math.max(0,Math.min(maxSequence,Number(value)||0));sequenceFilter.value=String(selectedSequence);sequenceLabel.textContent=`${selectedSequence} / ${maxSequence}`;applyGraphFilters()}
 function togglePlayback(){if(playTimer!==null){stopPlayback();return}if(maxSequence<=0)return;if(selectedSequence>=maxSequence)setSequence(0);playButton.textContent='Pause';const step=Math.max(1,Math.ceil(maxSequence/180));playTimer=setInterval(()=>{if(selectedSequence>=maxSequence){stopPlayback();return}setSequence(Math.min(maxSequence,selectedSequence+step))},160)}
+function snapshotView(){return{version:1,node_type:typeFilter.value,relation:relationFilter.value,causal_only:causalFilter.checked,search:search.value,sequence:selectedSequence,focus:focusState?{anchor:focusState.anchor,hops:focusState.hops}:null,expanded_clusters:[...expandedClusters]}}
+function renderPresetOptions(selected=''){
+  presetSelect.replaceChildren();const empty=document.createElement('option');empty.value='';empty.textContent='Saved views';presetSelect.appendChild(empty);
+  Object.keys(presets).sort((a,b)=>a.localeCompare(b)).forEach(name=>{const o=document.createElement('option');o.value=name;o.textContent=name;presetSelect.appendChild(o)});
+  presetSelect.value=selected&&presets[selected]?selected:'';deletePresetButton.disabled=!presetSelect.value;
+}
+function loadPresets(){
+  try{const raw=localStorage.getItem(presetStorageKey);const parsed=raw?JSON.parse(raw):{};presets=parsed&&typeof parsed==='object'&&!Array.isArray(parsed)?parsed:{}}
+  catch(_){presetStorageAvailable=false;presets={}}
+  renderPresetOptions();
+}
+function persistPresets(){try{localStorage.setItem(presetStorageKey,JSON.stringify(presets))}catch(_){presetStorageAvailable=false}}
+function applyPreset(name){
+  const state=presets[name];if(!state||typeof state!=='object')return;stopPlayback();
+  typeFilter.value=typeof state.node_type==='string'?state.node_type:'';relationFilter.value=typeof state.relation==='string'?state.relation:'';causalFilter.checked=state.causal_only===true;search.value=typeof state.search==='string'?state.search:'';
+  selectedSequence=maxSequence>0?Math.max(0,Math.min(maxSequence,Number(state.sequence)||0)):0;if(maxSequence>0){sequenceFilter.value=String(selectedSequence);sequenceLabel.textContent=`${selectedSequence} / ${maxSequence}`}
+  const expanded=Array.isArray(state.expanded_clusters)?state.expanded_clusters:[];expandedClusters=new Set(expanded.filter(id=>expansionClusters[id]));
+  focusState=state.focus&&typeof state.focus.anchor==='string'&&Number.isInteger(state.focus.hops)?{anchor:state.focus.anchor,hops:Math.max(0,state.focus.hops)}:null;
+  details.textContent=`Loaded saved view: ${name}`;applyGraphFilters();
+}
+function savePreset(){
+  const name=(window.prompt('Saved view name')||'').trim();if(!name)return;presets[name]=snapshotView();persistPresets();renderPresetOptions(name);
+  details.textContent=presetStorageAvailable?`Saved view locally: ${name}`:`Saved view for this page session: ${name}`;
+}
+function deletePreset(){const name=presetSelect.value;if(!name||!presets[name])return;delete presets[name];persistPresets();renderPresetOptions();details.textContent=`Deleted saved view: ${name}`}
 svg.addEventListener('pointerdown',ev=>{if(ev.target.closest?.('.node'))return;panStart={x:ev.clientX,y:ev.clientY,tx:transform.x,ty:transform.y};svg.classList.add('panning');svg.setPointerCapture(ev.pointerId)});
 svg.addEventListener('pointermove',ev=>{if(!panStart)return;transform.x=panStart.tx+ev.clientX-panStart.x;transform.y=panStart.ty+ev.clientY-panStart.y;applyTransform()});
 svg.addEventListener('pointerup',ev=>{panStart=null;svg.classList.remove('panning');try{svg.releasePointerCapture(ev.pointerId)}catch(_){}});
@@ -187,11 +218,13 @@ sequenceFilter.addEventListener('input',()=>{stopPlayback();setSequence(sequence
 playButton.addEventListener('click',togglePlayback);
 clearFocusButton.addEventListener('click',()=>{focusState=null;details.textContent='Focused subgraph cleared.';applyGraphFilters()});
 collapseButton.addEventListener('click',()=>{focusState=null;expandedClusters=new Set();details.textContent='All expandable clusters collapsed.';applyGraphFilters()});
+presetSelect.addEventListener('change',()=>{deletePresetButton.disabled=!presetSelect.value;if(presetSelect.value)applyPreset(presetSelect.value)});
+savePresetButton.addEventListener('click',savePreset);deletePresetButton.addEventListener('click',deletePreset);
 document.getElementById('fit').addEventListener('click',fit);
 document.getElementById('reset').addEventListener('click',()=>{computeLayout();renderNodes();renderEdges();applySearch();fit()});
 window.addEventListener('resize',fit);
 svg.addEventListener('click',()=>document.querySelectorAll('.node.selected').forEach(el=>el.classList.remove('selected')));
-applyGraphFilters();
+loadPresets();applyGraphFilters();
 })();
 </script>
 </body>
