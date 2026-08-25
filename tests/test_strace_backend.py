@@ -89,6 +89,68 @@ def test_strace_parser_builds_process_file_and_network_edges(tmp_path: Path) -> 
     assert all(event["source"]["id"].startswith("process:s1:") for event in file_events)
 
 
+def test_equal_timestamp_child_is_not_misclassified_as_root(tmp_path: Path) -> None:
+    output = tmp_path / "events.jsonl"
+    parser = StraceParser(
+        session_id="same-ts",
+        sink=JsonlSink(output),
+        watch_root=tmp_path,
+        command=["agent"],
+    )
+    # Deliberately place the child record first at the same timestamp. The parser
+    # must still learn the parent relationship from clone() before emitting nodes.
+    records = [
+        TraceRecord(10.0, 201, 'openat(AT_FDCWD, "child.txt", O_RDONLY) = 3'),
+        TraceRecord(10.0, 200, "clone(child_stack=NULL, flags=SIGCHLD) = 201"),
+    ]
+    parser.parse(records)
+    events = _events(output)
+    child_start = next(
+        event
+        for event in events
+        if event["event_type"] == "process.started"
+        and event["target"]["id"] == "process:same-ts:201"
+    )
+    assert child_start["relation"] == "SPAWNED"
+    assert child_start["source"]["id"] == "process:same-ts:200"
+    assert not any(
+        event["event_type"] == "process.started"
+        and event["target"]["id"] == "process:same-ts:201"
+        and event["relation"] == "LAUNCHED"
+        for event in events
+    )
+
+
+def test_nonblocking_connect_is_preserved_as_attempt(tmp_path: Path) -> None:
+    output = tmp_path / "events.jsonl"
+    parser = StraceParser(
+        session_id="async-connect",
+        sink=JsonlSink(output),
+        watch_root=tmp_path,
+        command=["agent"],
+    )
+    parser.parse(
+        [
+            TraceRecord(
+                20.0,
+                300,
+                (
+                    "connect(7, {sa_family=AF_INET, sin_port=htons(443), "
+                    'sin_addr=inet_addr("203.0.113.10")}, 16) = '
+                    "-1 EINPROGRESS (Operation now in progress)"
+                ),
+            )
+        ]
+    )
+    events = _events(output)
+    attempt = next(event for event in events if event["event_type"] == "network.connection_attempt")
+    assert attempt["relation"] == "CONNECT_ATTEMPTED"
+    assert attempt["target"]["id"] == "network_endpoint:203.0.113.10:443"
+    assert attempt["attributes"]["errno"] == "EINPROGRESS"
+    assert attempt["attributes"]["connected"] is False
+    assert attempt["attributes"]["causal"] is True
+
+
 def test_chdir_changes_relative_path_resolution(tmp_path: Path) -> None:
     output = tmp_path / "events.jsonl"
     parser = StraceParser(
