@@ -18,6 +18,35 @@ from .graph_ops import (
 from .sink import JsonlSink
 from .validate import validate_event_stream
 from .viewer import build_viewer_from_graph
+from .workflow import record_to_viewer
+
+
+def _add_collection_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--watch-root",
+        type=Path,
+        default=None,
+        help="Working directory to observe (default: current directory)",
+    )
+    parser.add_argument(
+        "--interval",
+        type=float,
+        default=0.10,
+        help="Portable backend polling interval in seconds (default: 0.10)",
+    )
+    parser.add_argument(
+        "--backend",
+        choices=["auto", "portable", "strace"],
+        default="auto",
+        help="Runtime backend. auto prefers strace on Linux when available",
+    )
+    parser.add_argument("--no-files", action="store_true", help="Disable filesystem observation")
+    parser.add_argument("--no-network", action="store_true", help="Disable network observation")
+    parser.add_argument(
+        "--keep-native-trace",
+        action="store_true",
+        help="Keep raw Linux strace files after parsing (off by default)",
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -28,38 +57,33 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="subcommand", required=True)
 
     run = subparsers.add_parser("run", help="Run a command inside an ExecWeave session")
-    run.add_argument(
-        "--watch-root",
-        type=Path,
-        default=None,
-        help="Working directory to observe (default: current directory)",
-    )
+    _add_collection_arguments(run)
     run.add_argument(
         "--output",
         type=Path,
         default=None,
         help="JSONL output path (default: .execweave/runs/<session-id>.jsonl)",
     )
-    run.add_argument(
-        "--interval",
-        type=float,
-        default=0.10,
-        help="Portable backend polling interval in seconds (default: 0.10)",
-    )
-    run.add_argument(
-        "--backend",
-        choices=["auto", "portable", "strace"],
-        default="auto",
-        help="Runtime backend. auto prefers strace on Linux when available",
-    )
-    run.add_argument("--no-files", action="store_true", help="Disable filesystem observation")
-    run.add_argument("--no-network", action="store_true", help="Disable network observation")
-    run.add_argument(
-        "--keep-native-trace",
-        action="store_true",
-        help="Keep raw Linux strace files after parsing (off by default)",
-    )
     run.add_argument("command", nargs=argparse.REMAINDER, help="Command to execute")
+
+    record = subparsers.add_parser(
+        "record",
+        help="Record a command, validate it, build the graph, and create the local viewer",
+    )
+    _add_collection_arguments(record)
+    record.add_argument(
+        "--output-dir",
+        type=Path,
+        default=None,
+        help="Artifact directory (default: .execweave/runs/<session-id>/)",
+    )
+    record.add_argument(
+        "--open",
+        action="store_true",
+        dest="open_browser",
+        help="Open the generated viewer after the command exits",
+    )
+    record.add_argument("command", nargs=argparse.REMAINDER, help="Command to execute")
 
     subparsers.add_parser("doctor", help="Show runtime collector availability")
 
@@ -259,6 +283,28 @@ def main(argv: list[str] | None = None) -> int:
             parser.error(str(exc))
         print(json.dumps({"output": str(written)}, indent=2, sort_keys=True))
         return 0
+
+    if args.subcommand == "record":
+        command = _clean_command(args.command)
+        if not command:
+            parser.error("execweave record requires a command, e.g. execweave record --open -- claude")
+        watch_root = (args.watch_root or Path.cwd()).expanduser().resolve()
+        try:
+            result = record_to_viewer(
+                command,
+                watch_root=watch_root,
+                output_dir=args.output_dir,
+                backend=args.backend,
+                poll_interval=args.interval,
+                collect_filesystem=not args.no_files,
+                collect_network=not args.no_network,
+                keep_raw_trace=args.keep_native_trace,
+                open_browser=args.open_browser,
+            )
+        except (FileExistsError, RuntimeError, ValueError) as exc:
+            parser.error(str(exc))
+        print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+        return result.return_code
 
     command = _clean_command(args.command)
     if not command:
