@@ -34,12 +34,17 @@ jobs:
         run: execweave run --backend portable --no-files --no-network --output phase1-portable.jsonl -- python -c "print('execweave portable smoke')"
       - name: Validate portable stream
         run: execweave validate phase1-portable.jsonl
+      - name: Materialize portable graph
+        run: execweave graph phase1-portable.jsonl --output phase1-portable.graph.json
       - name: Linux strace end-to-end smoke
         if: runner.os == 'Linux'
         run: execweave run --backend strace --no-network --output phase1-strace.jsonl -- python -c "from pathlib import Path; p=Path('ci-phase1.txt'); p.write_text('ok'); p.read_text(); p.unlink()"
       - name: Validate Linux strace stream
         if: runner.os == 'Linux'
         run: execweave validate phase1-strace.jsonl
+      - name: Materialize Linux strace graph
+        if: runner.os == 'Linux'
+        run: execweave graph phase1-strace.jsonl --output phase1-strace.graph.json
       - name: Phase 1 portable benchmark smoke test
         if: runner.os == 'Linux' && matrix.python-version == '3.12'
         run: execweave benchmark --backend portable --iterations 1
