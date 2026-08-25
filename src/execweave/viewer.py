@@ -34,9 +34,9 @@ input,select{border:1px solid var(--border);border-radius:7px;padding:7px 9px;ba
 .timeline{display:flex;align-items:center;gap:7px;width:100%;padding-top:2px;color:var(--muted);font-size:12px}.timeline input[type=range]{flex:1;min-width:120px;padding:0;accent-color:var(--selected)}#sequence-label{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:nowrap}
 #canvas-wrap{position:relative;min-width:0;min-height:0;overflow:hidden}#graph{width:100%;height:100%;display:block;cursor:grab;user-select:none}#graph.panning{cursor:grabbing}
 aside{overflow:auto;border-left:1px solid var(--border);background:var(--panel);padding:16px}aside h2{margin:0 0 12px;font-size:15px}aside h3{margin:18px 0 8px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
-#details pre{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.empty{color:var(--muted)}.detail-action{margin:12px 0 4px}
+#details pre{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.empty{color:var(--muted)}.detail-actions{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0 8px}
 button{border:1px solid var(--border);background:var(--panel);color:var(--text);border-radius:7px;padding:6px 9px;cursor:pointer}button:hover{border-color:var(--selected)}button:disabled{opacity:.45;cursor:default}
-.controls{position:absolute;top:12px;left:12px;z-index:5;display:flex;gap:6px}
+.controls{position:absolute;top:12px;left:12px;z-index:5;display:flex;gap:6px;flex-wrap:wrap}
 .node rect{stroke:var(--border);stroke-width:1.2;rx:9;ry:9}.node text{pointer-events:none;fill:var(--text)}.node .node-type{fill:var(--muted);font-size:10px}.node.selected rect{stroke:var(--selected);stroke-width:2.5}.node.dim{opacity:.13}.node.cluster rect{stroke:var(--selected);stroke-dasharray:6 4}
 .edge{fill:none;stroke:var(--edge);stroke-width:1.4;opacity:.75;cursor:pointer}.edge.causal{stroke:var(--causal)}.edge.noncausal{stroke:var(--noncausal);stroke-dasharray:6 5}.edge.dim{opacity:.06}.edge-hit{fill:none;stroke:transparent;stroke-width:12;cursor:pointer}.edge-label{fill:var(--muted);font-size:9px;pointer-events:none}.edge-label.dim{opacity:.08}
 .legend{display:flex;flex-wrap:wrap;gap:8px 12px}.legend span{display:inline-flex;align-items:center;gap:5px;color:var(--muted);font-size:12px}.dot{width:9px;height:9px;border-radius:50%;display:inline-block}
@@ -59,7 +59,12 @@ button{border:1px solid var(--border);background:var(--panel);color:var(--text);
   </div>
 </header>
 <div id="canvas-wrap">
-  <div class="controls"><button id="fit">Fit</button><button id="reset">Reset</button><button id="collapse-clusters" disabled>Collapse clusters</button></div>
+  <div class="controls">
+    <button id="fit">Fit</button>
+    <button id="reset">Reset</button>
+    <button id="clear-focus" disabled>Clear focus</button>
+    <button id="collapse-clusters" disabled>Collapse clusters</button>
+  </div>
   <svg id="graph" aria-label="ExecWeave execution graph">
     <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10z" fill="context-stroke"></path></marker></defs>
     <g id="viewport"><g id="edges"></g><g id="labels"></g><g id="nodes"></g></g>
@@ -67,6 +72,7 @@ button{border:1px solid var(--border);background:var(--panel);color:var(--text);
 </div>
 <aside>
   <h2>Selection</h2><div id="details" class="empty">Click a node or edge.</div>
+  <h3>Focus</h3><div class="empty">Click a node, then choose <strong>Focus 1 hop</strong> or <strong>Focus 2 hops</strong>. Focus follows only evidence edges allowed by the current timeline, relation, and causal filters; it never creates inferred edges.</div>
   <h3>Clusters</h3><div class="empty">Expandable cluster nodes have a dashed outline. Click one, then choose <strong>Expand cluster</strong>. Only graphs created with <code>graph-condense --keep-expansion</code> carry the original member evidence.</div>
   <h3>Timeline</h3><div class="empty">Move the evidence-sequence slider or press Play to replay how the graph grew. Aggregated edges spanning future evidence are marked <code>partial</code>; future counts are never shown early.</div>
   <h3>Filters</h3><div class="empty">Node type and relation filters change the visible subgraph. Search highlights within that subgraph.</div>
@@ -83,15 +89,16 @@ const possibleNodes=[...baseNodes],possibleEdges=[...baseEdges];
 Object.values(expansionClusters).forEach(entry=>{(entry.nodes||[]).forEach(n=>possibleNodes.push(n));(entry.edges||[]).forEach(e=>possibleEdges.push(e))});
 const svg=document.getElementById('graph'),viewport=document.getElementById('viewport'),edgeLayer=document.getElementById('edges'),labelLayer=document.getElementById('labels'),nodeLayer=document.getElementById('nodes');
 const details=document.getElementById('details'),search=document.getElementById('search'),stats=document.getElementById('stats'),typeFilter=document.getElementById('type-filter'),relationFilter=document.getElementById('relation-filter'),causalFilter=document.getElementById('causal-filter');
-const timeline=document.getElementById('timeline'),sequenceFilter=document.getElementById('sequence-filter'),sequenceLabel=document.getElementById('sequence-label'),playButton=document.getElementById('timeline-play'),collapseButton=document.getElementById('collapse-clusters');
+const timeline=document.getElementById('timeline'),sequenceFilter=document.getElementById('sequence-filter'),sequenceLabel=document.getElementById('sequence-label'),playButton=document.getElementById('timeline-play'),collapseButton=document.getElementById('collapse-clusters'),clearFocusButton=document.getElementById('clear-focus');
 const sequenceOf=(edge,key)=>Number.isInteger(edge[key])?edge[key]:null;
 const maxSequence=Math.max(0,...possibleEdges.map(edge=>sequenceOf(edge,'last_sequence')??sequenceOf(edge,'first_sequence')??0));
-let selectedSequence=maxSequence,playTimer=null,expandedClusters=new Set(),currentNodes=[],currentEdges=[],visibleNodes=[],visibleEdges=[],nodeById=new Map(),positions=new Map(),nodeElements=new Map(),edgeElements=[];
+let selectedSequence=maxSequence,playTimer=null,expandedClusters=new Set(),focusState=null,currentNodes=[],currentEdges=[],visibleNodes=[],visibleEdges=[],nodeById=new Map(),positions=new Map(),nodeElements=new Map(),edgeElements=[];
 let transform={x:40,y:40,scale:1},panStart=null,dragNode=null;
 
 function uniqueById(values){const seen=new Set();return values.filter(value=>{if(!value||!value.id||seen.has(value.id))return false;seen.add(value.id);return true})}
 function materializedGraph(){
-  const hiddenClusterEdges=new Set();expandedClusters.forEach(id=>{const entry=expansionClusters[id];if(entry&&entry.cluster_edge_id)hiddenClusterEdges.add(entry.cluster_edge_id)});
+  const hiddenClusterEdges=new Set();
+  expandedClusters.forEach(id=>{const entry=expansionClusters[id];if(entry&&entry.cluster_edge_id)hiddenClusterEdges.add(entry.cluster_edge_id)});
   let nodes=baseNodes.filter(node=>!expandedClusters.has(node.id));
   let edges=baseEdges.filter(edge=>!hiddenClusterEdges.has(edge.id));
   expandedClusters.forEach(id=>{const entry=expansionClusters[id];if(!entry)return;nodes=nodes.concat(entry.nodes||[]);edges=edges.concat(entry.edges||[])});
@@ -105,39 +112,85 @@ function colorForType(type){let h=0;for(const ch of String(type||'unknown'))h=((
 function labelFor(node){const raw=node.name||node.id||node.type||'node';return raw.length>30?raw.slice(0,27)+'…':raw}
 function edgeExistsAt(edge,sequence){const first=sequenceOf(edge,'first_sequence');return first===null||first<=sequence}
 function edgeLabel(edge){if(!(edge.count>1))return edge.relation;const last=sequenceOf(edge,'last_sequence');if(selectedSequence>=maxSequence||last===null||last<=selectedSequence)return `${edge.relation} ×${edge.count}`;return `${edge.relation} · partial`}
+function evidenceEdges(nodes,edges){
+  const ids=new Set(nodes.map(n=>n.id)),relation=relationFilter.value,causal=causalFilter.checked;
+  return edges.filter(e=>ids.has(e.source)&&ids.has(e.target)&&(!relation||e.relation===relation)&&(!causal||e.causal===true)&&edgeExistsAt(e,selectedSequence));
+}
+function focusNeighborhood(nodes,edges,state){
+  if(!state)return new Set(nodes.map(n=>n.id));
+  const ids=new Set(nodes.map(n=>n.id));if(!ids.has(state.anchor))return new Set();
+  const adjacency=new Map();nodes.forEach(n=>adjacency.set(n.id,[]));
+  edges.forEach(e=>{if(!adjacency.has(e.source)||!adjacency.has(e.target))return;adjacency.get(e.source).push(e.target);adjacency.get(e.target).push(e.source)});
+  const selected=new Set([state.anchor]),queue=[[state.anchor,0]];
+  for(let i=0;i<queue.length;i++){const [id,depth]=queue[i];if(depth>=state.hops)continue;for(const next of adjacency.get(id)||[]){if(selected.has(next))continue;selected.add(next);queue.push([next,depth+1])}}
+  return selected;
+}
 function applyGraphFilters(){
   const materialized=materializedGraph();currentNodes=materialized.nodes;currentEdges=materialized.edges;
   const type=typeFilter.value,relation=relationFilter.value,causal=causalFilter.checked,timelineActive=maxSequence>0&&selectedSequence<maxSequence;
-  let nodes=currentNodes.filter(n=>!type||n.type===type);let ids=new Set(nodes.map(n=>n.id));
-  let edges=currentEdges.filter(e=>ids.has(e.source)&&ids.has(e.target)&&(!relation||e.relation===relation)&&(!causal||e.causal===true)&&edgeExistsAt(e,selectedSequence));
-  if(relation||causal||timelineActive){const connected=new Set();edges.forEach(e=>{connected.add(e.source);connected.add(e.target)});nodes=nodes.filter(n=>connected.has(n.id))}
-  visibleNodes=nodes;visibleEdges=edges;nodeById=new Map(nodes.map(n=>[n.id,n]));positions=new Map();collapseButton.disabled=expandedClusters.size===0;
+  const eligible=evidenceEdges(currentNodes,currentEdges),focusIds=focusNeighborhood(currentNodes,eligible,focusState);
+  let nodes=currentNodes.filter(n=>focusIds.has(n.id)&&(!type||n.type===type));let ids=new Set(nodes.map(n=>n.id));
+  let edges=eligible.filter(e=>ids.has(e.source)&&ids.has(e.target));
+  if(relation||causal||timelineActive){const connected=new Set();edges.forEach(e=>{connected.add(e.source);connected.add(e.target)});if(focusState&&ids.has(focusState.anchor))connected.add(focusState.anchor);nodes=nodes.filter(n=>connected.has(n.id));ids=new Set(nodes.map(n=>n.id));edges=edges.filter(e=>ids.has(e.source)&&ids.has(e.target))}
+  visibleNodes=nodes;visibleEdges=edges;nodeById=new Map(nodes.map(n=>[n.id,n]));positions=new Map();collapseButton.disabled=expandedClusters.size===0;clearFocusButton.disabled=focusState===null;
   computeLayout();renderNodes();renderEdges();updateStats();applyTransform();applySearch();requestAnimationFrame(fit);
 }
-function updateStats(){const seq=maxSequence>0?` · seq ${selectedSequence}/${maxSequence}`:'';const expanded=expandedClusters.size?` · ${expandedClusters.size} cluster${expandedClusters.size===1?'':'s'} expanded`:'';stats.textContent=`${visibleNodes.length}/${currentNodes.length} nodes · ${visibleEdges.length}/${currentEdges.length} edges · ${graph.event_count??0} events${seq}${expanded}`}
+function updateStats(){
+  const seq=maxSequence>0?` · seq ${selectedSequence}/${maxSequence}`:'';
+  const expanded=expandedClusters.size?` · ${expandedClusters.size} cluster${expandedClusters.size===1?'':'s'} expanded`:'';
+  const focused=focusState?` · focus ${focusState.hops}-hop`:'';
+  stats.textContent=`${visibleNodes.length}/${currentNodes.length} nodes · ${visibleEdges.length}/${currentEdges.length} edges · ${graph.event_count??0} events${seq}${expanded}${focused}`;
+}
 function computeLayout(){
-  const ids=[...nodeById.keys()],indegree=new Map(ids.map(id=>[id,0])),outgoing=new Map(ids.map(id=>[id,[]]));visibleEdges.forEach(e=>{if(!nodeById.has(e.source)||!nodeById.has(e.target))return;indegree.set(e.target,(indegree.get(e.target)||0)+1);outgoing.get(e.source).push(e.target)});
-  const roots=ids.filter(id=>(indegree.get(id)||0)===0);if(!roots.length&&ids.length)roots.push(ids[0]);const depth=new Map(),q=roots.map(id=>[id,0]);q.forEach(([id,d])=>depth.set(id,d));for(let i=0;i<q.length;i++){const [id,d]=q[i];for(const next of outgoing.get(id)||[]){if(!depth.has(next)){depth.set(next,d+1);q.push([next,d+1])}}}
-  const max=Math.max(0,...depth.values());ids.forEach(id=>{if(!depth.has(id))depth.set(id,max+1)});const layers=new Map();ids.forEach(id=>{const d=depth.get(id);if(!layers.has(d))layers.set(d,[]);layers.get(d).push(id)});[...layers.entries()].sort((a,b)=>a[0]-b[0]).forEach(([d,layer])=>{layer.sort((a,b)=>String(nodeById.get(a).type).localeCompare(String(nodeById.get(b).type))||a.localeCompare(b));layer.forEach((id,i)=>positions.set(id,{x:d*250,y:i*88}))});
+  const ids=[...nodeById.keys()],indegree=new Map(ids.map(id=>[id,0])),outgoing=new Map(ids.map(id=>[id,[]]));
+  visibleEdges.forEach(e=>{if(!nodeById.has(e.source)||!nodeById.has(e.target))return;indegree.set(e.target,(indegree.get(e.target)||0)+1);outgoing.get(e.source).push(e.target)});
+  const roots=ids.filter(id=>(indegree.get(id)||0)===0);if(!roots.length&&ids.length)roots.push(ids[0]);const depth=new Map(),q=roots.map(id=>[id,0]);q.forEach(([id,d])=>depth.set(id,d));
+  for(let i=0;i<q.length;i++){const [id,d]=q[i];for(const next of outgoing.get(id)||[]){if(!depth.has(next)){depth.set(next,d+1);q.push([next,d+1])}}}
+  const max=Math.max(0,...depth.values());ids.forEach(id=>{if(!depth.has(id))depth.set(id,max+1)});const layers=new Map();ids.forEach(id=>{const d=depth.get(id);if(!layers.has(d))layers.set(d,[]);layers.get(d).push(id)});
+  [...layers.entries()].sort((a,b)=>a[0]-b[0]).forEach(([d,layer])=>{layer.sort((a,b)=>String(nodeById.get(a).type).localeCompare(String(nodeById.get(b).type))||a.localeCompare(b));layer.forEach((id,i)=>positions.set(id,{x:d*250,y:i*88}))});
 }
 function applyTransform(){viewport.setAttribute('transform',`translate(${transform.x} ${transform.y}) scale(${transform.scale})`)}
 function anchor(id,right){const p=positions.get(id)||{x:0,y:0};return{x:p.x+(right?170:0),y:p.y+29}}
 function edgePath(e){const a=anchor(e.source,true),b=anchor(e.target,false),bend=Math.max(45,Math.abs(b.x-a.x)*.45);return `M ${a.x} ${a.y} C ${a.x+bend} ${a.y}, ${b.x-bend} ${b.y}, ${b.x} ${b.y}`}
+function setFocus(nodeId,hops){focusState={anchor:nodeId,hops};details.textContent=`Focused ${hops}-hop runtime neighborhood around ${nodeId}.`;applyGraphFilters()}
 function showDetails(kind,value){
-  details.classList.remove('empty');details.replaceChildren();const t=document.createElement('strong');t.textContent=kind;const p=document.createElement('pre');p.textContent=JSON.stringify(value,null,2);details.append(t,document.createElement('br'),document.createElement('br'));
-  if(kind==='Node'&&expansionClusters[value.id]&&!expandedClusters.has(value.id)){const button=document.createElement('button');button.className='detail-action';button.textContent='Expand cluster';button.addEventListener('click',()=>{expandedClusters.add(value.id);details.textContent='Cluster expanded into original evidence nodes.';applyGraphFilters()});details.append(button,document.createElement('br'))}
+  details.classList.remove('empty');details.replaceChildren();const t=document.createElement('strong');t.textContent=kind;const p=document.createElement('pre');p.textContent=JSON.stringify(value,null,2);details.append(t,document.createElement('br'));
+  if(kind==='Node'){
+    const actions=document.createElement('div');actions.className='detail-actions';
+    [1,2].forEach(hops=>{const button=document.createElement('button');button.textContent=`Focus ${hops} ${hops===1?'hop':'hops'}`;button.addEventListener('click',()=>setFocus(value.id,hops));actions.appendChild(button)});
+    if(expansionClusters[value.id]&&!expandedClusters.has(value.id)){const button=document.createElement('button');button.textContent='Expand cluster';button.addEventListener('click',()=>{focusState=null;expandedClusters.add(value.id);details.textContent='Cluster expanded into original evidence nodes.';applyGraphFilters()});actions.appendChild(button)}
+    details.append(actions);
+  }else{details.append(document.createElement('br'))}
   details.append(p);
 }
-function renderEdges(){edgeLayer.replaceChildren();labelLayer.replaceChildren();edgeElements=[];visibleEdges.forEach(edge=>{if(!positions.has(edge.source)||!positions.has(edge.target))return;const d=edgePath(edge),line=document.createElementNS('http://www.w3.org/2000/svg','path');line.setAttribute('d',d);line.setAttribute('marker-end','url(#arrow)');line.classList.add('edge');if(edge.causal===true)line.classList.add('causal');else if(edge.causal===false)line.classList.add('noncausal');edgeLayer.appendChild(line);const hit=document.createElementNS('http://www.w3.org/2000/svg','path');hit.setAttribute('d',d);hit.classList.add('edge-hit');hit.addEventListener('click',ev=>{ev.stopPropagation();showDetails('Edge',edge)});edgeLayer.appendChild(hit);const a=anchor(edge.source,true),b=anchor(edge.target,false),text=document.createElementNS('http://www.w3.org/2000/svg','text');text.setAttribute('x',String((a.x+b.x)/2));text.setAttribute('y',String((a.y+b.y)/2-7));text.setAttribute('text-anchor','middle');text.classList.add('edge-label');text.textContent=edgeLabel(edge);labelLayer.appendChild(text);edgeElements.push({edge,visible:line,hit,text})})}
-function renderNodes(){nodeLayer.replaceChildren();nodeElements=new Map();visibleNodes.forEach(node=>{const p=positions.get(node.id);if(!p)return;const g=document.createElementNS('http://www.w3.org/2000/svg','g');g.classList.add('node');if(expansionClusters[node.id])g.classList.add('cluster');g.setAttribute('transform',`translate(${p.x} ${p.y})`);const r=document.createElementNS('http://www.w3.org/2000/svg','rect');r.setAttribute('width','170');r.setAttribute('height','58');r.setAttribute('fill',colorForType(node.type));g.appendChild(r);const type=document.createElementNS('http://www.w3.org/2000/svg','text');type.setAttribute('x','12');type.setAttribute('y','18');type.classList.add('node-type');type.textContent=node.type||'unknown';g.appendChild(type);const label=document.createElementNS('http://www.w3.org/2000/svg','text');label.setAttribute('x','12');label.setAttribute('y','39');label.textContent=labelFor(node);g.appendChild(label);g.addEventListener('pointerdown',ev=>{ev.stopPropagation();const pt=svgPoint(ev);dragNode={id:node.id,dx:pt.x-p.x,dy:pt.y-p.y};g.setPointerCapture(ev.pointerId)});g.addEventListener('pointermove',ev=>{if(!dragNode||dragNode.id!==node.id)return;const pt=svgPoint(ev),np={x:pt.x-dragNode.dx,y:pt.y-dragNode.dy};positions.set(node.id,np);g.setAttribute('transform',`translate(${np.x} ${np.y})`);renderEdges()});g.addEventListener('pointerup',ev=>{dragNode=null;try{g.releasePointerCapture(ev.pointerId)}catch(_){}});g.addEventListener('click',ev=>{ev.stopPropagation();document.querySelectorAll('.node.selected').forEach(el=>el.classList.remove('selected'));g.classList.add('selected');showDetails('Node',node)});nodeLayer.appendChild(g);nodeElements.set(node.id,g)})}
+function renderEdges(){
+  edgeLayer.replaceChildren();labelLayer.replaceChildren();edgeElements=[];
+  visibleEdges.forEach(edge=>{if(!positions.has(edge.source)||!positions.has(edge.target))return;const d=edgePath(edge),line=document.createElementNS('http://www.w3.org/2000/svg','path');line.setAttribute('d',d);line.setAttribute('marker-end','url(#arrow)');line.classList.add('edge');if(edge.causal===true)line.classList.add('causal');else if(edge.causal===false)line.classList.add('noncausal');edgeLayer.appendChild(line);const hit=document.createElementNS('http://www.w3.org/2000/svg','path');hit.setAttribute('d',d);hit.classList.add('edge-hit');hit.addEventListener('click',ev=>{ev.stopPropagation();showDetails('Edge',edge)});edgeLayer.appendChild(hit);const a=anchor(edge.source,true),b=anchor(edge.target,false),text=document.createElementNS('http://www.w3.org/2000/svg','text');text.setAttribute('x',String((a.x+b.x)/2));text.setAttribute('y',String((a.y+b.y)/2-7));text.setAttribute('text-anchor','middle');text.classList.add('edge-label');text.textContent=edgeLabel(edge);labelLayer.appendChild(text);edgeElements.push({edge,visible:line,hit,text})});
+}
+function renderNodes(){
+  nodeLayer.replaceChildren();nodeElements=new Map();
+  visibleNodes.forEach(node=>{const p=positions.get(node.id);if(!p)return;const g=document.createElementNS('http://www.w3.org/2000/svg','g');g.classList.add('node');if(expansionClusters[node.id])g.classList.add('cluster');g.setAttribute('transform',`translate(${p.x} ${p.y})`);const r=document.createElementNS('http://www.w3.org/2000/svg','rect');r.setAttribute('width','170');r.setAttribute('height','58');r.setAttribute('fill',colorForType(node.type));g.appendChild(r);const type=document.createElementNS('http://www.w3.org/2000/svg','text');type.setAttribute('x','12');type.setAttribute('y','18');type.classList.add('node-type');type.textContent=node.type||'unknown';g.appendChild(type);const label=document.createElementNS('http://www.w3.org/2000/svg','text');label.setAttribute('x','12');label.setAttribute('y','39');label.textContent=labelFor(node);g.appendChild(label);g.addEventListener('pointerdown',ev=>{ev.stopPropagation();const pt=svgPoint(ev);dragNode={id:node.id,dx:pt.x-p.x,dy:pt.y-p.y};g.setPointerCapture(ev.pointerId)});g.addEventListener('pointermove',ev=>{if(!dragNode||dragNode.id!==node.id)return;const pt=svgPoint(ev),np={x:pt.x-dragNode.dx,y:pt.y-dragNode.dy};positions.set(node.id,np);g.setAttribute('transform',`translate(${np.x} ${np.y})`);renderEdges()});g.addEventListener('pointerup',ev=>{dragNode=null;try{g.releasePointerCapture(ev.pointerId)}catch(_){}});g.addEventListener('click',ev=>{ev.stopPropagation();document.querySelectorAll('.node.selected').forEach(el=>el.classList.remove('selected'));g.classList.add('selected');showDetails('Node',node)});nodeLayer.appendChild(g);nodeElements.set(node.id,g)});
+}
 function svgPoint(ev){const rect=svg.getBoundingClientRect();return{x:(ev.clientX-rect.left-transform.x)/transform.scale,y:(ev.clientY-rect.top-transform.y)/transform.scale}}
 function fit(){if(!positions.size)return;const xs=[...positions.values()].map(p=>p.x),ys=[...positions.values()].map(p=>p.y),minX=Math.min(...xs),maxX=Math.max(...xs)+170,minY=Math.min(...ys),maxY=Math.max(...ys)+58,box=svg.getBoundingClientRect(),width=Math.max(1,maxX-minX),height=Math.max(1,maxY-minY),scale=Math.min(1.25,Math.max(.08,Math.min((box.width-70)/width,(box.height-70)/height)));transform={x:35-minX*scale,y:35-minY*scale,scale};applyTransform()}
 function applySearch(){const q=search.value.trim().toLowerCase();if(!q){nodeElements.forEach(el=>el.classList.remove('dim'));edgeElements.forEach(i=>{i.visible.classList.remove('dim');i.text.classList.remove('dim')});return}const matched=new Set();visibleNodes.forEach(n=>{if(`${n.id} ${n.name||''} ${n.type||''}`.toLowerCase().includes(q))matched.add(n.id)});nodeElements.forEach((el,id)=>el.classList.toggle('dim',!matched.has(id)));edgeElements.forEach(i=>{const keep=matched.has(i.edge.source)||matched.has(i.edge.target)||String(i.edge.relation).toLowerCase().includes(q);i.visible.classList.toggle('dim',!keep);i.text.classList.toggle('dim',!keep)})}
 function stopPlayback(){if(playTimer!==null){clearInterval(playTimer);playTimer=null}playButton.textContent='Play'}
 function setSequence(value){selectedSequence=Math.max(0,Math.min(maxSequence,Number(value)||0));sequenceFilter.value=String(selectedSequence);sequenceLabel.textContent=`${selectedSequence} / ${maxSequence}`;applyGraphFilters()}
 function togglePlayback(){if(playTimer!==null){stopPlayback();return}if(maxSequence<=0)return;if(selectedSequence>=maxSequence)setSequence(0);playButton.textContent='Pause';const step=Math.max(1,Math.ceil(maxSequence/180));playTimer=setInterval(()=>{if(selectedSequence>=maxSequence){stopPlayback();return}setSequence(Math.min(maxSequence,selectedSequence+step))},160)}
-svg.addEventListener('pointerdown',ev=>{if(ev.target.closest?.('.node'))return;panStart={x:ev.clientX,y:ev.clientY,tx:transform.x,ty:transform.y};svg.classList.add('panning');svg.setPointerCapture(ev.pointerId)});svg.addEventListener('pointermove',ev=>{if(!panStart)return;transform.x=panStart.tx+ev.clientX-panStart.x;transform.y=panStart.ty+ev.clientY-panStart.y;applyTransform()});svg.addEventListener('pointerup',ev=>{panStart=null;svg.classList.remove('panning');try{svg.releasePointerCapture(ev.pointerId)}catch(_){}});svg.addEventListener('wheel',ev=>{ev.preventDefault();const rect=svg.getBoundingClientRect(),mx=ev.clientX-rect.left,my=ev.clientY-rect.top,old=transform.scale,next=Math.min(4,Math.max(.08,old*Math.exp(-ev.deltaY*.0012))),gx=(mx-transform.x)/old,gy=(my-transform.y)/old;transform.scale=next;transform.x=mx-gx*next;transform.y=my-gy*next;applyTransform()},{passive:false});
-search.addEventListener('input',applySearch);[typeFilter,relationFilter,causalFilter].forEach(el=>el.addEventListener('change',applyGraphFilters));sequenceFilter.addEventListener('input',()=>{stopPlayback();setSequence(sequenceFilter.value)});playButton.addEventListener('click',togglePlayback);collapseButton.addEventListener('click',()=>{expandedClusters=new Set();details.textContent='All expandable clusters collapsed.';applyGraphFilters()});document.getElementById('fit').addEventListener('click',fit);document.getElementById('reset').addEventListener('click',()=>{computeLayout();renderNodes();renderEdges();applySearch();fit()});window.addEventListener('resize',fit);svg.addEventListener('click',()=>document.querySelectorAll('.node.selected').forEach(el=>el.classList.remove('selected')));
+svg.addEventListener('pointerdown',ev=>{if(ev.target.closest?.('.node'))return;panStart={x:ev.clientX,y:ev.clientY,tx:transform.x,ty:transform.y};svg.classList.add('panning');svg.setPointerCapture(ev.pointerId)});
+svg.addEventListener('pointermove',ev=>{if(!panStart)return;transform.x=panStart.tx+ev.clientX-panStart.x;transform.y=panStart.ty+ev.clientY-panStart.y;applyTransform()});
+svg.addEventListener('pointerup',ev=>{panStart=null;svg.classList.remove('panning');try{svg.releasePointerCapture(ev.pointerId)}catch(_){}});
+svg.addEventListener('wheel',ev=>{ev.preventDefault();const rect=svg.getBoundingClientRect(),mx=ev.clientX-rect.left,my=ev.clientY-rect.top,old=transform.scale,next=Math.min(4,Math.max(.08,old*Math.exp(-ev.deltaY*.0012))),gx=(mx-transform.x)/old,gy=(my-transform.y)/old;transform.scale=next;transform.x=mx-gx*next;transform.y=my-gy*next;applyTransform()},{passive:false});
+search.addEventListener('input',applySearch);
+[typeFilter,relationFilter,causalFilter].forEach(el=>el.addEventListener('change',applyGraphFilters));
+sequenceFilter.addEventListener('input',()=>{stopPlayback();setSequence(sequenceFilter.value)});
+playButton.addEventListener('click',togglePlayback);
+clearFocusButton.addEventListener('click',()=>{focusState=null;details.textContent='Focused subgraph cleared.';applyGraphFilters()});
+collapseButton.addEventListener('click',()=>{focusState=null;expandedClusters=new Set();details.textContent='All expandable clusters collapsed.';applyGraphFilters()});
+document.getElementById('fit').addEventListener('click',fit);
+document.getElementById('reset').addEventListener('click',()=>{computeLayout();renderNodes();renderEdges();applySearch();fit()});
+window.addEventListener('resize',fit);
+svg.addEventListener('click',()=>document.querySelectorAll('.node.selected').forEach(el=>el.classList.remove('selected')));
 applyGraphFilters();
 })();
 </script>
