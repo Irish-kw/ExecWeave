@@ -80,6 +80,18 @@ def test_claude_record_binds_hook_sidecar_and_builds_semantic_graph(
     assert "tool_call" in node_types
     assert "command" in node_types
 
+    correlated_graph = load_graph(result.correlated_graph)
+    summary = correlated_graph["metadata"]["correlation"]
+    assert summary["tool_calls_considered"] == result.correlation.tool_calls_considered
+    assert summary["correlated_tool_calls"] == result.correlation.correlated_tool_calls
+    assert summary["skipped_ambiguous"] == result.correlation.skipped_ambiguous
+    assert summary["skipped_no_match"] == result.correlation.skipped_no_match
+    assert summary["skipped_unsupported"] == result.correlation.skipped_unsupported
+    assert summary["max_window_ms"] == result.correlation.max_window_ms
+    viewer_html = result.correlated_viewer.read_text(encoding="utf-8")
+    assert 'id="correlation-section"' in viewer_html
+    assert '"correlation":{' in viewer_html
+
 
 def test_claude_record_without_hook_events_falls_back_to_runtime_graph(tmp_path: Path) -> None:
     output_dir = tmp_path / "runtime-only"
