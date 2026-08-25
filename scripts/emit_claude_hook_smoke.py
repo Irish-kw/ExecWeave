@@ -10,10 +10,10 @@ from pathlib import Path
 def _child_command() -> tuple[list[str], str]:
     if os.name == "nt":
         # Keep a non-Python process alive long enough for the portable sampler.
-        argv = ["ping", "-n", "3", "127.0.0.1"]
-        return argv, "ping -n 3 127.0.0.1"
-    argv = ["sleep", "1.2"]
-    return argv, "sleep 1.2"
+        argv = ["ping", "-n", "4", "127.0.0.1"]
+        return argv, "ping -n 4 127.0.0.1"
+    argv = ["sleep", "3"]
+    return argv, "sleep 3"
 
 
 def main() -> int:
@@ -37,8 +37,9 @@ def main() -> int:
         check=True,
     )
     child = subprocess.Popen(child_argv)
-    # Give the parent ExecWeave sampler several observation opportunities before wait().
-    time.sleep(0.3)
+    # Keep the emitter alive while the child is running so the portable sampler
+    # gets many observation opportunities on slower hosted runners.
+    time.sleep(0.5)
     return int(child.wait())
 
 
