@@ -15,14 +15,15 @@ def _hook_emitter_code(cwd: Path) -> str:
         "session_id": "gemini-test-session",
         "transcript_path": str(cwd / "transcript.json"),
     }
-    payloads = [
-        {**base, "hook_event_name": "SessionStart", "timestamp": "2026-08-25T08:20:00Z", "source": "startup"},
-        {**base, "hook_event_name": "BeforeTool", "timestamp": "2026-08-25T08:20:01Z", "tool_name": "run_shell_command", "tool_input": {"command": "echo execweave-gemini-record"}},
-        {**base, "hook_event_name": "AfterTool", "timestamp": "2026-08-25T08:20:02Z", "tool_name": "run_shell_command", "tool_input": {"command": "echo execweave-gemini-record"}, "tool_response": {"returnDisplay": "execweave-gemini-record", "error": None}},
-    ]
     return (
         "import json, subprocess; "
-        f"payloads={payloads!r}; "
+        "from datetime import datetime, timezone; "
+        f"base={base!r}; "
+        "now=lambda: datetime.now(timezone.utc).isoformat().replace('+00:00','Z'); "
+        "payloads=["
+        "{**base,'hook_event_name':'SessionStart','timestamp':now(),'source':'startup'},"
+        "{**base,'hook_event_name':'BeforeTool','timestamp':now(),'tool_name':'run_shell_command','tool_input':{'command':'echo execweave-gemini-record'}},"
+        "{**base,'hook_event_name':'AfterTool','timestamp':now(),'tool_name':'run_shell_command','tool_input':{'command':'echo execweave-gemini-record'},'tool_response':{'returnDisplay':'execweave-gemini-record','error':None}}]; "
         "[(subprocess.run(['execweave-gemini-hook'], input=json.dumps(p), text=True, check=True, capture_output=True)) for p in payloads]"
     )
 
