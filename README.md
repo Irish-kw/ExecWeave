@@ -113,13 +113,23 @@ execweave-inference-gateway event \
   --sidecar gateway.jsonl
 ```
 
-ExecWeave can keep these facts distinct:
+### LiteLLM Proxy
 
-```text
-requested model → resolved model → routed provider
+LiteLLM is also modeled as an `inference_gateway`.
+
+```bash
+execweave-inference-gateway event \
+  --gateway litellm \
+  --requested-model assistant \
+  --resolved-model azure/gpt-5 \
+  --provider-name Azure \
+  --deployment-id deployment-west \
+  --sidecar gateway.jsonl
 ```
 
-Whitelisted usage can include token counts, cache/reasoning counts, cost, and generation timing metadata. Prompt and response content are not persisted.
+ExecWeave keeps requested model, resolved model, routed provider, and deployment identity distinct. Provider/deployment edges are only emitted when authoritative metadata is supplied; they are never inferred from a model-name prefix.
+
+Whitelisted usage can include token counts, cache/reasoning counts, cost, and generation timing metadata. Prompt, response, and reasoning text are not persisted.
 
 ## Model runtime integrations
 
@@ -137,9 +147,23 @@ execweave-model-runtime event --runtime llamacpp --sidecar model-runtime.jsonl
 execweave-model-runtime probe --runtime llamacpp --metrics --sidecar model-runtime.jsonl
 ```
 
-This layer models `model_runtime`, `inference_request`, `model`, and runtime snapshots. It records selected token/timing/load metadata without prompt or generated content. Sensitive llama.cpp local model paths are redacted.
+### vLLM
 
-Future OpenAI-compatible runtimes such as vLLM and LM Studio can reuse this layer.
+```bash
+execweave-model-runtime event --runtime vllm --sidecar model-runtime.jsonl
+execweave-model-runtime probe --runtime vllm --sidecar model-runtime.jsonl
+```
+
+### LM Studio
+
+```bash
+execweave-model-runtime event --runtime lmstudio --sidecar model-runtime.jsonl
+execweave-model-runtime probe --runtime lmstudio --sidecar model-runtime.jsonl
+```
+
+This layer models `model_runtime`, `inference_request`, `model`, and runtime snapshots. OpenAI-compatible runtimes share response/usage and model-catalog parsing while retaining runtime-specific evidence semantics. It records selected model/token/timing/runtime metadata without prompt, generated, or reasoning content. Sensitive local model paths are redacted; llama.cpp keeps stricter GGUF-path redaction.
+
+LM Studio model-catalog visibility is represented as `ADVERTISES_MODEL`, not as proof that model weights are loaded in memory.
 
 ## Runtime evidence
 
@@ -220,7 +244,7 @@ Security findings remain explicit about evidence limits. A possible sensitive-fi
 
 ExecWeave is currently **v0.5.0** and under active development.
 
-Implemented baseline includes runtime collection, graph materialization/querying, standalone/live Viewer, native Claude/Codex/Gemini/Cursor/OpenCode semantic integrations, conservative Tool → Process correlation, OpenRouter gateway metadata, Ollama/llama.cpp runtime metadata, and cross-platform CI on Python 3.10/3.12.
+Implemented baseline includes runtime collection, graph materialization/querying, standalone/live Viewer, native Claude/Codex/Gemini/Cursor/OpenCode semantic integrations, conservative Tool → Process correlation, OpenRouter/LiteLLM gateway metadata, Ollama/llama.cpp/vLLM/LM Studio runtime metadata, and cross-platform CI on Python 3.10/3.12.
 
 ## Privacy
 
@@ -239,8 +263,8 @@ Review artifacts before sharing them.
 - [`Gemini CLI Hooks`](docs/gemini-hooks.md)
 - [`Cursor Hooks`](docs/cursor-hooks.md)
 - [`OpenCode Plugin`](docs/opencode-plugin.md)
-- [`Inference Gateway / OpenRouter`](docs/inference-gateway.md)
-- [`Model Runtime / Ollama / llama.cpp`](docs/model-runtime.md)
+- [`Inference Gateway / OpenRouter / LiteLLM`](docs/inference-gateway.md)
+- [`Model Runtime / Ollama / llama.cpp / vLLM / LM Studio`](docs/model-runtime.md)
 - [`Security Analysis`](docs/security-analysis.md)
 
 ## Contributing
