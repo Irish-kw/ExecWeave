@@ -24,28 +24,63 @@ cd ExecWeave
 python -m pip install -e ".[dev]"
 ```
 
-On Debian/Ubuntu, install the Linux reference backend:
+### Watch the graph while the agent is running
+
+```bash
+execweave live --open -- claude
+```
+
+The live MVP starts a server bound only to `127.0.0.1`, opens a browser, and updates the graph while the command is still running.
+
+```text
+AI Agent
+   ↓
+portable runtime collector
+   ↓
+events.jsonl grows
+   ↓
+execution graph snapshots
+   ↓
+127.0.0.1:<random-port>
+   ↓
+Live browser graph
+```
+
+When the command exits, ExecWeave validates the event stream and stores the final artifacts:
+
+```text
+.execweave/runs/<session-id>/
+├── events.jsonl
+├── graph.json
+└── viewer.html
+```
+
+The current live path intentionally uses the **portable** collector. The Linux `strace` backend is post-processed after the command exits, so presenting it as live would be misleading.
+
+### Stronger Linux post-run evidence
+
+On Debian/Ubuntu:
 
 ```bash
 sudo apt-get install strace
 ```
 
-Then record an agent run and open the resulting graph:
+Then record a run using syscall-backed attribution and open the final graph:
 
 ```bash
-execweave record --open -- claude
+execweave record --backend strace --open -- claude
 ```
 
-The same works with other agents or arbitrary commands:
+Other examples:
 
 ```bash
-execweave record --open -- codex
-execweave record --open -- gemini
-execweave record --open -- opencode
+execweave live --open -- codex
+execweave live --open -- gemini
+execweave live --open -- opencode
 execweave record --open -- python my_agent.py
 ```
 
-One `record` command performs the complete pipeline after the agent exits:
+`record` performs the complete pipeline after the command exits:
 
 ```text
 AI Agent
@@ -61,18 +96,10 @@ graph.json
 viewer.html
 ```
 
-By default, artifacts are stored under:
-
-```text
-.execweave/runs/<session-id>/
-├── events.jsonl
-├── graph.json
-└── viewer.html
-```
-
-Choose an explicit location:
+Choose an explicit artifact directory:
 
 ```bash
+execweave live --output-dir my-live-run --open -- claude
 execweave record --output-dir my-run --open -- claude
 ```
 
@@ -97,7 +124,7 @@ ExecWeave is currently **v0.3.0**.
 - explicit causal vs non-causal/session-observation semantics
 - event-stream validation
 - backend diagnostics and auto-selection
-- benchmark harness and cross-platform CI
+- benchmark harness and cross-platform CI configuration
 
 ### Phase 2 — Execution Graph
 
@@ -112,12 +139,14 @@ ExecWeave is currently **v0.3.0**.
 - graph summary
 - graph filtering
 - directed path queries
+- large-run graph condensation for repetitive leaf resources
 
 ### Phase 3 — Interactive Viewer
 
-**Standalone local viewer MVP implemented.**
+**Standalone and live local viewer MVPs implemented.**
 
-- no CDN or external JavaScript dependency
+- standalone HTML with no CDN or external JavaScript dependency
+- localhost live graph updates using the portable collector
 - pan / zoom
 - draggable nodes
 - node and edge inspection
@@ -125,11 +154,11 @@ ExecWeave is currently **v0.3.0**.
 - causal/non-causal edge styling
 - automatic directional layout
 
-Live graph updates while an agent is still running are not implemented yet.
+Progressive cluster expansion and Timeline ↔ Graph synchronization remain future work.
 
 ## Advanced manual workflow
 
-The one-command `record` workflow is the recommended path. Each stage is also available separately.
+The one-command `live` and `record` workflows are recommended. Each stage is also available separately.
 
 ### 1. Inspect collector capabilities
 
@@ -170,10 +199,28 @@ execweave validate --allow-incomplete run.jsonl
 execweave graph run.jsonl --output run.graph.json
 ```
 
-### 5. Open the viewer
+### 5. Condense a large graph
+
+Long agent runs can touch hundreds or thousands of low-value leaf files. Collapse repetitive file/directory/executable leaves while preserving processes, agents, sessions, sockets, and network endpoints:
+
+```bash
+execweave graph-condense run.graph.json \
+  --output run.compact.graph.json \
+  --threshold 8
+```
+
+A cluster is only created for equivalent **leaf** resources with one incoming relationship and no outgoing behavior. Important runtime topology is not collapsed merely to make the picture prettier.
+
+### 6. Open the viewer
 
 ```bash
 execweave view run.graph.json --output run.html --open
+```
+
+For a large run:
+
+```bash
+execweave view run.compact.graph.json --output run.compact.html --open
 ```
 
 ## Graph-first event model
@@ -254,17 +301,19 @@ Raw trace files are removed after parsing unless explicitly retained:
 execweave run --keep-native-trace -- claude
 ```
 
-### `portable` — cross-platform fallback
+### `portable` — cross-platform fallback and live backend
 
-The portable backend uses psutil and watchdog on Linux, macOS, and Windows.
+The portable backend uses psutil and watchdog on Linux, macOS, and Windows. It is also the current live-graph backend because it emits observations while the command is running.
 
-It keeps weaker filesystem attribution explicitly non-causal and can miss processes whose entire lifetime falls between polling intervals.
+Its limitations remain explicit: filesystem changes are session-correlated rather than process-attributed, and processes whose entire lifetime falls between polling intervals can be missed.
 
 Future native collectors are planned for:
 
 - Linux eBPF
 - Windows ETW
 - macOS Endpoint Security
+
+The goal is for future native backends to emit the same event contract while also supporting low-overhead live collection.
 
 ## Event-stream integrity
 
@@ -320,26 +369,34 @@ See [`docs/phase-2-execution-graph.md`](docs/phase-2-execution-graph.md) for the
 Generate a standalone local viewer:
 
 ```bash
-execweave view run.graph.json --output run.html
-```
-
-Open it immediately:
-
-```bash
 execweave view run.graph.json --output run.html --open
 ```
+
+Start the live viewer:
+
+```bash
+execweave live --open -- claude
+```
+
+Useful live options:
+
+```bash
+execweave live --port 8765 --open -- claude
+execweave live --linger 10 --open -- claude
+execweave live --no-files --open -- claude
+```
+
+The live HTTP server binds only to `127.0.0.1`. It is not exposed to the LAN by default.
 
 Current interactions include:
 
 - wheel zoom
 - background drag to pan
-- node drag
+- node drag in the standalone viewer
 - node/edge detail inspection
 - search by node ID, name, or type
 - causal/non-causal edge distinction
 - fit/reset controls
-
-The viewer embeds graph data directly in the local HTML and does not fetch a graph library from the internet.
 
 ## Benchmark
 
@@ -356,7 +413,8 @@ ExecWeave is **local-first**.
 
 - runtime events stay local by default
 - graph construction is local
-- the viewer is a standalone local file
+- standalone viewer data stays in the generated HTML
+- live serving binds to localhost only
 - no external CDN is required
 - file contents are not traced
 - `read()` / `write()` byte buffers are not collected
@@ -373,7 +431,7 @@ Runtime metadata can still include sensitive paths, commands, and endpoints. Rev
 - [x] Portable fallback
 - [x] Causality semantics
 - [x] Event validation
-- [x] Diagnostics / benchmark / CI
+- [x] Diagnostics / benchmark / CI configuration
 - [ ] Linux eBPF backend
 - [ ] Windows ETW backend
 - [ ] macOS Endpoint Security backend
@@ -385,6 +443,7 @@ Runtime metadata can still include sensitive paths, commands, and endpoints. Rev
 - [x] Edge aggregation
 - [x] Temporal metadata
 - [x] Summary / filter / path query
+- [x] Large-run leaf-resource condensation
 - [ ] Stronger entity resolution
 - [ ] Time-window graph snapshots
 - [ ] Compact evidence indexing for very large runs
@@ -393,9 +452,10 @@ Runtime metadata can still include sensitive paths, commands, and endpoints. Rev
 
 - [x] Standalone local viewer MVP
 - [x] Pan / zoom / drag / search / details
-- [ ] Live graph updates during execution
+- [x] Portable live graph updates during execution
+- [x] Initial large-graph condensation
+- [ ] Progressive cluster expansion in the viewer
 - [ ] Timeline ↔ Graph synchronization
-- [ ] Large-graph clustering / progressive expansion
 - [ ] Saved filters and focused subgraphs
 
 ### Later security / research layers
