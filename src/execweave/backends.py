@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Literal
 
 from .collector import RuntimeCollector
+from .scope import protect_filesystem_scope
 from .sink import JsonlSink
 from .strace_backend import StraceRuntimeCollector, strace_available
 
@@ -33,23 +34,29 @@ def create_collector(
     collect_filesystem: bool,
     collect_network: bool,
     keep_raw_trace: bool = False,
+    allow_broad_filesystem_scope: bool = False,
 ):
+    scope = protect_filesystem_scope(
+        watch_root,
+        collect_filesystem=collect_filesystem,
+        allow_broad_scope=allow_broad_filesystem_scope,
+    )
     resolved = resolve_backend(backend)
     if resolved == "strace":
         return StraceRuntimeCollector(
             session_id=session_id,
             sink=sink,
-            watch_root=watch_root,
-            collect_filesystem=collect_filesystem,
+            watch_root=scope.watch_root,
+            collect_filesystem=scope.collect_filesystem,
             collect_network=collect_network,
             keep_raw_trace=keep_raw_trace,
         )
     return RuntimeCollector(
         session_id=session_id,
         sink=sink,
-        watch_root=watch_root,
+        watch_root=scope.watch_root,
         poll_interval=poll_interval,
-        collect_filesystem=collect_filesystem,
+        collect_filesystem=scope.collect_filesystem,
         collect_network=collect_network,
     )
 
