@@ -36,6 +36,19 @@ cd ExecWeave
 python -m pip install -e ".[dev]"
 ```
 
+Claude Code, OpenAI Codex 또는 Gemini CLI를 실시간으로 관찰:
+
+```bash
+# Claude Code
+execweave live --open -- claude
+
+# OpenAI Codex
+execweave live --open -- codex
+
+# Gemini CLI
+execweave live --open -- gemini
+```
+
 ## Performance / footprint
 
 Reference benchmark는 editable source가 아니라 실제 설치된 wheel에서 실행됩니다. X축은 additional peak process-tree RSS, Y축은 runtime overhead, bubble 면적은 run당 median artifact size입니다. 두 축 모두 낮음→높음이며 왼쪽 아래가 선호 영역입니다.

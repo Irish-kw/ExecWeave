@@ -36,10 +36,17 @@ cd ExecWeave
 python -m pip install -e ".[dev]"
 ```
 
-Watch any command live:
+Watch Claude Code, OpenAI Codex, or Gemini CLI live:
 
 ```bash
+# Claude Code
 execweave live --open -- claude
+
+# OpenAI Codex
+execweave live --open -- codex
+
+# Gemini CLI
+execweave live --open -- gemini
 ```
 
 Or build the full artifact pipeline:

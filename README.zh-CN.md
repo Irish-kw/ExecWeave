@@ -36,6 +36,19 @@ cd ExecWeave
 python -m pip install -e ".[dev]"
 ```
 
+实时观察 Claude Code、OpenAI Codex 或 Gemini CLI：
+
+```bash
+# Claude Code
+execweave live --open -- claude
+
+# OpenAI Codex
+execweave live --open -- codex
+
+# Gemini CLI
+execweave live --open -- gemini
+```
+
 ## 性能与空间占用
 
 Reference benchmark 从实际安装的 wheel 运行。图采用常见的 trade-off 表达：X 轴为额外 peak process-tree RSS（低→高），Y 轴为 runtime overhead（低→高），bubble 面积表示每次 run 的 median artifact size；左下角更理想。

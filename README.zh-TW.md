@@ -36,10 +36,17 @@ cd ExecWeave
 python -m pip install -e ".[dev]"
 ```
 
-即時觀察 command：
+即時觀察 Claude Code、OpenAI Codex 或 Gemini CLI：
 
 ```bash
+# Claude Code
 execweave live --open -- claude
+
+# OpenAI Codex
+execweave live --open -- codex
+
+# Gemini CLI
+execweave live --open -- gemini
 ```
 
 建立完整 artifact pipeline：
