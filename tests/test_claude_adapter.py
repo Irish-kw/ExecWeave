@@ -51,9 +51,11 @@ def test_write_declares_file_target_without_storing_content() -> None:
     }
     events = claude_hook_to_semantic_events(payload, timestamp="2026-08-25T03:00:00Z")
     serialized = json.dumps(events)
+    declared = next(event for event in events if event["relation"] == "DECLARED_TARGET")
 
-    assert "DECLARED_TARGET" in [event["relation"] for event in events]
-    assert "file:/repo/output.txt" in serialized
+    assert declared["target"]["type"] == "file"
+    assert declared["target"]["id"].startswith("file:")
+    assert declared["target"]["name"] == "output.txt"
     assert secret not in serialized
     assert "content" in events[0]["target"]["attributes"]["input_keys"]
 
