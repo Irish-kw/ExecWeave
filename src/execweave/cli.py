@@ -201,6 +201,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=8,
         help="Maximum member names stored as cluster examples (default: 8)",
     )
+    graph_condense.add_argument(
+        "--keep-expansion",
+        action="store_true",
+        help="Embed original cluster members so the Viewer can expand them on demand",
+    )
 
     analyze = subparsers.add_parser(
         "analyze",
@@ -331,6 +336,7 @@ def main(argv: list[str] | None = None) -> int:
                 payload,
                 threshold=args.threshold,
                 sample_size=args.sample_size,
+                include_expansion=args.keep_expansion,
             )
             written = write_graph_payload(condensed, args.output)
         except (FileExistsError, ValueError) as exc:
