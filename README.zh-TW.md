@@ -10,62 +10,13 @@
 
 **看清楚 AI Agent 在你的電腦上實際做了什麼。**
 
-ExecWeave 是一個開源、local-first 的 AI Agent runtime observability 專案。它把本機 Agent 的執行行為轉成 execution graph，而不是逼你閱讀幾百、幾千行 CLI log。
+ExecWeave 是一個開源、local-first 的 AI Agent runtime observability 專案。它把本機 Agent 的執行行為轉成互動式 execution graph，而不是逼使用者閱讀幾百、幾千行 CLI log。
 
-ExecWeave 會蒐集 Agent、session、process、file、executable、socket 與 network endpoint 之間的關係，將 event materialize 成 Graph，最後產生可以直接在瀏覽器開啟的互動式本機 HTML viewer。
+ExecWeave 會連接 Agent、session、process、file、executable、socket 與 network endpoint 等 runtime entity，並保留支撐每條 edge 的 evidence。
 
 > **把不透明的 AI Agent 執行過程，變成人類真正看得懂的圖。**
 
-## 目前狀態
-
-### Phase 1 — Runtime Collection
-
-**Linux reference path 與跨平台 portable fallback 已完成。**
-
-目前支援：
-
-- graph-ready JSONL event stream；
-- 每次 run 單調遞增的 event sequence；
-- root 與 descendant process capture；
-- Linux syscall-backed 短生命週期 process capture；
-- Linux process-attributed file open/create/delete/rename；
-- Linux IPv4/IPv6/Unix-socket connection evidence；
-- 保留 non-blocking / failed `connect()` attempt；
-- Linux、macOS、Windows 的 psutil/watchdog portable fallback；
-- causal 與 non-causal/session-observation 明確區分；
-- event-stream validator；
-- backend diagnostics / auto selection；
-- benchmark harness 與 cross-platform CI。
-
-### Phase 2 — Execution Graph
-
-**核心 Graph materialization 與 query layer 已完成第一版。**
-
-- validated JSONL → graph JSON；
-- node deduplication；
-- repeated edge aggregation；
-- temporal first/last metadata；
-- evidence event IDs；
-- causality preservation；
-- graph summary；
-- graph filtering；
-- directed path query。
-
-### Phase 3 — Interactive Viewer
-
-**本機互動式 Viewer MVP 已完成第一版。**
-
-- standalone HTML；
-- 不依賴 CDN 或外部 JavaScript library；
-- pan / zoom；
-- node drag；
-- node / edge 詳情；
-- graph search；
-- causal / non-causal edge 視覺區分。
-
-目前尚未做到 Agent 執行途中即時更新 Graph；live view 會是下一步。
-
-## 快速開始
+## 最快開始方式
 
 ```bash
 git clone https://github.com/Irish-kw/ExecWeave.git
@@ -79,70 +30,158 @@ Debian / Ubuntu 若要使用 Linux reference backend：
 sudo apt-get install strace
 ```
 
-檢查目前可用 backend：
+接著只需要一個命令：
 
 ```bash
-execweave doctor
+execweave record --open -- claude
 ```
 
-### 1. 記錄一次 Agent 執行
+其他 Agent 也一樣：
 
 ```bash
-execweave run --output run.jsonl -- claude
+execweave record --open -- codex
+execweave record --open -- gemini
+execweave record --open -- opencode
+execweave record --open -- python my_agent.py
 ```
 
-也可以：
-
-```bash
-execweave run --output run.jsonl -- codex
-execweave run --output run.jsonl -- gemini
-execweave run --output run.jsonl -- opencode
-execweave run --output run.jsonl -- python my_agent.py
-```
-
-### 2. 驗證 event stream
-
-```bash
-execweave validate run.jsonl
-```
-
-### 3. 建立 Execution Graph
-
-```bash
-execweave graph run.jsonl --output run.graph.json
-```
-
-### 4. 在瀏覽器打開互動式 Graph
-
-```bash
-execweave view run.graph.json --output run.html --open
-```
-
-完整流程：
+`record` 會在 Agent 結束後自動完成：
 
 ```text
 AI Agent
    ↓
 Runtime Collection
    ↓
-run.jsonl
+events.jsonl
    ↓ validate
 Execution Graph
    ↓
-run.graph.json
-   ↓ view
-Standalone Interactive HTML
+graph.json
+   ↓
+viewer.html
+```
+
+預設輸出：
+
+```text
+.execweave/runs/<session-id>/
+├── events.jsonl
+├── graph.json
+└── viewer.html
+```
+
+也可以指定位置：
+
+```bash
+execweave record --output-dir my-run --open -- claude
+```
+
+ExecWeave 預設拒絕覆寫既有且非空的 artifact，避免不同 run 被混在一起。
+
+## 目前狀態
+
+ExecWeave 目前版本為 **v0.3.0**。
+
+### Phase 1 — Runtime Collection
+
+**Linux reference path 與跨平台 portable fallback 已完成。**
+
+- graph-ready JSONL event stream
+- monotonic sequence
+- root / descendant process capture
+- Linux syscall-backed short-lived process capture
+- process-attributed file open/create/delete/rename
+- IPv4 / IPv6 / Unix-socket connection evidence
+- non-blocking / failed connection attempt 保留
+- Linux / macOS / Windows portable fallback
+- causal / non-causal attribution
+- event validator
+- diagnostics / benchmark / CI
+
+### Phase 2 — Execution Graph
+
+**核心 Graph materialization 與 query layer 已完成第一版。**
+
+- validated JSONL → graph JSON
+- node deduplication
+- repeated edge aggregation
+- temporal first/last metadata
+- supporting event IDs
+- causality preservation
+- graph summary
+- graph filtering
+- directed path query
+
+### Phase 3 — Interactive Viewer
+
+**Standalone local Viewer MVP 已完成第一版。**
+
+- 不依賴 CDN / 外部 JavaScript
+- pan / zoom
+- node drag
+- node / edge detail
+- search
+- causal / non-causal edge 視覺區分
+- automatic directional layout
+
+目前尚未做到 Agent 執行中的 live graph update。
+
+## 進階手動流程
+
+一般使用者建議直接使用 `record`。每個階段也可以獨立操作。
+
+### 1. 查看 backend
+
+```bash
+execweave doctor
+```
+
+### 2. 收集 runtime events
+
+```bash
+execweave run --output run.jsonl -- claude
+```
+
+指定 backend：
+
+```bash
+execweave run --backend strace --output run.jsonl -- claude
+execweave run --backend portable --output run.jsonl -- claude
+```
+
+### 3. 驗證 event stream
+
+```bash
+execweave validate run.jsonl
+```
+
+中斷的 run：
+
+```bash
+execweave validate --allow-incomplete run.jsonl
+```
+
+### 4. 建立 Graph
+
+```bash
+execweave graph run.jsonl --output run.graph.json
+```
+
+### 5. 開啟 Viewer
+
+```bash
+execweave view run.graph.json --output run.html --open
 ```
 
 ## Graph-first event model
 
-Phase 1 每一筆 observation 都以：
+每一筆 runtime observation 都表示成：
 
 ```text
 source --RELATION--> target
 ```
 
-表示，例如：
+例如：
 
 ```text
 session --LAUNCHED--> process
@@ -155,14 +194,14 @@ process --CONNECTED_TO--> network_endpoint
 process --CONNECT_ATTEMPTED--> network_endpoint
 ```
 
-Phase 2 會把重複 evidence 聚合。例如某個 process 對同一檔案 open 17 次，Graph 只會有一條 edge：
+如果同一個 process 對同一個 file 發生 17 次相同行為，Phase 2 只會 materialize 一條 edge：
 
 ```text
 process --OPENED_READ--> file
 count = 17
 ```
 
-而不是畫 17 條重疊的線。
+而不是畫出 17 條重疊線。
 
 ## 不製造假的因果關係
 
@@ -181,13 +220,13 @@ process --OPENED_WRITE--> file
 }
 ```
 
-但 portable filesystem watcher 只能證明：
+Portable filesystem watcher 只能證明：
 
 ```text
 session --OBSERVED_FILE_CHANGE--> file
 ```
 
-因此會明確標記：
+因此標記：
 
 ```json
 {
@@ -196,15 +235,15 @@ session --OBSERVED_FILE_CHANGE--> file
 }
 ```
 
-ExecWeave 不會把時間上的相關性偽裝成因果證據。
+ExecWeave 不會把 temporal correlation 包裝成 causal proof。
 
 ## Backend
 
 ### `strace` — Linux reference backend
 
-Linux reference backend 使用 `strace -ff` 跟隨 descendant process，再把 process/filesystem/network syscall evidence 轉成 graph-ready events。
+使用 `strace -ff` 跟隨 descendant process，將 process/filesystem/network syscall evidence 轉成 graph-ready events。
 
-Raw trace 預設解析後刪除；只有除錯時才保留：
+Raw trace 預設解析後刪除：
 
 ```bash
 execweave run --keep-native-trace -- claude
@@ -212,35 +251,37 @@ execweave run --keep-native-trace -- claude
 
 ### `portable` — 跨平台 fallback
 
-Portable backend 使用 psutil + watchdog，可在 Linux、macOS、Windows 執行。
+使用 psutil + watchdog，可在 Linux、macOS、Windows 上執行。較弱的 filesystem attribution 會維持 non-causal，不會偽裝成 process-level 因果關係。
 
-它不假裝具備 native sensor 的精度：極短生命週期 process 可能漏掉，而 filesystem change 只會標成 session-correlated、non-causal observation。
+未來 native backend：
 
-`auto` 是預設設定，在 Linux 有 `strace` 時優先使用 `strace`，否則使用 `portable`。
+- Linux eBPF
+- Windows ETW
+- macOS Endpoint Security
 
 ## Event stream 完整性
 
-一個 event file 只代表一個 ExecWeave session。
-
-ExecWeave 預設拒絕把第二次 run append 到已存在且非空的 event file，避免 sequence 與 session identity 被污染。
-
-驗證完成的 run：
+一個 JSONL event file 只代表一個 ExecWeave session。
 
 ```bash
 execweave validate run.jsonl
 ```
 
-若 Agent 被中斷、沒有 `session.finished`：
+Validator 會檢查：
 
-```bash
-execweave validate --allow-incomplete run.jsonl
-```
+- JSONL 結構
+- 單一 session ID
+- unique event ID
+- 從 1 開始且連續的 sequence
+- timestamp
+- entity fields
+- session lifecycle
 
-Validator 會檢查 JSON、schema、event ID、session ID、sequence、timestamp、entity fields 與 session lifecycle。
+ExecWeave 也會拒絕把新 run append 到既有非空 event stream。
 
 ## Graph 查詢
 
-摘要：
+Graph 摘要：
 
 ```bash
 execweave graph-summary run.graph.json
@@ -254,7 +295,7 @@ execweave graph-filter run.graph.json \
   --causal-only
 ```
 
-只看 process 與 network endpoint：
+只看 process / network：
 
 ```bash
 execweave graph-filter run.graph.json \
@@ -263,37 +304,31 @@ execweave graph-filter run.graph.json \
   --node-type network_endpoint
 ```
 
-查 directed runtime path：
+找 directed runtime path：
 
 ```bash
 execweave path run.graph.json SOURCE_NODE_ID TARGET_NODE_ID --causal-only
 ```
 
-Graph contract 與 query semantics 請參考 [`docs/phase-2-execution-graph.md`](docs/phase-2-execution-graph.md)。
+Graph contract 請參考 [`docs/phase-2-execution-graph.md`](docs/phase-2-execution-graph.md)。
 
 ## Interactive Viewer
-
-產生 standalone local HTML：
-
-```bash
-execweave view run.graph.json --output run.html
-```
-
-產生後直接開啟：
 
 ```bash
 execweave view run.graph.json --output run.html --open
 ```
 
-目前 Viewer 支援：
+目前支援：
 
-- 滾輪 zoom；
-- 拖曳背景 pan；
-- 拖曳 node 重新排列；
-- 點擊 node / edge 查看 JSON evidence；
-- 依 node ID、name、type 搜尋；
-- causal / non-causal edge 顯示；
-- 自動 directional layout 與 fit-to-screen。
+- wheel zoom
+- background drag / pan
+- node drag
+- node / edge JSON detail
+- node ID / name / type search
+- causal / non-causal edge styling
+- fit / reset
+
+Viewer 是 standalone local HTML，不需要外部 CDN。
 
 ## Benchmark
 
@@ -302,70 +337,60 @@ execweave benchmark --backend portable --iterations 5
 execweave benchmark --backend strace --iterations 5
 ```
 
-這是工程 smoke benchmark，數字依機器而異，不代表正式 performance claim。
+這是 engineering smoke benchmark，不是正式 performance claim。
 
 ## Privacy
 
 ExecWeave 是 **local-first**：
 
-- event data 預設留在本機；
-- graph materialization 在本機完成；
-- HTML viewer 是 standalone local file；
-- Viewer 不需要外部 CDN；
-- 不蒐集 file content；
-- 不蒐集 `read()` / `write()` byte buffer；
-- raw Linux syscall trace 預設解析後刪除。
+- runtime event 預設留在本機
+- Graph 在本機建立
+- Viewer 是 standalone local file
+- 不需要外部 CDN
+- 不蒐集 file content
+- 不蒐集 `read()` / `write()` byte buffer
+- raw Linux syscall trace 預設解析後刪除
 
-Runtime metadata 仍可能包含敏感 file path、command、endpoint；分享前請自行檢查。
+Runtime metadata 仍可能包含敏感 path、command、endpoint，分享前請檢查。
 
 ## Roadmap
 
-### Phase 1 — Runtime Collection
+### Phase 1
 
-- [x] Graph-ready event schema
-- [x] Process/file/network collection
-- [x] Linux short-lived process capture
-- [x] Causal attribution semantics
+- [x] Runtime collection contract
+- [x] Linux reference backend
+- [x] Portable fallback
+- [x] Causality semantics
 - [x] Event validation
-- [x] Diagnostics
-- [x] Benchmark harness
-- [x] Cross-platform portable fallback
-
-未來 native backend：
-
+- [x] Diagnostics / benchmark / CI
 - [ ] Linux eBPF
 - [ ] Windows ETW
 - [ ] macOS Endpoint Security
 
-### Phase 2 — Execution Graph
+### Phase 2
 
-- [x] Event → Graph materialization
+- [x] Event → Graph
 - [x] Node deduplication
 - [x] Edge aggregation
-- [x] Temporal first/last metadata
-- [x] Graph summary
-- [x] Graph filtering
-- [x] Directed path query
-- [ ] 更強的跨 resource entity resolution
-- [ ] Time-window graph snapshot
-- [ ] 大型 run 的 compact evidence indexing
+- [x] Temporal metadata
+- [x] Summary / filter / path query
+- [ ] 更強的 entity resolution
+- [ ] Time-window snapshot
+- [ ] Large-run compact evidence indexing
 
-### Phase 3 — Interactive UI
+### Phase 3
 
-- [x] Standalone local HTML viewer MVP
-- [x] Pan / zoom / drag
-- [x] Search
-- [x] Node / edge details
-- [x] Causality visualization
-- [ ] Agent 執行中的 live graph update
-- [ ] Timeline ↔ graph synchronization
+- [x] Standalone local Viewer MVP
+- [x] Pan / zoom / drag / search / details
+- [ ] Live graph updates
+- [ ] Timeline ↔ Graph synchronization
 - [ ] Large graph clustering / progressive expansion
 - [ ] Saved filter / focused subgraph
 
 ### 後續 Security / Research Layer
 
 - [ ] Agent / Tool / MCP semantic telemetry
-- [ ] Credential / secret entities
+- [ ] Credential / secret entity
 - [ ] Data-flow / taint tracking
 - [ ] Anomaly detection
 - [ ] Attack-path reconstruction
@@ -381,31 +406,31 @@ Runtime metadata 仍可能包含敏感 file path、command、endpoint；分享�
 
 **非常歡迎一起貢獻 ExecWeave。**
 
-目前高影響力方向包括：
+目前高影響力方向：
 
-- Linux eBPF collector；
-- Windows ETW collector；
-- macOS Endpoint Security collector；
-- Graph entity resolution；
-- Graph visualization / large-graph UX；
-- OpenTelemetry / MCP integration；
-- privacy / redaction；
-- reproducible agent workload；
-- performance evaluation；
-- README 與文件翻譯。
+- Linux eBPF
+- Windows ETW
+- macOS Endpoint Security
+- Graph entity resolution
+- live / large-graph visualization
+- OpenTelemetry / MCP integration
+- privacy / redaction
+- reproducible Agent workload
+- performance evaluation
+- README / documentation translation
 
-小型修改可以直接 fork repository 並送 Pull Request。新的 collector 或大型 architecture change 建議先開 Issue，說明 telemetry source、需要的權限、預期 Graph relationship 與 causal guarantee。
+小型修改可直接 fork 後送 Pull Request。新的 collector 或大型 architecture change 建議先開 Issue，描述 telemetry source、權限需求、Graph relationship 與 causal guarantee。
 
 > **特別歡迎早期 contributor 一起加入。**
 
 ## 設計原則
 
 - **Local first** — runtime evidence 預設留在本機。
-- **Runtime truth over assumptions** — 優先相信 OS evidence，而不是只相信 Agent framework。
+- **Runtime truth over assumptions** — 優先相信 OS evidence。
 - **Graph over log** — relationship 是一等資料。
-- **Framework agnostic** — 不綁單一 model / agent provider。
-- **Explainable attribution** — 每條 edge 都應該能說明為什麼存在。
-- **No fake causality** — temporal correlation 不是 causal proof。
+- **Framework agnostic** — 不綁定單一 Agent / model provider。
+- **Explainable attribution** — 每條 edge 都能追查支撐 evidence。
+- **No fake causality** — temporal correlation 不等於 causal proof。
 
 ## License
 
