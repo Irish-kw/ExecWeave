@@ -86,9 +86,11 @@ ExecWeave 目前版本為 **v0.4.0**。
 - [x] standalone local HTML viewer
 - [x] localhost Live Graph MVP
 - [x] pan / zoom / node drag / search / details
+- [x] node type / relation / causal-only filter
 - [x] causal / non-causal styling
+- [x] Timeline ↔ Graph synchronization
+- [x] evidence-sequence slider + Play/Pause replay
 - [ ] progressive cluster expansion
-- [ ] Timeline ↔ Graph synchronization
 
 ### Security Analysis
 
@@ -99,7 +101,7 @@ execweave analyze run.graph.json
 execweave analyze run.graph.json --output analysis.json
 ```
 
-目前會標記 sensitive-file access、external endpoint，以及同一 process 的 possible sensitive-file → network path。
+目前會標記 sensitive-file access、external endpoint，以及 possible sensitive-file → network path。
 
 例如：
 
@@ -109,7 +111,7 @@ process
   └── CONNECTED_TO ─→ external endpoint
 ```
 
-這只能說明「同一 process 先有 sensitive-file access evidence，之後有 external network evidence」，**不能證明檔案內容真的被送出去**。Report 會明確保留：
+這只能說明「先有 sensitive-file access evidence，之後有 external network evidence」，**不能證明檔案內容真的被送出去**。Report 會明確保留：
 
 ```json
 {
@@ -137,6 +139,14 @@ execweave graph-condense run.graph.json \
 ```
 
 只有「單一 incoming relationship 且沒有 downstream behavior」的 file/directory/executable leaf 才會被折疊。Process、Agent、Session、Socket、Network Endpoint 預設不折疊。
+
+## Timeline ↔ Graph
+
+Standalone Viewer 現在會依 Graph edge 的 `first_sequence` / `last_sequence` 提供 **Evidence sequence** 滑桿與 Play/Pause replay。
+
+把滑桿往回拉，就能看到 Agent 的行為圖依 evidence 順序逐步長出來。若同一條 aggregated edge 在目前 sequence 只出現部分 evidence，Viewer 會顯示 `partial`，**不會提前把最終 `count` 洩漏到過去時間點**。
+
+Timeline 可以和 node type、relation、causal-only 與 search filter 一起使用。
 
 ## Graph-first event model
 
