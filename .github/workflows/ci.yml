@@ -28,6 +28,8 @@ jobs:
         run: ruff check .
       - name: Tests
         run: pytest -q
+      - name: Claude hook command smoke
+        run: python scripts/check_claude_hook.py
       - name: Collector diagnostics
         run: execweave doctor
       - name: Portable end-to-end smoke
