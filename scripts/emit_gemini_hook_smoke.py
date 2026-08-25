@@ -32,7 +32,7 @@ def main() -> int:
     }
     emit({**base, "hook_event_name": "SessionStart", "timestamp": now(), "source": "startup"})
     if os.name == "nt":
-        command = "ping -n 3 127.0.0.1 > NUL"
+        command = "ping -n 3 127.0.0.1"
     else:
         command = "sleep 1.2"
     tool_input = {"command": command}
