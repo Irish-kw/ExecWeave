@@ -17,6 +17,7 @@ from .graph_ops import (
 )
 from .sink import JsonlSink
 from .validate import validate_event_stream
+from .viewer import build_viewer_from_graph
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -115,6 +116,23 @@ def build_parser() -> argparse.ArgumentParser:
     path_query.add_argument("--max-paths", type=int, default=20)
     path_query.add_argument("--relation", action="append", default=[])
     path_query.add_argument("--causal-only", action="store_true")
+
+    view = subparsers.add_parser(
+        "view", help="Create a standalone local interactive HTML graph viewer"
+    )
+    view.add_argument("graph", type=Path, help="Path to a graph JSON file")
+    view.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="HTML output path (default: <graph-stem>.html)",
+    )
+    view.add_argument(
+        "--open",
+        action="store_true",
+        dest="open_browser",
+        help="Open the generated viewer in the default browser",
+    )
     return parser
 
 
@@ -226,6 +244,20 @@ def main(argv: list[str] | None = None) -> int:
                 sort_keys=True,
             )
         )
+        return 0
+
+    if args.subcommand == "view":
+        graph_path = args.graph.expanduser().resolve()
+        output = args.output or graph_path.with_name(f"{graph_path.stem}.html")
+        try:
+            written = build_viewer_from_graph(
+                graph_path,
+                output,
+                open_browser=args.open_browser,
+            )
+        except (FileExistsError, ValueError) as exc:
+            parser.error(str(exc))
+        print(json.dumps({"output": str(written)}, indent=2, sort_keys=True))
         return 0
 
     command = _clean_command(args.command)
