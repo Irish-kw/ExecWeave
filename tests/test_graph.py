@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from execweave.graph import build_execution_graph, write_execution_graph
+from execweave.graph import GraphAccumulator, build_execution_graph, write_execution_graph
 from execweave.inference_gateway import litellm_response_to_events
 from execweave.inference_identity import gateway_runtime_identity_event
 from execweave.model_runtime import vllm_response_to_events
@@ -87,6 +87,61 @@ def test_graph_deduplicates_nodes_and_aggregates_edges(tmp_path: Path) -> None:
     assert len(read_edge["event_ids"]) == 2
     assert read_edge["causal"] is True
     assert read_edge["backends"] == ["strace"]
+
+
+def test_incremental_graph_accumulator_matches_canonical_builder(tmp_path: Path) -> None:
+    stream = tmp_path / "run.jsonl"
+    _emit_complete_stream(stream)
+
+    canonical = build_execution_graph(stream).to_dict()
+    accumulator = GraphAccumulator(session_id="s1", source_path=stream)
+    for line in stream.read_text(encoding="utf-8").splitlines():
+        if line.strip():
+            accumulator.apply(json.loads(line))
+    incremental = accumulator.to_dict()
+
+    canonical.pop("built_at")
+    incremental.pop("built_at")
+    assert incremental == canonical
+
+
+def test_incremental_graph_can_drop_raw_edge_ids_but_keep_justification(tmp_path: Path) -> None:
+    stream = tmp_path / "live.jsonl"
+    accumulator = GraphAccumulator(
+        session_id="s1",
+        source_path=stream,
+        retain_event_ids=False,
+    )
+    accumulator.apply(
+        {
+            "schema_version": "0.2",
+            "event_id": "raw-event-id",
+            "session_id": "s1",
+            "timestamp": "2026-08-26T00:00:00Z",
+            "sequence": 1,
+            "event_type": "inference.identity",
+            "relation": "SAME_INFERENCE_REQUEST",
+            "source": {"id": "inference-request:gateway:g1", "type": "inference_request"},
+            "target": {"id": "inference-request:runtime:r1", "type": "inference_request"},
+            "attributes": {
+                "causal": False,
+                "inferred": False,
+                "identity_exact": True,
+                "identity_method": "shared_request_id",
+                "shared_request_id_hash": "0123456789abcdef0123456789abcdef",
+                "supporting_event_ids": ["support-a", "support-b"],
+            },
+        }
+    )
+
+    edge = accumulator.to_dict()["edges"][0]
+    assert edge["event_ids"] == []
+    assert edge["causal"] is False
+    assert edge["inferred"] is False
+    assert edge["identity_exact"] is True
+    assert edge["identity_methods"] == ["shared_request_id"]
+    assert edge["identity_hashes"] == ["0123456789abcdef0123456789abcdef"]
+    assert edge["supporting_event_ids"] == ["support-a", "support-b"]
 
 
 def test_source_only_lifecycle_event_updates_node_without_fake_edge(tmp_path: Path) -> None:
