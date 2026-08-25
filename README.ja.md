@@ -53,6 +53,7 @@ ExecWeave は現在 **v0.4.0** です。
 - [x] Event → Graph
 - [x] deduplication / aggregation / query
 - [x] large-run leaf condensation
+- [x] optional exact cluster expansion evidence
 - [ ] stronger entity resolution
 - [ ] time-window snapshots
 
@@ -63,7 +64,8 @@ ExecWeave は現在 **v0.4.0** です。
 - [x] node type / relation / causal-only filter
 - [x] Timeline ↔ Graph synchronization
 - [x] evidence-sequence slider + Play/Pause replay
-- [ ] progressive cluster expansion
+- [x] progressive cluster expansion
+- [ ] saved filters / focused subgraphs
 
 ### Security Analysis
 
@@ -105,13 +107,32 @@ execweave graph-condense run.graph.json \
 
 single incoming relationship を持ち downstream behavior のない file/directory/executable leaf のみを collapse します。Process、Agent、Session、Socket、Network Endpoint はデフォルトでは collapse しません。
 
+### Progressive cluster expansion
+
+通常の `graph-condense` は compact のままです。Viewer で cluster を必要なときだけ展開するには：
+
+```bash
+execweave graph-condense run.graph.json \
+  --output run.expandable.graph.json \
+  --threshold 8 \
+  --keep-expansion
+
+execweave view run.expandable.graph.json \
+  --output run.expandable.html \
+  --open
+```
+
+Expandable cluster は dashed outline で表示されます。Cluster をクリックして **Expand cluster** を選ぶと、その cluster だけが元の member nodes と evidence edges に置き換わります。他の cluster は collapsed のままです。**Collapse clusters** で compact view に戻せます。
+
+`--keep-expansion` は元の observed nodes/edges を保存するだけで、新しい causal relationship は生成しません。
+
 ## Timeline ↔ Graph
 
 Standalone Viewer は Graph edge の `first_sequence` / `last_sequence` を使って **Evidence sequence** slider と Play/Pause replay を提供します。
 
-Slider を戻すと、runtime evidence の順番に Graph が形成される過程を確認できます。Aggregated edge に現在の sequence より後の evidence が残っている場合は `partial` と表示し、最終 `count` を過去の時点へ先取りして表示しません。
+Aggregated edge に現在の sequence より後の evidence が残っている場合は `partial` と表示し、最終 `count` を過去の時点へ先取りして表示しません。
 
-Timeline は node type、relation、causal-only、search filter と組み合わせて使用できます。
+Timeline は node type、relation、causal-only、search filter、progressive cluster expansion と組み合わせて使用できます。
 
 ## Graph-first event model
 
