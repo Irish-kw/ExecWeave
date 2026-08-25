@@ -4,7 +4,7 @@ import hashlib
 import json
 from collections import Counter, defaultdict, deque
 from copy import deepcopy
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Iterable
 
 
@@ -136,8 +136,8 @@ def _node_bucket(node: dict[str, Any]) -> str:
     node_id = str(node.get("id") or "")
     prefix, _, value = node_id.partition(":")
     if prefix in {"file", "directory", "executable"} and value:
-        path = Path(value)
-        parent = str(path.parent)
+        canonical = value.replace("\\", "/")
+        parent = str(PurePosixPath(canonical).parent)
         return parent if parent != "." else "<relative>"
     return "<unknown>"
 
