@@ -47,6 +47,12 @@ def graph_summary(graph: dict[str, Any]) -> dict[str, Any]:
     causal_edges = sum(1 for edge in edges if edge.get("causal") is True)
     noncausal_edges = sum(1 for edge in edges if edge.get("causal") is False)
     mixed_edges = len(edges) - causal_edges - noncausal_edges
+    expansion = graph.get("expansion")
+    expansion_clusters = (
+        expansion.get("clusters", {})
+        if isinstance(expansion, dict) and isinstance(expansion.get("clusters"), dict)
+        else {}
+    )
     return {
         "session_id": graph.get("session_id"),
         "event_count": graph.get("event_count"),
@@ -58,6 +64,7 @@ def graph_summary(graph: dict[str, Any]) -> dict[str, Any]:
         "noncausal_edges": noncausal_edges,
         "mixed_or_unknown_causal_edges": mixed_edges,
         "condensed": bool(graph.get("condensed")),
+        "expandable_cluster_count": len(expansion_clusters),
     }
 
 
@@ -154,13 +161,14 @@ def condense_graph(
     threshold: int = 8,
     sample_size: int = 8,
     collapsible_types: Iterable[str] = ("file", "directory", "executable"),
+    include_expansion: bool = False,
 ) -> dict[str, Any]:
     """Collapse repetitive leaf resources while preserving runtime topology.
 
-    Only leaf nodes with exactly one incoming edge are eligible. Groups are formed by
-    source, relation, resource type, directory bucket, causal value, and backend set.
-    Processes, agents, sessions, sockets, and network endpoints are never collapsed by
-    default because they are usually important for attribution and path queries.
+    By default the result stays compact. When ``include_expansion`` is true, the
+    original member nodes and their incoming evidence edges are preserved under the
+    top-level ``expansion.clusters`` map so a viewer can materialize them on demand.
+    The expansion payload copies observed evidence; it does not infer new relations.
     """
     if threshold < 2:
         raise ValueError("threshold must be >= 2")
@@ -209,6 +217,7 @@ def condense_graph(
     collapsed_edge_ids: set[str] = set()
     cluster_nodes: list[dict[str, Any]] = []
     cluster_edges: list[dict[str, Any]] = []
+    expansion_clusters: dict[str, dict[str, Any]] = {}
     collapsed_groups = 0
 
     for key, members in groups.items():
@@ -282,6 +291,7 @@ def condense_graph(
                     "directory_bucket": bucket,
                     "sample_members": names[:sample_size],
                     "sample_truncated": len(names) > sample_size,
+                    "expandable": include_expansion,
                 },
                 "first_seen": min(first_seen_values) if first_seen_values else None,
                 "last_seen": max(last_seen_values) if last_seen_values else None,
@@ -313,6 +323,13 @@ def condense_graph(
                 "collapsed_member_count": len(member_nodes),
             }
         )
+        if include_expansion:
+            expansion_clusters[cluster_id] = {
+                "cluster_node_id": cluster_id,
+                "cluster_edge_id": cluster_edge_id,
+                "nodes": deepcopy(member_nodes),
+                "edges": deepcopy(member_edges),
+            }
 
     condensed_nodes = [
         node for node in nodes if node.get("id") not in collapsed_node_ids
@@ -347,7 +364,15 @@ def condense_graph(
         "collapsed_node_count": len(collapsed_node_ids),
         "result_node_count": len(payload["nodes"]),
         "result_edge_count": len(payload["edges"]),
+        "expansion_embedded": include_expansion,
     }
+    if include_expansion:
+        payload["expansion"] = {
+            "schema_version": "0.1",
+            "clusters": expansion_clusters,
+        }
+    else:
+        payload.pop("expansion", None)
     return payload
 
 
