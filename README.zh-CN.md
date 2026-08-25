@@ -8,11 +8,13 @@
   <a href="README.ko.md">한국어</a>
 </p>
 
-**看清 AI Agent 在你的电脑上实际上做了什么。**
+**看清 AI Agent 在你的电脑上实际做了什么。**
 
-ExecWeave 是一个开源、local-first 的 AI Agent runtime observability 项目，把 Agent 的 runtime activity 转成 evidence-backed execution graph。
+ExecWeave 是一个开源、local-first 的 AI Agent runtime observability 项目，把 Agent、Tool、Command、Process、File、Network activity 转成可交互 execution graph，同时严格区分 observed evidence 与 inference。
 
-## 最快开始
+> **Event 是 ground truth；Graph 是 materialized view。**
+
+## 快速开始
 
 ```bash
 git clone https://github.com/Irish-kw/ExecWeave.git
@@ -24,108 +26,127 @@ python -m pip install -e ".[dev]"
 
 ```bash
 execweave live --open -- claude
+execweave live --open -- codex
+execweave live --open -- gemini
 ```
 
-Live MVP 只绑定 `127.0.0.1`，使用 portable collector。结束后仍会保存 `events.jsonl`、`graph.json` 和 `viewer.html`。
+Live server 只绑定 `127.0.0.1`。
 
-### Claude Code：runtime + semantic graph
+## Native Agent Integrations
 
-ExecWeave 已内置 Claude Code native hook adapter，可以把 Agent / Tool / MCP / Model 的 logical evidence 与 runtime evidence 放在同一个 run 中。
+ExecWeave 当前有三个 native semantic adapter：**Claude Code、OpenAI Codex、Gemini CLI**。
+
+Provider hook 记录 Agent/Tool/Command/MCP 层的 logical evidence；OS collector 独立记录机器实际观察到的 runtime evidence。ExecWeave 不会把两类 evidence 直接包装成假的 causality。
+
+### Claude Code
 
 ```bash
 execweave-claude-hook --print-config
 execweave-claude-record --open -- claude
 ```
 
-当 semantic hooks 触发时，同一个 run directory 会同时保存 runtime-only、semantic-only 和 merged artifacts，包括 `semantic.jsonl`、`events.semantic.jsonl`、`graph.semantic.json` 与 `viewer.semantic.html`。
+详见 [`docs/claude-code-hooks.zh-CN.md`](docs/claude-code-hooks.zh-CN.md)。
 
-Claude hook 知道 logical tool call，但不会提供实际 Bash child PID。因此 ExecWeave **不会把 Tool → Process 伪装成直接 observed 或 causal edge**。
-
-需要保守的 bridge 时，可以显式执行：
+### OpenAI Codex
 
 ```bash
-execweave correlate run.semantic.jsonl \
-  --output run.correlated.jsonl
-execweave graph run.correlated.jsonl \
-  --output run.correlated.graph.json
-execweave view run.correlated.graph.json \
-  --output run.correlated.html \
-  --open
+execweave-codex-hook --print-config
+execweave-codex-record --open -- codex
 ```
 
-只有 bounded tool-call window 内存在**唯一候选**，并且有 exact executable / process / cmdline identity evidence 时才会生成 `CORRELATED_WITH_PROCESS`。对于 macOS Python framework 这类 launcher process，也只允许完整、非空、逐项完全一致的 `argv[1:]` fallback。Ambiguous 或 no-match 不生成 edge。
+当前 adapter 接收 `SessionStart`、`PreToolUse`、`PostToolUse`。`PostToolUse` 只表示中性的 `TOOL_CALL_RETURNED`，不直接声称 success/failure。
 
-所有 correlation edge 都保持 `inferred: true`、`causal: false`，并记录 inference method、supporting event IDs 和 heuristic confidence；confidence 明确不是 probability。
+详见 [`docs/codex-hooks.zh-CN.md`](docs/codex-hooks.zh-CN.md)。
 
-Linux 上需要更强 syscall-backed attribution：
+### Gemini CLI
+
+```bash
+execweave-gemini-hook --print-config
+execweave-gemini-record --open -- gemini
+```
+
+当前 adapter 接收 `SessionStart`、`BeforeTool`、`AfterTool`。`run_shell_command` 会生成 declared command evidence；部分 file tools 会生成 declared target path；`mcp_context` 会被规范化成 MCP server/tool entities。
+
+Gemini 当前 hook schema 没有可跨 `BeforeTool` / `AfterTool` 共享的 unique tool-call ID，所以 ExecWeave 不会伪造 direct identity edge。`tool_fingerprint` 仅作诊断 hint，不作为 call identity。
+
+详见 [`docs/gemini-hooks.zh-CN.md`](docs/gemini-hooks.zh-CN.md)。
+
+## 分层 artifacts
+
+```text
+.execweave/runs/<run-id>/
+├── events.jsonl
+├── graph.json
+├── viewer.html
+├── semantic.jsonl
+├── events.semantic.jsonl
+├── graph.semantic.json
+├── viewer.semantic.html
+├── events.correlated.jsonl
+├── graph.correlated.json
+└── viewer.correlated.html
+```
+
+Raw runtime 与 provider sidecar 保持分离；correlation 只生成新的 derived stream。
+
+## Tool → Process Correlation
+
+只有 bounded matcher 从独立 runtime evidence 中找到**唯一候选**时，才可能生成：
+
+```text
+tool_call --CORRELATED_WITH_PROCESS--> process
+```
+
+并始终保持：
+
+```text
+inferred: true
+causal: false
+```
+
+Ambiguous、no-match、compound、shell builtin、unsupported call 都不会硬建 edge。Correlated Viewer 会显示 matched / ambiguous / no match / unsupported 等统计。
+
+## Viewer
+
+Standalone Viewer 支持：
+
+- pan / zoom / drag
+- node / edge details
+- node type / relation filters
+- causal-only / **observed only**
+- search
+- Timeline ↔ Graph replay
+- Play/Pause
+- progressive cluster expansion
+- 1-hop / 2-hop focus
+- Saved Views
+- observed / non-causal / inferred 独立样式
+- Correlation Summary
+
+## Runtime Evidence
+
+Portable backend 支持 Linux/macOS/Windows。Linux 还可使用 syscall-backed reference backend：
 
 ```bash
 sudo apt-get install strace
 execweave record --backend strace --open -- claude
 ```
 
-## 当前状态
+三个 provider recorder 的 `--backend auto` 在 Linux 有 `strace` 时都会优先使用它。
 
-ExecWeave 当前版本为 **v0.4.0**。
+## 不制造假的因果关系
 
-### Phase 1
-- [x] graph-ready JSONL
-- [x] process capture
-- [x] Linux syscall-backed filesystem/network evidence
-- [x] portable fallback
-- [x] validation / diagnostics / benchmark / CI configuration
-- [ ] Linux eBPF
-- [ ] Windows ETW
-- [ ] macOS Endpoint Security
+ExecWeave 区分 observed causal、observed non-causal、provider semantic、inferred relationship。Provider hook 没有 child OS PID 时，不会直接声称 Tool → Process。时间接近本身不足以生成 edge。
 
-### Phase 2
-- [x] Event → Graph
-- [x] node deduplication
-- [x] edge aggregation
-- [x] graph summary / filtering / path query
-- [x] N-hop focused graph artifact
-- [x] large-run leaf condensation
-- [x] optional exact cluster expansion evidence
+同样地，process 先读敏感文件、之后连外，不等于已经证明这些 bytes 被传输。
 
-### Phase 3
-- [x] standalone local viewer
-- [x] portable Live Graph
-- [x] pan / zoom / drag / search / details
-- [x] node type / relation / causal-only filter
-- [x] Timeline ↔ Graph synchronization
-- [x] evidence-sequence slider + Play/Pause replay
-- [x] progressive cluster expansion
-- [x] 1-hop / 2-hop focused runtime neighborhood
-- [x] browser-local Saved View presets
-- [x] causal observed / non-causal observed / inferred 独立样式
-- [x] inferred edge 明确显示 `· inferred`
-
-### Semantic Telemetry
-
-- [x] provider-agnostic semantic JSONL sidecar
-- [x] validated `semantic-merge`，不重写原始 runtime evidence
-- [x] `agent` / `tool_call` / `tool` / `mcp_server` / `model` / `command` entities
-- [x] provider 实际提供 PID 时才做 conservative `process_reference` resolution
-- [x] Claude Code native session/tool/subagent/model hooks
-- [x] MCP 名称 normalization
-- [x] Linux / macOS / Windows 的 run-bound `execweave-claude-record`
-- [x] conservative Tool → Process correlation v0.1
-- [x] unique-candidate hard requirement；ambiguous / no-match 不建 edge
-- [x] inference method / supporting event IDs / bounded time window / heuristic confidence
-- [x] correlation edge 始终保持 `causal: false`
-
-更多 provider adapter、更强 identity resolution 和更丰富的 correlation evidence 仍是后续工作。
-
-### Security Analysis
+## Security Analysis
 
 ```bash
-execweave analyze run.graph.json
 execweave analyze run.graph.json --output analysis.json
 ```
 
-当前规则会标记 sensitive-file access、external endpoint，以及 possible sensitive-file → network path。
-
-这不是 exfiltration 证明。Report 会明确保留：
+Report 会明确保留：
 
 ```json
 {
@@ -134,125 +155,17 @@ execweave analyze run.graph.json --output analysis.json
 }
 ```
 
-## 手动流程
+## 当前状态
 
-```bash
-execweave doctor
-execweave run --output run.jsonl -- claude
-execweave validate run.jsonl
-execweave graph run.jsonl --output run.graph.json
-execweave view run.graph.json --output run.html --open
-```
+ExecWeave 当前为 **v0.4.0**。
 
-### Merge semantic sidecar
+已完成 baseline 包括 portable/strace runtime collection、execution graph、live/standalone Viewer、Timeline/focus/condensation/Saved Views、Claude/Codex/Gemini native adapters、conservative Tool→Process correlation、Correlation Summary 与初始 security analysis。
 
-```bash
-execweave semantic-merge run.jsonl semantic.jsonl \
-  --output run.semantic.jsonl
-```
-
-### Correlate semantic tool call 与 runtime process evidence
-
-```bash
-execweave correlate run.semantic.jsonl \
-  --output run.correlated.jsonl
-execweave graph run.correlated.jsonl \
-  --output run.correlated.graph.json
-```
-
-该阶段生成新的 derived stream，不会重写 input evidence。`CORRELATED_WITH_PROCESS` 表示 bounded evidence 在既定 heuristic 下只支持一个候选，不表示 provider 提供了 PID，也不表示 causality 已被证明。
-
-### Focus 一个 runtime neighborhood
-
-```bash
-execweave graph-focus run.graph.json PROCESS_NODE_ID \
-  --hops 2 \
-  --direction both \
-  --causal-only \
-  --output focused.graph.json
-
-execweave view focused.graph.json --output focused.html --open
-```
-
-`--direction` 支持 `in`、`out`、`both`；可重复使用 `--relation` 限制 traversal edge。所有限制都在 traversal **之前**应用，`graph-focus` 只复制原有 node 与 evidence edge，不会创建 shortcut 或新的 causal relationship。
-
-Viewer 中也可点击 node，选择 **Focus 1 hop** 或 **Focus 2 hops**；**Clear focus** 恢复当前 filter 下的完整 Graph。
-
-### 大型 Graph condensation
-
-```bash
-execweave graph-condense run.graph.json \
-  --output run.compact.graph.json \
-  --threshold 8
-```
-
-只折叠单一 incoming relationship、且没有 downstream behavior 的 file/directory/executable leaf。Process、Agent、Session、Socket、Network Endpoint 默认不会折叠。
-
-要让 Viewer 可以按需展开 cluster：
-
-```bash
-execweave graph-condense run.graph.json \
-  --output run.expandable.graph.json \
-  --threshold 8 \
-  --keep-expansion
-
-execweave view run.expandable.graph.json \
-  --output run.expandable.html \
-  --open
-```
-
-可展开 cluster 使用虚线边框。点击 cluster 后选择 **Expand cluster**，只会展开该 cluster 的原始 member nodes 与 evidence edges；其他 cluster 保持折叠。**Collapse clusters** 可恢复 compact view。
-
-`--keep-expansion` 只是保存原始 observed nodes/edges，不会创建新的 causal relationship。
-
-## Timeline ↔ Graph
-
-Standalone Viewer 根据 Graph edge 的 `first_sequence` / `last_sequence` 提供 **Evidence sequence** 滑杆与 Play/Pause replay。
-
-如果 aggregated edge 在当前 sequence 只包含部分 evidence，Viewer 会显示 `partial`，不会提前显示最终 `count`。
-
-Timeline 可以与 node type、relation、causal-only、search、focused neighborhood 和 progressive cluster expansion 一起使用。
-
-## Saved Views
-
-Viewer 的 **Save view** 会保存当前 node/relation/causal filter、search、timeline 位置、focus 状态和已展开 cluster。
-
-Preset 默认只保存在浏览器本地 storage，并且**只包含 UI state，不包含 Graph node、edge、event evidence、file content 或 prompt**。如果浏览器不允许 local storage，会安全退化为当前页面 session 内的临时 preset。
-
-## Graph-first event model
-
-```text
-source --RELATION--> target
-```
-
-例如：
-
-```text
-session --LAUNCHED--> process
-process --SPAWNED--> process
-process --OPENED_READ--> file
-process --CONNECTED_TO--> network_endpoint
-agent --REQUESTED_TOOL_CALL--> tool_call
-tool_call --DECLARED_COMMAND--> command
-tool_call --CORRELATED_WITH_PROCESS--> process   # inferred only
-```
-
-ExecWeave 不会把 temporal correlation 当成 causal proof，也不会把 file/network co-occurrence 当成 byte-level data flow。即使 correlation stage 找到唯一候选，也保持 `inferred: true` / `causal: false`；仅仅时间接近不足以生成 edge。
-
-## Live Graph
-
-```bash
-execweave live --open -- claude
-execweave live --port 8765 --open -- claude
-```
-
-Live server 只绑定 localhost。详细说明见 [`docs/live-graph.zh-CN.md`](docs/live-graph.zh-CN.md)。
+后续重点：Linux eBPF、Windows ETW、macOS Endpoint Security、更多 provider adapter、更强 process/tool identity、MCP normalization 与 long-run scalability。
 
 ## Privacy
 
-ExecWeave 是 **local-first**。Runtime event、Graph、Viewer、semantic sidecar 和 merged graph 默认留在本机；Saved View 只保存 UI state；无外部 CDN；不采集 file content 或 `read()`/`write()` byte buffer。
-
-Runtime / semantic metadata 仍可能包含敏感 path、command、endpoint 和 provider identifier，分享 artifact 前请检查。
+ExecWeave 是 **local-first**。默认不采集 file content、raw read/write byte buffer、prompt/transcript content。Command、path、endpoint、session ID 等 metadata 仍可能敏感，分享 artifact 前请检查。
 
 ## 文档
 
@@ -261,11 +174,13 @@ Runtime / semantic metadata 仍可能包含敏感 path、command、endpoint 和 
 - [`Live Graph`](docs/live-graph.zh-CN.md)
 - [`Semantic Telemetry`](docs/semantic-telemetry.zh-CN.md)
 - [`Claude Code Hooks`](docs/claude-code-hooks.zh-CN.md)
+- [`OpenAI Codex Hooks`](docs/codex-hooks.zh-CN.md)
+- [`Gemini CLI Hooks`](docs/gemini-hooks.zh-CN.md)
 - [`Security Analysis`](docs/security-analysis.zh-CN.md)
 
 ## Contributing
 
-欢迎 Linux eBPF、Windows ETW、macOS Endpoint Security、Graph entity resolution、更多 Agent/Tool/MCP provider adapter、更强 semantic/runtime correlation evidence、OpenTelemetry/MCP、privacy/redaction、testing、performance evaluation 和翻译贡献。
+欢迎 Linux eBPF、Windows ETW、macOS Endpoint Security、Agent/Tool/MCP provider adapter、provenance/correlation、Graph UX、privacy/redaction、testing/performance 与翻译贡献。
 
 ## License
 

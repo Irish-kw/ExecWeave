@@ -41,18 +41,6 @@ execweave record --open -- python my_agent.py
 
 The live server binds only to `127.0.0.1` and updates the graph while the command is still running.
 
-```text
-AI agent / command
-       ↓
-runtime collector
-       ↓
-   events.jsonl
-       ↓
-execution graph
-       ↓
-local browser viewer
-```
-
 A normal run produces:
 
 ```text
@@ -66,21 +54,14 @@ The current live path intentionally uses the portable collector. Linux `strace` 
 
 ## Native agent integrations
 
-ExecWeave currently has native semantic adapters for **Claude Code** and **OpenAI Codex**.
+ExecWeave currently has native semantic adapters for **Claude Code**, **OpenAI Codex**, and **Gemini CLI**.
 
-Provider hooks add logical Agent / Model / Tool / Command evidence. OS collectors independently record what the machine actually observed. ExecWeave does not collapse those two evidence classes into fake causality.
+Provider hooks add logical Agent / Tool / Command / MCP evidence. OS collectors independently record what the machine actually observed. ExecWeave does not collapse those evidence classes into fake causality.
 
 ### Claude Code
 
-Generate the hook settings fragment once:
-
 ```bash
 execweave-claude-hook --print-config
-```
-
-Merge its `hooks` object into your Claude Code settings, then record one run:
-
-```bash
 execweave-claude-record --open -- claude
 ```
 
@@ -90,25 +71,29 @@ See [`docs/claude-code-hooks.md`](docs/claude-code-hooks.md).
 
 ### OpenAI Codex
 
-Generate the supported lifecycle-hook configuration fragment:
-
 ```bash
 execweave-codex-hook --print-config
-```
-
-Merge the printed `hooks` object into your Codex `hooks.json`, then run:
-
-```bash
 execweave-codex-record --open -- codex
 ```
 
-ExecWeave currently consumes Codex `SessionStart`, `PreToolUse`, and `PostToolUse` lifecycle events. For canonical `Bash` calls, the declared command becomes semantic evidence and can participate in the same conservative Tool → Process correlation used by Claude runs.
+ExecWeave currently consumes Codex `SessionStart`, `PreToolUse`, and `PostToolUse` lifecycle events. For canonical `Bash` calls, the declared command can participate in conservative Tool → Process correlation.
 
-`PostToolUse` is deliberately represented as neutral `TOOL_CALL_RETURNED`, not as success or failure, because the current provider payload does not expose a sufficiently reliable outcome signal for that claim.
-
-Codex lifecycle hooks are still evolving. Some `codex exec` and Windows execution paths have had upstream hook-coverage gaps, so the adapter records only the provider hooks actually delivered. The independent OS runtime collector continues to work when provider hooks are absent.
+`PostToolUse` is deliberately represented as neutral `TOOL_CALL_RETURNED`, not as success or failure, because the provider payload does not expose a sufficiently reliable outcome signal for that claim.
 
 See [`docs/codex-hooks.md`](docs/codex-hooks.md).
+
+### Gemini CLI
+
+```bash
+execweave-gemini-hook --print-config
+execweave-gemini-record --open -- gemini
+```
+
+The current Gemini adapter consumes `SessionStart`, `BeforeTool`, and `AfterTool`. `run_shell_command` exposes declared command evidence, selected file tools expose declared target paths, and explicit `mcp_context` is normalized into MCP server/tool entities.
+
+Gemini's current hook schema does not provide a unique tool-call ID shared by `BeforeTool` and `AfterTool`, so ExecWeave does **not** fabricate a direct identity edge between them. A deterministic tool fingerprint is retained only as a diagnostic hint, not as call identity.
+
+See [`docs/gemini-hooks.md`](docs/gemini-hooks.md).
 
 ## Layered run artifacts
 
@@ -144,7 +129,7 @@ while OS telemetry independently observes processes. ExecWeave may derive:
 tool_call --CORRELATED_WITH_PROCESS--> process
 ```
 
-only when the existing bounded matcher finds one uniquely supported candidate.
+only when the bounded matcher finds one uniquely supported candidate.
 
 Every bridge remains:
 
@@ -155,16 +140,7 @@ causal: false
 
 Ambiguous, unmatched, compound, shell-builtin, or otherwise unsupported calls produce no bridge.
 
-The correlated Viewer includes a **Correlation Summary** with:
-
-- matched
-- ambiguous
-- no match
-- unsupported
-- considered tool calls
-- correlation window
-
-So a missing edge does not silently mean “nothing happened”; it may mean ExecWeave intentionally refused to infer a relationship from insufficient evidence.
+The correlated Viewer includes a **Correlation Summary** with matched, ambiguous, no-match, unsupported, considered-call, and correlation-window counts.
 
 ## Interactive Viewer
 
@@ -184,9 +160,9 @@ Current baseline includes:
 - 1-hop / 2-hop focused neighborhoods
 - browser-local Saved Views
 - explicit observed / non-causal / inferred edge styling
-- correlation summary for correlated graphs
+- Correlation Summary for correlated graphs
 
-**Observed only** removes `inferred: true` relationships before focus traversal and layout, rather than merely hiding purple lines after the fact.
+**Observed only** removes `inferred: true` relationships before focus traversal and layout, rather than merely hiding them after the fact.
 
 Saved Views store UI state only; they do not copy graph evidence into browser storage.
 
@@ -209,7 +185,7 @@ execweave record --backend strace --open -- claude
 
 The Linux reference backend follows descendants and converts syscall evidence into process-attributed process, filesystem, and network events.
 
-`execweave-claude-record --backend auto` and `execweave-codex-record --backend auto` prefer `strace` on Linux when available.
+`execweave-claude-record --backend auto`, `execweave-codex-record --backend auto`, and `execweave-gemini-record --backend auto` prefer `strace` on Linux when available.
 
 Future native collectors remain planned for Linux eBPF, Windows ETW, and macOS Endpoint Security.
 
@@ -235,7 +211,6 @@ process --CONNECTED_TO--> network_endpoint
 Semantic examples:
 
 ```text
-agent --USED_MODEL--> model
 agent --REQUESTED_TOOL_CALL--> tool_call
 tool_call --USES_TOOL--> tool
 tool_call --DECLARED_COMMAND--> command
@@ -264,14 +239,12 @@ Likewise, a process reading a sensitive file and later connecting to a network e
 
 ## Security analysis
 
-ExecWeave includes an initial conservative analysis layer:
-
 ```bash
 execweave analyze run.graph.json
 execweave analyze run.graph.json --output analysis.json
 ```
 
-It can flag sensitive-file access, external endpoints, and possible sensitive-file → network paths while explicitly preserving:
+The initial conservative analysis layer can flag sensitive-file access, external endpoints, and possible sensitive-file → network paths while explicitly preserving:
 
 ```json
 {
@@ -315,6 +288,7 @@ Implemented baseline:
 - Saved Views
 - native Claude Code semantic adapter + run-bound recorder
 - native OpenAI Codex semantic adapter + run-bound recorder
+- native Gemini CLI semantic adapter + run-bound recorder
 - conservative Tool → Process correlation
 - correlation metadata and Viewer summary
 - explainable initial security-analysis rules
@@ -348,6 +322,7 @@ Review artifacts before sharing them.
 - [`Semantic Telemetry`](docs/semantic-telemetry.md)
 - [`Claude Code Hooks`](docs/claude-code-hooks.md)
 - [`OpenAI Codex Hooks`](docs/codex-hooks.md)
+- [`Gemini CLI Hooks`](docs/gemini-hooks.md)
 - [`Security Analysis`](docs/security-analysis.md)
 
 ## Contributing
