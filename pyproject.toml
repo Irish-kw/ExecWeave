@@ -27,6 +27,7 @@ dev = [
 execweave = "execweave.cli:main"
 execweave-claude-hook = "execweave.claude_hook_cli:main"
 execweave-claude-record = "execweave.claude_record:main"
+execweave-codex-hook = "execweave.codex_hook_cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/execweave"]
