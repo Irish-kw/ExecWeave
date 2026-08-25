@@ -61,6 +61,9 @@ class GraphEdge:
     causal_values: set[bool] = field(default_factory=set)
     inferred_values: set[bool] = field(default_factory=set)
     inference_methods: set[str] = field(default_factory=set)
+    identity_exact_values: set[bool] = field(default_factory=set)
+    identity_methods: set[str] = field(default_factory=set)
+    identity_hashes: set[str] = field(default_factory=set)
     confidence_values: list[float] = field(default_factory=list)
     confidence_semantics: set[str] = field(default_factory=set)
     supporting_event_ids: set[str] = field(default_factory=set)
@@ -102,6 +105,15 @@ class GraphEdge:
             method = attributes.get("inference_method")
             if isinstance(method, str) and method:
                 self.inference_methods.add(method)
+            identity_exact = attributes.get("identity_exact")
+            if isinstance(identity_exact, bool):
+                self.identity_exact_values.add(identity_exact)
+            identity_method = attributes.get("identity_method")
+            if isinstance(identity_method, str) and identity_method:
+                self.identity_methods.add(identity_method)
+            identity_hash = attributes.get("shared_request_id_hash")
+            if isinstance(identity_hash, str) and identity_hash:
+                self.identity_hashes.add(identity_hash)
             confidence = attributes.get("confidence")
             if isinstance(confidence, (int, float)) and not isinstance(confidence, bool):
                 self.confidence_values.append(float(confidence))
@@ -127,6 +139,12 @@ class GraphEdge:
             inferred = False
         else:
             inferred = None
+        if self.identity_exact_values == {True}:
+            identity_exact: bool | None = True
+        elif self.identity_exact_values == {False}:
+            identity_exact = False
+        else:
+            identity_exact = None
         return {
             "id": self.id,
             "source": self.source,
@@ -144,6 +162,9 @@ class GraphEdge:
             "causal": causal,
             "inferred": inferred,
             "inference_methods": sorted(self.inference_methods),
+            "identity_exact": identity_exact,
+            "identity_methods": sorted(self.identity_methods),
+            "identity_hashes": sorted(self.identity_hashes),
             "confidence_min": min(self.confidence_values) if self.confidence_values else None,
             "confidence_max": max(self.confidence_values) if self.confidence_values else None,
             "confidence_semantics": sorted(self.confidence_semantics),

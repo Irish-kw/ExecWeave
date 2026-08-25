@@ -1,10 +1,15 @@
+import hashlib
 import json
 from pathlib import Path
 
 import pytest
 
 from execweave.graph import build_execution_graph, write_execution_graph
+from execweave.inference_gateway import litellm_response_to_events
+from execweave.inference_identity import gateway_runtime_identity_event
+from execweave.model_runtime import vllm_response_to_events
 from execweave.schema import Entity, RuntimeEvent
+from execweave.semantic import merge_semantic_sidecar
 from execweave.sink import JsonlSink
 
 
@@ -93,6 +98,87 @@ def test_source_only_lifecycle_event_updates_node_without_fake_edge(tmp_path: Pa
     assert "process.started" in process["event_types"]
     assert "process.exited" in process["event_types"]
     assert not any(edge.relation == "EXITED" for edge in graph.edges)
+
+
+def test_exact_inference_identity_survives_semantic_merge_and_graph_materialization(
+    tmp_path: Path,
+) -> None:
+    runtime = tmp_path / "runtime.jsonl"
+    sidecar = tmp_path / "inference.jsonl"
+    merged = tmp_path / "merged.jsonl"
+    _emit_complete_stream(runtime)
+
+    runtime_events = [
+        json.loads(line) for line in runtime.read_text(encoding="utf-8").splitlines() if line.strip()
+    ]
+    timestamp = next(
+        event["timestamp"] for event in runtime_events if event["event_type"] == "session.started"
+    )
+    shared = "PRIVATE_GRAPH_SHARED_REQUEST_ID"
+
+    records = []
+    records.extend(
+        litellm_response_to_events(
+            {
+                "id": "gw-graph-1",
+                "model": "proxy-alias-response",
+                "usage": {"prompt_tokens": 2, "completion_tokens": 1, "total_tokens": 3},
+            },
+            requested_model="assistant",
+            resolved_model="qwen/local",
+            provider_name="vLLM",
+            request_id="gw-graph-1",
+            timestamp=timestamp,
+        )
+    )
+    records.extend(
+        vllm_response_to_events(
+            {
+                "id": "rt-graph-1",
+                "model": "qwen/local",
+                "usage": {"prompt_tokens": 2, "completion_tokens": 1, "total_tokens": 3},
+            },
+            request_id="rt-graph-1",
+            timestamp=timestamp,
+        )
+    )
+    records.append(
+        gateway_runtime_identity_event(
+            gateway="litellm",
+            gateway_request_id="gw-graph-1",
+            runtime="vllm",
+            runtime_request_id="rt-graph-1",
+            shared_request_id=shared,
+            timestamp=timestamp,
+        )
+    )
+    sidecar.write_text(
+        "".join(json.dumps(record, sort_keys=True) + "\n" for record in records),
+        encoding="utf-8",
+    )
+
+    merge_semantic_sidecar(runtime, sidecar, merged)
+    graph_payload = build_execution_graph(merged).to_dict()
+    rendered = json.dumps(graph_payload, sort_keys=True)
+
+    assert shared not in merged.read_text(encoding="utf-8")
+    assert shared not in rendered
+    node_ids = {node["id"] for node in graph_payload["nodes"]}
+    assert "inference-request:litellm:gw-graph-1" in node_ids
+    assert "inference-request:vllm:rt-graph-1" in node_ids
+
+    identity_edge = next(
+        edge for edge in graph_payload["edges"] if edge["relation"] == "SAME_INFERENCE_REQUEST"
+    )
+    assert identity_edge["source"] == "inference-request:litellm:gw-graph-1"
+    assert identity_edge["target"] == "inference-request:vllm:rt-graph-1"
+    assert identity_edge["causal"] is False
+    assert identity_edge["inferred"] is False
+    assert identity_edge["identity_exact"] is True
+    assert identity_edge["identity_methods"] == ["shared_request_id"]
+    assert identity_edge["identity_hashes"] == [
+        hashlib.sha256(shared.encode("utf-8")).hexdigest()[:32]
+    ]
 
 
 def test_graph_rejects_invalid_stream(tmp_path: Path) -> None:
