@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
-import sys
 
 import pytest
 
@@ -49,9 +48,7 @@ def test_inference_link_cli_writes_exact_identity_sidecar(tmp_path) -> None:
     shared = "PRIVATE_CLI_SHARED_REQUEST_ID"
     subprocess.run(
         [
-            sys.executable,
-            "-m",
-            "execweave.inference_identity_cli",
+            "execweave-inference-link",
             "--gateway",
             "litellm",
             "--gateway-request-id",
