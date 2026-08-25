@@ -9,6 +9,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from .backends import BackendName
+from .correlation import CorrelationResult, correlate_tool_process
 from .graph import build_execution_graph, write_execution_graph
 from .semantic import SemanticMergeResult, merge_semantic_sidecar
 from .viewer import write_graph_html
@@ -26,6 +27,11 @@ class ClaudeRecordResult:
     semantic_graph: Path | None
     semantic_viewer: Path | None
     semantic_merge: SemanticMergeResult | None
+    correlation_status: str
+    correlated_event_stream: Path | None
+    correlated_graph: Path | None
+    correlated_viewer: Path | None
+    correlation: CorrelationResult | None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -40,6 +46,19 @@ class ClaudeRecordResult:
             "semantic_merge": (
                 self.semantic_merge.to_dict() if self.semantic_merge is not None else None
             ),
+            "correlation_status": self.correlation_status,
+            "correlated_event_stream": (
+                str(self.correlated_event_stream)
+                if self.correlated_event_stream is not None
+                else None
+            ),
+            "correlated_graph": (
+                str(self.correlated_graph) if self.correlated_graph is not None else None
+            ),
+            "correlated_viewer": (
+                str(self.correlated_viewer) if self.correlated_viewer is not None else None
+            ),
+            "correlation": self.correlation.to_dict() if self.correlation is not None else None,
         }
 
 
@@ -60,16 +79,22 @@ def record_claude_to_viewer(
     collect_filesystem: bool = True,
     collect_network: bool = True,
     keep_raw_trace: bool = False,
+    correlation_window_ms: int = 3000,
     open_browser: bool = False,
 ) -> ClaudeRecordResult:
-    """Record one Claude run with a run-bound semantic sidecar.
+    """Record one Claude run with run-bound semantic and inferred correlation artifacts.
 
     This function is intended for the dedicated CLI process. It temporarily sets
     EXECWEAVE_SEMANTIC_SIDECAR only inside that process so Claude Code and its hook
     commands inherit a run-specific path without mutating the caller's shell.
+
+    Runtime and semantic evidence remain immutable inputs. Correlation is written to
+    a third event stream and remains explicitly inferred/non-causal.
     """
     if not command:
         raise ValueError("command must not be empty")
+    if correlation_window_ms <= 0:
+        raise ValueError("correlation_window_ms must be greater than zero")
 
     root = Path(watch_root).expanduser().resolve()
     run_dir = (
@@ -83,7 +108,20 @@ def record_claude_to_viewer(
     merged_event_stream = run_dir / "events.semantic.jsonl"
     semantic_graph = run_dir / "graph.semantic.json"
     semantic_viewer = run_dir / "viewer.semantic.html"
-    _preflight([semantic_sidecar, merged_event_stream, semantic_graph, semantic_viewer])
+    correlated_event_stream = run_dir / "events.correlated.jsonl"
+    correlated_graph = run_dir / "graph.correlated.json"
+    correlated_viewer = run_dir / "viewer.correlated.html"
+    _preflight(
+        [
+            semantic_sidecar,
+            merged_event_stream,
+            semantic_graph,
+            semantic_viewer,
+            correlated_event_stream,
+            correlated_graph,
+            correlated_viewer,
+        ]
+    )
 
     previous = os.environ.get(_SEMANTIC_ENV)
     os.environ[_SEMANTIC_ENV] = str(semantic_sidecar)
@@ -116,6 +154,11 @@ def record_claude_to_viewer(
             semantic_graph=None,
             semantic_viewer=None,
             semantic_merge=None,
+            correlation_status="not_run_no_semantic_events",
+            correlated_event_stream=None,
+            correlated_graph=None,
+            correlated_viewer=None,
+            correlation=None,
         )
 
     merge_result = merge_semantic_sidecar(
@@ -128,7 +171,25 @@ def record_claude_to_viewer(
     write_graph_html(
         execution_graph.to_dict(),
         semantic_viewer,
+        open_browser=False,
+    )
+
+    correlation_result = correlate_tool_process(
+        merged_event_stream,
+        correlated_event_stream,
+        max_window_ms=correlation_window_ms,
+    )
+    correlated_execution_graph = build_execution_graph(correlated_event_stream)
+    write_execution_graph(correlated_execution_graph, correlated_graph)
+    write_graph_html(
+        correlated_execution_graph.to_dict(),
+        correlated_viewer,
         open_browser=open_browser,
+    )
+    correlation_status = (
+        "correlated"
+        if correlation_result.correlated_tool_calls > 0
+        else "completed_no_matches"
     )
     return ClaudeRecordResult(
         runtime=runtime,
@@ -138,6 +199,11 @@ def record_claude_to_viewer(
         semantic_graph=semantic_graph.resolve(),
         semantic_viewer=semantic_viewer.resolve(),
         semantic_merge=merge_result,
+        correlation_status=correlation_status,
+        correlated_event_stream=correlated_event_stream.resolve(),
+        correlated_graph=correlated_graph.resolve(),
+        correlated_viewer=correlated_viewer.resolve(),
+        correlation=correlation_result,
     )
 
 
@@ -152,7 +218,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="execweave-claude-record",
         description=(
-            "Record runtime evidence and bind Claude Code hook telemetry to the same local run."
+            "Record runtime evidence, Claude Code hook telemetry, and conservative "
+            "Tool-to-Process correlation in one local run."
         ),
     )
     parser.add_argument("--watch-root", type=Path, default=None)
@@ -162,6 +229,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--backend",
         choices=["auto", "portable", "strace"],
         default="auto",
+    )
+    parser.add_argument(
+        "--correlation-window-ms",
+        type=int,
+        default=3000,
+        help="maximum Tool-to-Process correlation window in milliseconds (default: 3000)",
     )
     parser.add_argument("--no-files", action="store_true")
     parser.add_argument("--no-network", action="store_true")
@@ -188,6 +261,7 @@ def main(argv: list[str] | None = None) -> int:
             collect_filesystem=not args.no_files,
             collect_network=not args.no_network,
             keep_raw_trace=args.keep_native_trace,
+            correlation_window_ms=args.correlation_window_ms,
             open_browser=args.open_browser,
         )
     except (FileExistsError, RuntimeError, ValueError, OSError) as exc:
