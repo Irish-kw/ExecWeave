@@ -59,7 +59,7 @@ Claude Code's `/hooks` menu can be used to inspect which hooks are currently con
 
 The adapter uses command hooks and is fail-open by default: a telemetry parsing or filesystem error is written to stderr but returns success so ExecWeave observability does not block an Agent tool call. `--strict` is available for debugging the hook itself, not as a runtime security policy.
 
-## Recommended: one-command runtime + semantic recording
+## Recommended: one-command runtime + semantic + correlation recording
 
 After the hooks are installed, use the run-bound workflow:
 
@@ -71,7 +71,17 @@ On Linux, `--backend auto` still prefers the stronger `strace` backend when avai
 
 `execweave-claude-record` binds a sidecar path that is unique to this ExecWeave run **inside the dedicated CLI process**. Claude and its hook commands inherit that path, so two independently launched ExecWeave Claude-record processes do not need to guess which semantic sidecar belongs to which runtime capture.
 
-If Claude emits semantic hook events, the run directory contains both raw and merged artifacts:
+If Claude emits semantic hook events, the recorder now runs three explicit evidence stages:
+
+```text
+runtime evidence
+    ↓ semantic merge
+runtime + semantic evidence
+    ↓ conservative correlation
+runtime + semantic + inferred correlation
+```
+
+The run directory keeps every stage separate:
 
 ```text
 .execweave/runs/<run-id>/
@@ -79,12 +89,26 @@ If Claude emits semantic hook events, the run directory contains both raw and me
 ├── graph.json                # runtime-only graph
 ├── viewer.html               # runtime-only viewer
 ├── semantic.jsonl            # Claude hook semantic evidence only
-├── events.semantic.jsonl     # validated merged stream
+├── events.semantic.jsonl     # validated runtime + semantic stream
 ├── graph.semantic.json       # runtime + semantic graph
-└── viewer.semantic.html      # runtime + semantic viewer
+├── viewer.semantic.html      # runtime + semantic viewer
+├── events.correlated.jsonl   # runtime + semantic + inferred bridges
+├── graph.correlated.json     # graph including inferred bridges
+└── viewer.correlated.html    # viewer with inferred edges styled separately
 ```
 
-`--open` opens `viewer.semantic.html` when semantic evidence was observed. If the hooks are not installed or no supported hook event fires, ExecWeave reports `semantic_status: "no_events"` and falls back to the runtime-only viewer instead of guessing or failing the run.
+`--open` opens `viewer.correlated.html` when semantic evidence was observed. If the hooks are not installed or no supported hook event fires, ExecWeave reports `semantic_status: "no_events"`, `correlation_status: "not_run_no_semantic_events"`, and falls back to the runtime-only viewer.
+
+If semantic evidence exists but no unique safe Tool → Process candidate survives, ExecWeave still produces the correlated artifacts with `correlation_status: "completed_no_matches"`. No inferred edge is fabricated.
+
+The default maximum correlation window is 3000 ms. It can be changed explicitly:
+
+```bash
+execweave-claude-record \
+  --correlation-window-ms 1500 \
+  --open \
+  -- claude
+```
 
 Choose a directory explicitly if desired:
 
@@ -95,7 +119,7 @@ execweave-claude-record \
   -- claude
 ```
 
-The run-bound workflow preserves the original `events.jsonl`; semantic evidence is merged only into a separate `events.semantic.jsonl`.
+The run-bound workflow preserves `events.jsonl`, `semantic.jsonl`, and `events.semantic.jsonl`. Correlation is written only to the separate `events.correlated.jsonl` stream.
 
 ## Standalone hook sidecar location
 
@@ -121,9 +145,9 @@ execweave-claude-hook --sidecar /path/to/semantic.jsonl
 
 For parallel standalone sessions, prefer the automatic session-scoped path instead of pointing multiple Claude sessions at one fixed sidecar.
 
-## Advanced: manual merge
+## Advanced: manual merge and correlation
 
-The generic semantic pipeline remains available when you already have a runtime capture and a semantic sidecar:
+The generic semantic and correlation pipeline remains available when you already have a runtime capture and a semantic sidecar:
 
 ```bash
 execweave semantic-merge \
@@ -132,8 +156,16 @@ execweave semantic-merge \
   --output run.semantic.jsonl
 
 execweave validate run.semantic.jsonl
-execweave graph run.semantic.jsonl --output run.semantic.graph.json
-execweave view run.semantic.graph.json --output run.semantic.html --open
+
+execweave correlate run.semantic.jsonl \
+  --output run.correlated.jsonl
+
+execweave validate run.correlated.jsonl
+execweave graph run.correlated.jsonl \
+  --output run.correlated.graph.json
+execweave view run.correlated.graph.json \
+  --output run.correlated.html \
+  --open
 ```
 
 The original runtime stream and semantic sidecar remain unchanged.
@@ -159,20 +191,6 @@ session --LAUNCHED--> Claude process --SPAWNED--> shell/process ...
 ```
 
 ExecWeave does not claim those paths are the same causal chain merely because their timestamps or command strings look similar.
-
-When an explicit inferred bridge is useful, run:
-
-```bash
-execweave correlate run.semantic.jsonl \
-  --output run.correlated.jsonl
-
-execweave validate run.correlated.jsonl
-execweave graph run.correlated.jsonl \
-  --output run.correlated.graph.json
-execweave view run.correlated.graph.json \
-  --output run.correlated.html \
-  --open
-```
 
 The v0.1 correlation stage is intentionally conservative:
 
