@@ -55,6 +55,7 @@ ExecWeave 当前版本为 **v0.4.0**。
 - [x] edge aggregation
 - [x] graph summary / filtering / path query
 - [x] large-run leaf condensation
+- [x] optional exact cluster expansion evidence
 
 ### Phase 3
 - [x] standalone local viewer
@@ -63,7 +64,8 @@ ExecWeave 当前版本为 **v0.4.0**。
 - [x] node type / relation / causal-only filter
 - [x] Timeline ↔ Graph synchronization
 - [x] evidence-sequence slider + Play/Pause replay
-- [ ] progressive cluster expansion
+- [x] progressive cluster expansion
+- [ ] saved filters / focused subgraphs
 
 ### Security Analysis
 
@@ -103,13 +105,32 @@ execweave graph-condense run.graph.json \
 
 只折叠单一 incoming relationship、且没有 downstream behavior 的 file/directory/executable leaf。Process、Agent、Session、Socket、Network Endpoint 默认不会折叠。
 
+### 可逐步展开的 condensed Graph
+
+默认 `graph-condense` 仍保持真正精简。要让 Viewer 可以按需展开 cluster：
+
+```bash
+execweave graph-condense run.graph.json \
+  --output run.expandable.graph.json \
+  --threshold 8 \
+  --keep-expansion
+
+execweave view run.expandable.graph.json \
+  --output run.expandable.html \
+  --open
+```
+
+可展开 cluster 使用虚线边框。点击 cluster 后选择 **Expand cluster**，只会展开该 cluster 的原始 member nodes 与 evidence edges；其他 cluster 保持折叠。**Collapse clusters** 可恢复 compact view。
+
+`--keep-expansion` 只是保存原始 observed nodes/edges，不会创建新的 causal relationship。
+
 ## Timeline ↔ Graph
 
-Standalone Viewer 现在会根据 Graph edge 的 `first_sequence` / `last_sequence` 提供 **Evidence sequence** 滑杆与 Play/Pause replay。
+Standalone Viewer 根据 Graph edge 的 `first_sequence` / `last_sequence` 提供 **Evidence sequence** 滑杆与 Play/Pause replay。
 
-把滑杆向前或向后移动，就能按 evidence 顺序查看 Graph 如何逐步形成。若 aggregated edge 在当前 sequence 只包含部分 evidence，Viewer 会显示 `partial`，不会提前显示最终 `count`。
+如果 aggregated edge 在当前 sequence 只包含部分 evidence，Viewer 会显示 `partial`，不会提前显示最终 `count`。
 
-Timeline 可以和 node type、relation、causal-only、search filter 一起使用。
+Timeline 可以与 node type、relation、causal-only、search filter 和 progressive cluster expansion 一起使用。
 
 ## Graph-first event model
 
