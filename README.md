@@ -46,7 +46,7 @@ execution graph snapshots
 Live browser graph
 ```
 
-When the command exits, ExecWeave validates the event stream and stores the final artifacts:
+When the command exits, ExecWeave validates the event stream and stores:
 
 ```text
 .execweave/runs/<session-id>/
@@ -80,22 +80,6 @@ execweave live --open -- opencode
 execweave record --open -- python my_agent.py
 ```
 
-`record` performs the complete pipeline after the command exits:
-
-```text
-AI Agent
-   ↓
-Runtime Collection
-   ↓
-events.jsonl
-   ↓ validate
-Execution Graph
-   ↓
-graph.json
-   ↓
-viewer.html
-```
-
 Choose an explicit artifact directory:
 
 ```bash
@@ -107,7 +91,7 @@ ExecWeave refuses to silently overwrite existing non-empty artifacts.
 
 ## Current status
 
-ExecWeave is currently **v0.3.0**.
+ExecWeave is currently **v0.4.0**.
 
 ### Phase 1 — Runtime Collection
 
@@ -156,50 +140,31 @@ ExecWeave is currently **v0.3.0**.
 
 Progressive cluster expansion and Timeline ↔ Graph synchronization remain future work.
 
+### Security analysis
+
+**First conservative, explainable rule layer implemented.**
+
+- sensitive-file access findings
+- external endpoint findings
+- possible sensitive-file → network prioritization
+- explicit `data_flow_proven: false`
+- explicit `exfiltration_proven: false`
+
+ExecWeave does not turn co-occurrence into a data-flow claim.
+
 ## Advanced manual workflow
 
 The one-command `live` and `record` workflows are recommended. Each stage is also available separately.
 
-### 1. Inspect collector capabilities
-
 ```bash
 execweave doctor
-```
-
-### 2. Collect runtime events
-
-```bash
 execweave run --output run.jsonl -- claude
-```
-
-Choose a backend explicitly:
-
-```bash
-execweave run --backend strace --output run.jsonl -- claude
-execweave run --backend portable --output run.jsonl -- claude
-```
-
-`auto` is the default. It prefers `strace` on Linux when available and otherwise uses `portable`.
-
-### 3. Validate the stream
-
-```bash
 execweave validate run.jsonl
-```
-
-For an interrupted run:
-
-```bash
-execweave validate --allow-incomplete run.jsonl
-```
-
-### 4. Materialize the graph
-
-```bash
 execweave graph run.jsonl --output run.graph.json
+execweave view run.graph.json --output run.html --open
 ```
 
-### 5. Condense a large graph
+### Condense a large graph
 
 Long agent runs can touch hundreds or thousands of low-value leaf files. Collapse repetitive file/directory/executable leaves while preserving processes, agents, sessions, sockets, and network endpoints:
 
@@ -209,19 +174,29 @@ execweave graph-condense run.graph.json \
   --threshold 8
 ```
 
-A cluster is only created for equivalent **leaf** resources with one incoming relationship and no outgoing behavior. Important runtime topology is not collapsed merely to make the picture prettier.
+A cluster is only created for equivalent **leaf** resources with one incoming relationship and no outgoing behavior.
 
-### 6. Open the viewer
-
-```bash
-execweave view run.graph.json --output run.html --open
-```
-
-For a large run:
+### Analyze the graph
 
 ```bash
-execweave view run.compact.graph.json --output run.compact.html --open
+execweave analyze run.graph.json
 ```
+
+Save the report too:
+
+```bash
+execweave analyze run.graph.json --output analysis.json
+```
+
+A finding such as:
+
+```text
+process
+  ├── OPENED_READ ──→ ~/.ssh/id_ed25519
+  └── CONNECTED_TO ─→ external endpoint
+```
+
+is reported as a **possible sensitive-file-to-network path**, not as proof that the key bytes were transmitted.
 
 ## Graph-first event model
 
@@ -244,18 +219,9 @@ process --CONNECTED_TO--> network_endpoint
 process --CONNECT_ATTEMPTED--> network_endpoint
 ```
 
-Phase 2 aggregates repeated evidence. If one process opens the same file 17 times, the graph stores one relationship:
-
-```text
-process --OPENED_READ--> file
-count = 17
-```
-
-instead of drawing 17 overlapping lines.
+Repeated evidence is aggregated. If one process opens the same file 17 times, the graph stores one relationship with `count = 17` instead of 17 overlapping lines.
 
 ## No fake causality
-
-ExecWeave separates evidence that proves a process relationship from events that merely occurred during the same session.
 
 Linux syscall-backed evidence can produce:
 
@@ -278,16 +244,9 @@ The portable filesystem watcher can only prove:
 session --OBSERVED_FILE_CHANGE--> file
 ```
 
-and therefore marks it:
+and therefore marks it `causal: false`.
 
-```json
-{
-  "attribution": "session_observation",
-  "causal": false
-}
-```
-
-Temporal correlation is not presented as causal proof.
+Temporal correlation is not presented as causal proof, and same-process file/network activity is not presented as byte-level data flow.
 
 ## Backends
 
@@ -305,60 +264,21 @@ execweave run --keep-native-trace -- claude
 
 The portable backend uses psutil and watchdog on Linux, macOS, and Windows. It is also the current live-graph backend because it emits observations while the command is running.
 
-Its limitations remain explicit: filesystem changes are session-correlated rather than process-attributed, and processes whose entire lifetime falls between polling intervals can be missed.
+Its limitations remain explicit: filesystem changes are session-correlated rather than process-attributed, and very short-lived processes can be missed between polling intervals.
 
-Future native collectors are planned for:
-
-- Linux eBPF
-- Windows ETW
-- macOS Endpoint Security
-
-The goal is for future native backends to emit the same event contract while also supporting low-overhead live collection.
+Future native collectors are planned for Linux eBPF, Windows ETW, and macOS Endpoint Security.
 
 ## Event-stream integrity
 
-A JSONL event file represents exactly one ExecWeave session.
-
-`execweave validate` checks:
-
-- valid JSONL records
-- one session ID per file
-- unique event IDs
-- contiguous sequence numbers starting at 1
-- valid timestamps
-- required entity fields
-- completed session lifecycle by default
+`execweave validate` checks valid JSONL, one session ID, unique event IDs, contiguous sequence numbers, timestamps, entity fields, and completed session lifecycle by default.
 
 ExecWeave also rejects accidental reuse of non-empty event/graph/viewer outputs rather than silently mixing runs.
 
 ## Graph queries
 
-Summarize a graph:
-
 ```bash
 execweave graph-summary run.graph.json
-```
-
-Keep only causal edges:
-
-```bash
-execweave graph-filter run.graph.json \
-  --output causal.graph.json \
-  --causal-only
-```
-
-Focus on process/network relationships:
-
-```bash
-execweave graph-filter run.graph.json \
-  --output process-network.graph.json \
-  --node-type process \
-  --node-type network_endpoint
-```
-
-Find a directed runtime path:
-
-```bash
+execweave graph-filter run.graph.json --output causal.graph.json --causal-only
 execweave path run.graph.json SOURCE_NODE_ID TARGET_NODE_ID --causal-only
 ```
 
@@ -366,15 +286,8 @@ See [`docs/phase-2-execution-graph.md`](docs/phase-2-execution-graph.md) for the
 
 ## Interactive viewer
 
-Generate a standalone local viewer:
-
 ```bash
 execweave view run.graph.json --output run.html --open
-```
-
-Start the live viewer:
-
-```bash
 execweave live --open -- claude
 ```
 
@@ -387,25 +300,6 @@ execweave live --no-files --open -- claude
 ```
 
 The live HTTP server binds only to `127.0.0.1`. It is not exposed to the LAN by default.
-
-Current interactions include:
-
-- wheel zoom
-- background drag to pan
-- node drag in the standalone viewer
-- node/edge detail inspection
-- search by node ID, name, or type
-- causal/non-causal edge distinction
-- fit/reset controls
-
-## Benchmark
-
-```bash
-execweave benchmark --backend portable --iterations 5
-execweave benchmark --backend strace --iterations 5
-```
-
-This is an engineering smoke benchmark, not a published performance claim.
 
 ## Privacy
 
@@ -458,13 +352,14 @@ Runtime metadata can still include sensitive paths, commands, and endpoints. Rev
 - [ ] Timeline ↔ Graph synchronization
 - [ ] Saved filters and focused subgraphs
 
-### Later security / research layers
+### Security / research layers
 
+- [x] Initial explainable rule analysis
 - [ ] Agent / Tool / MCP semantic telemetry
 - [ ] credential and secret entities
-- [ ] data-flow / taint tracking
+- [ ] byte-level data-flow / taint tracking
 - [ ] anomaly detection
-- [ ] attack-path reconstruction
+- [ ] attack-path ranking
 - [ ] execution replay
 - [ ] runtime allow / warn / block policy
 
@@ -472,25 +367,16 @@ Runtime metadata can still include sensitive paths, commands, and endpoints. Rev
 
 - [`Phase 1 — Runtime Collection`](docs/phase-1-runtime-collection.md)
 - [`Phase 2 — Execution Graph`](docs/phase-2-execution-graph.md)
+- [`Live Graph`](docs/live-graph.md)
+- [`Security Analysis`](docs/security-analysis.md)
 
 ## Contributing
 
 **Contributions are very welcome.**
 
-High-impact areas include:
+High-impact areas include Linux eBPF, Windows ETW, macOS Endpoint Security, graph entity resolution, live/large-graph visualization, OpenTelemetry/MCP integrations, privacy/redaction, reproducible agent workloads, and performance evaluation.
 
-- Linux eBPF
-- Windows ETW
-- macOS Endpoint Security
-- graph entity resolution
-- live / large-graph visualization
-- OpenTelemetry / MCP integrations
-- privacy and redaction
-- reproducible agent workloads
-- performance evaluation
-- README and documentation translations
-
-For small changes, fork the repository and open a pull request. For a new collector or architecture change, open an issue first and describe the telemetry source, privilege requirements, expected graph relationships, and causal guarantees.
+For a new collector or architecture change, open an issue first and describe the telemetry source, privilege requirements, expected graph relationships, and causal guarantees.
 
 > **Early contributors are especially welcome.**
 
