@@ -75,7 +75,8 @@ class _Declaration:
     timestamp: datetime
     tool_call: dict[str, Any]
     command_entity: dict[str, Any]
-    command_head: str | None
+    command_token: str
+    command_head: str
 
 
 @dataclass
@@ -111,7 +112,7 @@ class _Candidate:
         if self.has_exec_match and self.has_cmdline_match:
             return "unique_exec_and_cmdline_match", 0.95
         if self.has_exec_match:
-            return "unique_exec_basename_match", 0.90
+            return "unique_exec_identity_match", 0.90
         if self.has_process_exe_match and self.has_cmdline_match:
             return "unique_process_exe_and_cmdline_match", 0.90
         if self.has_process_exe_match:
@@ -146,14 +147,41 @@ def _load_jsonl(path: Path) -> list[dict[str, Any]]:
     return events
 
 
-def _normalize_executable(value: object) -> str | None:
+def _clean_executable(value: object) -> str | None:
     if not isinstance(value, str) or not value.strip():
         return None
-    text = value.strip().strip('"').strip("'").replace("\\", "/")
-    name = text.rsplit("/", 1)[-1].lower()
+    return value.strip().strip('"').strip("'") or None
+
+
+def _normalize_executable(value: object) -> str | None:
+    text = _clean_executable(value)
+    if text is None:
+        return None
+    name = text.replace("\\", "/").rsplit("/", 1)[-1].lower()
     if name.endswith(".exe"):
         name = name[:-4]
     return name or None
+
+
+def _canonical_executable_path(value: object) -> str | None:
+    text = _clean_executable(value)
+    if text is None:
+        return None
+    if "/" not in text and "\\" not in text and not Path(text).is_absolute():
+        return None
+    try:
+        resolved = Path(text).expanduser().resolve(strict=False)
+    except (OSError, RuntimeError, ValueError):
+        return None
+    return os.path.normcase(str(resolved))
+
+
+def _same_executable_identity(candidate: object, declaration: _Declaration) -> bool:
+    if _normalize_executable(candidate) == declaration.command_head:
+        return True
+    declared_path = _canonical_executable_path(declaration.command_token)
+    candidate_path = _canonical_executable_path(candidate)
+    return declared_path is not None and candidate_path is not None and declared_path == candidate_path
 
 
 def _has_shell_control(command: str) -> bool:
@@ -206,8 +234,6 @@ def _first_token(command: str) -> str | None:
         char = text[index]
         if char == quote:
             return "".join(chars)
-        # Preserve ordinary backslashes so quoted Windows paths remain intact.
-        # Only consume a backslash when it escapes the active double quote.
         if (
             char == "\\"
             and quote == '"'
@@ -222,16 +248,16 @@ def _first_token(command: str) -> str | None:
     return None
 
 
-def _command_head(command: str) -> str | None:
+def _command_identity(command: str) -> tuple[str, str] | None:
     if _has_shell_control(command):
         return None
     token = _first_token(command)
     if not token or "=" in token:
         return None
-    normalized = _normalize_executable(token)
-    if normalized is None or normalized in _BUILTINS:
+    head = _normalize_executable(token)
+    if head is None or head in _BUILTINS:
         return None
-    return normalized
+    return token, head
 
 
 def _declarations(events: list[dict[str, Any]]) -> list[_Declaration]:
@@ -249,13 +275,19 @@ def _declarations(events: list[dict[str, Any]]) -> list[_Declaration]:
         command = target_attributes.get("command") if isinstance(target_attributes, dict) else None
         if not isinstance(command, str) or not command:
             continue
+        identity = _command_identity(command)
+        if identity is None:
+            token, head = "", ""
+        else:
+            token, head = identity
         result.append(
             _Declaration(
                 event=event,
                 timestamp=_parse_timestamp(event.get("timestamp"), context=f"event {index}"),
                 tool_call=deepcopy(source),
                 command_entity=deepcopy(target),
-                command_head=_command_head(command),
+                command_token=token,
+                command_head=head,
             )
         )
     result.sort(key=lambda item: item.timestamp)
@@ -288,7 +320,7 @@ def _event_time(event: dict[str, Any], *, index: int) -> datetime:
 def _candidate_processes(
     events: list[dict[str, Any]],
     *,
-    command_head: str,
+    declaration: _Declaration,
     start: datetime,
     end: datetime,
 ) -> dict[str, _Candidate]:
@@ -313,13 +345,12 @@ def _candidate_processes(
                 continue
             if not isinstance(target, dict) or target.get("type") != "executable":
                 continue
-            executable = target.get("name")
-            if _normalize_executable(executable) != command_head:
-                executable_id = target.get("id")
-                if not isinstance(executable_id, str) or not executable_id.startswith("executable:"):
-                    continue
-                if _normalize_executable(executable_id[len("executable:") :]) != command_head:
-                    continue
+            executable_value: object = target.get("name")
+            executable_id = target.get("id")
+            if isinstance(executable_id, str) and executable_id.startswith("executable:"):
+                executable_value = executable_id[len("executable:") :]
+            if not _same_executable_identity(executable_value, declaration):
+                continue
             process = deepcopy(source)
             exec_match = True
         elif event_type == "process.started":
@@ -329,10 +360,10 @@ def _candidate_processes(
             attributes = target.get("attributes") or {}
             if not isinstance(attributes, dict):
                 continue
-            process_exe_match = _normalize_executable(attributes.get("exe")) == command_head
+            process_exe_match = _same_executable_identity(attributes.get("exe"), declaration)
             cmdline = attributes.get("cmdline")
             if isinstance(cmdline, list) and cmdline and isinstance(cmdline[0], str):
-                cmdline_match = _normalize_executable(cmdline[0]) == command_head
+                cmdline_match = _same_executable_identity(cmdline[0], declaration)
             if not process_exe_match and not cmdline_match:
                 continue
             process = deepcopy(target)
@@ -404,6 +435,7 @@ def _derived_event(
             "confidence_semantics": "heuristic_score_not_probability",
             "candidate_count": 1,
             "declared_command_head": declaration.command_head,
+            "declared_command_token": declaration.command_token,
             "tool_call_id": tool_call_id,
             "command_entity_id": declaration.command_entity.get("id"),
             "time_delta_ms": round(delta_ms, 3),
@@ -439,7 +471,7 @@ def correlate_tool_process(
     skipped_ambiguous = 0
 
     for position, declaration in enumerate(declarations):
-        if declaration.command_head is None:
+        if not declaration.command_head:
             skipped_unsupported += 1
             continue
 
@@ -457,7 +489,7 @@ def correlate_tool_process(
 
         candidates = _candidate_processes(
             events,
-            command_head=declaration.command_head,
+            declaration=declaration,
             start=declaration.timestamp,
             end=window_end,
         )
