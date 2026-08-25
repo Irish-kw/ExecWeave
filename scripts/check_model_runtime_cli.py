@@ -38,7 +38,7 @@ class Handler(BaseHTTPRequestHandler):
                     "data": [
                         {
                             "id": "/Users/private/models/ci-secret.gguf",
-                            "owned_by": "llamacpp",
+                            "owned_by": "local-runtime",
                             "meta": {"n_ctx_train": 131072, "n_params": 8000000000},
                         }
                     ]
@@ -74,6 +74,39 @@ def _run(args: list[str], *, payload: dict | None = None) -> None:
 
 def _read(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def _check_openai_event(root: Path, runtime: str) -> None:
+    output = root / f"{runtime}-event.jsonl"
+    _run(
+        [
+            "execweave-model-runtime",
+            "event",
+            "--runtime",
+            runtime,
+            "--sidecar",
+            str(output),
+        ],
+        payload={
+            "id": f"resp-{runtime}-ci",
+            "model": "/Users/private/models/ci-secret-model",
+            "output": [{"content": [{"type": "output_text", "text": "PRIVATE_RESPONSE"}]}],
+            "reasoning": {"summary": "PRIVATE_REASONING"},
+            "usage": {
+                "input_tokens": 5,
+                "output_tokens": 6,
+                "total_tokens": 11,
+                "input_tokens_details": {"cached_tokens": 2},
+                "output_tokens_details": {"reasoning_tokens": 1},
+            },
+        },
+    )
+    text = output.read_text(encoding="utf-8")
+    if "/Users/private/models" in text or "PRIVATE_RESPONSE" in text or "PRIVATE_REASONING" in text:
+        raise RuntimeError(f"{runtime} content/path leaked into model-runtime sidecar")
+    relations = {item["relation"] for item in _read(output)}
+    if relations != {"SERVED_INFERENCE", "USED_MODEL"}:
+        raise RuntimeError(f"unexpected {runtime} inference relations: {sorted(relations)}")
 
 
 def main() -> int:
@@ -129,6 +162,9 @@ def main() -> int:
     if "/Users/private/models" in llama_text or "PRIVATE_LLAMA_RESPONSE" in llama_text:
         raise RuntimeError("llama.cpp content/path leaked into model-runtime sidecar")
 
+    _check_openai_event(root, "vllm")
+    _check_openai_event(root, "lmstudio")
+
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -170,6 +206,29 @@ def main() -> int:
         relations = {item["relation"] for item in _read(llama_probe)}
         if relations != {"SERVES_MODEL", "REPORTED_METRICS"}:
             raise RuntimeError(f"unexpected llama.cpp probe relations: {sorted(relations)}")
+
+        for runtime, expected_relation in (
+            ("vllm", "SERVES_MODEL"),
+            ("lmstudio", "ADVERTISES_MODEL"),
+        ):
+            probe = root / f"{runtime}-probe.jsonl"
+            _run(
+                [
+                    "execweave-model-runtime",
+                    "probe",
+                    "--runtime",
+                    runtime,
+                    "--endpoint",
+                    endpoint,
+                    "--sidecar",
+                    str(probe),
+                ]
+            )
+            text = probe.read_text(encoding="utf-8")
+            if "/Users/private/models" in text:
+                raise RuntimeError(f"{runtime} probe leaked local model path")
+            if _read(probe)[0]["relation"] != expected_relation:
+                raise RuntimeError(f"{runtime} probe relation did not preserve runtime semantics")
     finally:
         server.shutdown()
         server.server_close()

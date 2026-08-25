@@ -8,9 +8,13 @@ from execweave.model_runtime import (
     llamacpp_metrics_to_events,
     llamacpp_models_to_events,
     llamacpp_response_to_events,
+    lmstudio_models_to_events,
+    lmstudio_response_to_events,
     ollama_ps_to_events,
     ollama_response_to_events,
     sanitize_endpoint,
+    vllm_models_to_events,
+    vllm_response_to_events,
 )
 
 
@@ -76,6 +80,36 @@ def test_llamacpp_response_records_usage_and_timings_without_choices() -> None:
     assert request["attributes"]["timing_predicted_per_second"] == 53.3
 
 
+def test_openai_compatible_responses_usage_is_normalized_without_content() -> None:
+    payload = {
+        "id": "resp-1",
+        "model": "org/model",
+        "output": [{"content": [{"type": "output_text", "text": "private answer"}]}],
+        "reasoning": {"summary": "private reasoning"},
+        "usage": {
+            "input_tokens": 12,
+            "output_tokens": 8,
+            "total_tokens": 20,
+            "input_tokens_details": {"cached_tokens": 4},
+            "output_tokens_details": {"reasoning_tokens": 3},
+        },
+    }
+    for converter in (vllm_response_to_events, lmstudio_response_to_events):
+        events = converter(payload)
+        rendered = json.dumps(events)
+        assert "private answer" not in rendered
+        assert "private reasoning" not in rendered
+        request = next(
+            event["target"] for event in events if event["relation"] == "SERVED_INFERENCE"
+        )
+        assert request["attributes"]["prompt_tokens"] == 12
+        assert request["attributes"]["completion_tokens"] == 8
+        assert request["attributes"]["total_tokens"] == 20
+        assert request["attributes"]["cached_prompt_tokens"] == 4
+        assert request["attributes"]["reasoning_tokens"] == 3
+        assert request["attributes"]["protocol"] == "openai_compatible"
+
+
 def test_llamacpp_response_redacts_model_file_path() -> None:
     payload = {
         "id": "chatcmpl-path",
@@ -89,6 +123,15 @@ def test_llamacpp_response_redacts_model_file_path() -> None:
     assert model["name"] == "secret-model.gguf"
     assert model["attributes"]["native_model_id_redacted"] is True
     assert model["id"].startswith("model:llamacpp:redacted:")
+
+
+def test_openai_compatible_local_model_paths_are_redacted() -> None:
+    payload = {"data": [{"id": "/Users/private/models/local-model", "owned_by": "local"}]}
+    for converter in (vllm_models_to_events, lmstudio_models_to_events):
+        events = converter(payload)
+        rendered = json.dumps(events)
+        assert "/Users/private/models" not in rendered
+        assert events[0]["target"]["attributes"]["native_model_id_redacted"] is True
 
 
 def test_ollama_ps_records_loaded_model_runtime_metadata() -> None:
@@ -115,6 +158,18 @@ def test_ollama_ps_records_loaded_model_runtime_metadata() -> None:
     assert event["target"]["id"] == "model:ollama:gemma4"
     assert event["attributes"]["size_vram"] == 5333539264
     assert event["attributes"]["quantization_level"] == "Q4_K_M"
+
+
+def test_openai_compatible_model_catalog_preserves_runtime_semantics() -> None:
+    payload = {"data": [{"id": "org/model", "owned_by": "local", "created": 123}]}
+    vllm_event = vllm_models_to_events(payload)[0]
+    lmstudio_event = lmstudio_models_to_events(payload)[0]
+    assert vllm_event["relation"] == "SERVES_MODEL"
+    assert lmstudio_event["relation"] == "ADVERTISES_MODEL"
+    assert vllm_event["attributes"]["provider"] == "vllm"
+    assert lmstudio_event["attributes"]["provider"] == "lmstudio"
+    assert vllm_event["attributes"]["protocol"] == "openai_compatible"
+    assert lmstudio_event["attributes"]["protocol"] == "openai_compatible"
 
 
 def test_llamacpp_models_and_metrics_remain_runtime_scoped() -> None:

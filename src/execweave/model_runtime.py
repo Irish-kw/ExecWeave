@@ -77,10 +77,20 @@ def _runtime_entity(runtime: str, endpoint: str) -> dict[str, Any]:
     )
 
 
+def _looks_like_local_model_path(model: str) -> bool:
+    normalized = model.replace("\\", "/")
+    if normalized.startswith(("/", "~/")):
+        return True
+    if len(model) >= 3 and model[1] == ":" and model[2] in {"/", "\\"}:
+        return True
+    return model.lower().endswith(".gguf") and ("/" in model or "\\" in model)
+
+
 def _model_entity(runtime: str, model: str) -> dict[str, Any]:
-    if runtime == "llamacpp" and (
-        "/" in model or "\\" in model or model.lower().endswith(".gguf")
-    ):
+    redact = _looks_like_local_model_path(model)
+    if runtime == "llamacpp" and ("/" in model or "\\" in model or model.lower().endswith(".gguf")):
+        redact = True
+    if redact:
         basename = model.replace("\\", "/").rsplit("/", 1)[-1] or "model"
         digest = hashlib.sha256(model.encode("utf-8", errors="replace")).hexdigest()[:24]
         return _entity(
@@ -160,6 +170,60 @@ def _inference_entities(
     return events
 
 
+def _copy_int(mapping: dict[str, Any], source: str, target: str, attrs: dict[str, Any]) -> None:
+    value = mapping.get(source)
+    if isinstance(value, int) and not isinstance(value, bool) and target not in attrs:
+        attrs[target] = value
+
+
+def _openai_usage_attributes(payload: dict[str, Any]) -> dict[str, Any]:
+    attrs: dict[str, Any] = {"protocol": "openai_compatible"}
+    usage = payload.get("usage")
+    if not isinstance(usage, dict):
+        return attrs
+
+    for source, target in (
+        ("prompt_tokens", "prompt_tokens"),
+        ("input_tokens", "prompt_tokens"),
+        ("completion_tokens", "completion_tokens"),
+        ("output_tokens", "completion_tokens"),
+        ("total_tokens", "total_tokens"),
+    ):
+        _copy_int(usage, source, target, attrs)
+
+    for detail_key in ("prompt_tokens_details", "input_tokens_details"):
+        details = usage.get(detail_key)
+        if isinstance(details, dict):
+            _copy_int(details, "cached_tokens", "cached_prompt_tokens", attrs)
+    for detail_key in ("completion_tokens_details", "output_tokens_details"):
+        details = usage.get(detail_key)
+        if isinstance(details, dict):
+            _copy_int(details, "reasoning_tokens", "reasoning_tokens", attrs)
+    return attrs
+
+
+def openai_compatible_response_to_events(
+    payload: dict[str, Any],
+    *,
+    runtime: str,
+    endpoint: str,
+    request_id: str | None = None,
+    timestamp: str | None = None,
+    extra_attributes: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    attrs = _openai_usage_attributes(payload)
+    if extra_attributes:
+        attrs.update(extra_attributes)
+    return _inference_entities(
+        runtime,
+        payload,
+        endpoint=endpoint,
+        request_id=request_id,
+        timestamp=timestamp or _now(),
+        attributes=attrs,
+    )
+
+
 def ollama_response_to_events(
     payload: dict[str, Any],
     *,
@@ -200,18 +264,7 @@ def llamacpp_response_to_events(
     request_id: str | None = None,
     timestamp: str | None = None,
 ) -> list[dict[str, Any]]:
-    attrs: dict[str, Any] = {"protocol": "openai_compatible"}
-    usage = payload.get("usage")
-    if isinstance(usage, dict):
-        for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
-            value = usage.get(key)
-            if isinstance(value, int) and not isinstance(value, bool):
-                attrs[key] = value
-        details = usage.get("prompt_tokens_details")
-        if isinstance(details, dict):
-            cached = details.get("cached_tokens")
-            if isinstance(cached, int) and not isinstance(cached, bool):
-                attrs["cached_prompt_tokens"] = cached
+    extra: dict[str, Any] = {}
     timings = payload.get("timings")
     if isinstance(timings, dict):
         for key in (
@@ -227,14 +280,46 @@ def llamacpp_response_to_events(
         ):
             value = timings.get(key)
             if isinstance(value, (int, float)) and not isinstance(value, bool):
-                attrs[f"timing_{key}"] = value
-    return _inference_entities(
-        "llamacpp",
+                extra[f"timing_{key}"] = value
+    return openai_compatible_response_to_events(
         payload,
+        runtime="llamacpp",
         endpoint=endpoint,
         request_id=request_id,
-        timestamp=timestamp or _now(),
-        attributes=attrs,
+        timestamp=timestamp,
+        extra_attributes=extra,
+    )
+
+
+def vllm_response_to_events(
+    payload: dict[str, Any],
+    *,
+    endpoint: str = "http://localhost:8000",
+    request_id: str | None = None,
+    timestamp: str | None = None,
+) -> list[dict[str, Any]]:
+    return openai_compatible_response_to_events(
+        payload,
+        runtime="vllm",
+        endpoint=endpoint,
+        request_id=request_id,
+        timestamp=timestamp,
+    )
+
+
+def lmstudio_response_to_events(
+    payload: dict[str, Any],
+    *,
+    endpoint: str = "http://localhost:1234",
+    request_id: str | None = None,
+    timestamp: str | None = None,
+) -> list[dict[str, Any]]:
+    return openai_compatible_response_to_events(
+        payload,
+        runtime="lmstudio",
+        endpoint=endpoint,
+        request_id=request_id,
+        timestamp=timestamp,
     )
 
 
@@ -281,17 +366,21 @@ def ollama_ps_to_events(
     return events
 
 
-def llamacpp_models_to_events(
+def openai_compatible_models_to_events(
     payload: dict[str, Any],
     *,
-    endpoint: str = "http://localhost:8080",
+    runtime: str,
+    endpoint: str,
+    relation: str = "SERVES_MODEL",
+    event_suffix: str = "model.served",
     timestamp: str | None = None,
+    meta_keys: tuple[str, ...] = (),
 ) -> list[dict[str, Any]]:
     data = payload.get("data")
     if not isinstance(data, list):
-        raise ValueError("llama.cpp /v1/models response requires data")
+        raise ValueError("OpenAI-compatible /v1/models response requires data")
     observed_at = timestamp or _now()
-    runtime = _runtime_entity("llamacpp", endpoint)
+    runtime_entity = _runtime_entity(runtime, endpoint)
     events: list[dict[str, Any]] = []
     for item in data:
         if not isinstance(item, dict):
@@ -299,28 +388,76 @@ def llamacpp_models_to_events(
         model_id = item.get("id")
         if not isinstance(model_id, str) or not model_id:
             continue
-        attrs: dict[str, Any] = {}
+        attrs: dict[str, Any] = {"protocol": "openai_compatible"}
         owned_by = item.get("owned_by")
         if isinstance(owned_by, str) and owned_by:
             attrs["owned_by"] = owned_by
+        created = item.get("created")
+        if isinstance(created, int) and not isinstance(created, bool):
+            attrs["created"] = created
         meta = item.get("meta")
         if isinstance(meta, dict):
-            for key in ("vocab_type", "n_vocab", "n_ctx_train", "n_embd", "n_params", "size"):
+            for key in meta_keys:
                 value = meta.get(key)
-                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                if isinstance(value, (str, int, float)) and not isinstance(value, bool):
                     attrs[key] = value
         events.append(
             _event(
                 timestamp=observed_at,
-                event_type="model_runtime.llamacpp.model.served",
-                relation="SERVES_MODEL",
-                source=runtime,
-                target=_model_entity("llamacpp", model_id),
-                runtime="llamacpp",
+                event_type=f"model_runtime.{runtime}.{event_suffix}",
+                relation=relation,
+                source=runtime_entity,
+                target=_model_entity(runtime, model_id),
+                runtime=runtime,
                 attributes=attrs,
             )
         )
     return events
+
+
+def llamacpp_models_to_events(
+    payload: dict[str, Any],
+    *,
+    endpoint: str = "http://localhost:8080",
+    timestamp: str | None = None,
+) -> list[dict[str, Any]]:
+    return openai_compatible_models_to_events(
+        payload,
+        runtime="llamacpp",
+        endpoint=endpoint,
+        timestamp=timestamp,
+        meta_keys=("vocab_type", "n_vocab", "n_ctx_train", "n_embd", "n_params", "size"),
+    )
+
+
+def vllm_models_to_events(
+    payload: dict[str, Any],
+    *,
+    endpoint: str = "http://localhost:8000",
+    timestamp: str | None = None,
+) -> list[dict[str, Any]]:
+    return openai_compatible_models_to_events(
+        payload,
+        runtime="vllm",
+        endpoint=endpoint,
+        timestamp=timestamp,
+    )
+
+
+def lmstudio_models_to_events(
+    payload: dict[str, Any],
+    *,
+    endpoint: str = "http://localhost:1234",
+    timestamp: str | None = None,
+) -> list[dict[str, Any]]:
+    return openai_compatible_models_to_events(
+        payload,
+        runtime="lmstudio",
+        endpoint=endpoint,
+        relation="ADVERTISES_MODEL",
+        event_suffix="model.advertised",
+        timestamp=timestamp,
+    )
 
 
 def llamacpp_metrics_to_events(
