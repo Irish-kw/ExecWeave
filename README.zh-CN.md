@@ -60,8 +60,10 @@ ExecWeave 当前版本为 **v0.4.0**。
 - [x] standalone local viewer
 - [x] portable Live Graph
 - [x] pan / zoom / drag / search / details
+- [x] node type / relation / causal-only filter
+- [x] Timeline ↔ Graph synchronization
+- [x] evidence-sequence slider + Play/Pause replay
 - [ ] progressive cluster expansion
-- [ ] Timeline ↔ Graph synchronization
 
 ### Security Analysis
 
@@ -70,7 +72,7 @@ execweave analyze run.graph.json
 execweave analyze run.graph.json --output analysis.json
 ```
 
-当前规则会标记 sensitive-file access、external endpoint，以及同一 process 的 possible sensitive-file → network path。
+当前规则会标记 sensitive-file access、external endpoint，以及 possible sensitive-file → network path。
 
 这不是 exfiltration 证明。Report 会明确保留：
 
@@ -100,6 +102,14 @@ execweave graph-condense run.graph.json \
 ```
 
 只折叠单一 incoming relationship、且没有 downstream behavior 的 file/directory/executable leaf。Process、Agent、Session、Socket、Network Endpoint 默认不会折叠。
+
+## Timeline ↔ Graph
+
+Standalone Viewer 现在会根据 Graph edge 的 `first_sequence` / `last_sequence` 提供 **Evidence sequence** 滑杆与 Play/Pause replay。
+
+把滑杆向前或向后移动，就能按 evidence 顺序查看 Graph 如何逐步形成。若 aggregated edge 在当前 sequence 只包含部分 evidence，Viewer 会显示 `partial`，不会提前显示最终 `count`。
+
+Timeline 可以和 node type、relation、causal-only、search filter 一起使用。
 
 ## Graph-first event model
 
