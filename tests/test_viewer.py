@@ -98,6 +98,18 @@ def test_viewer_contains_focused_neighborhood_controls() -> None:
     assert "never creates inferred edges" in html
 
 
+def test_viewer_contains_saved_view_presets() -> None:
+    html = render_graph_html(_graph())
+    assert 'id="preset-select"' in html
+    assert 'id="save-preset"' in html
+    assert 'id="delete-preset"' in html
+    assert "snapshotView" in html
+    assert "loadPresets" in html
+    assert "localStorage" in html
+    assert "Graph evidence is never copied into preset storage" in html
+    assert "page session only" in html
+
+
 def test_viewer_contains_timeline_playback_and_partial_edge_semantics() -> None:
     html = render_graph_html(_graph())
     assert 'id="sequence-filter"' in html
