@@ -1,0 +1,61 @@
+name: Package and reference benchmark
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "pyproject.toml"
+      - "src/execweave/__init__.py"
+      - "src/execweave/overhead_benchmark.py"
+      - "tests/test_overhead_benchmark.py"
+      - ".github/workflows/package-benchmark.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package-benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install build tooling and strace
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build twine
+          command -v strace >/dev/null || (sudo apt-get update && sudo apt-get install -y strace)
+      - name: Build wheel and sdist
+        run: |
+          python -m build
+          python -m twine check dist/*
+          ls -lh dist/
+      - name: Install wheel in a clean environment
+        run: |
+          python -m venv .package-smoke
+          .package-smoke/bin/python -m pip install --upgrade pip
+          .package-smoke/bin/python -m pip install dist/*.whl
+          .package-smoke/bin/execweave --help >/dev/null
+          .package-smoke/bin/execweave-overhead --help >/dev/null
+      - name: Run reference overhead benchmark from installed wheel
+        run: |
+          .package-smoke/bin/execweave-overhead \
+            --iterations 7 \
+            --strace auto \
+            --output-json benchmark-results.json \
+            --output-svg benchmark-overhead.svg
+      - name: Upload package and benchmark artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: execweave-package-benchmark
+          path: |
+            dist/*
+            benchmark-results.json
+            benchmark-overhead.svg
+          if-no-files-found: error
+          retention-days: 30

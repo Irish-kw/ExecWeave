@@ -4,13 +4,36 @@ build-backend = "hatchling.build"
 
 [project]
 name = "execweave"
-version = "0.5.0"
+version = "0.6.0"
 description = "Turn AI-agent runtime behavior into a local interactive execution graph."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
 authors = [
   { name = "ExecWeave contributors" }
+]
+keywords = [
+  "ai-agents",
+  "observability",
+  "runtime",
+  "security",
+  "provenance",
+  "execution-graph",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Information Technology",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Debuggers",
+  "Topic :: System :: Monitoring",
 ]
 dependencies = [
   "psutil>=5.9",
@@ -22,6 +45,16 @@ dev = [
   "pytest>=8.0",
   "ruff>=0.16,<0.17",
 ]
+release = [
+  "build>=1.2",
+  "twine>=6.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/Irish-kw/ExecWeave"
+Repository = "https://github.com/Irish-kw/ExecWeave"
+Documentation = "https://github.com/Irish-kw/ExecWeave#documentation"
+Issues = "https://github.com/Irish-kw/ExecWeave/issues"
 
 [project.scripts]
 execweave = "execweave.cli:main"
@@ -39,6 +72,7 @@ execweave-opencode-record = "execweave.opencode_record:main"
 execweave-model-runtime = "execweave.model_runtime_cli:main"
 execweave-inference-gateway = "execweave.inference_gateway_cli:main"
 execweave-inference-link = "execweave.inference_identity_cli:main"
+execweave-overhead = "execweave.overhead_benchmark:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/execweave"]
