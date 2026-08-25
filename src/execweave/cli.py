@@ -8,6 +8,7 @@ from uuid import uuid4
 from .backends import backend_diagnostics, create_collector, resolve_backend
 from .benchmark import format_benchmark, run_benchmark
 from .sink import JsonlSink
+from .validate import validate_event_stream
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -60,6 +61,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--backend", choices=["auto", "portable", "strace"], default="auto"
     )
     benchmark.add_argument("--iterations", type=int, default=5)
+
+    validate = subparsers.add_parser(
+        "validate", help="Validate one graph-ready ExecWeave JSONL event stream"
+    )
+    validate.add_argument("path", type=Path, help="Path to a .jsonl event stream")
+    validate.add_argument(
+        "--allow-incomplete",
+        action="store_true",
+        help="Do not require session.started/session.finished (useful after an interrupted run)",
+    )
     return parser
 
 
@@ -86,6 +97,14 @@ def main(argv: list[str] | None = None) -> int:
         print(format_benchmark(result))
         return 0
 
+    if args.subcommand == "validate":
+        result = validate_event_stream(
+            args.path,
+            require_complete_session=not args.allow_incomplete,
+        )
+        print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+        return 0 if result.valid else 1
+
     command = _clean_command(args.command)
     if not command:
         parser.error("execweave run requires a command, e.g. execweave run -- claude")
@@ -93,7 +112,11 @@ def main(argv: list[str] | None = None) -> int:
     session_id = uuid4().hex
     watch_root = (args.watch_root or Path.cwd()).expanduser().resolve()
     output = args.output or (watch_root / ".execweave" / "runs" / f"{session_id}.jsonl")
-    sink = JsonlSink(output)
+    try:
+        sink = JsonlSink(output)
+    except FileExistsError as exc:
+        parser.error(str(exc))
+
     try:
         resolved = resolve_backend(args.backend)
         collector = create_collector(
