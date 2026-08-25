@@ -156,7 +156,7 @@ def test_unique_strace_exec_match_creates_bridge(tmp_path: Path) -> None:
         if "CORRELATED_WITH_PROCESS" in line
     )
     assert inference["target"]["id"] == process["id"]
-    assert inference["attributes"]["inference_method"] == "unique_exec_basename_match"
+    assert inference["attributes"]["inference_method"] == "unique_exec_identity_match"
     assert inference["attributes"]["confidence"] == 0.9
 
 
