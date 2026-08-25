@@ -254,7 +254,7 @@ execweave live --open -- claude
 execweave live --port 8765 --open -- claude
 ```
 
-Live server は `127.0.0.1` のみに bind します。詳細は [`docs/live-graph.md`](docs/live-graph.md)。
+Live server は `127.0.0.1` のみに bind します。詳細は [`docs/live-graph.ja.md`](docs/live-graph.ja.md)。
 
 ## Privacy
 
@@ -264,12 +264,12 @@ Runtime / semantic metadata には sensitive path、command、endpoint、provide
 
 ## Documentation
 
-- [`Phase 1 — Runtime Collection`](docs/phase-1-runtime-collection.md)
-- [`Phase 2 — Execution Graph`](docs/phase-2-execution-graph.md)
-- [`Live Graph`](docs/live-graph.md)
-- [`Semantic Telemetry`](docs/semantic-telemetry.md)
-- [`Claude Code Hooks`](docs/claude-code-hooks.md)
-- [`Security Analysis`](docs/security-analysis.md)
+- [`Phase 1 — Runtime Collection`](docs/phase-1-runtime-collection.ja.md)
+- [`Phase 2 — Execution Graph`](docs/phase-2-execution-graph.ja.md)
+- [`Live Graph`](docs/live-graph.ja.md)
+- [`Semantic Telemetry`](docs/semantic-telemetry.ja.md)
+- [`Claude Code Hooks`](docs/claude-code-hooks.ja.md)
+- [`Security Analysis`](docs/security-analysis.ja.md)
 
 ## Contributing
 

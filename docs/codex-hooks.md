@@ -1,3 +1,13 @@
+<!-- i18n-nav:start -->
+<p align="center">
+  <strong>English</strong> |
+  <a href="codex-hooks.zh-TW.md">繁體中文</a> |
+  <a href="codex-hooks.zh-CN.md">简体中文</a> |
+  <a href="codex-hooks.ja.md">日本語</a> |
+  <a href="codex-hooks.ko.md">한국어</a>
+</p>
+<!-- i18n-nav:end -->
+
 # OpenAI Codex lifecycle hooks
 
 ExecWeave has a native OpenAI Codex lifecycle-hook adapter for adding provider-level semantic evidence to the same local run as OS runtime telemetry.

@@ -1,3 +1,13 @@
+<!-- i18n-nav:start -->
+<p align="center">
+  <strong>English</strong> |
+  <a href="semantic-telemetry.zh-TW.md">繁體中文</a> |
+  <a href="semantic-telemetry.zh-CN.md">简体中文</a> |
+  <a href="semantic-telemetry.ja.md">日本語</a> |
+  <a href="semantic-telemetry.ko.md">한국어</a>
+</p>
+<!-- i18n-nav:end -->
+
 # Semantic Telemetry
 
 ExecWeave can combine provider/framework semantic events with OS runtime evidence without rewriting the original runtime capture.

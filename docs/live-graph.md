@@ -1,3 +1,13 @@
+<!-- i18n-nav:start -->
+<p align="center">
+  <strong>English</strong> |
+  <a href="live-graph.zh-TW.md">繁體中文</a> |
+  <a href="live-graph.zh-CN.md">简体中文</a> |
+  <a href="live-graph.ja.md">日本語</a> |
+  <a href="live-graph.ko.md">한국어</a>
+</p>
+<!-- i18n-nav:end -->
+
 # Live Graph
 
 ExecWeave can stream a local execution graph while an AI agent or arbitrary command is still running.

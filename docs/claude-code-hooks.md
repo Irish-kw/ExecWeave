@@ -1,3 +1,13 @@
+<!-- i18n-nav:start -->
+<p align="center">
+  <strong>English</strong> |
+  <a href="claude-code-hooks.zh-TW.md">繁體中文</a> |
+  <a href="claude-code-hooks.zh-CN.md">简体中文</a> |
+  <a href="claude-code-hooks.ja.md">日本語</a> |
+  <a href="claude-code-hooks.ko.md">한국어</a>
+</p>
+<!-- i18n-nav:end -->
+
 # Claude Code Hooks
 
 ExecWeave includes a native Claude Code command-hook adapter that records provider semantic telemetry into a separate local JSONL sidecar.

@@ -1,3 +1,13 @@
+<!-- i18n-nav:start -->
+<p align="center">
+  <strong>English</strong> |
+  <a href="phase-2-execution-graph.zh-TW.md">繁體中文</a> |
+  <a href="phase-2-execution-graph.zh-CN.md">简体中文</a> |
+  <a href="phase-2-execution-graph.ja.md">日本語</a> |
+  <a href="phase-2-execution-graph.ko.md">한국어</a>
+</p>
+<!-- i18n-nav:end -->
+
 # Phase 2 — Execution Graph
 
 Phase 2 turns a validated Phase 1 JSONL event stream into a persistent execution graph that can be queried and later visualized by the local UI.

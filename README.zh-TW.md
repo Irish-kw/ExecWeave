@@ -72,7 +72,7 @@ execweave-claude-record --open -- claude
 
 當 hook 有觸發時，ExecWeave 會自動產生 runtime、semantic 與 conservative correlation artifacts。
 
-詳細契約見 [`docs/claude-code-hooks.md`](docs/claude-code-hooks.md)。
+詳細契約見 [`docs/claude-code-hooks.zh-TW.md`](docs/claude-code-hooks.zh-TW.md)。
 
 ### OpenAI Codex
 
@@ -100,7 +100,7 @@ execweave-codex-record --open -- codex
 
 Codex lifecycle hooks 仍在快速演進。部分 `codex exec` 與 Windows execution path 曾有 upstream hook coverage gap，因此 ExecWeave 只記錄 provider 真正送出的 hook，不假設所有 execution mode 都有完整 semantic coverage。Provider hook 缺失時，獨立的 OS runtime collector 仍可正常運作。
 
-詳細說明見 [`docs/codex-hooks.md`](docs/codex-hooks.md)。
+詳細說明見 [`docs/codex-hooks.zh-TW.md`](docs/codex-hooks.zh-TW.md)。
 
 ## Provider-integrated run artifacts
 
@@ -332,13 +332,13 @@ ExecWeave 不主動蒐集 file content 或 raw read/write byte buffer。Native s
 
 ## 文件
 
-- [`Phase 1 — Runtime Collection`](docs/phase-1-runtime-collection.md)
-- [`Phase 2 — Execution Graph`](docs/phase-2-execution-graph.md)
-- [`Live Graph`](docs/live-graph.md)
-- [`Semantic Telemetry`](docs/semantic-telemetry.md)
-- [`Claude Code Hooks`](docs/claude-code-hooks.md)
-- [`OpenAI Codex Hooks`](docs/codex-hooks.md)
-- [`Security Analysis`](docs/security-analysis.md)
+- [`Phase 1 — Runtime Collection`](docs/phase-1-runtime-collection.zh-TW.md)
+- [`Phase 2 — Execution Graph`](docs/phase-2-execution-graph.zh-TW.md)
+- [`Live Graph`](docs/live-graph.zh-TW.md)
+- [`Semantic Telemetry`](docs/semantic-telemetry.zh-TW.md)
+- [`Claude Code Hooks`](docs/claude-code-hooks.zh-TW.md)
+- [`OpenAI Codex Hooks`](docs/codex-hooks.zh-TW.md)
+- [`Security Analysis`](docs/security-analysis.zh-TW.md)
 
 ## Contributing
 

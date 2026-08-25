@@ -1,3 +1,13 @@
+<!-- i18n-nav:start -->
+<p align="center">
+  <strong>English</strong> |
+  <a href="phase-1-runtime-collection.zh-TW.md">繁體中文</a> |
+  <a href="phase-1-runtime-collection.zh-CN.md">简体中文</a> |
+  <a href="phase-1-runtime-collection.ja.md">日本語</a> |
+  <a href="phase-1-runtime-collection.ko.md">한국어</a>
+</p>
+<!-- i18n-nav:end -->
+
 # Phase 1 — Runtime Collection
 
 Phase 1 establishes a graph-ready, local runtime event stream that Phase 2 can turn into an execution graph.

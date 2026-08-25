@@ -246,7 +246,7 @@ execweave live --open -- claude
 execweave live --port 8765 --open -- claude
 ```
 
-Live server 只绑定 localhost。详细说明见 [`docs/live-graph.md`](docs/live-graph.md)。
+Live server 只绑定 localhost。详细说明见 [`docs/live-graph.zh-CN.md`](docs/live-graph.zh-CN.md)。
 
 ## Privacy
 
@@ -256,12 +256,12 @@ Runtime / semantic metadata 仍可能包含敏感 path、command、endpoint 和 
 
 ## 文档
 
-- [`Phase 1 — Runtime Collection`](docs/phase-1-runtime-collection.md)
-- [`Phase 2 — Execution Graph`](docs/phase-2-execution-graph.md)
-- [`Live Graph`](docs/live-graph.md)
-- [`Semantic Telemetry`](docs/semantic-telemetry.md)
-- [`Claude Code Hooks`](docs/claude-code-hooks.md)
-- [`Security Analysis`](docs/security-analysis.md)
+- [`Phase 1 — Runtime Collection`](docs/phase-1-runtime-collection.zh-CN.md)
+- [`Phase 2 — Execution Graph`](docs/phase-2-execution-graph.zh-CN.md)
+- [`Live Graph`](docs/live-graph.zh-CN.md)
+- [`Semantic Telemetry`](docs/semantic-telemetry.zh-CN.md)
+- [`Claude Code Hooks`](docs/claude-code-hooks.zh-CN.md)
+- [`Security Analysis`](docs/security-analysis.zh-CN.md)
 
 ## Contributing
 

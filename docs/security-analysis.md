@@ -1,3 +1,13 @@
+<!-- i18n-nav:start -->
+<p align="center">
+  <strong>English</strong> |
+  <a href="security-analysis.zh-TW.md">繁體中文</a> |
+  <a href="security-analysis.zh-CN.md">简体中文</a> |
+  <a href="security-analysis.ja.md">日本語</a> |
+  <a href="security-analysis.ko.md">한국어</a>
+</p>
+<!-- i18n-nav:end -->
+
 # Security Analysis
 
 ExecWeave includes a conservative, explainable rule layer over a completed execution graph.
