@@ -60,8 +60,10 @@ ExecWeave は現在 **v0.4.0** です。
 - [x] standalone Viewer
 - [x] portable Live Graph
 - [x] pan / zoom / drag / search / details
+- [x] node type / relation / causal-only filter
+- [x] Timeline ↔ Graph synchronization
+- [x] evidence-sequence slider + Play/Pause replay
 - [ ] progressive cluster expansion
-- [ ] Timeline ↔ Graph synchronization
 
 ### Security Analysis
 
@@ -70,7 +72,7 @@ execweave analyze run.graph.json
 execweave analyze run.graph.json --output analysis.json
 ```
 
-現在の rule layer は sensitive-file access、external endpoint、同一 process における possible sensitive-file → network path を優先表示します。
+現在の rule layer は sensitive-file access、external endpoint、possible sensitive-file → network path を優先表示します。
 
 これは exfiltration の証明ではありません。Report は明示的に以下を保持します。
 
@@ -102,6 +104,14 @@ execweave graph-condense run.graph.json \
 ```
 
 single incoming relationship を持ち downstream behavior のない file/directory/executable leaf のみを collapse します。Process、Agent、Session、Socket、Network Endpoint はデフォルトでは collapse しません。
+
+## Timeline ↔ Graph
+
+Standalone Viewer は Graph edge の `first_sequence` / `last_sequence` を使って **Evidence sequence** slider と Play/Pause replay を提供します。
+
+Slider を戻すと、runtime evidence の順番に Graph が形成される過程を確認できます。Aggregated edge に現在の sequence より後の evidence が残っている場合は `partial` と表示し、最終 `count` を過去の時点へ先取りして表示しません。
+
+Timeline は node type、relation、causal-only、search filter と組み合わせて使用できます。
 
 ## Graph-first event model
 
