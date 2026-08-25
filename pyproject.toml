@@ -38,6 +38,7 @@ execweave-opencode-plugin = "execweave.opencode_plugin_cli:main"
 execweave-opencode-record = "execweave.opencode_record:main"
 execweave-model-runtime = "execweave.model_runtime_cli:main"
 execweave-inference-gateway = "execweave.inference_gateway_cli:main"
+execweave-inference-link = "execweave.inference_identity_cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/execweave"]

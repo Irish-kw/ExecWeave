@@ -44,7 +44,19 @@ execweave-inference-gateway generation \
   --sidecar gateway.jsonl
 ```
 
-JSON 從 stdin 讀取。預設 endpoint identity：
+如果 caller 已經掌握 Gateway observation 與 Model Runtime observation 共用的明確 request identity，可以連接兩個既有 request node：
+
+```bash
+execweave-inference-link \
+  --gateway litellm \
+  --gateway-request-id gw-123 \
+  --runtime vllm \
+  --runtime-request-id rt-456 \
+  --shared-request-id trace-789 \
+  --sidecar inference.jsonl
+```
+
+Gateway response JSON 從 stdin 讀取。預設 endpoint identity：
 
 - OpenRouter：`https://openrouter.ai/api/v1`
 - LiteLLM Proxy：`http://localhost:4000`
@@ -58,6 +70,7 @@ inference_request --ROUTED_TO_MODEL--> model
 inference_request --ROUTED_TO_PROVIDER--> inference_provider
 inference_request --ROUTED_TO_DEPLOYMENT--> inference_deployment
 inference_gateway --REPORTED_GENERATION_METADATA--> inference_request
+inference_request --SAME_INFERENCE_REQUEST--> inference_request
 ```
 
 例如 LiteLLM request 可以分別保存：
@@ -81,6 +94,20 @@ LiteLLM 被建模成 `inference_gateway`，不是 `model_runtime`。它的 OpenA
 
 `--provider-name` 與 `--deployment-id` 只有在 caller 或 adapter 有 authoritative routing metadata 時才建立。ExecWeave **不會**從 `azure/...` 之類的 model string 推測 provider 或 deployment；沒有這些 routing facts 時，就不建立對應 edge。
 
+## 精確 Gateway ↔ Model Runtime identity
+
+`execweave-inference-link` 刻意比 temporal correlation 更嚴格。只有 caller 已經握有一個同時對應 Gateway 與 Runtime observation 的明確 shared identifier 時，才建立 `SAME_INFERENCE_REQUEST`。ExecWeave 不會用 timestamp、model name、token counts、latency 或其他相似度訊號猜測 identity。
+
+Gateway request 與 Runtime request 仍維持兩個不同 node，因此各層 metadata 不會互相覆蓋。Identity edge 固定標記：
+
+```text
+identity_exact: true
+inferred: false
+causal: false
+```
+
+它只表示依據明確 shared identity，兩個 observation 指向同一個 logical inference request；這**不代表**某個 Agent 或 OS process 因此被證明造成該 request。沒有 explicit shared identity 時就不建立這條 edge。
+
 ## Usage metadata
 
 Response parser 只白名單保留 prompt/input tokens、completion/output tokens、total tokens、cached prompt tokens、cache-write tokens、reasoning-token counts 與 reported cost。
@@ -89,10 +116,10 @@ Response parser 只白名單保留 prompt/input tokens、completion/output token
 
 ExecWeave 不保存 prompt text、response/completion content、reasoning text、choices 或任意 provider payload 欄位。Gateway endpoint 中的 credentials、query parameters 與 fragment 會從 stored endpoint identity 移除。
 
-原始 requested model 不會從 response 猜測；只有 caller 明確提供時才保存這項 evidence。
+原始 requested model 不會從 response 猜測；只有 caller 明確提供時才保存這項 evidence。精確跨層 identity 使用的原始 `--shared-request-id` 也不會落盤；link event 只保存由 SHA-256 衍生的 identity hash。
 
 ## Evidence boundary
 
 Gateway response metadata 只能證明 gateway 自己回報的資訊，或與 response 一起提供的 authoritative routing metadata。它不能單獨證明是哪個本機 Agent 發起 request、哪個 model-runtime process 實際服務，或哪個 OS process 造成 request。
 
-Gateway events 因此保持 non-causal（`causal: false`），並與 Agent/IDE semantic evidence、Model Runtime evidence、OS Runtime evidence 分層保存。跨層 attribution 需要明確 shared identity 或另外定義的保守 correlation；inferred correlation 永遠不能被表示成 causal evidence。
+Gateway events 因此保持 non-causal（`causal: false`），並與 Agent/IDE semantic evidence、Model Runtime evidence、OS Runtime evidence 分層保存。明確 shared request identity 可以連接 Gateway 與 Model Runtime observation，但不會把兩層壓成同一層；另外推導出的 correlation 必須持續標示為 inferred，永遠不能表示成 causal evidence。
