@@ -78,6 +78,17 @@ def _runtime_entity(runtime: str, endpoint: str) -> dict[str, Any]:
 
 
 def _model_entity(runtime: str, model: str) -> dict[str, Any]:
+    if runtime == "llamacpp" and (
+        "/" in model or "\\" in model or model.lower().endswith(".gguf")
+    ):
+        basename = model.replace("\\", "/").rsplit("/", 1)[-1] or "model"
+        digest = hashlib.sha256(model.encode("utf-8", errors="replace")).hexdigest()[:24]
+        return _entity(
+            "model",
+            f"model:{runtime}:redacted:{digest}",
+            name=basename,
+            attributes={"provider": runtime, "native_model_id_redacted": True},
+        )
     return _entity(
         "model",
         f"model:{runtime}:{model}",
