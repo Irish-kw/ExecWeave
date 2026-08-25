@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ipaddress
+from collections import Counter
 from dataclasses import asdict, dataclass, field
 from pathlib import PurePath
 from typing import Any
