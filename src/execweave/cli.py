@@ -19,6 +19,7 @@ from .graph_ops import (
     write_graph_payload,
 )
 from .live import run_live
+from .semantic import merge_semantic_sidecar
 from .sink import JsonlSink
 from .validate import validate_event_stream
 from .viewer import build_viewer_from_graph
@@ -156,6 +157,14 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Do not require session.started/session.finished (useful after an interrupted run)",
     )
+
+    semantic_merge = subparsers.add_parser(
+        "semantic-merge",
+        help="Merge Agent/Tool/MCP semantic sidecar events into a new runtime event stream",
+    )
+    semantic_merge.add_argument("runtime", type=Path, help="Validated runtime JSONL stream")
+    semantic_merge.add_argument("semantic", type=Path, help="Semantic sidecar JSONL")
+    semantic_merge.add_argument("--output", type=Path, required=True)
 
     graph = subparsers.add_parser(
         "graph", help="Materialize a validated event stream into an execution graph"
@@ -300,6 +309,14 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
         return 0 if result.valid else 1
+
+    if args.subcommand == "semantic-merge":
+        try:
+            result = merge_semantic_sidecar(args.runtime, args.semantic, args.output)
+        except (FileExistsError, ValueError) as exc:
+            parser.error(str(exc))
+        print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+        return 0
 
     if args.subcommand == "graph":
         source = args.path.expanduser().resolve()
