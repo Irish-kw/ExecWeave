@@ -30,6 +30,14 @@ jobs:
         run: pytest -q
       - name: Claude hook command smoke
         run: python scripts/check_claude_hook.py
+      - name: Claude run-bound semantic record smoke
+        run: execweave-claude-record --backend auto --no-files --no-network --output-dir claude-record-smoke -- python scripts/emit_claude_hook_smoke.py
+      - name: Validate Claude runtime stream
+        run: execweave validate claude-record-smoke/events.jsonl
+      - name: Validate Claude merged stream
+        run: execweave validate claude-record-smoke/events.semantic.jsonl
+      - name: Verify Claude semantic graph
+        run: python scripts/check_claude_record_graph.py claude-record-smoke/graph.semantic.json
       - name: Collector diagnostics
         run: execweave doctor
       - name: Portable end-to-end smoke
