@@ -53,6 +53,7 @@ ExecWeave는 현재 **v0.4.0**입니다.
 - [x] Event → Graph
 - [x] deduplication / aggregation / query
 - [x] large-run leaf condensation
+- [x] optional exact cluster expansion evidence
 - [ ] stronger entity resolution
 - [ ] time-window snapshots
 
@@ -63,7 +64,8 @@ ExecWeave는 현재 **v0.4.0**입니다.
 - [x] node type / relation / causal-only filter
 - [x] Timeline ↔ Graph synchronization
 - [x] evidence-sequence slider + Play/Pause replay
-- [ ] progressive cluster expansion
+- [x] progressive cluster expansion
+- [ ] saved filters / focused subgraphs
 
 ### Security Analysis
 
@@ -105,13 +107,32 @@ execweave graph-condense run.graph.json \
 
 single incoming relationship을 가지며 downstream behavior가 없는 file/directory/executable leaf만 collapse합니다. Process, Agent, Session, Socket, Network Endpoint는 기본적으로 collapse하지 않습니다.
 
+### Progressive cluster expansion
+
+기본 `graph-condense` 결과는 계속 compact합니다. Viewer에서 cluster를 필요할 때만 펼치려면:
+
+```bash
+execweave graph-condense run.graph.json \
+  --output run.expandable.graph.json \
+  --threshold 8 \
+  --keep-expansion
+
+execweave view run.expandable.graph.json \
+  --output run.expandable.html \
+  --open
+```
+
+Expandable cluster는 dashed outline으로 표시됩니다. Cluster를 클릭한 뒤 **Expand cluster**를 선택하면 해당 cluster만 원래 member nodes와 evidence edges로 바뀌며 다른 cluster는 collapsed 상태를 유지합니다. **Collapse clusters**로 compact view에 복귀할 수 있습니다.
+
+`--keep-expansion`은 원래 observed nodes/edges를 보존할 뿐 새로운 causal relationship을 만들지 않습니다.
+
 ## Timeline ↔ Graph
 
 Standalone Viewer는 Graph edge의 `first_sequence` / `last_sequence`를 사용해 **Evidence sequence** slider와 Play/Pause replay를 제공합니다.
 
-Slider를 뒤로 이동하면 runtime evidence 순서에 따라 Graph가 어떻게 형성됐는지 볼 수 있습니다. Aggregated edge에 현재 sequence 이후의 evidence가 남아 있다면 `partial`로 표시하며, 최종 `count`를 과거 시점에 미리 노출하지 않습니다.
+Aggregated edge에 현재 sequence 이후의 evidence가 남아 있다면 `partial`로 표시하며, 최종 `count`를 과거 시점에 미리 노출하지 않습니다.
 
-Timeline은 node type, relation, causal-only, search filter와 함께 사용할 수 있습니다.
+Timeline은 node type, relation, causal-only, search filter, progressive cluster expansion과 함께 사용할 수 있습니다.
 
 ## Graph-first event model
 
