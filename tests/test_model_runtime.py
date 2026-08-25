@@ -76,6 +76,21 @@ def test_llamacpp_response_records_usage_and_timings_without_choices() -> None:
     assert request["attributes"]["timing_predicted_per_second"] == 53.3
 
 
+def test_llamacpp_response_redacts_model_file_path() -> None:
+    payload = {
+        "id": "chatcmpl-path",
+        "model": "/Users/private/models/secret-model.gguf",
+        "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+    }
+    events = llamacpp_response_to_events(payload)
+    rendered = json.dumps(events)
+    assert "/Users/private/models" not in rendered
+    model = next(event["target"] for event in events if event["relation"] == "USED_MODEL")
+    assert model["name"] == "secret-model.gguf"
+    assert model["attributes"]["native_model_id_redacted"] is True
+    assert model["id"].startswith("model:llamacpp:redacted:")
+
+
 def test_ollama_ps_records_loaded_model_runtime_metadata() -> None:
     payload = {
         "models": [
@@ -103,10 +118,11 @@ def test_ollama_ps_records_loaded_model_runtime_metadata() -> None:
 
 
 def test_llamacpp_models_and_metrics_remain_runtime_scoped() -> None:
+    private_model_path = "/Users/private/models/model.gguf"
     models = {
         "data": [
             {
-                "id": "model.gguf",
+                "id": private_model_path,
                 "owned_by": "llamacpp",
                 "meta": {"n_ctx_train": 131072, "n_params": 8030261312, "size": 4912898304},
             }
@@ -114,6 +130,9 @@ def test_llamacpp_models_and_metrics_remain_runtime_scoped() -> None:
     }
     model_event = llamacpp_models_to_events(models)[0]
     assert model_event["relation"] == "SERVES_MODEL"
+    assert model_event["target"]["name"] == "model.gguf"
+    assert model_event["target"]["attributes"]["native_model_id_redacted"] is True
+    assert private_model_path not in json.dumps(model_event)
     metrics = """
 # HELP llamacpp:prompt_tokens_total Prompt tokens
 llamacpp:prompt_tokens_total 42
