@@ -22,6 +22,18 @@ def load_graph(path: str | Path) -> dict[str, Any]:
     return payload
 
 
+def write_graph_payload(graph: dict[str, Any], path: str | Path) -> Path:
+    output = Path(path).expanduser().resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    if output.exists() and output.stat().st_size > 0:
+        raise FileExistsError(f"ExecWeave graph output already exists: {output}")
+    output.write_text(
+        json.dumps(graph, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return output
+
+
 def graph_summary(graph: dict[str, Any]) -> dict[str, Any]:
     nodes = [node for node in graph.get("nodes", []) if isinstance(node, dict)]
     edges = [edge for edge in graph.get("edges", []) if isinstance(edge, dict)]
