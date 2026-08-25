@@ -16,10 +16,16 @@ ExecWeave is an open-source, local-first observability project that turns AI-age
 
 ## Install
 
-ExecWeave v0.6.0 is packaged as a standard Python wheel/sdist. The repository is PyPI-ready; until the first Trusted Publisher release is made, install the package directly from GitHub:
+ExecWeave is published on PyPI as a standard Python wheel/sdist. Install the latest published release with:
 
 ```bash
-python -m pip install "execweave @ git+https://github.com/Irish-kw/ExecWeave.git@main"
+python -m pip install -U execweave
+```
+
+The `main` branch may contain a newer patch than the current PyPI release. To test the latest mainline build directly:
+
+```bash
+python -m pip install --upgrade --force-reinstall "execweave @ git+https://github.com/Irish-kw/ExecWeave.git@main"
 ```
 
 For development:
@@ -28,12 +34,6 @@ For development:
 git clone https://github.com/Irish-kw/ExecWeave.git
 cd ExecWeave
 python -m pip install -e ".[dev]"
-```
-
-Once the first PyPI release is published, installation becomes:
-
-```bash
-python -m pip install execweave
 ```
 
 Watch any command live:
@@ -210,6 +210,8 @@ execweave run --backend portable -- your-command
 execweave run --backend strace -- your-command
 ```
 
+Since v0.6.1, child commands are resolved through a shared cross-platform launcher before execution. Linux and macOS retain normal PATH executable behavior. Windows resolves `.exe`, `.cmd`, and `.bat` launchers through PATH/PATHEXT, while an explicit `.ps1` launcher is invoked through PowerShell. Dedicated Windows CI exercises Codex and Cursor recorders from both `cmd.exe` and Windows PowerShell; the full Cursor semantic/correlation integration remains covered by the normal Windows, macOS, and Ubuntu matrix.
+
 Portable filesystem watching is session-correlated rather than process-causal, and short-lived processes can be missed between polling intervals. The Linux `strace` path captures process-attributed syscall evidence after the command exits.
 
 Future native collectors remain planned for Linux eBPF, Windows ETW, and macOS Endpoint Security.
@@ -265,9 +267,9 @@ Security findings remain explicit about evidence limits. A possible sensitive-fi
 
 ## Current status
 
-ExecWeave is currently **v0.6.0** and under active development.
+ExecWeave `main` is currently **v0.6.1** and under active development.
 
-The baseline includes runtime collection, graph materialization/querying, standalone/live Viewer, Claude/Codex/Gemini/Cursor/OpenCode semantic integrations, conservative Tool → Process correlation, OpenRouter/LiteLLM gateway metadata, Ollama/llama.cpp/vLLM/LM Studio runtime metadata, exact Gateway ↔ Model Runtime request identity, PyPI-ready wheel/sdist packaging, reproducible overhead benchmarking, and cross-platform CI on Python 3.10/3.12.
+The baseline includes runtime collection, graph materialization/querying, standalone/live Viewer, Claude/Codex/Gemini/Cursor/OpenCode semantic integrations, conservative Tool → Process correlation, OpenRouter/LiteLLM gateway metadata, Ollama/llama.cpp/vLLM/LM Studio runtime metadata, exact Gateway ↔ Model Runtime request identity, published PyPI wheel/sdist packaging, reproducible overhead benchmarking, cross-platform command-launcher compatibility, and cross-platform CI on Python 3.10/3.12.
 
 ## Privacy
 
