@@ -18,6 +18,7 @@ from .sink import JsonlSink
 _TIMESTAMP_RE = re.compile(r"^(?P<ts>\d+(?:\.\d+)?)\s+(?P<body>.*)$")
 _SYSCALL_RE = re.compile(r"^(?P<name>[a-zA-Z0-9_]+)\((?P<args>.*)\)\s+=\s+(?P<result>.*)$")
 _CLONE_RESULT_RE = re.compile(r"^(?P<pid>\d+)(?:\s|$)")
+_CONNECT_ERROR_RE = re.compile(r"^-1\s+(?P<errno>[A-Z0-9_]+)(?:\s|$)")
 _EXIT_RE = re.compile(r"^\+\+\+ exited with (?P<code>-?\d+) \+\+\+$")
 _KILLED_RE = re.compile(r"^\+\+\+ killed by (?P<signal>[A-Z0-9]+).*$")
 _QUOTED_RE = re.compile(r'"((?:\\.|[^"\\])*)"')
@@ -104,9 +105,7 @@ def read_trace_records(trace_dir: Path, prefix: str = "trace") -> list[TraceReco
             match = _TIMESTAMP_RE.match(line)
             if match is None:
                 continue
-            records.append(
-                TraceRecord(float(match.group("ts")), pid, match.group("body"))
-            )
+            records.append(TraceRecord(float(match.group("ts")), pid, match.group("body")))
     records.sort(key=lambda record: (record.timestamp, record.pid))
     return records
 
@@ -142,6 +141,7 @@ class StraceParser:
         )
         self._known_processes: set[int] = set()
         self._cwd_by_pid: dict[int, Path] = {}
+        self._parent_by_pid: dict[int, int] = {}
 
     def process_entity(self, pid: int) -> Entity:
         return Entity(
@@ -156,8 +156,27 @@ class StraceParser:
         )
 
     def parse(self, records: Iterable[TraceRecord]) -> None:
-        for record in records:
+        materialized = list(records)
+        self._index_process_parents(materialized)
+        for record in materialized:
             self._parse_record(record)
+
+    def _index_process_parents(self, records: Iterable[TraceRecord]) -> None:
+        """Index fork/clone relationships before emitting events.
+
+        strace timestamps can tie across per-PID trace files. Without a pre-pass,
+        a child record that sorts before its parent's clone() record can be mistaken
+        for a session root. The parent index makes process identity independent of
+        cross-file ordering at equal timestamps.
+        """
+        for record in records:
+            syscall = _SYSCALL_RE.match(record.body)
+            if syscall is None or syscall.group("name") not in {"clone", "clone3", "fork", "vfork"}:
+                continue
+            child_match = _CLONE_RESULT_RE.match(syscall.group("result"))
+            if child_match is None:
+                continue
+            self._parent_by_pid[int(child_match.group("pid"))] = record.pid
 
     def _ensure_process(
         self,
@@ -169,6 +188,8 @@ class StraceParser:
     ) -> None:
         if pid in self._known_processes:
             return
+        if parent_pid is None:
+            parent_pid = self._parent_by_pid.get(pid)
         self._known_processes.add(pid)
         if parent_pid is not None:
             self._cwd_by_pid[pid] = self._cwd_by_pid.get(parent_pid, self.watch_root)
@@ -457,8 +478,6 @@ class StraceParser:
         )
 
     def _parse_connect(self, record: TraceRecord, args: str, result: str) -> None:
-        if result.startswith("-1"):
-            return
         family: str | None = None
         endpoint: str | None = None
         ipv4 = _IPV4_RE.search(args)
@@ -477,6 +496,13 @@ class StraceParser:
                     endpoint = unix.group("path")
         if endpoint is None:
             return
+
+        error_match = _CONNECT_ERROR_RE.match(result)
+        connected = error_match is None and not result.startswith("-1")
+        relation = "CONNECTED_TO" if connected else "CONNECT_ATTEMPTED"
+        event_type = "network.connection" if connected else "network.connection_attempt"
+        errno = error_match.group("errno") if error_match is not None else None
+
         target_type = "unix_socket" if family == "AF_UNIX" else "network_endpoint"
         target = Entity(
             type=target_type,
@@ -486,8 +512,8 @@ class StraceParser:
         self.sink.emit(
             RuntimeEvent.create(
                 session_id=self.session_id,
-                event_type="network.connection",
-                relation="CONNECTED_TO",
+                event_type=event_type,
+                relation=relation,
                 source=self.process_entity(record.pid),
                 target=target,
                 timestamp=_iso_timestamp(record.timestamp),
@@ -495,6 +521,9 @@ class StraceParser:
                     "family": family,
                     "endpoint": endpoint,
                     "syscall": "connect",
+                    "result": result,
+                    "errno": errno,
+                    "connected": connected,
                     "attribution": "syscall",
                     "causal": True,
                     "backend": "strace",
@@ -647,9 +676,7 @@ class StraceRuntimeCollector:
                         "return_code": return_code,
                         "backend": self.backend_name,
                         "raw_trace_kept": self.keep_raw_trace,
-                        "trace_directory": str(self.trace_root)
-                        if self.keep_raw_trace
-                        else None,
+                        "trace_directory": str(self.trace_root) if self.keep_raw_trace else None,
                     },
                 )
             )
