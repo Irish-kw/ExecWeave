@@ -9,6 +9,7 @@ from .backends import backend_diagnostics, create_collector, resolve_backend
 from .benchmark import format_benchmark, run_benchmark
 from .graph import build_execution_graph, write_execution_graph
 from .graph_ops import (
+    condense_graph,
     filter_graph,
     find_paths,
     graph_summary,
@@ -181,6 +182,25 @@ def build_parser() -> argparse.ArgumentParser:
     graph_filter.add_argument("--backend", action="append", default=[])
     graph_filter.add_argument("--causal-only", action="store_true")
 
+    graph_condense = subparsers.add_parser(
+        "graph-condense",
+        help="Collapse repetitive leaf resources into inspectable cluster nodes",
+    )
+    graph_condense.add_argument("path", type=Path, help="Path to a graph JSON file")
+    graph_condense.add_argument("--output", type=Path, required=True)
+    graph_condense.add_argument(
+        "--threshold",
+        type=int,
+        default=8,
+        help="Minimum equivalent leaf nodes required to form a cluster (default: 8)",
+    )
+    graph_condense.add_argument(
+        "--sample-size",
+        type=int,
+        default=8,
+        help="Maximum member names stored as cluster examples (default: 8)",
+    )
+
     path_query = subparsers.add_parser("path", help="Find directed paths in an execution graph")
     path_query.add_argument("graph", type=Path, help="Path to a graph JSON file")
     path_query.add_argument("source", help="Exact source node ID")
@@ -285,6 +305,30 @@ def main(argv: list[str] | None = None) -> int:
         print(
             json.dumps(
                 {**graph_summary(filtered), "output": str(written)},
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 0
+
+    if args.subcommand == "graph-condense":
+        try:
+            payload = load_graph(args.path)
+            condensed = condense_graph(
+                payload,
+                threshold=args.threshold,
+                sample_size=args.sample_size,
+            )
+            written = write_graph_payload(condensed, args.output)
+        except (FileExistsError, ValueError) as exc:
+            parser.error(str(exc))
+        print(
+            json.dumps(
+                {
+                    **graph_summary(condensed),
+                    "condensation": condensed.get("condensation"),
+                    "output": str(written),
+                },
                 indent=2,
                 sort_keys=True,
             )
