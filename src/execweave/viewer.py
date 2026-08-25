@@ -9,6 +9,7 @@ from .graph_ops import load_graph
 
 VIEWER_MAX_NODES = 1500
 VIEWER_MAX_EDGES = 4000
+VIEWER_MAX_DOM_ELEMENTS = 5000
 
 
 def _safe_embedded_json(payload: dict[str, Any]) -> str:
@@ -48,9 +49,15 @@ def _graph_render_counts(graph: dict[str, Any]) -> tuple[int, int]:
     return node_count, edge_count
 
 
+def _estimated_svg_elements(node_count: int, edge_count: int) -> int:
+    # Current retained SVG uses roughly 4 elements/node and 3 elements/edge.
+    return node_count * 4 + edge_count * 3
+
+
 def _render_protective_html(graph: dict[str, Any], node_count: int, edge_count: int) -> str:
     event_count = graph.get("event_count")
     event_text = str(event_count) if isinstance(event_count, int) else "unknown"
+    estimated_dom = _estimated_svg_elements(node_count, edge_count)
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -60,10 +67,10 @@ def _render_protective_html(graph: dict[str, Any], node_count: int, edge_count: 
 <style>
 :root{{color-scheme:dark;--bg:#0b0f14;--panel:#111821;--text:#e8edf3;--muted:#9eb0c4;--border:#2a3949;--accent:#73b7ff}}
 *{{box-sizing:border-box}}html,body{{margin:0;min-height:100%;background:var(--bg);color:var(--text);font:15px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}}
-main{{max-width:760px;margin:8vh auto;padding:28px;border:1px solid var(--border);border-radius:12px;background:var(--panel)}}
+main{{max-width:820px;margin:8vh auto;padding:28px;border:1px solid var(--border);border-radius:12px;background:var(--panel)}}
 h1{{margin:0 0 12px;font-size:23px}}.badge{{display:inline-block;margin-bottom:18px;padding:4px 9px;border:1px solid var(--accent);border-radius:999px;color:var(--accent);font-size:12px;font-weight:700;letter-spacing:.04em}}
-.stats{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:22px 0}}.stat{{padding:12px;border:1px solid var(--border);border-radius:8px}}.stat strong{{display:block;font-size:22px}}.stat span,p{{color:var(--muted)}}code{{color:var(--text)}}
-@media(max-width:620px){{main{{margin:18px;padding:20px}}.stats{{grid-template-columns:1fr}}}}
+.stats{{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:22px 0}}.stat{{padding:12px;border:1px solid var(--border);border-radius:8px}}.stat strong{{display:block;font-size:22px}}.stat span,p{{color:var(--muted)}}code{{color:var(--text)}}
+@media(max-width:720px){{main{{margin:18px;padding:20px}}.stats{{grid-template-columns:repeat(2,minmax(0,1fr))}}}}
 </style>
 </head>
 <body>
@@ -74,9 +81,10 @@ h1{{margin:0 0 12px;font-size:23px}}.badge{{display:inline-block;margin-bottom:1
   <div class="stats">
     <div class="stat"><strong>{node_count}</strong><span>possible nodes</span></div>
     <div class="stat"><strong>{edge_count}</strong><span>possible edges</span></div>
+    <div class="stat"><strong>{estimated_dom}</strong><span>estimated SVG elements</span></div>
     <div class="stat"><strong>{event_text}</strong><span>events</span></div>
   </div>
-  <p>Safety budget: at most <strong>{VIEWER_MAX_NODES}</strong> possible nodes and <strong>{VIEWER_MAX_EDGES}</strong> possible edges in this SVG viewer. Use <code>graph-focus</code>, <code>graph-filter</code>, or <code>graph-condense</code> to create a smaller view. The full graph and raw evidence remain in the run artifacts.</p>
+  <p>Hard safety limits: <strong>{VIEWER_MAX_NODES}</strong> possible nodes, <strong>{VIEWER_MAX_EDGES}</strong> possible edges, and approximately <strong>{VIEWER_MAX_DOM_ELEMENTS}</strong> SVG DOM elements. Use <code>graph-focus</code>, <code>graph-filter</code>, or <code>graph-condense</code> to create a smaller view. The full graph and raw evidence remain in the run artifacts.</p>
 </main>
 </body>
 </html>
@@ -298,8 +306,8 @@ function savePreset(){
 function deletePreset(){const name=presetSelect.value;if(!name||!presets[name])return;delete presets[name];persistPresets();renderPresetOptions();details.textContent=`Deleted saved view: ${name}`}
 svg.addEventListener('pointerdown',ev=>{if(ev.target.closest?.('.node'))return;panStart={x:ev.clientX,y:ev.clientY,tx:transform.x,ty:transform.y};svg.classList.add('panning');svg.setPointerCapture(ev.pointerId)});
 svg.addEventListener('pointermove',ev=>{if(!panStart)return;transform.x=panStart.tx+ev.clientX-panStart.x;transform.y=panStart.ty+ev.clientY-panStart.y;applyTransform()});
-svg.addEventListener('pointerup',ev=>{panStart=null;svg.classList.remove('panning');try{svg.releasePointerCapture(ev.pointerId)}catch(_){}});
-svg.addEventListener('wheel',ev=>{ev.preventDefault();const rect=svg.getBoundingClientRect(),mx=e.clientX-rect.left,my=e.clientY-rect.top,old=transform.scale,next=Math.min(4,Math.max(.08,old*Math.exp(-ev.deltaY*.0012))),gx=(mx-transform.x)/old,gy=(my-transform.y)/old;transform.scale=next;transform.x=mx-gx*next;transform.y=my-gy*next;applyTransform()},{passive:false});
+svg.addEventListener('pointerup',ev=>{panStart=null;svg.classList.remove('panning');try{svg.releasePointerCapture(ev.pointerId)}catch(_){} });
+svg.addEventListener('wheel',ev=>{ev.preventDefault();const rect=svg.getBoundingClientRect(),mx=ev.clientX-rect.left,my=ev.clientY-rect.top,old=transform.scale,next=Math.min(4,Math.max(.08,old*Math.exp(-ev.deltaY*.0012))),gx=(mx-transform.x)/old,gy=(my-transform.y)/old;transform.scale=next;transform.x=mx-gx*next;transform.y=my-gy*next;applyTransform()},{passive:false});
 search.addEventListener('input',applySearch);
 [typeFilter,relationFilter,causalFilter,observedOnlyFilter].forEach(el=>el.addEventListener('change',applyGraphFilters));
 sequenceFilter.addEventListener('input',()=>{stopPlayback();setSequence(sequenceFilter.value)});
@@ -322,7 +330,12 @@ renderCorrelationSummary();loadPresets();applyGraphFilters();
 
 def render_graph_html(graph: dict[str, Any]) -> str:
     node_count, edge_count = _graph_render_counts(graph)
-    if node_count > VIEWER_MAX_NODES or edge_count > VIEWER_MAX_EDGES:
+    estimated_dom = _estimated_svg_elements(node_count, edge_count)
+    if (
+        node_count > VIEWER_MAX_NODES
+        or edge_count > VIEWER_MAX_EDGES
+        or estimated_dom > VIEWER_MAX_DOM_ELEMENTS
+    ):
         return _render_protective_html(graph, node_count, edge_count)
     return _VIEWER_TEMPLATE.replace("__GRAPH_DATA__", _safe_embedded_json(graph))
 
