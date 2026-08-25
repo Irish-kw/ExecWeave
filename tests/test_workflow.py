@@ -1,6 +1,8 @@
 import sys
 from pathlib import Path
 
+import pytest
+
 from execweave.graph_ops import load_graph
 from execweave.validate import validate_event_stream
 from execweave.workflow import record_to_viewer
@@ -55,3 +57,23 @@ def test_record_to_viewer_preserves_nonzero_command_exit(tmp_path: Path) -> None
     assert validate_event_stream(result.event_stream).valid is True
     assert result.graph.exists()
     assert result.viewer.exists()
+
+
+def test_record_preflight_rejects_conflicts_before_agent_runs(tmp_path: Path) -> None:
+    output_dir = tmp_path / "existing"
+    output_dir.mkdir()
+    (output_dir / "graph.json").write_text("old graph", encoding="utf-8")
+    marker = tmp_path / "should-not-exist.txt"
+    code = f"from pathlib import Path; Path({str(marker)!r}).write_text('ran')"
+
+    with pytest.raises(FileExistsError, match="record artifacts already exist"):
+        record_to_viewer(
+            [sys.executable, "-c", code],
+            watch_root=tmp_path,
+            output_dir=output_dir,
+            backend="portable",
+            collect_filesystem=False,
+            collect_network=False,
+        )
+
+    assert not marker.exists()
