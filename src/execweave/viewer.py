@@ -50,6 +50,7 @@ button{border:1px solid var(--border);background:var(--panel);color:var(--text);
   <select id="type-filter" title="Node type"><option value="">All node types</option></select>
   <select id="relation-filter" title="Relation"><option value="">All relations</option></select>
   <label class="toggle"><input id="causal-filter" type="checkbox"> causal only</label>
+  <label class="toggle"><input id="observed-only-filter" type="checkbox"> observed only</label>
   <input id="search" placeholder="Search visible graph…" autocomplete="off">
   <select id="preset-select" title="Saved view presets"><option value="">Saved views</option></select>
   <button id="save-preset" type="button">Save view</button>
@@ -75,11 +76,11 @@ button{border:1px solid var(--border);background:var(--panel);color:var(--text);
 </div>
 <aside>
   <h2>Selection</h2><div id="details" class="empty">Click a node or edge.</div>
-  <h3>Saved views</h3><div class="empty">Save the current node/relation/causal filters, search text, timeline position, focused neighborhood, and expanded clusters as a browser-local preset. Graph evidence is never copied into preset storage. If browser storage is unavailable, presets safely fall back to this page session only.</div>
-  <h3>Focus</h3><div class="empty">Click a node, then choose <strong>Focus 1 hop</strong> or <strong>Focus 2 hops</strong>. Focus follows only evidence edges allowed by the current timeline, relation, and causal filters; it never creates inferred edges.</div>
+  <h3>Saved views</h3><div class="empty">Save the current node/relation/causal/observed-only filters, search text, timeline position, focused neighborhood, and expanded clusters as a browser-local preset. Graph evidence is never copied into preset storage. If browser storage is unavailable, presets safely fall back to this page session only.</div>
+  <h3>Focus</h3><div class="empty">Click a node, then choose <strong>Focus 1 hop</strong> or <strong>Focus 2 hops</strong>. Focus follows only edges allowed by the current timeline, relation, causal, and observed-only filters; it never creates inferred edges.</div>
   <h3>Clusters</h3><div class="empty">Expandable cluster nodes have a dashed outline. Click one, then choose <strong>Expand cluster</strong>. Only graphs created with <code>graph-condense --keep-expansion</code> carry the original member evidence.</div>
   <h3>Timeline</h3><div class="empty">Move the evidence-sequence slider or press Play to replay how the graph grew. Aggregated edges spanning future evidence are marked <code>partial</code>; future counts are never shown early.</div>
-  <h3>Filters</h3><div class="empty">Node type and relation filters change the visible subgraph. Search highlights within that subgraph.</div>
+  <h3>Filters</h3><div class="empty">Node type and relation filters change the visible subgraph. <strong>Observed only</strong> removes derived inferred relationships before focus traversal and layout. Search highlights within the remaining subgraph.</div>
   <h3>Edge semantics</h3><div class="legend"><span><i class="dot" style="background:var(--causal)"></i>Causal evidence</span><span><i class="dot" style="background:var(--noncausal)"></i>Non-causal observation</span><span><i class="dot" style="background:var(--inferred)"></i>Inferred correlation</span><span><i class="dot" style="background:var(--edge)"></i>Mixed / unspecified</span></div><div class="empty">Inferred edges are heuristic correlations backed by explicit supporting evidence. They are not observed or causal evidence.</div>
 </aside>
 </div>
@@ -92,7 +93,7 @@ const expansionClusters=(graph.expansion&&graph.expansion.clusters)||{};
 const possibleNodes=[...baseNodes],possibleEdges=[...baseEdges];
 Object.values(expansionClusters).forEach(entry=>{(entry.nodes||[]).forEach(n=>possibleNodes.push(n));(entry.edges||[]).forEach(e=>possibleEdges.push(e))});
 const svg=document.getElementById('graph'),viewport=document.getElementById('viewport'),edgeLayer=document.getElementById('edges'),labelLayer=document.getElementById('labels'),nodeLayer=document.getElementById('nodes');
-const details=document.getElementById('details'),search=document.getElementById('search'),stats=document.getElementById('stats'),typeFilter=document.getElementById('type-filter'),relationFilter=document.getElementById('relation-filter'),causalFilter=document.getElementById('causal-filter');
+const details=document.getElementById('details'),search=document.getElementById('search'),stats=document.getElementById('stats'),typeFilter=document.getElementById('type-filter'),relationFilter=document.getElementById('relation-filter'),causalFilter=document.getElementById('causal-filter'),observedOnlyFilter=document.getElementById('observed-only-filter');
 const timeline=document.getElementById('timeline'),sequenceFilter=document.getElementById('sequence-filter'),sequenceLabel=document.getElementById('sequence-label'),playButton=document.getElementById('timeline-play'),collapseButton=document.getElementById('collapse-clusters'),clearFocusButton=document.getElementById('clear-focus');
 const presetSelect=document.getElementById('preset-select'),savePresetButton=document.getElementById('save-preset'),deletePresetButton=document.getElementById('delete-preset');
 const presetStorageKey=`execweave.viewer.presets.v1:${graph.session_id||'graph'}`;
@@ -119,8 +120,8 @@ function labelFor(node){const raw=node.name||node.id||node.type||'node';return r
 function edgeExistsAt(edge,sequence){const first=sequenceOf(edge,'first_sequence');return first===null||first<=sequence}
 function edgeLabel(edge){const relation=edge.inferred===true?`${edge.relation} · inferred`:edge.relation;if(!(edge.count>1))return relation;const last=sequenceOf(edge,'last_sequence');if(selectedSequence>=maxSequence||last===null||last<=selectedSequence)return `${relation} ×${edge.count}`;return `${relation} · partial`}
 function evidenceEdges(nodes,edges){
-  const ids=new Set(nodes.map(n=>n.id)),relation=relationFilter.value,causal=causalFilter.checked;
-  return edges.filter(e=>ids.has(e.source)&&ids.has(e.target)&&(!relation||e.relation===relation)&&(!causal||e.causal===true)&&edgeExistsAt(e,selectedSequence));
+  const ids=new Set(nodes.map(n=>n.id)),relation=relationFilter.value,causal=causalFilter.checked,observedOnly=observedOnlyFilter.checked;
+  return edges.filter(e=>ids.has(e.source)&&ids.has(e.target)&&(!relation||e.relation===relation)&&(!causal||e.causal===true)&&(!observedOnly||e.inferred!==true)&&edgeExistsAt(e,selectedSequence));
 }
 function focusNeighborhood(nodes,edges,state){
   if(!state)return new Set(nodes.map(n=>n.id));
@@ -133,11 +134,11 @@ function focusNeighborhood(nodes,edges,state){
 }
 function applyGraphFilters(){
   const materialized=materializedGraph();currentNodes=materialized.nodes;currentEdges=materialized.edges;
-  const type=typeFilter.value,relation=relationFilter.value,causal=causalFilter.checked,timelineActive=maxSequence>0&&selectedSequence<maxSequence;
+  const type=typeFilter.value,relation=relationFilter.value,causal=causalFilter.checked,observedOnly=observedOnlyFilter.checked,timelineActive=maxSequence>0&&selectedSequence<maxSequence;
   const eligible=evidenceEdges(currentNodes,currentEdges),focusIds=focusNeighborhood(currentNodes,eligible,focusState);
   let nodes=currentNodes.filter(n=>focusIds.has(n.id)&&(!type||n.type===type));let ids=new Set(nodes.map(n=>n.id));
   let edges=eligible.filter(e=>ids.has(e.source)&&ids.has(e.target));
-  if(relation||causal||timelineActive){const connected=new Set();edges.forEach(e=>{connected.add(e.source);connected.add(e.target)});if(focusState&&ids.has(focusState.anchor))connected.add(focusState.anchor);nodes=nodes.filter(n=>connected.has(n.id));ids=new Set(nodes.map(n=>n.id));edges=edges.filter(e=>ids.has(e.source)&&ids.has(e.target))}
+  if(relation||causal||observedOnly||timelineActive){const connected=new Set();edges.forEach(e=>{connected.add(e.source);connected.add(e.target)});if(focusState&&ids.has(focusState.anchor))connected.add(focusState.anchor);nodes=nodes.filter(n=>connected.has(n.id));ids=new Set(nodes.map(n=>n.id));edges=edges.filter(e=>ids.has(e.source)&&ids.has(e.target))}
   visibleNodes=nodes;visibleEdges=edges;nodeById=new Map(nodes.map(n=>[n.id,n]));positions=new Map();collapseButton.disabled=expandedClusters.size===0;clearFocusButton.disabled=focusState===null;
   computeLayout();renderNodes();renderEdges();updateStats();applyTransform();applySearch();requestAnimationFrame(fit);
 }
@@ -145,7 +146,8 @@ function updateStats(){
   const seq=maxSequence>0?` · seq ${selectedSequence}/${maxSequence}`:'';
   const expanded=expandedClusters.size?` · ${expandedClusters.size} cluster${expandedClusters.size===1?'':'s'} expanded`:'';
   const focused=focusState?` · focus ${focusState.hops}-hop`:'';
-  stats.textContent=`${visibleNodes.length}/${currentNodes.length} nodes · ${visibleEdges.length}/${currentEdges.length} edges · ${graph.event_count??0} events${seq}${expanded}${focused}`;
+  const observed=observedOnlyFilter.checked?' · observed only':'';
+  stats.textContent=`${visibleNodes.length}/${currentNodes.length} nodes · ${visibleEdges.length}/${currentEdges.length} edges · ${graph.event_count??0} events${seq}${expanded}${focused}${observed}`;
 }
 function computeLayout(){
   const ids=[...nodeById.keys()],indegree=new Map(ids.map(id=>[id,0])),outgoing=new Map(ids.map(id=>[id,[]]));
@@ -183,7 +185,7 @@ function applySearch(){const q=search.value.trim().toLowerCase();if(!q){nodeElem
 function stopPlayback(){if(playTimer!==null){clearInterval(playTimer);playTimer=null}playButton.textContent='Play'}
 function setSequence(value){selectedSequence=Math.max(0,Math.min(maxSequence,Number(value)||0));sequenceFilter.value=String(selectedSequence);sequenceLabel.textContent=`${selectedSequence} / ${maxSequence}`;applyGraphFilters()}
 function togglePlayback(){if(playTimer!==null){stopPlayback();return}if(maxSequence<=0)return;if(selectedSequence>=maxSequence)setSequence(0);playButton.textContent='Pause';const step=Math.max(1,Math.ceil(maxSequence/180));playTimer=setInterval(()=>{if(selectedSequence>=maxSequence){stopPlayback();return}setSequence(Math.min(maxSequence,selectedSequence+step))},160)}
-function snapshotView(){return{version:1,node_type:typeFilter.value,relation:relationFilter.value,causal_only:causalFilter.checked,search:search.value,sequence:selectedSequence,focus:focusState?{anchor:focusState.anchor,hops:focusState.hops}:null,expanded_clusters:[...expandedClusters]}}
+function snapshotView(){return{version:1,node_type:typeFilter.value,relation:relationFilter.value,causal_only:causalFilter.checked,observed_only:observedOnlyFilter.checked,search:search.value,sequence:selectedSequence,focus:focusState?{anchor:focusState.anchor,hops:focusState.hops}:null,expanded_clusters:[...expandedClusters]}}
 function renderPresetOptions(selected=''){
   presetSelect.replaceChildren();const empty=document.createElement('option');empty.value='';empty.textContent='Saved views';presetSelect.appendChild(empty);
   Object.keys(presets).sort((a,b)=>a.localeCompare(b)).forEach(name=>{const o=document.createElement('option');o.value=name;o.textContent=name;presetSelect.appendChild(o)});
@@ -197,7 +199,7 @@ function loadPresets(){
 function persistPresets(){try{localStorage.setItem(presetStorageKey,JSON.stringify(presets))}catch(_){presetStorageAvailable=false}}
 function applyPreset(name){
   const state=presets[name];if(!state||typeof state!=='object')return;stopPlayback();
-  typeFilter.value=typeof state.node_type==='string'?state.node_type:'';relationFilter.value=typeof state.relation==='string'?state.relation:'';causalFilter.checked=state.causal_only===true;search.value=typeof state.search==='string'?state.search:'';
+  typeFilter.value=typeof state.node_type==='string'?state.node_type:'';relationFilter.value=typeof state.relation==='string'?state.relation:'';causalFilter.checked=state.causal_only===true;observedOnlyFilter.checked=state.observed_only===true;search.value=typeof state.search==='string'?state.search:'';
   selectedSequence=maxSequence>0?Math.max(0,Math.min(maxSequence,Number(state.sequence)||0)):0;if(maxSequence>0){sequenceFilter.value=String(selectedSequence);sequenceLabel.textContent=`${selectedSequence} / ${maxSequence}`}
   const expanded=Array.isArray(state.expanded_clusters)?state.expanded_clusters:[];expandedClusters=new Set(expanded.filter(id=>expansionClusters[id]));
   focusState=state.focus&&typeof state.focus.anchor==='string'&&Number.isInteger(state.focus.hops)?{anchor:state.focus.anchor,hops:Math.max(0,state.focus.hops)}:null;
@@ -213,7 +215,7 @@ svg.addEventListener('pointermove',ev=>{if(!panStart)return;transform.x=panStart
 svg.addEventListener('pointerup',ev=>{panStart=null;svg.classList.remove('panning');try{svg.releasePointerCapture(ev.pointerId)}catch(_){}});
 svg.addEventListener('wheel',ev=>{ev.preventDefault();const rect=svg.getBoundingClientRect(),mx=ev.clientX-rect.left,my=ev.clientY-rect.top,old=transform.scale,next=Math.min(4,Math.max(.08,old*Math.exp(-ev.deltaY*.0012))),gx=(mx-transform.x)/old,gy=(my-transform.y)/old;transform.scale=next;transform.x=mx-gx*next;transform.y=my-gy*next;applyTransform()},{passive:false});
 search.addEventListener('input',applySearch);
-[typeFilter,relationFilter,causalFilter].forEach(el=>el.addEventListener('change',applyGraphFilters));
+[typeFilter,relationFilter,causalFilter,observedOnlyFilter].forEach(el=>el.addEventListener('change',applyGraphFilters));
 sequenceFilter.addEventListener('input',()=>{stopPlayback();setSequence(sequenceFilter.value)});
 playButton.addEventListener('click',togglePlayback);
 clearFocusButton.addEventListener('click',()=>{focusState=null;details.textContent='Focused subgraph cleared.';applyGraphFilters()});
