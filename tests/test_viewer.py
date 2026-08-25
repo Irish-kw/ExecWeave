@@ -44,6 +44,16 @@ def _inferred_graph() -> dict:
         "event_count": 3,
         "node_count": 2,
         "edge_count": 1,
+        "metadata": {
+            "correlation": {
+                "tool_calls_considered": 5,
+                "correlated_tool_calls": 1,
+                "skipped_ambiguous": 2,
+                "skipped_no_match": 1,
+                "skipped_unsupported": 1,
+                "max_window_ms": 3000,
+            }
+        },
         "nodes": [
             {"id": "tool-call:1", "type": "tool_call", "name": "Bash"},
             {"id": "process:p1", "type": "process", "name": "python"},
@@ -171,6 +181,20 @@ def test_viewer_observed_only_filter_removes_inferred_before_focus() -> None:
     assert "(!observedOnly||e.inferred!==true)" in html
     assert "const eligible=evidenceEdges(currentNodes,currentEdges)" in html
     assert "removes derived inferred relationships before focus traversal" in html
+
+
+def test_viewer_shows_run_level_correlation_summary_when_metadata_exists() -> None:
+    html = render_graph_html(_inferred_graph())
+    assert 'id="correlation-section"' in html
+    assert "renderCorrelationSummary" in html
+    assert "Matched" in html
+    assert "Ambiguous" in html
+    assert "No match" in html
+    assert "Unsupported" in html
+    assert "Considered" in html
+    assert "conservative rejection" in html
+    assert '"skipped_ambiguous":2' in html
+    assert '"max_window_ms":3000' in html
 
 
 def test_viewer_contains_progressive_cluster_expansion() -> None:
