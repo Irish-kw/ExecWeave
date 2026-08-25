@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from .backends import backend_diagnostics, create_collector, resolve_backend
 from .benchmark import format_benchmark, run_benchmark
+from .graph import build_execution_graph, write_execution_graph
 from .sink import JsonlSink
 from .validate import validate_event_stream
 
@@ -71,6 +72,22 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Do not require session.started/session.finished (useful after an interrupted run)",
     )
+
+    graph = subparsers.add_parser(
+        "graph", help="Materialize a validated event stream into an execution graph"
+    )
+    graph.add_argument("path", type=Path, help="Path to a .jsonl event stream")
+    graph.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Graph JSON output path (default: <input-stem>.graph.json)",
+    )
+    graph.add_argument(
+        "--allow-incomplete",
+        action="store_true",
+        help="Allow graph construction from an interrupted but structurally valid run",
+    )
     return parser
 
 
@@ -104,6 +121,27 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
         return 0 if result.valid else 1
+
+    if args.subcommand == "graph":
+        source = args.path.expanduser().resolve()
+        output = args.output or source.with_name(f"{source.stem}.graph.json")
+        try:
+            execution_graph = build_execution_graph(
+                source,
+                allow_incomplete=args.allow_incomplete,
+            )
+            written = write_execution_graph(execution_graph, output)
+        except (FileExistsError, ValueError) as exc:
+            parser.error(str(exc))
+        summary = {
+            "session_id": execution_graph.session_id,
+            "event_count": execution_graph.event_count,
+            "node_count": len(execution_graph.nodes),
+            "edge_count": len(execution_graph.edges),
+            "output": str(written),
+        }
+        print(json.dumps(summary, indent=2, sort_keys=True))
+        return 0
 
     command = _clean_command(args.command)
     if not command:
