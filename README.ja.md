@@ -10,7 +10,7 @@
 
 **AI エージェントが実際にマシン上で何をしたのかを見る。**
 
-ExecWeave は、AI エージェントの活動をインタラクティブな実行グラフへ変換する、ローカルファーストのオープンソース observability プロジェクトです。観測された evidence と推論された関係を明確に分離します。
+ExecWeave は、AI エージェントの活動をインタラクティブな実行グラフへ変換する、ローカルファーストのオープンソース observability プロジェクトです。観測された evidence と inference を明確に分離します。
 
 > **Event is ground truth. The graph is a materialized view.**
 
@@ -91,55 +91,68 @@ execweave-opencode-record --open -- opencode
 
 project-local plugin は exact `sessionID + callID` を使い、tool output は転送しません。
 
-Provider-integrated run では runtime / semantic / correlated artifact を別々に保存します。Tool → Process bridge は常に derived evidence です：
+Provider-integrated run では runtime / semantic / correlated artifact を別々に保存します。Tool → Process bridge は保守的な derived evidence です：
 
 ```text
 inferred: true
 causal: false
 ```
 
-ambiguity がある場合は edge を作りません。
+ambiguous / no-match の場合は edge を作りません。
 
 ## Inference gateway integrations
 
-### OpenRouter
+現在は **OpenRouter** と **LiteLLM Proxy** をサポートします。Gateway は local model runtime ではなく `inference_gateway` として扱います。
 
-OpenRouter は local model runtime ではなく `inference_gateway` として扱います。
+### OpenRouter
 
 ```bash
 execweave-inference-gateway event \
   --gateway openrouter \
   --requested-model openrouter/auto \
+  --provider-name OpenAI \
   --sidecar gateway.jsonl
 ```
 
-ExecWeave は次を分離して保持できます：
+### LiteLLM Proxy
 
-```text
-requested model → resolved model → routed provider
+```bash
+execweave-inference-gateway event \
+  --gateway litellm \
+  --requested-model assistant \
+  --resolved-model azure/gpt-5 \
+  --provider-name Azure \
+  --deployment-id deployment-west \
+  --sidecar gateway.jsonl
 ```
 
-token count、cache/reasoning count、cost、generation timing などの whitelist metadata のみ保存し、prompt / response content は保存しません。
+ExecWeave は次を別々の evidence として保持します：
+
+```text
+requested model → resolved model → routed provider → deployment
+```
+
+Provider / deployment edge は authoritative routing metadata がある場合だけ生成します。`azure/...` のような model string から provider や deployment を推測しません。Gateway events は `causal: false` のままです。Prompt、response、reasoning content は保存しません。
 
 ## Model runtime integrations
 
-### Ollama
+現在は **Ollama**、**llama.cpp**、**vLLM**、**LM Studio** をサポートします。
 
 ```bash
 execweave-model-runtime event --runtime ollama --sidecar model-runtime.jsonl
-execweave-model-runtime probe --runtime ollama --sidecar model-runtime.jsonl
+execweave-model-runtime event --runtime llamacpp --sidecar model-runtime.jsonl
+execweave-model-runtime event --runtime vllm --sidecar model-runtime.jsonl
+execweave-model-runtime event --runtime lmstudio --sidecar model-runtime.jsonl
 ```
-
-### llama.cpp
 
 ```bash
-execweave-model-runtime event --runtime llamacpp --sidecar model-runtime.jsonl
+execweave-model-runtime probe --runtime ollama --sidecar model-runtime.jsonl
 execweave-model-runtime probe --runtime llamacpp --metrics --sidecar model-runtime.jsonl
+execweave-model-runtime probe --runtime vllm --sidecar model-runtime.jsonl
+execweave-model-runtime probe --runtime lmstudio --sidecar model-runtime.jsonl
 ```
 
-この層は `model_runtime`、`inference_request`、`model`、runtime snapshot を表現します。prompt や生成本文は保存せず、選択された token/timing/load metadata のみ記録します。llama.cpp の sensitive local model path は redact されます。
-
-将来の vLLM / LM Studio など OpenAI-compatible runtime はこの層を再利用できます。
+llama.cpp、vLLM、LM Studio は OpenAI-compatible response/usage と `/v1/models` catalog parser を共有しますが、runtime-specific metadata は各 adapter に残します。vLLM catalog は `SERVES_MODEL`、LM Studio catalog は `ADVERTISES_MODEL` であり、catalog に存在するだけで loaded model とは見なしません。Sensitive local model path は redact され、llama.cpp の GGUF path はより厳格に処理します。
 
 ## Runtime evidence
 
@@ -151,23 +164,11 @@ execweave run --backend portable -- your-command
 execweave run --backend strace -- your-command
 ```
 
-portable filesystem event は process-causal ではなく session-correlated です。Linux `strace` path は command 終了後に process-attributed syscall evidence を生成します。
+portable filesystem event は process-causal ではなく session-correlated です。短命 process は polling interval の間に見逃す場合があります。Linux `strace` path は command 終了後に process-attributed syscall evidence を生成します。
 
 ## Interactive Viewer
 
-Standalone Viewer はローカル・self-contained です。現在の baseline：
-
-- pan / zoom / draggable nodes
-- node / edge inspection
-- node-type / relation / causal filters
-- **observed only** filter
-- search
-- evidence-sequence Timeline ↔ Graph replay
-- progressive cluster expansion
-- 1-hop / 2-hop focused neighborhoods
-- browser-local Saved Views
-- observed / non-causal / inferred edge styling
-- Correlation Summary
+Standalone Viewer はローカル・self-contained です。現在の baseline には pan / zoom、node/edge inspection、filters、**observed only**、search、Timeline ↔ Graph replay、progressive cluster expansion、1/2-hop focus、Saved Views、observed/non-causal/inferred styling、Correlation Summary が含まれます。
 
 ## Security analysis
 
@@ -188,7 +189,7 @@ sensitive-file → network の可能性は byte-level exfiltration の証明で�
 
 ExecWeave は現在 **v0.5.0** で、active development 中です。
 
-runtime collection、graph materialization/query、standalone/live Viewer、Claude/Codex/Gemini/Cursor/OpenCode semantic integration、conservative Tool → Process correlation、OpenRouter gateway metadata、Ollama/llama.cpp runtime metadata、Python 3.10/3.12 の cross-platform CI が baseline として実装されています。
+runtime collection、graph materialization/query、standalone/live Viewer、Claude/Codex/Gemini/Cursor/OpenCode semantic integration、conservative Tool → Process correlation、OpenRouter/LiteLLM gateway metadata、Ollama/llama.cpp/vLLM/LM Studio runtime metadata、cross-platform CI が baseline として実装されています。
 
 ## Privacy
 
@@ -207,8 +208,8 @@ ExecWeave は local-first です。runtime events、semantic sidecars、graphs�
 - [`Gemini CLI Hooks`](docs/gemini-hooks.ja.md)
 - [`Cursor Hooks`](docs/cursor-hooks.ja.md)
 - [`OpenCode Plugin`](docs/opencode-plugin.ja.md)
-- [`Inference Gateway / OpenRouter`](docs/inference-gateway.ja.md)
-- [`Model Runtime / Ollama / llama.cpp`](docs/model-runtime.ja.md)
+- [`Inference Gateway / OpenRouter / LiteLLM`](docs/inference-gateway.ja.md)
+- [`Model Runtime / Ollama / llama.cpp / vLLM / LM Studio`](docs/model-runtime.ja.md)
 - [`Security Analysis`](docs/security-analysis.ja.md)
 
 ## Contributing

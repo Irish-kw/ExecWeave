@@ -8,9 +8,9 @@
   <a href="model-runtime.ko.md">한국어</a>
 </p>
 
-Model Runtime 與 Agent/IDE semantic adapter 是不同層。Ollama、llama.cpp、vLLM 等 server 負責執行 inference，不應被當成 Tool 或 Agent。
+Model Runtime 與 Agent/IDE semantic adapter、Inference Gateway 是不同層。它描述 local 或 self-hosted inference server 自己回報的資訊，不能單獨證明是哪個 Agent 發起 request。
 
-目前 baseline 支援 **Ollama** 與 **llama.cpp**。
+目前 baseline 支援 **Ollama**、**llama.cpp**、**vLLM** 與 **LM Studio**。
 
 ## CLI
 
@@ -19,49 +19,79 @@ Model Runtime 與 Agent/IDE semantic adapter 是不同層。Ollama、llama.cpp�
 ```bash
 execweave-model-runtime event --runtime ollama --sidecar model-runtime.jsonl
 execweave-model-runtime event --runtime llamacpp --sidecar model-runtime.jsonl
+execweave-model-runtime event --runtime vllm --sidecar model-runtime.jsonl
+execweave-model-runtime event --runtime lmstudio --sidecar model-runtime.jsonl
 ```
 
-取得 runtime state snapshot：
+取得 runtime state 或 model catalog：
 
 ```bash
 execweave-model-runtime probe --runtime ollama --sidecar model-runtime.jsonl
 execweave-model-runtime probe --runtime llamacpp --metrics --sidecar model-runtime.jsonl
+execweave-model-runtime probe --runtime vllm --sidecar model-runtime.jsonl
+execweave-model-runtime probe --runtime lmstudio --sidecar model-runtime.jsonl
 ```
 
-預設 endpoint：Ollama 為 `http://localhost:11434`，llama.cpp 為 `http://localhost:8080`。
+預設 endpoint：
+
+- Ollama：`http://localhost:11434`
+- llama.cpp：`http://localhost:8080`
+- vLLM：`http://localhost:8000`
+- LM Studio：`http://localhost:1234`
+
+## OpenAI-compatible 共用層
+
+llama.cpp、vLLM、LM Studio 共用同一個 OpenAI-compatible parser，處理 final response usage 與 `/v1/models` catalog metadata。共用層會統一 Chat Completions 的 `prompt_tokens` / `completion_tokens` 與 Responses 的 `input_tokens` / `output_tokens`，只保留白名單 token metadata，例如 cached-token 與 reasoning-token counts。
+
+Runtime-specific evidence 不會硬塞進共用 parser。llama.cpp 仍保留自己的 timing fields 與 Prometheus metrics adapter。
 
 ## Graph model
-
-Runtime layer 可以產生：
 
 ```text
 model_runtime --SERVED_INFERENCE--> inference_request
 inference_request --USED_MODEL--> model
 model_runtime --LOADED_MODEL--> model
 model_runtime --SERVES_MODEL--> model
+model_runtime --ADVERTISES_MODEL--> model
 model_runtime --REPORTED_METRICS--> model_runtime_snapshot
 ```
 
+這些 relation 的 evidence semantics 不相同。
+
 ## Ollama
 
-Final response metadata 可提供 prompt/completion token counts、load duration、prompt-evaluation duration、generation duration 與 finish reason。
+Final response metadata 可包含 prompt/completion token counts、load duration、prompt-evaluation duration、generation duration 與 finish reason。
 
-`/api/ps` snapshot 可提供 loaded model 的 VRAM size、context length、format、family、parameter size、quantization 等 metadata。
+`/api/ps` snapshot 可提供目前 loaded model 的 VRAM size、context length、format、family、parameter size、quantization 等 metadata，因此使用 `LOADED_MODEL`。
 
 ## llama.cpp
 
-OpenAI-compatible response 可提供 usage 與 timing/throughput metadata。`/v1/models` 描述 served models；若 server 開啟 `/metrics`，可加入 aggregate runtime metrics。
+OpenAI-compatible response 提供 normalized usage，加上 llama.cpp 專屬 timing/throughput metadata。`/v1/models` 使用 `SERVES_MODEL`；可選的 `/metrics` 提供 aggregate runtime metrics。
 
-目前 baseline 會跳過含 Prometheus labels 的 metrics，因為 label 可能帶有敏感的本機 model path 或其他 identifiers。
+含 Prometheus labels 的 metrics 會跳過，避免 labels 洩漏敏感本機 model path 或 identifiers。若 model ID 看起來是本機 path 或 GGUF filename，完整 identifier 只用於 hash-based entity identity，Graph 顯示只保留安全名稱。
 
-若 llama.cpp model ID 看起來是本機 path 或 GGUF filename，ExecWeave 會 redaction：完整 native identifier 只用於 hash-based entity identity，Graph 顯示僅保留 basename。
+## vLLM
+
+vLLM 重用 OpenAI-compatible response 與 model-catalog 共用層。`/v1/models` 使用 `SERVES_MODEL`，表示該 serving endpoint 對外提供的 model。
+
+不保存 prompt、response、reasoning text、choices、logprobs 或 generated token text。
+
+## LM Studio
+
+LM Studio 重用相同 OpenAI-compatible response parser，但 `/v1/models` 使用 `ADVERTISES_MODEL`，而不是 `LOADED_MODEL`。
+
+這個區分是刻意的：LM Studio 可以讓已下載 model 出現在 server catalog，且某些設定可以 on-demand load；因此 catalog entry 本身不能證明 observation 當下 model weights 已 resident in memory。
 
 ## 隱私邊界
 
-此 layer 預設排除 prompt text、response content、thinking/reasoning text、choices、logprobs 與 raw generated tokens。
+此 layer 排除 prompt text、response content、thinking/reasoning text、choices、logprobs 與 raw generated tokens。
 
-Aggregate runtime metrics 也不會自動歸因到特定 Agent 或 inference request。
+白名單 metadata 可包含 model/request identity、prompt/input token counts、completion/output token counts、total tokens、cached-token counts、reasoning-token counts 與 runtime-specific timing metadata。支援的本機 OpenAI-compatible runtime 會 redaction absolute local model path；llama.cpp GGUF path 採更嚴格 redaction。
+
+Aggregate runtime metrics 不會自動歸因到特定 Agent 或 inference request。
 
 ## Evidence boundary
 
-Runtime API 能證明的是 inference server 自己回報的資訊，不能單獨證明是哪個 Agent 發起 request。跨層 request identity 必須有明確 shared identifier，或另外定義的保守 correlation 機制。
+Runtime API 只能證明 inference server 自己回報的資訊，不能單獨證明是哪個 Agent 發起 request、哪個 gateway routing，或哪個 OS process 造成 request。
+
+跨層 identity 必須有明確 shared identifier，或另外定義的保守 correlation。Derived correlation 必須維持 inference 標記，不能改寫成 causal evidence。

@@ -98,48 +98,61 @@ inferred: true
 causal: false
 ```
 
-候选模糊时不建立 edge。
+候选模糊或无 match 时不建立 edge。
 
 ## Inference Gateway integrations
 
-### OpenRouter
+当前支持 **OpenRouter** 与 **LiteLLM Proxy**。Gateway 被建模为 `inference_gateway`，而不是 local model runtime。
 
-OpenRouter 被建模为 `inference_gateway`，而不是 local model runtime。
+### OpenRouter
 
 ```bash
 execweave-inference-gateway event \
   --gateway openrouter \
   --requested-model openrouter/auto \
+  --provider-name OpenAI \
+  --sidecar gateway.jsonl
+```
+
+### LiteLLM Proxy
+
+```bash
+execweave-inference-gateway event \
+  --gateway litellm \
+  --requested-model assistant \
+  --resolved-model azure/gpt-5 \
+  --provider-name Azure \
+  --deployment-id deployment-west \
   --sidecar gateway.jsonl
 ```
 
 ExecWeave 会分别保存：
 
 ```text
-requested model → resolved model → routed provider
+requested model → resolved model → routed provider → deployment
 ```
 
-白名单 metadata 可包含 token counts、cache/reasoning counts、cost 与 generation timing；prompt 和 response content 不会保存。
+Provider 与 deployment 只有在 caller/adapter 拥有明确 routing metadata 时才建立；ExecWeave 不会从 `azure/...` 之类的 model string 自行推测。Gateway events 保持 `causal: false`。Prompt、response、reasoning content 不保存。
 
 ## Model Runtime integrations
 
-### Ollama
+当前支持 **Ollama**、**llama.cpp**、**vLLM** 与 **LM Studio**。
 
 ```bash
 execweave-model-runtime event --runtime ollama --sidecar model-runtime.jsonl
-execweave-model-runtime probe --runtime ollama --sidecar model-runtime.jsonl
+execweave-model-runtime event --runtime llamacpp --sidecar model-runtime.jsonl
+execweave-model-runtime event --runtime vllm --sidecar model-runtime.jsonl
+execweave-model-runtime event --runtime lmstudio --sidecar model-runtime.jsonl
 ```
-
-### llama.cpp
 
 ```bash
-execweave-model-runtime event --runtime llamacpp --sidecar model-runtime.jsonl
+execweave-model-runtime probe --runtime ollama --sidecar model-runtime.jsonl
 execweave-model-runtime probe --runtime llamacpp --metrics --sidecar model-runtime.jsonl
+execweave-model-runtime probe --runtime vllm --sidecar model-runtime.jsonl
+execweave-model-runtime probe --runtime lmstudio --sidecar model-runtime.jsonl
 ```
 
-该层使用 `model_runtime`、`inference_request`、`model` 与 runtime snapshot。只保存选定的 token/timing/load metadata，不保存 prompt 或 generated content。敏感的 llama.cpp 本机 model path 会被 redaction。
-
-未来 vLLM、LM Studio 等 OpenAI-compatible runtime 可复用该层。
+llama.cpp、vLLM、LM Studio 共用 OpenAI-compatible response/usage 与 `/v1/models` catalog parser；runtime-specific metadata 仍保留在各自 adapter。vLLM catalog 使用 `SERVES_MODEL`，LM Studio catalog 使用 `ADVERTISES_MODEL`，不会因为 model 出现在 catalog 就宣称它已经加载到内存。敏感的本机 model path 会进行 redaction，llama.cpp GGUF path 保持更严格处理。
 
 ## Runtime evidence
 
@@ -157,23 +170,7 @@ Portable filesystem watching 是 session-correlated，而不是 process-causal�
 
 ## Layered artifacts
 
-Provider-integrated run 可产生：
-
-```text
-.execweave/runs/<run-id>/
-├── events.jsonl
-├── graph.json
-├── viewer.html
-├── semantic.jsonl
-├── events.semantic.jsonl
-├── graph.semantic.json
-├── viewer.semantic.html
-├── events.correlated.jsonl
-├── graph.correlated.json
-└── viewer.correlated.html
-```
-
-Derived correlation layer 不会重写 raw evidence。
+Provider-integrated run 可产生 runtime、semantic 与 correlated artifacts；Derived correlation layer 不会重写 raw evidence。
 
 ## Interactive Viewer
 
@@ -201,7 +198,7 @@ execweave analyze run.graph.json --output analysis.json
 
 ExecWeave 当前为 **v0.5.0**，持续开发中。
 
-Baseline 已包括 runtime collection、Graph materialization/query、standalone/live Viewer、Claude/Codex/Gemini/Cursor/OpenCode native semantic integrations、保守 Tool → Process correlation、OpenRouter gateway metadata、Ollama/llama.cpp runtime metadata，以及 Python 3.10/3.12 的跨平台 CI。
+Baseline 已包括 runtime collection、Graph materialization/query、standalone/live Viewer、Claude/Codex/Gemini/Cursor/OpenCode native semantic integrations、保守 Tool → Process correlation、OpenRouter/LiteLLM gateway metadata、Ollama/llama.cpp/vLLM/LM Studio runtime metadata，以及跨平台 CI。
 
 ## 隐私
 
@@ -220,8 +217,8 @@ ExecWeave 是 local-first。Runtime events、semantic sidecars、graphs、report
 - [`Gemini CLI Hooks`](docs/gemini-hooks.zh-CN.md)
 - [`Cursor Hooks`](docs/cursor-hooks.zh-CN.md)
 - [`OpenCode Plugin`](docs/opencode-plugin.zh-CN.md)
-- [`Inference Gateway / OpenRouter`](docs/inference-gateway.zh-CN.md)
-- [`Model Runtime / Ollama / llama.cpp`](docs/model-runtime.zh-CN.md)
+- [`Inference Gateway / OpenRouter / LiteLLM`](docs/inference-gateway.zh-CN.md)
+- [`Model Runtime / Ollama / llama.cpp / vLLM / LM Studio`](docs/model-runtime.zh-CN.md)
 - [`Security Analysis`](docs/security-analysis.zh-CN.md)
 
 ## Contributing

@@ -98,48 +98,61 @@ inferred: true
 causal: false
 ```
 
-候選模糊時不建立 edge。
+候選模糊或無 match 時不建立 edge。
 
 ## Inference Gateway integrations
 
-### OpenRouter
+目前支援 **OpenRouter** 與 **LiteLLM Proxy**。Gateway 被建模成 `inference_gateway`，不是 local model runtime。
 
-OpenRouter 被建模成 `inference_gateway`，不是 local model runtime。
+### OpenRouter
 
 ```bash
 execweave-inference-gateway event \
   --gateway openrouter \
   --requested-model openrouter/auto \
+  --provider-name OpenAI \
+  --sidecar gateway.jsonl
+```
+
+### LiteLLM Proxy
+
+```bash
+execweave-inference-gateway event \
+  --gateway litellm \
+  --requested-model assistant \
+  --resolved-model azure/gpt-5 \
+  --provider-name Azure \
+  --deployment-id deployment-west \
   --sidecar gateway.jsonl
 ```
 
 ExecWeave 會分開保存：
 
 ```text
-requested model → resolved model → routed provider
+requested model → resolved model → routed provider → deployment
 ```
 
-白名單 metadata 可包含 token counts、cache/reasoning counts、cost 與 generation timing；prompt 與 response content 不會保存。
+Provider 與 deployment 只有在 caller/adapter 有明確 routing metadata 時才建立；ExecWeave 不會從 `azure/...` 之類的 model string 自行推測。Gateway events 保持 `causal: false`。Prompt、response、reasoning content 不保存。
 
 ## Model Runtime integrations
 
-### Ollama
+目前支援 **Ollama**、**llama.cpp**、**vLLM** 與 **LM Studio**。
 
 ```bash
 execweave-model-runtime event --runtime ollama --sidecar model-runtime.jsonl
-execweave-model-runtime probe --runtime ollama --sidecar model-runtime.jsonl
+execweave-model-runtime event --runtime llamacpp --sidecar model-runtime.jsonl
+execweave-model-runtime event --runtime vllm --sidecar model-runtime.jsonl
+execweave-model-runtime event --runtime lmstudio --sidecar model-runtime.jsonl
 ```
-
-### llama.cpp
 
 ```bash
-execweave-model-runtime event --runtime llamacpp --sidecar model-runtime.jsonl
+execweave-model-runtime probe --runtime ollama --sidecar model-runtime.jsonl
 execweave-model-runtime probe --runtime llamacpp --metrics --sidecar model-runtime.jsonl
+execweave-model-runtime probe --runtime vllm --sidecar model-runtime.jsonl
+execweave-model-runtime probe --runtime lmstudio --sidecar model-runtime.jsonl
 ```
 
-此層使用 `model_runtime`、`inference_request`、`model` 與 runtime snapshot。只保存選定的 token/timing/load metadata，不保存 prompt 或 generated content。敏感的 llama.cpp 本機 model path 會被 redaction。
-
-未來 vLLM、LM Studio 等 OpenAI-compatible runtime 可重用此層。
+llama.cpp、vLLM、LM Studio 共用 OpenAI-compatible response/usage 與 `/v1/models` catalog parser；runtime-specific metadata 仍留在各自 adapter。vLLM catalog 使用 `SERVES_MODEL`，LM Studio catalog 使用 `ADVERTISES_MODEL`，不會因 model 出現在 catalog 就宣稱它已載入記憶體。敏感的本機 model path 會 redaction，llama.cpp GGUF path 維持更嚴格處理。
 
 ## Runtime evidence
 
@@ -177,19 +190,7 @@ Derived correlation layer 不會重寫 raw evidence。
 
 ## Interactive Viewer
 
-Standalone Viewer 完全 local、自包含，目前包含：
-
-- pan / zoom / draggable nodes
-- node / edge inspection
-- node-type / relation / causal filters
-- **observed only** filter
-- search
-- evidence-sequence Timeline ↔ Graph replay
-- progressive cluster expansion
-- 1-hop / 2-hop focused neighborhoods
-- browser-local Saved Views
-- observed / non-causal / inferred edge styling
-- Correlation Summary
+Standalone Viewer 完全 local、自包含，目前包含 pan / zoom、node/edge inspection、filters、**observed only**、search、Timeline ↔ Graph replay、progressive cluster expansion、1/2-hop focus、Saved Views、observed/non-causal/inferred styling 與 Correlation Summary。
 
 ## Graph operations
 
@@ -220,7 +221,7 @@ execweave analyze run.graph.json --output analysis.json
 
 ExecWeave 目前為 **v0.5.0**，持續開發中。
 
-目前 baseline 已包含 runtime collection、Graph materialization/query、standalone/live Viewer、Claude/Codex/Gemini/Cursor/OpenCode native semantic integrations、保守 Tool → Process correlation、OpenRouter gateway metadata、Ollama/llama.cpp runtime metadata，以及 Python 3.10/3.12 的跨平台 CI。
+目前 baseline 已包含 runtime collection、Graph materialization/query、standalone/live Viewer、Claude/Codex/Gemini/Cursor/OpenCode native semantic integrations、保守 Tool → Process correlation、OpenRouter/LiteLLM gateway metadata、Ollama/llama.cpp/vLLM/LM Studio runtime metadata，以及跨平台 CI。
 
 ## 隱私
 
@@ -239,8 +240,8 @@ ExecWeave 是 local-first。Runtime events、semantic sidecars、graphs、report
 - [`Gemini CLI Hooks`](docs/gemini-hooks.zh-TW.md)
 - [`Cursor Hooks`](docs/cursor-hooks.zh-TW.md)
 - [`OpenCode Plugin`](docs/opencode-plugin.zh-TW.md)
-- [`Inference Gateway / OpenRouter`](docs/inference-gateway.zh-TW.md)
-- [`Model Runtime / Ollama / llama.cpp`](docs/model-runtime.zh-TW.md)
+- [`Inference Gateway / OpenRouter / LiteLLM`](docs/inference-gateway.zh-TW.md)
+- [`Model Runtime / Ollama / llama.cpp / vLLM / LM Studio`](docs/model-runtime.zh-TW.md)
 - [`Security Analysis`](docs/security-analysis.zh-TW.md)
 
 ## Contributing

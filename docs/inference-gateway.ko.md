@@ -8,9 +8,9 @@
   <strong>한국어</strong>
 </p>
 
-Inference Gateway는 Agent/client와 model provider/runtime 사이의 독립 계층입니다. 첫 baseline integration은 **OpenRouter**입니다.
+Inference Gateway는 Agent/client와 model provider/runtime 사이의 독립 계층입니다. 현재 baseline은 **OpenRouter**와 **LiteLLM Proxy**를 지원합니다.
 
-ExecWeave는 requested model, resolved model, provider routing을 서로 다른 evidence로 보존하며 하나의 model field로 합치지 않습니다.
+ExecWeave는 requested model, resolved model, routed provider, deployment identity를 서로 다른 evidence로 보존하며 하나의 model field로 합치지 않습니다.
 
 ## CLI
 
@@ -24,7 +24,19 @@ execweave-inference-gateway event \
   --sidecar gateway.jsonl
 ```
 
-Generation metadata를 변환합니다.
+LiteLLM Proxy final response를 변환합니다.
+
+```bash
+execweave-inference-gateway event \
+  --gateway litellm \
+  --requested-model assistant \
+  --resolved-model azure/gpt-5 \
+  --provider-name Azure \
+  --deployment-id deployment-west \
+  --sidecar gateway.jsonl
+```
+
+OpenRouter generation metadata를 변환합니다.
 
 ```bash
 execweave-inference-gateway generation \
@@ -32,7 +44,10 @@ execweave-inference-gateway generation \
   --sidecar gateway.jsonl
 ```
 
-JSON은 stdin에서 읽습니다. 기본 endpoint identity는 `https://openrouter.ai/api/v1`입니다.
+JSON은 stdin에서 읽습니다. 기본 endpoint identity:
+
+- OpenRouter: `https://openrouter.ai/api/v1`
+- LiteLLM Proxy: `http://localhost:4000`
 
 ## Graph model
 
@@ -41,24 +56,34 @@ inference_gateway --SERVED_INFERENCE--> inference_request
 inference_request --REQUESTED_MODEL--> model
 inference_request --ROUTED_TO_MODEL--> model
 inference_request --ROUTED_TO_PROVIDER--> inference_provider
+inference_request --ROUTED_TO_DEPLOYMENT--> inference_deployment
 inference_gateway --REPORTED_GENERATION_METADATA--> inference_request
 ```
 
-한 request에서 다음을 동시에 보존할 수 있습니다.
+LiteLLM request에서는 예를 들어 다음을 별도의 evidence로 보존할 수 있습니다.
 
 ```text
-requested_model = openrouter/auto
-resolved_model  = openai/gpt-5.6-sol
-provider        = OpenAI
+requested_model = assistant
+resolved_model  = azure/gpt-5
+provider        = Azure
+deployment      = deployment-west
 ```
 
 이 값들은 서로 대체 가능한 사실이 아닙니다.
 
+## OpenRouter
+
+OpenRouter response metadata는 requested model과 response model을 분리하고 명시적으로 관측된 routed provider만 보존합니다. OpenRouter-specific generation metadata에서는 latency, generation time, cost, native token counts, streaming state, cancellation state도 기록할 수 있습니다.
+
+## LiteLLM Proxy
+
+LiteLLM은 `model_runtime`이 아니라 `inference_gateway`로 모델링합니다. OpenAI-compatible response는 동일한 gateway evidence layer를 통해 request/model usage metadata를 제공합니다.
+
+`--provider-name`과 `--deployment-id`는 caller / adapter가 authoritative routing metadata를 가지고 있을 때만 edge를 생성합니다. ExecWeave는 `azure/...` 같은 model string에서 provider / deployment를 **추측하지 않습니다**. routing facts가 없으면 해당 edge를 만들지 않습니다.
+
 ## Usage metadata
 
-Response parser는 prompt/completion/total tokens, cached prompt tokens, cache-write tokens, reasoning-token counts, provider reported cost만 whitelist로 유지합니다.
-
-Generation metadata는 latency, generation time, total cost, native token counts, streamed status, cancellation state를 추가할 수 있습니다.
+Response parser는 prompt/input tokens, completion/output tokens, total tokens, cached prompt tokens, cache-write tokens, reasoning-token counts, reported cost만 whitelist로 유지합니다.
 
 ## 프라이버시 경계
 
@@ -68,6 +93,6 @@ ExecWeave는 prompt text, response/completion content, reasoning text, choices, 
 
 ## Evidence boundary
 
-OpenRouter response metadata가 증명하는 것은 gateway가 해당 generation에 대해 보고한 정보입니다. 어떤 local Agent가 request를 시작했는지는 단독으로 증명할 수 없습니다. Gateway routing evidence는 Agent semantics 및 OS runtime observations와 분리해 저장합니다.
+Gateway response metadata가 증명하는 것은 gateway 자체가 보고한 정보 또는 response와 함께 제공된 authoritative routing metadata뿐입니다. 어떤 local Agent가 request를 시작했는지, 어떤 model-runtime process가 실제 serving했는지, 어떤 OS process가 원인인지는 단독으로 증명할 수 없습니다.
 
-향후 LiteLLM 같은 gateway도 이 layer를 재사용할 수 있으며 local inference runtime으로 잘못 모델링하지 않습니다.
+Gateway events는 non-causal(`causal: false`)로 유지하고 Agent/IDE semantic evidence, Model Runtime evidence, OS Runtime evidence와 분리합니다. Cross-layer attribution에는 명시적 shared identity 또는 별도로 정의된 conservative correlation이 필요하며 inferred correlation을 causal evidence로 표현해서는 안 됩니다.

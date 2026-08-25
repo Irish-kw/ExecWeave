@@ -8,13 +8,13 @@
   <a href="inference-gateway.ko.md">한국어</a>
 </p>
 
-Inference Gateway は Agent/client と model provider/runtime の間にある独立レイヤーです。最初の baseline integration は **OpenRouter** です。
+Inference Gateway は Agent/client と model provider/runtime の間にある独立レイヤーです。現在の baseline は **OpenRouter** と **LiteLLM Proxy** をサポートします。
 
-ExecWeave は requested model、resolved model、provider routing を別々の evidence として保持し、単一の model field に潰しません。
+ExecWeave は requested model、resolved model、routed provider、deployment identity を別々の evidence として保持し、単一の model field に潰しません。
 
 ## CLI
 
-OpenRouter の final response を変換します。
+OpenRouter final response を変換します。
 
 ```bash
 execweave-inference-gateway event \
@@ -24,7 +24,19 @@ execweave-inference-gateway event \
   --sidecar gateway.jsonl
 ```
 
-Generation metadata を変換します。
+LiteLLM Proxy final response を変換します。
+
+```bash
+execweave-inference-gateway event \
+  --gateway litellm \
+  --requested-model assistant \
+  --resolved-model azure/gpt-5 \
+  --provider-name Azure \
+  --deployment-id deployment-west \
+  --sidecar gateway.jsonl
+```
+
+OpenRouter generation metadata を変換します。
 
 ```bash
 execweave-inference-gateway generation \
@@ -32,7 +44,10 @@ execweave-inference-gateway generation \
   --sidecar gateway.jsonl
 ```
 
-JSON は stdin から読み取ります。既定 endpoint identity は `https://openrouter.ai/api/v1` です。
+JSON は stdin から読み取ります。既定 endpoint identity：
+
+- OpenRouter: `https://openrouter.ai/api/v1`
+- LiteLLM Proxy: `http://localhost:4000`
 
 ## Graph model
 
@@ -41,24 +56,34 @@ inference_gateway --SERVED_INFERENCE--> inference_request
 inference_request --REQUESTED_MODEL--> model
 inference_request --ROUTED_TO_MODEL--> model
 inference_request --ROUTED_TO_PROVIDER--> inference_provider
+inference_request --ROUTED_TO_DEPLOYMENT--> inference_deployment
 inference_gateway --REPORTED_GENERATION_METADATA--> inference_request
 ```
 
-一つの request で次を同時に保持できます。
+LiteLLM request では、たとえば次を別々に保持できます。
 
 ```text
-requested_model = openrouter/auto
-resolved_model  = openai/gpt-5.6-sol
-provider        = OpenAI
+requested_model = assistant
+resolved_model  = azure/gpt-5
+provider        = Azure
+deployment      = deployment-west
 ```
 
 これらは置き換え可能な事実ではありません。
 
+## OpenRouter
+
+OpenRouter response metadata では requested model と response model を分離し、明示的に観測された routed provider だけを保持します。OpenRouter-specific generation metadata では latency、generation time、cost、native token counts、streaming state、cancellation state も記録できます。
+
+## LiteLLM Proxy
+
+LiteLLM は `model_runtime` ではなく `inference_gateway` としてモデル化します。OpenAI-compatible response は同じ gateway evidence layer を通じて request/model usage metadata を提供します。
+
+`--provider-name` と `--deployment-id` は caller / adapter が authoritative routing metadata を持つ場合だけ edge を生成します。ExecWeave は `azure/...` のような model string から provider / deployment を**推測しません**。routing facts がない場合は対応する edge を作りません。
+
 ## Usage metadata
 
-Response parser は prompt/completion/total tokens、cached prompt tokens、cache-write tokens、reasoning-token counts、provider reported cost だけを whitelist で保持します。
-
-Generation metadata から latency、generation time、total cost、native token counts、streamed status、cancellation state を追加できます。
+Response parser は prompt/input tokens、completion/output tokens、total tokens、cached prompt tokens、cache-write tokens、reasoning-token counts、reported cost のみを whitelist で保持します。
 
 ## プライバシー境界
 
@@ -68,6 +93,6 @@ ExecWeave は prompt text、response/completion content、reasoning text、choic
 
 ## Evidence boundary
 
-OpenRouter response metadata が証明するのは gateway がその generation について報告した情報です。どの local Agent が request を開始したかは単独では証明できません。Gateway routing evidence は Agent semantics と OS runtime observations から分離して保存します。
+Gateway response metadata が証明するのは gateway 自身が報告した情報、または response とともに与えられた authoritative routing metadata だけです。どの local Agent が request を開始したか、どの model-runtime process が実際に serving したか、どの OS process が原因かは単独では証明できません。
 
-将来 LiteLLM などもこの gateway layer を再利用でき、local inference runtime と誤ってモデル化されません。
+Gateway events は non-causal（`causal: false`）のまま Agent/IDE semantic evidence、Model Runtime evidence、OS Runtime evidence と分離します。Cross-layer attribution には明示的 shared identity または別途定義された conservative correlation が必要で、inferred correlation を causal evidence として表現してはいけません。

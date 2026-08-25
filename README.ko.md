@@ -10,7 +10,7 @@
 
 **AI 에이전트가 실제로 머신에서 무엇을 했는지 확인하세요.**
 
-ExecWeave는 AI 에이전트 활동을 인터랙티브 실행 그래프로 변환하는 로컬 우선 오픈소스 observability 프로젝트입니다. 관측된 evidence와 추론된 관계를 명확히 분리합니다.
+ExecWeave는 AI 에이전트 활동을 인터랙티브 실행 그래프로 변환하는 로컬 우선 오픈소스 observability 프로젝트입니다. 관측된 evidence와 inference를 명확히 분리합니다.
 
 > **Event is ground truth. The graph is a materialized view.**
 
@@ -91,55 +91,68 @@ execweave-opencode-record --open -- opencode
 
 project-local plugin은 exact `sessionID + callID`를 사용하며 tool output을 전달하지 않습니다.
 
-Provider-integrated run은 runtime / semantic / correlated artifact를 분리해 보존합니다. Tool → Process bridge는 항상 derived evidence입니다:
+Provider-integrated run은 runtime / semantic / correlated artifact를 분리해 보존합니다. Tool → Process bridge는 보수적인 derived evidence입니다:
 
 ```text
 inferred: true
 causal: false
 ```
 
-ambiguity가 있으면 edge를 만들지 않습니다.
+ambiguous 또는 no-match이면 edge를 만들지 않습니다.
 
 ## Inference gateway integrations
 
-### OpenRouter
+현재 **OpenRouter**와 **LiteLLM Proxy**를 지원합니다. Gateway는 local model runtime이 아니라 `inference_gateway`로 모델링됩니다.
 
-OpenRouter는 local model runtime이 아니라 `inference_gateway`로 모델링됩니다.
+### OpenRouter
 
 ```bash
 execweave-inference-gateway event \
   --gateway openrouter \
   --requested-model openrouter/auto \
+  --provider-name OpenAI \
   --sidecar gateway.jsonl
 ```
 
-ExecWeave는 다음을 분리해 유지할 수 있습니다:
+### LiteLLM Proxy
 
-```text
-requested model → resolved model → routed provider
+```bash
+execweave-inference-gateway event \
+  --gateway litellm \
+  --requested-model assistant \
+  --resolved-model azure/gpt-5 \
+  --provider-name Azure \
+  --deployment-id deployment-west \
+  --sidecar gateway.jsonl
 ```
 
-token count, cache/reasoning count, cost, generation timing 같은 whitelist metadata만 저장하고 prompt / response content는 저장하지 않습니다.
+ExecWeave는 다음을 서로 다른 evidence로 유지합니다:
+
+```text
+requested model → resolved model → routed provider → deployment
+```
+
+Provider / deployment edge는 authoritative routing metadata가 있을 때만 생성합니다. `azure/...` 같은 model string에서 provider나 deployment를 추측하지 않습니다. Gateway events는 `causal: false`로 유지됩니다. Prompt, response, reasoning content는 저장하지 않습니다.
 
 ## Model runtime integrations
 
-### Ollama
+현재 **Ollama**, **llama.cpp**, **vLLM**, **LM Studio**를 지원합니다.
 
 ```bash
 execweave-model-runtime event --runtime ollama --sidecar model-runtime.jsonl
-execweave-model-runtime probe --runtime ollama --sidecar model-runtime.jsonl
+execweave-model-runtime event --runtime llamacpp --sidecar model-runtime.jsonl
+execweave-model-runtime event --runtime vllm --sidecar model-runtime.jsonl
+execweave-model-runtime event --runtime lmstudio --sidecar model-runtime.jsonl
 ```
-
-### llama.cpp
 
 ```bash
-execweave-model-runtime event --runtime llamacpp --sidecar model-runtime.jsonl
+execweave-model-runtime probe --runtime ollama --sidecar model-runtime.jsonl
 execweave-model-runtime probe --runtime llamacpp --metrics --sidecar model-runtime.jsonl
+execweave-model-runtime probe --runtime vllm --sidecar model-runtime.jsonl
+execweave-model-runtime probe --runtime lmstudio --sidecar model-runtime.jsonl
 ```
 
-이 계층은 `model_runtime`, `inference_request`, `model`, runtime snapshot을 모델링합니다. prompt나 생성 본문 없이 선택된 token/timing/load metadata만 기록하며, llama.cpp의 민감한 local model path는 redact됩니다.
-
-향후 vLLM, LM Studio 같은 OpenAI-compatible runtime은 이 계층을 재사용할 수 있습니다.
+llama.cpp, vLLM, LM Studio는 OpenAI-compatible response/usage와 `/v1/models` catalog parser를 공유하지만 runtime-specific metadata는 각 adapter에 남깁니다. vLLM catalog는 `SERVES_MODEL`, LM Studio catalog는 `ADVERTISES_MODEL`을 사용하므로 catalog에 존재한다는 사실만으로 loaded model이라고 주장하지 않습니다. 민감한 local model path는 redact하며 llama.cpp GGUF path는 더 엄격하게 처리합니다.
 
 ## Runtime evidence
 
@@ -151,23 +164,11 @@ execweave run --backend portable -- your-command
 execweave run --backend strace -- your-command
 ```
 
-portable filesystem event는 process-causal이 아니라 session-correlated입니다. Linux `strace` path는 command 종료 후 process-attributed syscall evidence를 생성합니다.
+portable filesystem event는 process-causal이 아니라 session-correlated입니다. 짧게 실행되는 process는 polling interval 사이에서 놓칠 수 있습니다. Linux `strace` path는 command 종료 후 process-attributed syscall evidence를 생성합니다.
 
 ## Interactive Viewer
 
-Standalone Viewer는 로컬 self-contained입니다. 현재 baseline:
-
-- pan / zoom / draggable nodes
-- node / edge inspection
-- node-type / relation / causal filters
-- **observed only** filter
-- search
-- evidence-sequence Timeline ↔ Graph replay
-- progressive cluster expansion
-- 1-hop / 2-hop focused neighborhoods
-- browser-local Saved Views
-- observed / non-causal / inferred edge styling
-- Correlation Summary
+Standalone Viewer는 로컬 self-contained입니다. 현재 baseline에는 pan/zoom, node/edge inspection, filters, **observed only**, search, Timeline ↔ Graph replay, progressive cluster expansion, 1/2-hop focus, Saved Views, observed/non-causal/inferred styling, Correlation Summary가 포함됩니다.
 
 ## Security analysis
 
@@ -188,7 +189,7 @@ sensitive-file → network 가능성은 byte-level exfiltration 증명이 아닙
 
 ExecWeave는 현재 **v0.5.0**이며 active development 중입니다.
 
-runtime collection, graph materialization/query, standalone/live Viewer, Claude/Codex/Gemini/Cursor/OpenCode semantic integration, conservative Tool → Process correlation, OpenRouter gateway metadata, Ollama/llama.cpp runtime metadata, Python 3.10/3.12 cross-platform CI가 baseline으로 구현되어 있습니다.
+runtime collection, graph materialization/query, standalone/live Viewer, Claude/Codex/Gemini/Cursor/OpenCode semantic integration, conservative Tool → Process correlation, OpenRouter/LiteLLM gateway metadata, Ollama/llama.cpp/vLLM/LM Studio runtime metadata, cross-platform CI가 baseline으로 구현되어 있습니다.
 
 ## Privacy
 
@@ -207,8 +208,8 @@ ExecWeave는 local-first입니다. runtime events, semantic sidecars, graphs, re
 - [`Gemini CLI Hooks`](docs/gemini-hooks.ko.md)
 - [`Cursor Hooks`](docs/cursor-hooks.ko.md)
 - [`OpenCode Plugin`](docs/opencode-plugin.ko.md)
-- [`Inference Gateway / OpenRouter`](docs/inference-gateway.ko.md)
-- [`Model Runtime / Ollama / llama.cpp`](docs/model-runtime.ko.md)
+- [`Inference Gateway / OpenRouter / LiteLLM`](docs/inference-gateway.ko.md)
+- [`Model Runtime / Ollama / llama.cpp / vLLM / LM Studio`](docs/model-runtime.ko.md)
 - [`Security Analysis`](docs/security-analysis.ko.md)
 
 ## Contributing
