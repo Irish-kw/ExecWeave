@@ -88,6 +88,16 @@ def test_viewer_contains_focus_filters() -> None:
     assert "applyGraphFilters" in html
 
 
+def test_viewer_contains_focused_neighborhood_controls() -> None:
+    html = render_graph_html(_graph())
+    assert 'id="clear-focus"' in html
+    assert "Focus 1 hop" in html
+    assert "Focus 2 hops" in html
+    assert "focusNeighborhood" in html
+    assert "setFocus" in html
+    assert "never creates inferred edges" in html
+
+
 def test_viewer_contains_timeline_playback_and_partial_edge_semantics() -> None:
     html = render_graph_html(_graph())
     assert 'id="sequence-filter"' in html
