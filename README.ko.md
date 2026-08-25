@@ -10,26 +10,43 @@
 
 **AI Agent가 내 컴퓨터에서 실제로 무엇을 했는지 확인하세요.**
 
-ExecWeave는 AI Agent의 runtime behavior를 사람이 이해하기 쉬운 interactive execution graph로 변환하기 위한 오픈소스 프로젝트입니다.
+ExecWeave는 로컬 AI Agent의 runtime activity를 execution graph로 변환하는 open-source / local-first observability 프로젝트입니다. 긴 CLI log를 읽는 대신 Agent, session, process, file, executable, socket, network endpoint 사이의 관계를 기록하고 Graph로 materialize한 뒤, 브라우저에서 열 수 있는 standalone HTML viewer를 생성합니다.
 
-긴 CLI 출력이나 수천 개의 trace event를 읽는 대신, Agent, process, command, file, network endpoint, tool, MCP server, repository, credential 및 기타 runtime resource를 하나의 이해 가능한 graph로 연결하는 것을 목표로 합니다.
-
-> **불투명한 AI Agent 실행을 사람이 이해할 수 있는 형태로 바꿉니다.**
+> **불투명한 AI Agent 실행을 사람이 이해할 수 있는 Graph로 바꿉니다.**
 
 ## 현재 상태
 
-ExecWeave는 아직 **early development** 단계입니다. Phase 1 runtime collection에는 실행 가능한 MVP가 있습니다.
+### Phase 1 — Runtime Collection
 
-현재 collector는 다음을 수행할 수 있습니다.
+**Linux reference path와 cross-platform portable fallback이 완료되었습니다.**
 
-- Agent 또는 임의의 command를 ExecWeave session으로 실행
-- root process와 descendant process 탐지
-- parent/child process relationship 기록
-- 지정한 working directory의 filesystem 변경 관찰
-- OS가 허용하는 경우 process별 outbound network connection 관찰
-- 모든 observation을 동일한 session ID를 공유하는 graph-ready JSONL event로 출력
+현재 graph-ready JSONL, monotonic sequence, root/descendant process capture, Linux syscall-backed short-lived process capture, process-attributed filesystem/network evidence, non-blocking/failed connect attempt 보존, portable fallback, causal/non-causal semantics, validator, diagnostics, benchmark, CI를 제공합니다.
 
-현재 **interactive graph UI는 아직 구현되지 않았습니다.**
+### Phase 2 — Execution Graph
+
+**Graph materialization 및 query layer의 첫 번째 core가 구현되었습니다.**
+
+- validated JSONL → graph JSON
+- node deduplication
+- repeated edge aggregation
+- temporal first/last metadata
+- evidence event IDs
+- causality preservation
+- graph summary / filter
+- directed path query
+
+### Phase 3 — Interactive Viewer
+
+**로컬 Viewer MVP가 구현되었습니다.**
+
+- standalone HTML
+- CDN / external JavaScript dependency 없음
+- pan / zoom / node drag
+- node / edge details
+- graph search
+- causal / non-causal edge visualization
+
+Agent가 실행되는 동안 Graph를 live update하는 기능은 향후 작업입니다.
 
 ## Quick start
 
@@ -39,85 +56,34 @@ cd ExecWeave
 python -m pip install -e ".[dev]"
 ```
 
-ExecWeave 아래에서 AI Agent를 실행합니다.
+Debian / Ubuntu에서 Linux reference backend를 사용하려면:
 
 ```bash
-execweave run -- claude
+sudo apt-get install strace
 ```
 
-또는:
+전체 흐름:
 
 ```bash
-execweave run -- codex
-execweave run -- gemini
-execweave run -- opencode
-execweave run -- python my_agent.py
+execweave doctor
+execweave run --output run.jsonl -- claude
+execweave validate run.jsonl
+execweave graph run.jsonl --output run.graph.json
+execweave view run.graph.json --output run.html --open
 ```
 
-로컬 event stream은 다음 위치에 저장됩니다.
-
-```text
-.execweave/runs/<session-id>.jsonl
-```
-
-다른 directory를 관찰하려면:
+Codex, Gemini CLI, OpenCode 또는 임의의 Python Agent도 실행할 수 있습니다.
 
 ```bash
-execweave run --watch-root /path/to/project -- claude
+execweave run --output run.jsonl -- codex
+execweave run --output run.jsonl -- gemini
+execweave run --output run.jsonl -- opencode
+execweave run --output run.jsonl -- python my_agent.py
 ```
-
-개별 collector 비활성화:
-
-```bash
-execweave run --no-files -- claude
-execweave run --no-network -- claude
-```
-
-Phase 1 설계, 제한 사항 및 acceptance criteria는 [`docs/phase-1-runtime-collection.md`](docs/phase-1-runtime-collection.md)를 참고하세요.
-
-## 왜 ExecWeave가 필요한가요?
-
-현대의 coding agent는 하나의 task에서 수백 또는 수천 개의 action을 수행할 수 있습니다.
-
-```text
-source file 읽기
-→ shell command 실행
-→ child process 생성
-→ package 설치
-→ code 수정
-→ credential 접근
-→ external service 연결
-→ test 실행
-→ Git 조작
-```
-
-대부분의 도구는 이러한 동작을 CLI output, log, trace 또는 process tree 형태로 보여줍니다.
-
-ExecWeave는 다른 표현 방식을 지향합니다.
-
-```text
-                         ┌── READ ─────→ package.json
-                         │
-AI Agent ──→ Shell ──────┼── SPAWN ────→ npm
-    │                    │                 │
-    │                    │                 └──→ node
-    │                    │
-    │                    └── CONNECT ──→ registry.npmjs.org
-    │
-    ├── READ ───────────────→ src/app.ts
-    │
-    ├── WRITE ──────────────→ src/app.ts
-    │
-    └── Git ────────────────→ github.com
-```
-
-우리가 답하고 싶은 질문은 단순합니다.
-
-> **이 Agent가 내 컴퓨터에서 실제로 무엇을 했는가?**
 
 ## Graph-first event model
 
-Phase 1은 단순한 임의 형식의 log line을 저장하지 않습니다. 각 runtime observation은 graph-ready 형식으로 표현됩니다.
+각 runtime observation은 다음 형식으로 표현됩니다.
 
 ```text
 source --RELATION--> target
@@ -128,269 +94,144 @@ source --RELATION--> target
 ```text
 session --LAUNCHED--> process
 process --SPAWNED--> process
+process --EXECUTED--> executable
+process --OPENED_READ--> file
+process --OPENED_WRITE--> file
 process --CONNECTED_TO--> network_endpoint
+process --CONNECT_ATTEMPTED--> network_endpoint
+```
+
+Phase 2는 repeated evidence를 aggregate합니다. 같은 process가 같은 file을 17번 open했다면 17개의 겹치는 edge 대신 하나의 edge와 `count = 17`을 저장합니다.
+
+## Fake causality를 만들지 않습니다
+
+Linux syscall evidence는 다음을 증명할 수 있습니다.
+
+```text
+process --OPENED_WRITE--> file
+```
+
+이 경우 `causal: true`로 기록합니다.
+
+반면 portable filesystem watcher가 증명할 수 있는 것은 다음 정도입니다.
+
+```text
 session --OBSERVED_FILE_CHANGE--> file
 ```
 
-단순화된 event 예시:
+따라서 `causal: false`로 유지합니다. ExecWeave는 temporal correlation을 causal proof로 승격하지 않습니다.
 
-```json
-{
-  "schema_version": "0.1",
-  "session_id": "...",
-  "event_type": "network.connection",
-  "relation": "CONNECTED_TO",
-  "source": {
-    "type": "process",
-    "id": "process:1234:1780000000000000"
-  },
-  "target": {
-    "type": "network_endpoint",
-    "id": "endpoint:github.com:443"
-  }
-}
+## Backend
+
+### `strace`
+
+Linux reference backend는 `strace -ff`로 descendant process를 추적하고 process/filesystem/network syscall evidence를 graph-ready event로 변환합니다.
+
+Raw trace는 기본적으로 parsing 후 삭제됩니다.
+
+```bash
+execweave run --keep-native-trace -- claude
 ```
 
-운영체제는 PID를 재사용하므로 process ID에는 PID와 process creation time을 함께 포함합니다.
+### `portable`
 
-### Causality는 중요합니다
+psutil + watchdog를 사용하며 Linux / macOS / Windows에서 동작합니다. native sensor보다 약한 filesystem attribution은 명시적으로 non-causal 상태로 유지됩니다.
 
-ExecWeave는 telemetry가 증명할 수 없는 인과관계를 주장하지 않습니다.
+`auto`는 Linux에서 `strace`가 사용 가능하면 `strace`, 그렇지 않으면 `portable`을 선택합니다.
 
-현재 filesystem watcher는 파일이 ExecWeave session 중 변경되었다는 사실은 알 수 있지만, 어떤 process가 변경했는지는 아직 증명할 수 없습니다. 따라서 해당 event는 다음과 같이 명시됩니다.
+## Event stream validation
 
-```json
-{
-  "attribution": "session_observation",
-  "causal": false
-}
+```bash
+execweave validate run.jsonl
 ```
 
-향후 eBPF, ETW, Endpoint Security collector는 더 강한 process-attributed edge를 제공할 수 있습니다.
+Interrupted run:
 
-## Vision
-
-ExecWeave는 단일 컴퓨터에서 실행되는 AI Agent를 위한 **live heterogeneous runtime behavior graph**를 목표로 합니다.
-
-```mermaid
-graph TD
-    A[AI Agent] --> B[Agent / Tool telemetry]
-    A --> C[Operating System]
-    B --> D[ExecWeave Collector]
-    C --> E[Runtime telemetry]
-    E --> D
-    D --> F[Event Store]
-    F --> G[Graph Builder]
-    G --> H[Interactive Graph UI]
+```bash
+execweave validate --allow-incomplete run.jsonl
 ```
 
-장기적으로 graph는 다음 entity를 연결할 수 있습니다.
+Validator는 JSON, schema, event ID, session ID, sequence, timestamp, entity fields, session lifecycle을 검사합니다.
 
-### Nodes
+## Graph query
 
-```text
-Agent
-Session
-Process
-Command
-File
-Directory
-Domain
-IP
-Socket
-Tool
-MCP Server
-Repository
-Credential
-Resource
+```bash
+execweave graph-summary run.graph.json
 ```
 
-### Relationships
-
-```text
-LAUNCHED
-SPAWNED
-EXECUTED
-READ
-WROTE
-DELETED
-CONNECTED_TO
-CALLED
-USED
-MODIFIED
-DOWNLOADED
-UPLOADED
-BELONGS_TO
-TRIGGERED
+```bash
+execweave graph-filter run.graph.json --output causal.graph.json --causal-only
 ```
 
-## ExecWeave는 무엇이 다른가요?
-
-ExecWeave는 단순히 또 하나의 다음 도구가 되는 것을 목표로 하지 않습니다.
-
-- LLM trace viewer
-- token dashboard
-- prompt observability platform
-- terminal recorder
-- process tree
-- Agent workflow visualizer
-
-일반적인 process tree가 다음처럼 보인다면:
-
-```text
-agent
-└── bash
-    └── git
-        └── ssh
+```bash
+execweave graph-filter run.graph.json \
+  --output process-network.graph.json \
+  --node-type process \
+  --node-type network_endpoint
 ```
 
-ExecWeave는 해당 process 주변의 실제 runtime relationship까지 보여주는 것을 목표로 합니다.
-
-```text
-                     ┌── READ ─────→ ~/.ssh/config
-                     │
-Agent → bash → git ──┼── USE ──────→ SSH key
-                     │
-                     ├── READ ─────→ repository
-                     │
-                     └── CONNECT ──→ github.com
+```bash
+execweave path run.graph.json SOURCE_NODE_ID TARGET_NODE_ID --causal-only
 ```
+
+자세한 Graph contract: [`docs/phase-2-execution-graph.md`](docs/phase-2-execution-graph.md)
+
+## Interactive Viewer
+
+```bash
+execweave view run.graph.json --output run.html --open
+```
+
+Viewer는 standalone local HTML이며 zoom, pan, node drag, search, node/edge details를 지원합니다. 외부 CDN이 필요하지 않습니다.
 
 ## Roadmap
 
-### Phase 1 — Runtime collection
+### Phase 1
 
-- [x] 명시적인 ExecWeave session 시작
-- [x] graph-ready runtime event schema 정의
-- [x] root process capture
-- [x] parent/child process relationship 탐지
-- [x] filesystem changes 관찰
-- [x] outbound network connections 관찰
-- [x] observation을 하나의 session ID로 연결
-- [ ] 매우 짧게 실행되는 process 안정적 capture
-- [ ] Linux process-attributed filesystem telemetry
-- [ ] Windows process-attributed filesystem telemetry
-- [ ] macOS process-attributed filesystem telemetry
-- [ ] Runtime overhead benchmark
+- [x] Runtime event schema / collection
+- [x] Linux short-lived process capture
+- [x] Causal semantics
+- [x] Validation / diagnostics / benchmark
+- [x] Cross-platform portable fallback
+- [ ] Linux eBPF
+- [ ] Windows ETW
+- [ ] macOS Endpoint Security
 
-### Phase 2 — Execution graph
+### Phase 2
 
-- [ ] runtime events를 Graph로 구성
-- [ ] Entity resolution / deduplication
-- [ ] Temporal graph relationships
-- [ ] Graph filtering
-- [ ] causal/runtime path query
+- [x] Event → Graph
+- [x] Node dedup / edge aggregation
+- [x] Temporal metadata
+- [x] Summary / filter / path query
+- [ ] Stronger entity resolution
+- [ ] Time-window snapshot
+- [ ] Large-run evidence indexing
 
-### Phase 3 — Interactive UI
+### Phase 3
 
-- [ ] Live graph updates
-- [ ] Node expand/collapse
-- [ ] process / file / endpoint 검색
-- [ ] node / edge 상세 보기
-- [ ] Timeline + graph synchronization
-
-### Phase 4 — Agent integrations
-
-- [ ] Claude Code
-- [ ] OpenAI Codex
-- [ ] Gemini CLI
-- [ ] OpenCode
-- [ ] MCP
-- [ ] Generic agent SDK / OpenTelemetry integration
-
-### Phase 5 — Security and analysis
-
-- [ ] Sensitive-resource detection
-- [ ] Credential access detection
-- [ ] Unknown-destination detection
-- [ ] Behavioral comparison
-- [ ] Runtime anomaly detection
-- [ ] Causal provenance
-- [ ] Data-flow tracking
-- [ ] Execution replay
-- [ ] Runtime policy / allow / warn / block
-
-## Platform direction
-
-첫 collector는 event model을 안정화하기 위해 의도적으로 단순하게 설계되었습니다.
-
-계획 중인 telemetry source:
-
-- **Linux:** eBPF, procfs, audit events
-- **Windows:** ETW, Windows process/filesystem telemetry
-- **macOS:** Endpoint Security, FSEvents, process telemetry
-- **Agent layer:** agent SDK, OpenTelemetry, MCP integrations
+- [x] Standalone local Viewer MVP
+- [x] Pan / zoom / drag / search / details
+- [ ] Live graph update
+- [ ] Timeline ↔ Graph synchronization
+- [ ] Large graph clustering
 
 ## Privacy
 
-ExecWeave는 **local-first**를 지향합니다.
-
-Runtime telemetry에는 file path, command-line argument, repository name, network destination, Agent prompt, secret-related metadata 등 민감한 정보가 포함될 수 있습니다.
-
-불필요한 수집을 최소화하고 기본적으로 telemetry를 컴퓨터 밖으로 전송하지 않으며, 가능한 경우 sensitive value를 redact 또는 hash해야 합니다.
+ExecWeave는 **local-first**입니다. Event, Graph, Viewer는 기본적으로 로컬에 남으며 Viewer는 CDN을 필요로 하지 않습니다. file contents와 read/write byte buffer는 수집하지 않습니다. 공유 전 runtime metadata에 민감한 path / command / endpoint가 포함되어 있지 않은지 확인하세요.
 
 ## Contributing
 
-**ExecWeave에 대한 contribution을 환영합니다.**
+**Contribution을 환영합니다.**
 
-아직 초기 단계이기 때문에 contributor는 작은 bug fix뿐 아니라 architecture와 event model 설계에도 직접 참여할 수 있습니다.
-
-특히 도움이 필요한 분야:
-
-- Linux eBPF collectors
-- Windows ETW collectors
-- macOS Endpoint Security collectors
-- process/file/network attribution
-- graph modeling / entity resolution
-- interactive graph visualization
-- OpenTelemetry / MCP integrations
-- reproducible agent workload / tests
-- performance / overhead measurement
-- security research / provenance analysis
-- README / documentation translations
-
-작은 변경은 repository를 fork한 뒤 pull request를 보내주세요. 큰 architecture 또는 telemetry 변경은 platform, event source, 필요한 privilege, 예상 graph relationship을 설명하는 issue를 먼저 열어 주세요.
-
-### README translations
-
-`README.md`는 canonical English source입니다. 번역본은 `README.zh-TW.md`, `README.zh-CN.md`, `README.ja.md`, `README.ko.md`와 같은 locale-qualified filename을 사용합니다.
-
-새로운 언어 추가도 환영합니다. 구조, code example, link, roadmap status, 기술적 의미를 canonical README와 동기화해 주세요.
+Linux eBPF, Windows ETW, macOS Endpoint Security, Graph entity resolution, large-graph UX, OpenTelemetry/MCP, privacy/redaction, reproducible workload, performance evaluation, documentation translation 등의 기여를 환영합니다.
 
 > **Early contributors are especially welcome.**
 
-## Design principles
+## Documentation
 
-### Local first
-
-민감한 runtime telemetry를 제3자에게 업로드하지 않고 Agent behavior를 확인할 수 있어야 합니다.
-
-### Runtime truth over assumptions
-
-가능한 한 Agent framework의 주장보다 운영체제에서 실제로 발생한 사실을 우선적으로 보여줍니다.
-
-### Graph over log
-
-Log는 중요한 evidence이지만 runtime entity 간 relationship은 first-class data여야 합니다.
-
-### Framework agnostic
-
-특정 model provider나 Agent framework에 종속되지 않아야 합니다.
-
-### Explainable attribution
-
-두 node가 왜 연결되었는지, 어떤 raw event가 해당 edge를 뒷받침하는지 설명할 수 있어야 합니다.
-
-### No fake causality
-
-Temporal correlation을 causal attribution처럼 표시하지 않습니다.
+- [`Phase 1 — Runtime Collection`](docs/phase-1-runtime-collection.md)
+- [`Phase 2 — Execution Graph`](docs/phase-2-execution-graph.md)
 
 ## License
 
-[`LICENSE`](LICENSE)를 참고하세요.
-
----
-
-**Issue를 열고, 아이디어를 제안하고, Pull Request를 보내고, Integration을 만들고, Architecture에 도전하세요.**
-
-> **AI Agent 실행을 사람이 이해할 수 있게 만듭시다.**
+See [`LICENSE`](LICENSE).
