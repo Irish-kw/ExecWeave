@@ -78,6 +78,9 @@ def test_condense_graph_groups_repetitive_file_leaves() -> None:
     assert cluster["attributes"]["directory_bucket"] == "/repo/src"
     assert len(cluster["attributes"]["sample_members"]) == 3
     assert cluster["attributes"]["sample_truncated"] is True
+    assert cluster["attributes"]["expandable"] is False
+    assert "expansion" not in condensed
+    assert condensed["condensation"]["expansion_embedded"] is False
 
     cluster_edges = [edge for edge in condensed["edges"] if edge["target"] == cluster["id"]]
     assert len(cluster_edges) == 1
@@ -91,6 +94,27 @@ def test_condense_graph_groups_repetitive_file_leaves() -> None:
     assert any(edge["relation"] == "CONNECTED_TO" for edge in condensed["edges"])
     assert condensed["condensation"]["collapsed_node_count"] == 10
     assert original["node_count"] == 12
+
+
+def test_condense_graph_can_embed_exact_expansion_evidence() -> None:
+    original = _graph(6)
+    condensed = condense_graph(original, threshold=4, include_expansion=True)
+
+    cluster = next(node for node in condensed["nodes"] if node["type"] == "file_cluster")
+    assert cluster["attributes"]["expandable"] is True
+    assert condensed["condensation"]["expansion_embedded"] is True
+
+    expansion = condensed["expansion"]
+    assert expansion["schema_version"] == "0.1"
+    entry = expansion["clusters"][cluster["id"]]
+    assert entry["cluster_node_id"] == cluster["id"]
+    assert len(entry["nodes"]) == 6
+    assert len(entry["edges"]) == 6
+    assert all(node["type"] == "file" for node in entry["nodes"])
+    assert all(edge["relation"] == "OPENED_READ" for edge in entry["edges"])
+    assert {edge["target"] for edge in entry["edges"]} == {
+        node["id"] for node in entry["nodes"]
+    }
 
 
 def test_condense_graph_canonicalizes_windows_style_paths() -> None:
