@@ -10,9 +10,7 @@
 
 **看清楚 AI Agent 在你的電腦上實際做了什麼。**
 
-ExecWeave 是一個開源、local-first 的 AI Agent runtime observability 專案。它把本機 Agent 的執行行為轉成互動式 execution graph，而不是逼使用者閱讀幾百、幾千行 CLI log。
-
-ExecWeave 會連接 Agent、session、process、file、executable、socket 與 network endpoint 等 runtime entity，並保留支撐每條 edge 的 evidence。
+ExecWeave 是一個開源、local-first 的 AI Agent runtime observability 專案。它把 Agent 的執行行為轉成有 runtime evidence 支撐的互動式 execution graph，而不是逼使用者閱讀幾百、幾千行 CLI log。
 
 > **把不透明的 AI Agent 執行過程，變成人類真正看得懂的圖。**
 
@@ -24,28 +22,63 @@ cd ExecWeave
 python -m pip install -e ".[dev]"
 ```
 
-Debian / Ubuntu 若要使用 Linux reference backend：
+### Agent 還在跑時就看 Graph
+
+```bash
+execweave live --open -- claude
+```
+
+Live MVP 只會在 `127.0.0.1` 啟動本機 server，Agent 還在執行時瀏覽器裡的 Graph 就會持續更新。
+
+```text
+AI Agent
+   ↓
+portable runtime collector
+   ↓
+events.jsonl 持續增加
+   ↓
+execution graph snapshots
+   ↓
+127.0.0.1:<random-port>
+   ↓
+Live browser graph
+```
+
+Agent 結束後，ExecWeave 會驗證 event stream，並保存：
+
+```text
+.execweave/runs/<session-id>/
+├── events.jsonl
+├── graph.json
+└── viewer.html
+```
+
+目前 live 模式刻意只使用 **portable** collector。Linux `strace` backend 是 command 結束後才解析 trace，因此不會把 post-processing 假裝成 live telemetry。
+
+### Linux 上需要更強的 process-level evidence
+
+Debian / Ubuntu：
 
 ```bash
 sudo apt-get install strace
 ```
 
-接著只需要一個命令：
+接著用 syscall-backed attribution 記錄完整 run：
 
 ```bash
-execweave record --open -- claude
+execweave record --backend strace --open -- claude
 ```
 
-其他 Agent 也一樣：
+其他例子：
 
 ```bash
-execweave record --open -- codex
-execweave record --open -- gemini
-execweave record --open -- opencode
+execweave live --open -- codex
+execweave live --open -- gemini
+execweave live --open -- opencode
 execweave record --open -- python my_agent.py
 ```
 
-`record` 會在 Agent 結束後自動完成：
+`record` 會在 command 結束後自動完成：
 
 ```text
 AI Agent
@@ -61,22 +94,14 @@ graph.json
 viewer.html
 ```
 
-預設輸出：
-
-```text
-.execweave/runs/<session-id>/
-├── events.jsonl
-├── graph.json
-└── viewer.html
-```
-
-也可以指定位置：
+也可以指定輸出位置：
 
 ```bash
+execweave live --output-dir my-live-run --open -- claude
 execweave record --output-dir my-run --open -- claude
 ```
 
-ExecWeave 預設拒絕覆寫既有且非空的 artifact，避免不同 run 被混在一起。
+ExecWeave 會拒絕默默覆寫既有且非空的 artifact，避免不同 run 被混在一起。
 
 ## 目前狀態
 
@@ -87,56 +112,59 @@ ExecWeave 目前版本為 **v0.3.0**。
 **Linux reference path 與跨平台 portable fallback 已完成。**
 
 - graph-ready JSONL event stream
-- monotonic sequence
+- 每個 run 單調遞增的 sequence
 - root / descendant process capture
 - Linux syscall-backed short-lived process capture
-- process-attributed file open/create/delete/rename
-- IPv4 / IPv6 / Unix-socket connection evidence
+- Linux process-attributed file open/create/delete/rename evidence
+- Linux IPv4 / IPv6 / Unix-socket connection evidence
 - non-blocking / failed connection attempt 保留
-- Linux / macOS / Windows portable fallback
-- causal / non-causal attribution
-- event validator
-- diagnostics / benchmark / CI
+- Linux / macOS / Windows 的 psutil/watchdog portable fallback
+- causal / non-causal attribution 明確區分
+- event-stream validation
+- backend diagnostics / auto selection
+- benchmark harness / cross-platform CI configuration
 
 ### Phase 2 — Execution Graph
 
 **核心 Graph materialization 與 query layer 已完成第一版。**
 
 - validated JSONL → graph JSON
-- node deduplication
+- stable entity ID node deduplication
 - repeated edge aggregation
-- temporal first/last metadata
+- first / last temporal metadata
 - supporting event IDs
 - causality preservation
 - graph summary
 - graph filtering
 - directed path query
+- 大型 run 的 repetitive leaf-resource condensation
 
 ### Phase 3 — Interactive Viewer
 
-**Standalone local Viewer MVP 已完成第一版。**
+**Standalone 與 Live local Viewer MVP 都已完成第一版。**
 
-- 不依賴 CDN / 外部 JavaScript
+- standalone HTML，不依賴 CDN / 外部 JavaScript
+- portable collector 的 localhost live graph update
 - pan / zoom
-- node drag
+- draggable node
 - node / edge detail
 - search
-- causal / non-causal edge 視覺區分
-- automatic directional layout
+- causal / non-causal edge styling
+- directional layout
 
-目前尚未做到 Agent 執行中的 live graph update。
+Progressive cluster expansion 與 Timeline ↔ Graph synchronization 仍是後續工作。
 
 ## 進階手動流程
 
-一般使用者建議直接使用 `record`。每個階段也可以獨立操作。
+一般使用者建議直接使用 `live` 或 `record`。每個階段也可以獨立執行。
 
-### 1. 查看 backend
+### 1. 查看 collector/backend 能力
 
 ```bash
 execweave doctor
 ```
 
-### 2. 收集 runtime events
+### 2. 收集 runtime event
 
 ```bash
 execweave run --output run.jsonl -- claude
@@ -148,6 +176,8 @@ execweave run --output run.jsonl -- claude
 execweave run --backend strace --output run.jsonl -- claude
 execweave run --backend portable --output run.jsonl -- claude
 ```
+
+`auto` 預設在 Linux 有 `strace` 時優先使用，否則使用 `portable`。
 
 ### 3. 驗證 event stream
 
@@ -167,10 +197,28 @@ execweave validate --allow-incomplete run.jsonl
 execweave graph run.jsonl --output run.graph.json
 ```
 
-### 5. 開啟 Viewer
+### 5. 壓縮大型 Graph
+
+長時間 Agent run 可能碰到幾百、幾千個低價值 leaf file。ExecWeave 可以把等價的 file/directory/executable leaf 收成 cluster，同時保留 process、agent、session、socket、network endpoint：
+
+```bash
+execweave graph-condense run.graph.json \
+  --output run.compact.graph.json \
+  --threshold 8
+```
+
+只有「單一 incoming relationship 且沒有 downstream behavior」的 leaf resource 才有資格被折疊，不會為了畫面好看就破壞重要 runtime topology。
+
+### 6. 開啟 Viewer
 
 ```bash
 execweave view run.graph.json --output run.html --open
+```
+
+大型 run：
+
+```bash
+execweave view run.compact.graph.json --output run.compact.html --open
 ```
 
 ## Graph-first event model
@@ -241,7 +289,7 @@ ExecWeave 不會把 temporal correlation 包裝成 causal proof。
 
 ### `strace` — Linux reference backend
 
-使用 `strace -ff` 跟隨 descendant process，將 process/filesystem/network syscall evidence 轉成 graph-ready events。
+使用 `strace -ff` 跟隨 descendant process，將 process / filesystem / network syscall evidence 轉成 graph-ready events。
 
 Raw trace 預設解析後刪除：
 
@@ -249,15 +297,19 @@ Raw trace 預設解析後刪除：
 execweave run --keep-native-trace -- claude
 ```
 
-### `portable` — 跨平台 fallback
+### `portable` — 跨平台 fallback 與目前的 live backend
 
-使用 psutil + watchdog，可在 Linux、macOS、Windows 上執行。較弱的 filesystem attribution 會維持 non-causal，不會偽裝成 process-level 因果關係。
+使用 psutil + watchdog，可在 Linux、macOS、Windows 上執行。它也是目前 live graph 的 backend，因為 observation 會在 command 執行中持續 emit。
+
+限制會明確保留：filesystem change 只有 session correlation，不是 process attribution；完整生命週期落在 polling interval 之間的極短 process 仍可能漏掉。
 
 未來 native backend：
 
 - Linux eBPF
 - Windows ETW
 - macOS Endpoint Security
+
+目標是讓未來 native backend 使用同一份 event contract，同時提供低 overhead 的 live collection。
 
 ## Event stream 完整性
 
@@ -314,21 +366,37 @@ Graph contract 請參考 [`docs/phase-2-execution-graph.md`](docs/phase-2-execut
 
 ## Interactive Viewer
 
+建立 standalone viewer：
+
 ```bash
 execweave view run.graph.json --output run.html --open
 ```
+
+直接啟動 live viewer：
+
+```bash
+execweave live --open -- claude
+```
+
+常用 live 選項：
+
+```bash
+execweave live --port 8765 --open -- claude
+execweave live --linger 10 --open -- claude
+execweave live --no-files --open -- claude
+```
+
+Live HTTP server 只綁定 `127.0.0.1`，預設不會暴露到 LAN。
 
 目前支援：
 
 - wheel zoom
 - background drag / pan
-- node drag
-- node / edge JSON detail
+- standalone viewer 的 node drag
+- node / edge detail
 - node ID / name / type search
 - causal / non-causal edge styling
 - fit / reset
-
-Viewer 是 standalone local HTML，不需要外部 CDN。
 
 ## Benchmark
 
@@ -345,7 +413,8 @@ ExecWeave 是 **local-first**：
 
 - runtime event 預設留在本機
 - Graph 在本機建立
-- Viewer 是 standalone local file
+- standalone viewer data 留在產生的 HTML
+- live serving 只綁 localhost
 - 不需要外部 CDN
 - 不蒐集 file content
 - 不蒐集 `read()` / `write()` byte buffer
@@ -362,7 +431,7 @@ Runtime metadata 仍可能包含敏感 path、command、endpoint，分享前請�
 - [x] Portable fallback
 - [x] Causality semantics
 - [x] Event validation
-- [x] Diagnostics / benchmark / CI
+- [x] Diagnostics / benchmark / CI configuration
 - [ ] Linux eBPF
 - [ ] Windows ETW
 - [ ] macOS Endpoint Security
@@ -374,6 +443,7 @@ Runtime metadata 仍可能包含敏感 path、command、endpoint，分享前請�
 - [x] Edge aggregation
 - [x] Temporal metadata
 - [x] Summary / filter / path query
+- [x] Large-run leaf-resource condensation
 - [ ] 更強的 entity resolution
 - [ ] Time-window snapshot
 - [ ] Large-run compact evidence indexing
@@ -382,9 +452,10 @@ Runtime metadata 仍可能包含敏感 path、command、endpoint，分享前請�
 
 - [x] Standalone local Viewer MVP
 - [x] Pan / zoom / drag / search / details
-- [ ] Live graph updates
+- [x] Portable live graph update
+- [x] 初步 large-graph condensation
+- [ ] Viewer progressive cluster expansion
 - [ ] Timeline ↔ Graph synchronization
-- [ ] Large graph clustering / progressive expansion
 - [ ] Saved filter / focused subgraph
 
 ### 後續 Security / Research Layer
