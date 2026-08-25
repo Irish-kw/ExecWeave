@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from uuid import uuid4
 
+from .analysis import analyze_graph
 from .backends import backend_diagnostics, create_collector, resolve_backend
 from .benchmark import format_benchmark, run_benchmark
 from .graph import build_execution_graph, write_execution_graph
@@ -201,6 +202,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Maximum member names stored as cluster examples (default: 8)",
     )
 
+    analyze = subparsers.add_parser(
+        "analyze",
+        help="Run conservative explainable security rules over an execution graph",
+    )
+    analyze.add_argument("graph", type=Path, help="Path to a graph JSON file")
+    analyze.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Optional JSON report output path; findings are always printed to stdout",
+    )
+
     path_query = subparsers.add_parser("path", help="Find directed paths in an execution graph")
     path_query.add_argument("graph", type=Path, help="Path to a graph JSON file")
     path_query.add_argument("source", help="Exact source node ID")
@@ -333,6 +346,24 @@ def main(argv: list[str] | None = None) -> int:
                 sort_keys=True,
             )
         )
+        return 0
+
+    if args.subcommand == "analyze":
+        try:
+            payload = load_graph(args.graph)
+            report = analyze_graph(payload)
+            if args.output is not None:
+                output = args.output.expanduser().resolve()
+                output.parent.mkdir(parents=True, exist_ok=True)
+                if output.exists() and output.stat().st_size > 0:
+                    raise FileExistsError(f"ExecWeave analysis output already exists: {output}")
+                output.write_text(
+                    json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+                    encoding="utf-8",
+                )
+        except (FileExistsError, ValueError) as exc:
+            parser.error(str(exc))
+        print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
         return 0
 
     if args.subcommand == "path":
