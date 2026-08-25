@@ -44,6 +44,18 @@ jobs:
         run: python scripts/check_correlation_graph.py claude-record-smoke/graph.correlated.json
       - name: Check correlated standalone viewer JavaScript syntax
         run: python scripts/check_viewer_js.py claude-record-smoke/viewer.correlated.html --output claude-record-smoke/viewer.correlated.js
+      - name: Gemini run-bound semantic and correlation smoke
+        run: execweave-gemini-record --backend auto --no-files --no-network --output-dir gemini-record-smoke -- python scripts/emit_gemini_hook_smoke.py
+      - name: Validate Gemini runtime stream
+        run: execweave validate gemini-record-smoke/events.jsonl
+      - name: Validate Gemini merged stream
+        run: execweave validate gemini-record-smoke/events.semantic.jsonl
+      - name: Validate Gemini correlated stream
+        run: execweave validate gemini-record-smoke/events.correlated.jsonl
+      - name: Verify Gemini conservative correlation edge
+        run: python scripts/check_correlation_graph.py gemini-record-smoke/graph.correlated.json
+      - name: Check Gemini correlated viewer JavaScript syntax
+        run: python scripts/check_viewer_js.py gemini-record-smoke/viewer.correlated.html --output gemini-record-smoke/viewer.correlated.js
       - name: Collector diagnostics
         run: execweave doctor
       - name: Portable end-to-end smoke
