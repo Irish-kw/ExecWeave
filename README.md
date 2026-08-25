@@ -123,6 +123,7 @@ ExecWeave is currently **v0.4.0**.
 - graph summary
 - graph filtering
 - directed path queries
+- evidence-preserving N-hop focused subgraphs
 - large-run graph condensation for repetitive leaf resources
 - optional exact expansion payload for condensed clusters
 
@@ -138,6 +139,10 @@ ExecWeave is currently **v0.4.0**.
 - progressive cluster expansion for condensed graphs
 - expand one cluster without expanding the rest of the graph
 - collapse expanded clusters back to the compact view
+- 1-hop / 2-hop focused runtime neighborhoods from any visible node
+- focus recomputes under the current timeline / relation / causal evidence constraints
+- browser-local Saved View presets for filters, search, timeline, focus, and expanded clusters
+- Saved View presets store view state only, never graph evidence
 - pan / zoom
 - draggable nodes
 - node and edge inspection
@@ -146,7 +151,7 @@ ExecWeave is currently **v0.4.0**.
 - causal/non-causal edge styling
 - automatic directional layout
 
-Saved filters and additional focused-subgraph workflows remain future work.
+The Phase 3 viewer baseline now covers replay, progressive expansion, focused neighborhoods, and locally saved views.
 
 ### Security analysis
 
@@ -171,6 +176,26 @@ execweave validate run.jsonl
 execweave graph run.jsonl --output run.graph.json
 execweave view run.graph.json --output run.html --open
 ```
+
+### Focus on one runtime neighborhood
+
+Extract a real graph artifact around one or more exact node IDs:
+
+```bash
+execweave graph-focus run.graph.json PROCESS_NODE_ID \
+  --hops 2 \
+  --direction both \
+  --causal-only \
+  --output focused.graph.json
+
+execweave view focused.graph.json \
+  --output focused.html \
+  --open
+```
+
+`--direction` accepts `in`, `out`, or `both`. `--relation` can be repeated to restrict traversal to selected relationship types. Filters are applied **before** traversal, and `graph-focus` only copies existing nodes and evidence edges; it never invents a shortcut or inferred causal relationship.
+
+The standalone Viewer provides the same idea interactively: click a node and choose **Focus 1 hop** or **Focus 2 hops**. **Clear focus** restores the current full filtered graph.
 
 ### Condense a large graph
 
@@ -304,6 +329,7 @@ ExecWeave also rejects accidental reuse of non-empty event/graph/viewer outputs 
 ```bash
 execweave graph-summary run.graph.json
 execweave graph-filter run.graph.json --output causal.graph.json --causal-only
+execweave graph-focus run.graph.json NODE_ID --hops 2 --output focused.graph.json
 execweave path run.graph.json SOURCE_NODE_ID TARGET_NODE_ID --causal-only
 ```
 
@@ -318,7 +344,9 @@ execweave live --open -- claude
 
 The standalone viewer contains an **Evidence sequence** slider. Drag it backward to inspect an earlier graph state or press **Play** to replay the run. An edge is introduced only after its `first_sequence`; if an aggregated relationship has later evidence that has not happened yet, the Viewer labels it `partial` instead of exposing the final count early.
 
-Timeline playback composes with node-type, relation, causal-only, search filters, and progressively expanded clusters.
+Click a node to focus on its 1-hop or 2-hop runtime neighborhood. Focus follows only evidence allowed by the current timeline, relation, and causal filters.
+
+Use **Save view** to persist the current node/relation/causal filters, search text, timeline position, focus, and expanded clusters in browser-local storage. Saved views contain only UI state — not graph nodes, edges, event evidence, file contents, or prompts. If browser storage is unavailable, the Viewer safely keeps presets only for the current page session.
 
 Useful live options:
 
@@ -337,6 +365,7 @@ ExecWeave is **local-first**.
 - runtime events stay local by default
 - graph construction is local
 - standalone viewer data stays in the generated HTML
+- saved view presets contain UI state only and stay browser-local when storage is available
 - live serving binds to localhost only
 - no external CDN is required
 - file contents are not traced
@@ -366,6 +395,7 @@ Runtime metadata can still include sensitive paths, commands, and endpoints. Rev
 - [x] Edge aggregation
 - [x] Temporal metadata
 - [x] Summary / filter / path query
+- [x] N-hop focused graph artifacts
 - [x] Large-run leaf-resource condensation
 - [x] Optional exact expansion evidence for clusters
 - [ ] Stronger entity resolution
@@ -380,7 +410,8 @@ Runtime metadata can still include sensitive paths, commands, and endpoints. Rev
 - [x] Initial large-graph condensation
 - [x] Timeline ↔ Graph synchronization
 - [x] Progressive cluster expansion in the viewer
-- [ ] Saved filters and focused subgraphs
+- [x] Focused 1-hop / 2-hop runtime neighborhoods
+- [x] Browser-local Saved View presets
 
 ### Security / research layers
 
@@ -404,7 +435,7 @@ Runtime metadata can still include sensitive paths, commands, and endpoints. Rev
 
 **Contributions are very welcome.**
 
-High-impact areas include Linux eBPF, Windows ETW, macOS Endpoint Security, graph entity resolution, live/large-graph visualization, OpenTelemetry/MCP integrations, privacy/redaction, reproducible agent workloads, and performance evaluation.
+High-impact areas include Linux eBPF, Windows ETW, macOS Endpoint Security, graph entity resolution, Agent/Tool/MCP semantic telemetry, OpenTelemetry/MCP integrations, privacy/redaction, reproducible agent workloads, and performance evaluation.
 
 For a new collector or architecture change, open an issue first and describe the telemetry source, privilege requirements, expected graph relationships, and causal guarantees.
 
