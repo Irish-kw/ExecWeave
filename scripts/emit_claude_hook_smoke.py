@@ -11,7 +11,7 @@ from pathlib import Path
 def main() -> int:
     # Keep the child alive long enough for the portable 100 ms process sampler.
     child_code = "import time; time.sleep(1.2); print('execweave-correlation-smoke')"
-    command_head = Path(sys.executable).name
+    executable = str(Path(sys.executable).resolve())
     payload = {
         "session_id": "ci-claude-record-session",
         "prompt_id": "ci-prompt",
@@ -20,7 +20,7 @@ def main() -> int:
         "hook_event_name": "PreToolUse",
         "tool_name": "Bash",
         "tool_use_id": "ci-record-tool-use",
-        "tool_input": {"command": f'{command_head} -c "{child_code}"'},
+        "tool_input": {"command": f'"{executable}" -c "{child_code}"'},
     }
     if not os.environ.get("EXECWEAVE_SEMANTIC_SIDECAR"):
         raise SystemExit("run-bound semantic sidecar environment was not inherited")
