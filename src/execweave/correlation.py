@@ -77,6 +77,7 @@ class _Declaration:
     command_entity: dict[str, Any]
     command_token: str
     command_head: str
+    command_argv: tuple[str, ...]
 
 
 @dataclass
@@ -88,6 +89,7 @@ class _Candidate:
     has_exec_match: bool = False
     has_process_exe_match: bool = False
     has_cmdline_match: bool = False
+    has_argv_tail_match: bool = False
 
     def observe(
         self,
@@ -97,6 +99,7 @@ class _Candidate:
         exec_match: bool = False,
         process_exe_match: bool = False,
         cmdline_match: bool = False,
+        argv_tail_match: bool = False,
     ) -> None:
         if timestamp >= self.latest_timestamp:
             self.latest_timestamp = timestamp
@@ -107,6 +110,7 @@ class _Candidate:
         self.has_exec_match = self.has_exec_match or exec_match
         self.has_process_exe_match = self.has_process_exe_match or process_exe_match
         self.has_cmdline_match = self.has_cmdline_match or cmdline_match
+        self.has_argv_tail_match = self.has_argv_tail_match or argv_tail_match
 
     def method_and_confidence(self) -> tuple[str, float]:
         if self.has_exec_match and self.has_cmdline_match:
@@ -117,7 +121,11 @@ class _Candidate:
             return "unique_process_exe_and_cmdline_match", 0.90
         if self.has_process_exe_match:
             return "unique_process_exe_match", 0.85
-        return "unique_process_cmdline_match", 0.80
+        if self.has_cmdline_match:
+            return "unique_process_cmdline_match", 0.80
+        if self.has_argv_tail_match:
+            return "unique_process_argv_tail_match", 0.80
+        raise RuntimeError("correlation candidate has no matching evidence")
 
 
 def _parse_timestamp(value: object, *, context: str) -> datetime:
@@ -220,44 +228,62 @@ def _has_shell_control(command: str) -> bool:
     return quote is not None
 
 
-def _first_token(command: str) -> str | None:
-    text = command.lstrip()
-    if not text:
-        return None
-    if text[0] not in {"'", '"'}:
-        return text.split(None, 1)[0]
-
-    quote = text[0]
-    chars: list[str] = []
-    index = 1
-    while index < len(text):
-        char = text[index]
-        if char == quote:
-            return "".join(chars)
-        if (
-            char == "\\"
-            and quote == '"'
-            and index + 1 < len(text)
-            and text[index + 1] == '"'
-        ):
-            chars.append('"')
-            index += 2
-            continue
-        chars.append(char)
-        index += 1
-    return None
-
-
-def _command_identity(command: str) -> tuple[str, str] | None:
+def _command_argv(command: str) -> tuple[str, ...] | None:
     if _has_shell_control(command):
         return None
-    token = _first_token(command)
-    if not token or "=" in token:
+    tokens: list[str] = []
+    chars: list[str] = []
+    quote: str | None = None
+    token_started = False
+    index = 0
+    while index < len(command):
+        char = command[index]
+        if quote is not None:
+            if char == quote:
+                quote = None
+                token_started = True
+            elif (
+                quote == '"'
+                and char == "\\"
+                and index + 1 < len(command)
+                and command[index + 1] == '"'
+            ):
+                chars.append('"')
+                token_started = True
+                index += 1
+            else:
+                chars.append(char)
+                token_started = True
+        elif char.isspace():
+            if token_started:
+                tokens.append("".join(chars))
+                chars = []
+                token_started = False
+        elif char in {"'", '"'}:
+            quote = char
+            token_started = True
+        else:
+            chars.append(char)
+            token_started = True
+        index += 1
+    if quote is not None:
+        return None
+    if token_started:
+        tokens.append("".join(chars))
+    return tuple(tokens)
+
+
+def _command_identity(command: str) -> tuple[str, str, tuple[str, ...]] | None:
+    argv = _command_argv(command)
+    if not argv:
+        return None
+    token = argv[0]
+    if "=" in token:
         return None
     head = _normalize_executable(token)
     if head is None or head in _BUILTINS:
         return None
-    return token, head
+    return token, head, argv
 
 
 def _declarations(events: list[dict[str, Any]]) -> list[_Declaration]:
@@ -277,9 +303,9 @@ def _declarations(events: list[dict[str, Any]]) -> list[_Declaration]:
             continue
         identity = _command_identity(command)
         if identity is None:
-            token, head = "", ""
+            token, head, argv = "", "", ()
         else:
-            token, head = identity
+            token, head, argv = identity
         result.append(
             _Declaration(
                 event=event,
@@ -288,6 +314,7 @@ def _declarations(events: list[dict[str, Any]]) -> list[_Declaration]:
                 command_entity=deepcopy(target),
                 command_token=token,
                 command_head=head,
+                command_argv=argv,
             )
         )
     result.sort(key=lambda item: item.timestamp)
@@ -338,6 +365,7 @@ def _candidate_processes(
         exec_match = False
         process_exe_match = False
         cmdline_match = False
+        argv_tail_match = False
         if event_type == "process.exec" and relation == "EXECUTED":
             source = event.get("source")
             target = event.get("target")
@@ -362,9 +390,14 @@ def _candidate_processes(
                 continue
             process_exe_match = _same_executable_identity(attributes.get("exe"), declaration)
             cmdline = attributes.get("cmdline")
-            if isinstance(cmdline, list) and cmdline and isinstance(cmdline[0], str):
+            if isinstance(cmdline, list) and cmdline and all(isinstance(item, str) for item in cmdline):
                 cmdline_match = _same_executable_identity(cmdline[0], declaration)
-            if not process_exe_match and not cmdline_match:
+                argv_tail_match = (
+                    len(declaration.command_argv) > 1
+                    and len(cmdline) == len(declaration.command_argv)
+                    and tuple(cmdline[1:]) == declaration.command_argv[1:]
+                )
+            if not process_exe_match and not cmdline_match and not argv_tail_match:
                 continue
             process = deepcopy(target)
         if process is None:
@@ -387,6 +420,7 @@ def _candidate_processes(
             exec_match=exec_match,
             process_exe_match=process_exe_match,
             cmdline_match=cmdline_match,
+            argv_tail_match=argv_tail_match,
         )
     return candidates
 
