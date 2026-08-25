@@ -12,7 +12,7 @@
 
 ExecWeave is an open-source, local-first runtime observability project that turns AI-agent activity into an interactive execution graph.
 
-Instead of forcing users to understand hundreds of CLI lines, ExecWeave connects agents, sessions, processes, files, executables, sockets, and network endpoints into a graph backed by runtime evidence.
+Instead of forcing users to understand hundreds of CLI lines, ExecWeave connects agents, sessions, tools, MCP servers, processes, files, executables, sockets, and network endpoints into a graph backed by explicit evidence sources.
 
 > **Turn opaque AI-agent execution into something humans can actually understand.**
 
@@ -57,6 +57,37 @@ When the command exits, ExecWeave validates the event stream and stores:
 
 The current live path intentionally uses the **portable** collector. The Linux `strace` backend is post-processed after the command exits, so presenting it as live would be misleading.
 
+### Claude Code: runtime + semantic graph
+
+ExecWeave also has a native Claude Code hook adapter for logical Agent / Tool / MCP evidence.
+
+Generate the hook settings fragment once:
+
+```bash
+execweave-claude-hook --print-config
+```
+
+Merge its `hooks` object into your Claude Code settings, then record runtime and semantic evidence together:
+
+```bash
+execweave-claude-record --open -- claude
+```
+
+When semantic hooks fire, the same run directory keeps the evidence layers separate and also builds a merged graph:
+
+```text
+.execweave/runs/<run-id>/
+├── events.jsonl              # runtime only
+├── graph.json                # runtime-only graph
+├── viewer.html               # runtime-only viewer
+├── semantic.jsonl            # Claude hook evidence only
+├── events.semantic.jsonl     # validated merged stream
+├── graph.semantic.json       # runtime + semantic graph
+└── viewer.semantic.html      # runtime + semantic viewer
+```
+
+The native Claude hook knows the logical tool call, but Claude's hook payload does not expose the actual Bash child PID. ExecWeave therefore does **not** invent an exact Tool → Process edge from timing or command similarity. See [`docs/claude-code-hooks.md`](docs/claude-code-hooks.md).
+
 ### Stronger Linux post-run evidence
 
 On Debian/Ubuntu:
@@ -70,6 +101,8 @@ Then record a run using syscall-backed attribution and open the final graph:
 ```bash
 execweave record --backend strace --open -- claude
 ```
+
+`execweave-claude-record` with `--backend auto` also prefers `strace` on Linux when it is available.
 
 Other examples:
 
@@ -85,6 +118,7 @@ Choose an explicit artifact directory:
 ```bash
 execweave live --output-dir my-live-run --open -- claude
 execweave record --output-dir my-run --open -- claude
+execweave-claude-record --output-dir my-claude-run --open -- claude
 ```
 
 ExecWeave refuses to silently overwrite existing non-empty artifacts.
@@ -153,6 +187,21 @@ ExecWeave is currently **v0.4.0**.
 
 The Phase 3 viewer baseline now covers replay, progressive expansion, focused neighborhoods, and locally saved views.
 
+### Semantic telemetry
+
+**Generic semantic merge plus the first native provider adapter are implemented.**
+
+- provider-agnostic semantic JSONL sidecars
+- validated `semantic-merge` into a new event stream without rewriting raw runtime evidence
+- `agent`, `tool_call`, `tool`, `mcp_server`, `model`, and `command` graph entities
+- conservative PID-based `process_reference` resolution only when a source actually provides a PID
+- native Claude Code hooks for session/tool/subagent/model semantics
+- MCP normalization from `mcp__<server>__<tool>` names
+- run-bound `execweave-claude-record` workflow across Linux, macOS, and Windows
+- explicit provider-vs-OS evidence boundary; Claude hooks do not fabricate Tool → Process attribution
+
+Additional provider adapters and explicit confidence-bearing semantic/runtime correlation remain future work.
+
 ### Security analysis
 
 **First conservative, explainable rule layer implemented.**
@@ -167,7 +216,7 @@ ExecWeave does not turn co-occurrence into a data-flow claim.
 
 ## Advanced manual workflow
 
-The one-command `live` and `record` workflows are recommended. Each stage is also available separately.
+The one-command `live`, `record`, and Claude-specific record workflows are recommended. Each stage is also available separately.
 
 ```bash
 execweave doctor
@@ -176,6 +225,21 @@ execweave validate run.jsonl
 execweave graph run.jsonl --output run.graph.json
 execweave view run.graph.json --output run.html --open
 ```
+
+### Merge a semantic sidecar manually
+
+```bash
+execweave semantic-merge run.jsonl semantic.jsonl \
+  --output run.semantic.jsonl
+execweave validate run.semantic.jsonl
+execweave graph run.semantic.jsonl \
+  --output run.semantic.graph.json
+execweave view run.semantic.graph.json \
+  --output run.semantic.html \
+  --open
+```
+
+The raw runtime stream and semantic sidecar remain unchanged. See [`docs/semantic-telemetry.md`](docs/semantic-telemetry.md) for the generic contract.
 
 ### Focus on one runtime neighborhood
 
@@ -250,13 +314,13 @@ is reported as a **possible sensitive-file-to-network path**, not as proof that 
 
 ## Graph-first event model
 
-Every runtime observation is represented as:
+Every observation is represented as:
 
 ```text
 source --RELATION--> target
 ```
 
-Examples:
+Runtime examples:
 
 ```text
 session --LAUNCHED--> process
@@ -267,6 +331,15 @@ process --OPENED_WRITE--> file
 process --DELETED--> file
 process --CONNECTED_TO--> network_endpoint
 process --CONNECT_ATTEMPTED--> network_endpoint
+```
+
+Semantic examples:
+
+```text
+agent --REQUESTED_TOOL_CALL--> tool_call
+tool_call --USES_TOOL--> tool
+tool_call --DECLARED_COMMAND--> command
+tool_call --VIA_MCP--> mcp_server
 ```
 
 Repeated evidence is aggregated. If one process opens the same file 17 times, the graph stores one relationship with `count = 17` instead of 17 overlapping lines.
@@ -295,6 +368,8 @@ session --OBSERVED_FILE_CHANGE--> file
 ```
 
 and therefore marks it `causal: false`.
+
+Provider hooks are also kept distinct from OS attribution. A Claude hook can prove that a logical tool invocation was requested, but without a provider-supplied PID it does not prove which exact process implemented that tool call.
 
 Temporal correlation is not presented as causal proof, and same-process file/network activity is not presented as byte-level data flow.
 
@@ -364,15 +439,18 @@ ExecWeave is **local-first**.
 
 - runtime events stay local by default
 - graph construction is local
+- semantic sidecars and merged semantic graphs stay local by default
+- the Claude adapter does not persist `Write`/`Edit` content or `PostToolUse.tool_response`
+- declared shell commands are bounded but remain potentially sensitive metadata
 - standalone viewer data stays in the generated HTML
 - saved view presets contain UI state only and stay browser-local when storage is available
 - live serving binds to localhost only
 - no external CDN is required
-- file contents are not traced
+- file contents are not traced by the runtime collector
 - `read()` / `write()` byte buffers are not collected
 - raw Linux syscall traces are deleted after parsing unless explicitly retained
 
-Runtime metadata can still include sensitive paths, commands, and endpoints. Review artifacts before sharing them.
+Runtime and semantic metadata can still include sensitive paths, commands, endpoints, and provider identifiers. Review artifacts before sharing them.
 
 ## Roadmap
 
@@ -413,10 +491,14 @@ Runtime metadata can still include sensitive paths, commands, and endpoints. Rev
 - [x] Focused 1-hop / 2-hop runtime neighborhoods
 - [x] Browser-local Saved View presets
 
-### Security / research layers
+### Semantic / security / research layers
 
 - [x] Initial explainable rule analysis
-- [ ] Agent / Tool / MCP semantic telemetry
+- [x] Generic Agent / Tool / MCP semantic telemetry contract
+- [x] Native Claude Code hook adapter
+- [x] Run-bound Claude runtime + semantic recording
+- [ ] Additional provider adapters
+- [ ] Explicit confidence-bearing semantic/runtime correlation
 - [ ] credential and secret entities
 - [ ] byte-level data-flow / taint tracking
 - [ ] anomaly detection
@@ -429,13 +511,15 @@ Runtime metadata can still include sensitive paths, commands, and endpoints. Rev
 - [`Phase 1 — Runtime Collection`](docs/phase-1-runtime-collection.md)
 - [`Phase 2 — Execution Graph`](docs/phase-2-execution-graph.md)
 - [`Live Graph`](docs/live-graph.md)
+- [`Semantic Telemetry`](docs/semantic-telemetry.md)
+- [`Claude Code Hooks`](docs/claude-code-hooks.md)
 - [`Security Analysis`](docs/security-analysis.md)
 
 ## Contributing
 
 **Contributions are very welcome.**
 
-High-impact areas include Linux eBPF, Windows ETW, macOS Endpoint Security, graph entity resolution, Agent/Tool/MCP semantic telemetry, OpenTelemetry/MCP integrations, privacy/redaction, reproducible agent workloads, and performance evaluation.
+High-impact areas include Linux eBPF, Windows ETW, macOS Endpoint Security, graph entity resolution, additional Agent/Tool/MCP provider adapters, explicit semantic/runtime correlation, OpenTelemetry/MCP integrations, privacy/redaction, reproducible agent workloads, and performance evaluation.
 
 For a new collector or architecture change, open an issue first and describe the telemetry source, privilege requirements, expected graph relationships, and causal guarantees.
 
