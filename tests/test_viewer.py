@@ -143,6 +143,33 @@ def _expandable_graph() -> dict:
     return condense_graph(graph, threshold=4, include_expansion=True)
 
 
+def _large_graph() -> dict:
+    nodes = [
+        {"id": f"node-{index}", "type": "file", "name": f"file-{index}"}
+        for index in range(600)
+    ]
+    edges = [
+        {
+            "id": f"edge-{index}",
+            "source": "node-0",
+            "target": f"node-{(index % 599) + 1}",
+            "relation": "OBSERVED_FILE_CHANGE",
+            "count": 1,
+            "causal": False,
+        }
+        for index in range(1000)
+    ]
+    return {
+        "graph_schema_version": "0.1",
+        "session_id": "large",
+        "event_count": 100000,
+        "node_count": len(nodes),
+        "edge_count": len(edges),
+        "nodes": nodes,
+        "edges": edges,
+    }
+
+
 def test_viewer_is_standalone_and_escapes_embedded_graph_data() -> None:
     html = render_graph_html(_graph())
     assert "ExecWeave" in html
@@ -262,8 +289,50 @@ def test_viewer_contains_progressive_cluster_expansion() -> None:
 
 def test_viewer_safely_handles_graphs_without_sequence_metadata() -> None:
     html = render_graph_html(_graph(with_sequence=False))
-    assert "const maxSequence=Math.max(0" in html
+    assert "let maxSequence=0" in html
+    assert "Math.max(0,..." not in html
     assert "timeline.style.display='none'" in html
+
+
+def test_viewer_avoids_large_array_spread_and_throttles_drag_edge_redraws() -> None:
+    html = render_graph_html(_graph())
+    assert "Math.min(...xs)" not in html
+    assert "Math.max(...xs)" not in html
+    assert "Math.max(0,...depth.values())" not in html
+    assert "scheduleEdgeRender()" in html
+    assert "edgeRenderFrame=requestAnimationFrame" in html
+
+
+def test_viewer_refuses_oversized_svg_before_embedding_graph_payload() -> None:
+    html = render_graph_html(_large_graph())
+
+    assert "LARGE GRAPH PROTECTIVE MODE" in html
+    assert "Rendering disabled to protect browser memory" in html
+    assert "No evidence was deleted or reclassified" in html
+    assert "600" in html
+    assert "1000" in html
+    assert "5400" in html
+    assert "<svg" not in html
+    assert "node-599" not in html
+
+
+def test_viewer_counts_hidden_expansion_members_toward_safety_budget() -> None:
+    graph = _graph()
+    graph["expansion"] = {
+        "clusters": {
+            "cluster:large": {
+                "nodes": [
+                    {"id": f"hidden-{index}", "type": "file", "name": str(index)}
+                    for index in range(1250)
+                ],
+                "edges": [],
+            }
+        }
+    }
+
+    html = render_graph_html(graph)
+    assert "LARGE GRAPH PROTECTIVE MODE" in html
+    assert "hidden-1249" not in html
 
 
 def test_write_graph_html_refuses_existing_nonempty_output(tmp_path: Path) -> None:
