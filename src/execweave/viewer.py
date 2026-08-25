@@ -35,6 +35,7 @@ input,select{border:1px solid var(--border);border-radius:7px;padding:7px 9px;ba
 #canvas-wrap{position:relative;min-width:0;min-height:0;overflow:hidden}#graph{width:100%;height:100%;display:block;cursor:grab;user-select:none}#graph.panning{cursor:grabbing}
 aside{overflow:auto;border-left:1px solid var(--border);background:var(--panel);padding:16px}aside h2{margin:0 0 12px;font-size:15px}aside h3{margin:18px 0 8px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
 #details pre{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.empty{color:var(--muted)}.detail-actions{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0 8px}
+.correlation-summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.correlation-stat{border:1px solid var(--border);border-radius:7px;background:var(--panel2);padding:7px 9px;color:var(--muted);font-size:11px}.correlation-stat strong{display:block;color:var(--text);font-size:16px;line-height:1.2;margin-top:2px}
 button{border:1px solid var(--border);background:var(--panel);color:var(--text);border-radius:7px;padding:6px 9px;cursor:pointer}button:hover{border-color:var(--selected)}button:disabled{opacity:.45;cursor:default}
 .controls{position:absolute;top:12px;left:12px;z-index:5;display:flex;gap:6px;flex-wrap:wrap}
 .node rect{stroke:var(--border);stroke-width:1.2;rx:9;ry:9}.node text{pointer-events:none;fill:var(--text)}.node .node-type{fill:var(--muted);font-size:10px}.node.selected rect{stroke:var(--selected);stroke-width:2.5}.node.dim{opacity:.13}.node.cluster rect{stroke:var(--selected);stroke-dasharray:6 4}
@@ -76,6 +77,7 @@ button{border:1px solid var(--border);background:var(--panel);color:var(--text);
 </div>
 <aside>
   <h2>Selection</h2><div id="details" class="empty">Click a node or edge.</div>
+  <section id="correlation-section" hidden><h3>Correlation</h3><div id="correlation-summary" class="correlation-summary"></div><div id="correlation-note" class="empty"></div></section>
   <h3>Saved views</h3><div class="empty">Save the current node/relation/causal/observed-only filters, search text, timeline position, focused neighborhood, and expanded clusters as a browser-local preset. Graph evidence is never copied into preset storage. If browser storage is unavailable, presets safely fall back to this page session only.</div>
   <h3>Focus</h3><div class="empty">Click a node, then choose <strong>Focus 1 hop</strong> or <strong>Focus 2 hops</strong>. Focus follows only edges allowed by the current timeline, relation, causal, and observed-only filters; it never creates inferred edges.</div>
   <h3>Clusters</h3><div class="empty">Expandable cluster nodes have a dashed outline. Click one, then choose <strong>Expand cluster</strong>. Only graphs created with <code>graph-condense --keep-expansion</code> carry the original member evidence.</div>
@@ -94,6 +96,7 @@ const possibleNodes=[...baseNodes],possibleEdges=[...baseEdges];
 Object.values(expansionClusters).forEach(entry=>{(entry.nodes||[]).forEach(n=>possibleNodes.push(n));(entry.edges||[]).forEach(e=>possibleEdges.push(e))});
 const svg=document.getElementById('graph'),viewport=document.getElementById('viewport'),edgeLayer=document.getElementById('edges'),labelLayer=document.getElementById('labels'),nodeLayer=document.getElementById('nodes');
 const details=document.getElementById('details'),search=document.getElementById('search'),stats=document.getElementById('stats'),typeFilter=document.getElementById('type-filter'),relationFilter=document.getElementById('relation-filter'),causalFilter=document.getElementById('causal-filter'),observedOnlyFilter=document.getElementById('observed-only-filter');
+const correlationSection=document.getElementById('correlation-section'),correlationSummary=document.getElementById('correlation-summary'),correlationNote=document.getElementById('correlation-note');
 const timeline=document.getElementById('timeline'),sequenceFilter=document.getElementById('sequence-filter'),sequenceLabel=document.getElementById('sequence-label'),playButton=document.getElementById('timeline-play'),collapseButton=document.getElementById('collapse-clusters'),clearFocusButton=document.getElementById('clear-focus');
 const presetSelect=document.getElementById('preset-select'),savePresetButton=document.getElementById('save-preset'),deletePresetButton=document.getElementById('delete-preset');
 const presetStorageKey=`execweave.viewer.presets.v1:${graph.session_id||'graph'}`;
@@ -148,6 +151,22 @@ function updateStats(){
   const focused=focusState?` · focus ${focusState.hops}-hop`:'';
   const observed=observedOnlyFilter.checked?' · observed only':'';
   stats.textContent=`${visibleNodes.length}/${currentNodes.length} nodes · ${visibleEdges.length}/${currentEdges.length} edges · ${graph.event_count??0} events${seq}${expanded}${focused}${observed}`;
+}
+function renderCorrelationSummary(){
+  const correlation=graph.metadata&&graph.metadata.correlation;
+  if(!correlation||typeof correlation!=='object')return;
+  const items=[
+    ['Matched',correlation.correlated_tool_calls],
+    ['Ambiguous',correlation.skipped_ambiguous],
+    ['No match',correlation.skipped_no_match],
+    ['Unsupported',correlation.skipped_unsupported],
+    ['Considered',correlation.tool_calls_considered],
+    ['Window (ms)',correlation.max_window_ms],
+  ];
+  correlationSummary.replaceChildren();
+  items.forEach(([label,value])=>{const box=document.createElement('div');box.className='correlation-stat';const name=document.createElement('span');name.textContent=label;const count=document.createElement('strong');count.textContent=Number.isFinite(Number(value))?String(value):'—';box.append(name,count);correlationSummary.appendChild(box)});
+  correlationNote.textContent='Missing inferred edges can mean conservative rejection: ambiguous, unmatched, or unsupported tool calls intentionally produce no bridge.';
+  correlationSection.hidden=false;
 }
 function computeLayout(){
   const ids=[...nodeById.keys()],indegree=new Map(ids.map(id=>[id,0])),outgoing=new Map(ids.map(id=>[id,[]]));
@@ -226,7 +245,7 @@ document.getElementById('fit').addEventListener('click',fit);
 document.getElementById('reset').addEventListener('click',()=>{computeLayout();renderNodes();renderEdges();applySearch();fit()});
 window.addEventListener('resize',fit);
 svg.addEventListener('click',()=>document.querySelectorAll('.node.selected').forEach(el=>el.classList.remove('selected')));
-loadPresets();applyGraphFilters();
+renderCorrelationSummary();loadPresets();applyGraphFilters();
 })();
 </script>
 </body>
