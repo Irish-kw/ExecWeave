@@ -57,7 +57,8 @@ Documentation = "https://github.com/Irish-kw/ExecWeave#documentation"
 Issues = "https://github.com/Irish-kw/ExecWeave/issues"
 
 [project.scripts]
-execweave = "execweave.cli:main"
+execweave = "execweave.entry:main"
+execweave-top = "execweave.top_cli:main"
 execweave-claude-hook = "execweave.claude_hook_cli:main"
 execweave-claude-record = "execweave.claude_record:main"
 execweave-codex-hook = "execweave.codex_hook_cli:main"
@@ -73,6 +74,7 @@ execweave-model-runtime = "execweave.model_runtime_cli:main"
 execweave-inference-gateway = "execweave.inference_gateway_cli:main"
 execweave-inference-link = "execweave.inference_identity_cli:main"
 execweave-overhead = "execweave.overhead_benchmark:main"
+execweave-scalability = "execweave.scalability_benchmark:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/execweave"]
