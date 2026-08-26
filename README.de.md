@@ -51,18 +51,70 @@ cd ExecWeave
 python -m pip install -e ".[dev]"
 ```
 
-Claude Code, OpenAI Codex oder Gemini CLI live beobachten:
+Live-OS-Runtime-Telemetrie funktioniert mit **jedem lokalen Befehl**. Die folgenden Namen sind Beispiele, keine Whitelist:
 
 ```bash
-# Claude Code
+# Agent / IDE CLIs
 execweave live --open -- claude
-
-# OpenAI Codex
 execweave live --open -- codex
-
-# Gemini CLI
 execweave live --open -- gemini
+execweave live --open -- cursor
+execweave live --open -- opencode
+
+# Any local program
+execweave live --open -- python my_agent.py
+
+# A local model runtime launched under ExecWeave
+execweave live --open -- ollama serve
 ```
+
+`execweave live` streamt Process-, File- und Network-Evidence für den von ExecWeave gestarteten Command Tree. Agent-Semantic-Hooks, Model-Runtime-API-Metadaten oder Inference-Gateway-Routing-Metadaten werden **nicht** automatisch in den Live Viewer injiziert.
+
+#### Live-Capability-Matrix
+
+| Integration | Direct OS-runtime live | Specialized metadata | Automatisch im Live Viewer |
+| --- | --- | --- | --- |
+| Claude Code | Ja | `execweave-claude-record` / hooks | Nein |
+| OpenAI Codex | Ja | `execweave-codex-record` / hooks | Nein |
+| Gemini CLI | Ja | `execweave-gemini-record` / hooks | Nein |
+| Cursor | Ja | `execweave-cursor-record` / hooks | Nein |
+| OpenCode | Ja | `execweave-opencode-record` / plugin | Nein |
+| Ollama | Ja, wenn es unter ExecWeave gestartet wird, z. B. `ollama serve` | `execweave-model-runtime event/probe --runtime ollama` | Nein |
+| llama.cpp | Ja, wenn der lokale Server unter ExecWeave gestartet wird | `execweave-model-runtime event/probe --runtime llamacpp` | Nein |
+| vLLM | Ja, wenn der lokale Server unter ExecWeave gestartet wird | `execweave-model-runtime event/probe --runtime vllm` | Nein |
+| LM Studio | Nur für einen lokalen Prozess, der unter ExecWeave gestartet wurde; ein bereits laufender Server wird nicht attached | `execweave-model-runtime event/probe --runtime lmstudio` | Nein |
+| LiteLLM Proxy | Ja, wenn der lokale Proxy unter ExecWeave gestartet wird | `execweave-inference-gateway event --gateway litellm` | Nein |
+| OpenRouter | Kein direkt startbarer Remote-Service-Prozess; stattdessen den lokalen Client/Agent unter `live` ausführen | `execweave-inference-gateway event/generation --gateway openrouter` | Nein |
+
+Für einen bereits laufenden Ollama-Server kann `execweave-model-runtime probe --runtime ollama` den geladenen Modellzustand snapshotten. Bei OpenRouter kann `live` den lokalen Client und dessen Network-Aktivität beobachten; Gateway-Routing-/Usage-Metadaten bleiben eine separate Evidence-Layer.
+
+<!-- v0.6.3-live -->
+### v0.6.3 Live-Observability
+
+Dieselbe Live-Session kann im Browser oder Terminal betrachtet werden:
+
+```bash
+execweave top -- codex          # Terminal dashboard
+execweave top --open -- codex   # Terminal + Web Viewer
+```
+
+Live-Updates verwenden inkrementelle Snapshots/Deltas mit begrenzter History, statt den vollständigen Graph wiederholt neu zu bauen und zu übertragen. Live- und Standalone-Viewer unterstützen einen persistenten Dark/Light-Theme-Schalter. Unter Linux werden sehr große rekursive Filesystem-Scopes vorab geprüft und bei Bedarf automatisch von inotify auf Polling zurückgestuft, sodass ein erschöpfter inotify-Watch-Pool die Session nicht abbricht.
+
+`live` ist eine generische OS-Runtime-Ansicht und keine Integrations-Whitelist. Spezialisierte Agent-Semantic-, Model-Runtime- und Gateway-Metadaten bleiben getrennte Evidence-Layer und werden in v0.6.3 nicht automatisch in den Live Viewer injiziert.
+
+Der reproduzierbare Graph-Scalability-Benchmark läuft mit `execweave-scalability`; CI deckt 10k, 100k und 1M synthetische Events ab.
+
+#### Scalability-Benchmark
+
+Referenzergebnis aus GitHub Actions für den inkrementellen `GraphAccumulator`-Synthetic-Workload (`retain_event_ids=False`):
+
+| Events | Apply time | Throughput | Nodes | Edges | Apply RSS Δ | Snapshot |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 10k | 0.114 s | 87,681 ev/s | 10,001 | 10,000 | 35.9 MiB | 8.5 MiB |
+| 100k | 0.654 s | 152,816 ev/s | 10,001 | 10,000 | 25.8 MiB | 8.6 MiB |
+| **1M** | **6.087 s** | **164,273 ev/s** | **10,001** | **10,000** | **23.5 MiB** | **8.6 MiB** |
+
+Bei **1.000.000 Events** duplizierte der inkrementelle In-Memory-Graph keine Raw Event IDs; Raw Evidence bleibt vom materialized graph getrennt. Dieser Benchmark misst Graph-Akkumulation und Snapshot-Materialisierung, nicht den End-to-End-Durchsatz des Collectors oder Browsers.
 
 Oder die vollständige Artifact-Pipeline erzeugen:
 
@@ -301,7 +353,7 @@ Security Findings bleiben hinsichtlich ihrer Evidence-Grenzen explizit. Ein mög
 
 ## Aktueller Stand
 
-ExecWeave `main` ist derzeit **v0.6.2** und wird aktiv weiterentwickelt.
+ExecWeave `main` ist derzeit **v0.6.3** und wird aktiv weiterentwickelt.
 
 Der Baseline umfasst Runtime Collection, Graph-Materialisierung und -Abfragen, Standalone/Live Viewer, Claude/Codex/Gemini/Cursor/OpenCode Semantic Integrations, konservative Tool → Process Correlation, OpenRouter/LiteLLM Gateway Metadata, Ollama/llama.cpp/vLLM/LM Studio Runtime Metadata, exakte Gateway ↔ Model Runtime Request Identity, veröffentlichte PyPI wheel/sdist-Pakete, reproduzierbares Overhead Benchmarking, Cross-Platform Command-Launcher-Kompatibilität, Large-Graph Browser Safety Guards, inkrementelles Live JSONL Tail/Cache und Cross-Platform CI unter Python 3.10/3.12.
 

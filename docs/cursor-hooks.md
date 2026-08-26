@@ -1,12 +1,17 @@
 # Cursor Hooks
 
+<!-- i18n-nav:start -->
 <p align="center">
   <strong>English</strong> |
   <a href="cursor-hooks.zh-TW.md">繁體中文</a> |
   <a href="cursor-hooks.zh-CN.md">简体中文</a> |
   <a href="cursor-hooks.ja.md">日本語</a> |
-  <a href="cursor-hooks.ko.md">한국어</a>
+  <a href="cursor-hooks.ko.md">한국어</a> |
+  <a href="cursor-hooks.fr.md">Français</a> |
+  <a href="cursor-hooks.de.md">Deutsch</a> |
+  <a href="cursor-hooks.ru.md">Русский</a>
 </p>
+<!-- i18n-nav:end -->
 
 ExecWeave uses Cursor's native hook surface to add logical Agent / Tool / Command evidence to the runtime graph without treating provider metadata as OS causality.
 

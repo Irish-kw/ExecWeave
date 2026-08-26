@@ -1,12 +1,17 @@
 # Model Runtime Integrations
 
+<!-- i18n-nav:start -->
 <p align="center">
   <strong>English</strong> |
   <a href="model-runtime.zh-TW.md">繁體中文</a> |
   <a href="model-runtime.zh-CN.md">简体中文</a> |
   <a href="model-runtime.ja.md">日本語</a> |
-  <a href="model-runtime.ko.md">한국어</a>
+  <a href="model-runtime.ko.md">한국어</a> |
+  <a href="model-runtime.fr.md">Français</a> |
+  <a href="model-runtime.de.md">Deutsch</a> |
+  <a href="model-runtime.ru.md">Русский</a>
 </p>
+<!-- i18n-nav:end -->
 
 Model runtimes are separate from Agent/IDE semantic adapters and inference gateways. They describe what a local or self-hosted inference server reports; they do not prove which Agent initiated a request.
 
