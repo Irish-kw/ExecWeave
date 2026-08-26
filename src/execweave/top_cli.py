@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from .top import run_attached_top, run_top
 
@@ -79,15 +80,36 @@ def _parse_attach_command(raw: str) -> list[str]:
     return payload
 
 
+def _validate_attach_url(raw: str) -> str:
+    try:
+        parsed = urlsplit(raw)
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("invalid detached dashboard attach URL") from exc
+
+    if parsed.scheme != "http":
+        raise ValueError("detached dashboard attach URL must use localhost HTTP")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("detached dashboard attach URL must not contain credentials")
+    if parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
+        raise ValueError("detached dashboard attach URL must target localhost")
+    if port is None or not (1 <= port <= 65535):
+        raise ValueError("detached dashboard attach URL requires a valid localhost port")
+    if parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
+        raise ValueError("detached dashboard attach URL must be a live-server base URL")
+    return raw
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
     if args.attach is not None:
         try:
+            live_url = _validate_attach_url(args.attach)
             command = _parse_attach_command(args.attach_command_json)
             run_attached_top(
-                args.attach,
+                live_url,
                 command=command,
                 refresh_seconds=args.refresh,
             )
