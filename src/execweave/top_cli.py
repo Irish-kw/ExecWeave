@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
-from .top import run_top
+from .top import run_attached_top, run_top
 
 
 def _clean_command(command: list[str]) -> list[str]:
@@ -60,15 +61,40 @@ def build_parser() -> argparse.ArgumentParser:
         "--open",
         action="store_true",
         dest="open_browser",
-        help="Open the Web Viewer alongside the terminal dashboard",
+        help="Open the Web Viewer in addition to the detached terminal dashboard",
     )
+    parser.add_argument("--attach", default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--attach-command-json", default="[]", help=argparse.SUPPRESS)
     parser.add_argument("command", nargs=argparse.REMAINDER, help="Command to execute")
     return parser
+
+
+def _parse_attach_command(raw: str) -> list[str]:
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError("invalid detached dashboard command metadata") from exc
+    if not isinstance(payload, list) or not all(isinstance(item, str) for item in payload):
+        raise ValueError("detached dashboard command metadata must be a string array")
+    return payload
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    if args.attach is not None:
+        try:
+            command = _parse_attach_command(args.attach_command_json)
+            run_attached_top(
+                args.attach,
+                command=command,
+                refresh_seconds=args.refresh,
+            )
+        except (RuntimeError, ValueError, OSError) as exc:
+            parser.error(str(exc))
+        return 0
+
     command = _clean_command(args.command)
     if not command:
         parser.error("execweave top requires a command, e.g. execweave top -- codex")
