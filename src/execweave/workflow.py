@@ -5,6 +5,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from .backends import BackendName, create_collector, resolve_backend
+from .fidelity import write_fidelity_report
 from .graph import build_execution_graph, write_execution_graph
 from .sink import JsonlSink
 from .theme import ensure_viewer_theme
@@ -19,6 +20,7 @@ class RecordResult:
     return_code: int
     output_dir: Path
     event_stream: Path
+    fidelity: Path
     graph: Path
     viewer: Path
     event_count: int
@@ -32,6 +34,7 @@ class RecordResult:
             "return_code": self.return_code,
             "output_dir": str(self.output_dir),
             "event_stream": str(self.event_stream),
+            "fidelity": str(self.fidelity),
             "graph": str(self.graph),
             "viewer": str(self.viewer),
             "event_count": self.event_count,
@@ -73,9 +76,10 @@ def record_to_viewer(
     run_dir.mkdir(parents=True, exist_ok=True)
 
     event_path = run_dir / "events.jsonl"
+    fidelity_path = run_dir / "fidelity.json"
     graph_path = run_dir / "graph.json"
     viewer_path = run_dir / "viewer.html"
-    _preflight_artifacts([event_path, graph_path, viewer_path])
+    _preflight_artifacts([event_path, fidelity_path, graph_path, viewer_path])
 
     sink = JsonlSink(event_path)
     resolved = resolve_backend(backend)
@@ -98,6 +102,7 @@ def record_to_viewer(
         raise RuntimeError(f"recorded event stream failed validation: {details}")
 
     execution_graph = build_execution_graph(event_path)
+    write_fidelity_report(execution_graph.fidelity, fidelity_path)
     write_execution_graph(execution_graph, graph_path)
     write_graph_html(execution_graph.to_dict(), viewer_path, open_browser=False)
     ensure_viewer_theme(viewer_path)
@@ -112,6 +117,7 @@ def record_to_viewer(
         return_code=return_code,
         output_dir=run_dir,
         event_stream=event_path,
+        fidelity=fidelity_path,
         graph=graph_path,
         viewer=viewer_path,
         event_count=execution_graph.event_count,
