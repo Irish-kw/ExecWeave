@@ -40,6 +40,22 @@ def _event(
     }
 
 
+def _session_start_context(**context: object) -> dict[str, object]:
+    event = _event(
+        sequence=1,
+        event_type="session.started",
+        relation="STARTED_SESSION",
+        backend="portable",
+        attribution=None,
+        source_type="agent",
+        target_type="session",
+    )
+    attributes = event["attributes"]
+    assert isinstance(attributes, dict)
+    attributes.update(context)
+    return event
+
+
 def test_portable_fidelity_is_sampled_without_lowering_behavior_severity() -> None:
     events = [
         _event(
@@ -101,6 +117,55 @@ def test_session_correlated_evidence_is_not_automatically_sampled() -> None:
 
     assert fidelity["attribution_modes"]["specialized"] == ["session_correlated"]
     assert fidelity["sampled_evidence_present"] is False
+
+
+def test_configured_portable_interval_marks_sampling_without_observed_process_event() -> None:
+    event = _session_start_context(
+        platform="linux",
+        configured_process_poll_interval_ms=50.0,
+        filesystem_requested=False,
+        filesystem_collected=False,
+        filesystem_scope_downgraded=False,
+        network_requested=False,
+        network_collected=False,
+    )
+
+    fidelity = derive_fidelity([event])
+
+    assert fidelity["sampled_evidence_present"] is True
+    assert fidelity["capture_context"] == {
+        "platform": "linux",
+        "configured_process_poll_interval_ms": 50.0,
+        "filesystem_requested": False,
+        "filesystem_collected": False,
+        "filesystem_scope_downgraded": False,
+        "network_requested": False,
+        "network_collected": False,
+    }
+    assert any("configured 50 ms interval" in item for item in fidelity["limitations"])
+    assert any("actual observation gaps longer" in item for item in fidelity["limitations"])
+    assert "blind_window_ms" not in fidelity
+    assert "blind_window_ms" not in fidelity["capture_context"]
+
+
+def test_filesystem_scope_downgrade_is_explicit_without_changing_severity() -> None:
+    event = _session_start_context(
+        platform="linux",
+        configured_process_poll_interval_ms=100.0,
+        filesystem_requested=True,
+        filesystem_collected=False,
+        filesystem_scope_downgraded=True,
+        network_requested=True,
+        network_collected=True,
+    )
+
+    fidelity = derive_fidelity([event])
+
+    assert fidelity["capture_context"]["filesystem_requested"] is True
+    assert fidelity["capture_context"]["filesystem_collected"] is False
+    assert fidelity["capture_context"]["filesystem_scope_downgraded"] is True
+    assert any("broad-scope safety guard" in item for item in fidelity["limitations"])
+    assert "severity" not in fidelity
 
 
 def test_network_attempt_is_part_of_network_attribution_contract() -> None:
@@ -218,7 +283,11 @@ def test_final_graph_embeds_fidelity_block(tmp_path: Path) -> None:
                 "type": "session",
                 "attributes": {"backend": "portable"},
             },
-            "attributes": {"backend": "portable"},
+            "attributes": {
+                "backend": "portable",
+                "platform": "linux",
+                "configured_process_poll_interval_ms": 100.0,
+            },
         },
         {
             "schema_version": "0.2",
@@ -241,6 +310,8 @@ def test_final_graph_embeds_fidelity_block(tmp_path: Path) -> None:
     assert graph["fidelity"]["fidelity_schema_version"] == "0.1"
     assert graph["fidelity"]["session_id"] == "s1"
     assert graph["fidelity"]["backend_observed"] == ["portable"]
+    assert graph["fidelity"]["capture_context"]["platform"] == "linux"
+    assert graph["fidelity"]["capture_context"]["configured_process_poll_interval_ms"] == 100.0
     assert "byte_level_dataflow" in graph["fidelity"]["claims_not_supported"]
 
 

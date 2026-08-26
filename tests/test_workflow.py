@@ -43,6 +43,13 @@ def test_record_to_viewer_portable_end_to_end(tmp_path: Path) -> None:
     assert graph["edge_count"] == result.edge_count
     assert fidelity == graph["fidelity"]
     assert fidelity["fidelity_schema_version"] == "0.1"
+    assert fidelity["capture_context"]["platform"] == sys.platform
+    assert fidelity["capture_context"]["configured_process_poll_interval_ms"] == 50.0
+    assert fidelity["capture_context"]["filesystem_requested"] is False
+    assert fidelity["capture_context"]["filesystem_collected"] is False
+    assert fidelity["capture_context"]["filesystem_scope_downgraded"] is False
+    assert fidelity["capture_context"]["network_requested"] is False
+    assert fidelity["capture_context"]["network_collected"] is False
     assert "byte_level_dataflow" in fidelity["claims_not_supported"]
     assert "ExecWeave" in result.viewer.read_text(encoding="utf-8")
 
@@ -67,7 +74,7 @@ def test_record_to_viewer_preserves_nonzero_command_exit(tmp_path: Path) -> None
     assert result.viewer.exists()
 
 
-def test_record_preflight_rejects_conflicts_before_agent_runs(tmp_path: Path) -> None:
+def test_record_preflight_rejects_conflicts_before_agent_runs(tmp_path: Paath) -> None:
     output_dir = tmp_path / "existing"
     output_dir.mkdir()
     (output_dir / "graph.json").write_text("old graph", encoding="utf-8")

@@ -65,6 +65,12 @@ def _entity_type(entity: object) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
+def _single_or_none(values: set[Any]) -> Any | None:
+    if len(values) != 1:
+        return None
+    return next(iter(values))
+
+
 @dataclass
 class FidelityAccumulator:
     """Summarize what a stream can and cannot substantiate.
@@ -77,6 +83,13 @@ class FidelityAccumulator:
 
     backends: set[str] = field(default_factory=set)
     session_ids: set[str] = field(default_factory=set)
+    platforms: set[str] = field(default_factory=set)
+    configured_process_poll_intervals_ms: set[float] = field(default_factory=set)
+    filesystem_requested_values: set[bool] = field(default_factory=set)
+    filesystem_collected_values: set[bool] = field(default_factory=set)
+    filesystem_scope_downgraded_values: set[bool] = field(default_factory=set)
+    network_requested_values: set[bool] = field(default_factory=set)
+    network_collected_values: set[bool] = field(default_factory=set)
     attribution_modes: dict[str, set[str]] = field(
         default_factory=lambda: {
             "process": set(),
@@ -109,6 +122,25 @@ class FidelityAccumulator:
         backend = attributes.get("backend")
         if isinstance(backend, str) and backend:
             self.backends.add(backend)
+
+        if event_type == "session.started":
+            platform = attributes.get("platform")
+            if isinstance(platform, str) and platform:
+                self.platforms.add(platform)
+            interval = attributes.get("configured_process_poll_interval_ms")
+            if isinstance(interval, (int, float)) and not isinstance(interval, bool) and interval > 0:
+                self.configured_process_poll_intervals_ms.add(float(interval))
+            for key, target in (
+                ("filesystem_requested", self.filesystem_requested_values),
+                ("filesystem_collected", self.filesystem_collected_values),
+                ("filesystem_scope_downgraded", self.filesystem_scope_downgraded_values),
+                ("network_requested", self.network_requested_values),
+                ("network_collected", self.network_collected_values),
+            ):
+                value = attributes.get(key)
+                if isinstance(value, bool):
+                    target.add(value)
+
         for entity in (event.get("source"), event.get("target")):
             entity_backend = _entity_backend(entity)
             if entity_backend:
@@ -160,25 +192,52 @@ class FidelityAccumulator:
         else:
             not_supported.add("short_lived_process_capture")
 
-        # Sampling is a capture mechanism, not an attribution/trust grade. In
-        # particular, session-correlated filesystem/provider evidence may be
-        # event-driven rather than sampled and therefore must not set this flag.
-        sampled = any(
+        # Sampling is a capture mechanism, not an attribution/trust grade. A
+        # configured portable process interval is itself enough to establish that
+        # the run used sampled collection even if no process/network event happened
+        # to be emitted before the command exited.
+        sampled = bool(self.configured_process_poll_intervals_ms) or any(
             "process_polled" in self.attribution_modes[channel]
             for channel in ("process", "network")
         )
+
+        configured_interval = _single_or_none(self.configured_process_poll_intervals_ms)
+        filesystem_scope_downgraded = _single_or_none(
+            self.filesystem_scope_downgraded_values
+        )
+        capture_context = {
+            "platform": _single_or_none(self.platforms),
+            "configured_process_poll_interval_ms": configured_interval,
+            "filesystem_requested": _single_or_none(self.filesystem_requested_values),
+            "filesystem_collected": _single_or_none(self.filesystem_collected_values),
+            "filesystem_scope_downgraded": filesystem_scope_downgraded,
+            "network_requested": _single_or_none(self.network_requested_values),
+            "network_collected": _single_or_none(self.network_collected_values),
+        }
 
         limitations: list[str] = [
             "ExecWeave does not establish byte-level dataflow from these observations.",
             "No current run artifact is an adversary-resistant trust anchor for its own evidence files.",
         ]
         if "portable" in self.backends:
-            limitations.append(
-                "Portable process/network collection is sampled and may miss activity that exists entirely between samples."
-            )
+            if configured_interval is not None:
+                limitations.append(
+                    "Portable process/network collection is sampled at a configured "
+                    f"{configured_interval:g} ms interval; scheduler delay can make actual "
+                    "observation gaps longer, and activity that exists entirely between "
+                    "observations may be missed."
+                )
+            else:
+                limitations.append(
+                    "Portable process/network collection is sampled and may miss activity that exists entirely between samples."
+                )
         if "strace" in self.backends:
             limitations.append(
                 "Strace evidence is limited to the traced command lineage and selected syscall classes; it is not OS-wide visibility."
+            )
+        if filesystem_scope_downgraded is True:
+            limitations.append(
+                "Filesystem collection was requested but disabled for this run by the broad-scope safety guard."
             )
         if "session_correlated" in self.attribution_modes["filesystem"]:
             limitations.append(
@@ -196,6 +255,7 @@ class FidelityAccumulator:
             "backend_observed": sorted(self.backends),
             "event_count": self.event_count,
             "observed_process_count": self.observed_process_count,
+            "capture_context": capture_context,
             "attribution_modes": modes,
             "sampled_evidence_present": sampled,
             "unresolved_process_references": self.unresolved_process_references,
