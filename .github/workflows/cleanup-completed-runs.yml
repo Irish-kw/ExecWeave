@@ -1,0 +1,43 @@
+name: Cleanup completed Actions runs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/cleanup-completed-runs.yml"
+
+permissions:
+  actions: write
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Delete completed workflow runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          gh api --paginate \
+            "repos/$GH_REPO/actions/runs?status=completed&per_page=100" \
+            --jq '.workflow_runs[].id' > /tmp/completed-runs.txt
+
+          count=$(wc -l < /tmp/completed-runs.txt)
+          echo "Deleting $count completed workflow runs"
+
+          while read -r run_id; do
+            [ -n "$run_id" ] || continue
+            gh api --method DELETE "repos/$GH_REPO/actions/runs/$run_id"
+          done < /tmp/completed-runs.txt
+
+      - name: Remove one-time cleanup workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/cleanup-completed-runs.yml
+          git commit -m "chore: remove completed-run cleanup workflow"
+          git push origin HEAD:main
