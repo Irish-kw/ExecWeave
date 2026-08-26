@@ -6,11 +6,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .content_store import FullFidelityContentStore
 from .inference_gateway import (
     append_gateway_records,
     litellm_response_to_events,
     sanitize_gateway_endpoint,
 )
+from .inference_gateway_full_fidelity import litellm_callback_to_content_events
 
 try:
     from litellm.integrations.custom_logger import CustomLogger as _LiteLLMCustomLogger
@@ -62,6 +64,10 @@ def _timestamp(value: object) -> str | None:
     return None
 
 
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
 def _gateway_endpoint() -> str:
     candidate = os.environ.get(_ENDPOINT_ENV) or os.environ.get("PROXY_BASE_URL") or _DEFAULT_ENDPOINT
     try:
@@ -78,8 +84,8 @@ def standard_logging_to_events(
 ) -> list[dict[str, Any]]:
     """Convert LiteLLM StandardLoggingPayload into privacy-safe gateway evidence.
 
-    Only documented routing, usage, cost, cache, and latency fields are read. Prompt,
-    response, raw request, arbitrary metadata, API keys, and provider endpoints are ignored.
+    The semantic summary intentionally stays limited to routing, usage, cost, cache, and
+    latency fields. Full request/response evidence is appended separately by the callback.
     """
     call_id = _text(payload.get("id"))
     if call_id is None:
@@ -136,12 +142,13 @@ def standard_logging_to_events(
 
 
 class ExecWeaveLiteLLMCallback(_LiteLLMCustomLogger):
-    """LiteLLM callback that writes only whitelisted metadata into an active ExecWeave run."""
+    """LiteLLM callback that appends semantic summary then full source-exposed evidence."""
 
-    def _emit(self, kwargs: object, end_time: object = None) -> None:
-        sidecar = os.environ.get(_SEMANTIC_ENV)
-        if not sidecar:
+    def _emit(self, kwargs: object, response_obj: object, end_time: object = None) -> None:
+        sidecar_value = os.environ.get(_SEMANTIC_ENV)
+        if not sidecar_value:
             return
+        sidecar = Path(sidecar_value).expanduser().resolve()
         try:
             callback_kwargs = _mapping(kwargs)
             if callback_kwargs is None:
@@ -149,13 +156,27 @@ class ExecWeaveLiteLLMCallback(_LiteLLMCustomLogger):
             standard = _mapping(callback_kwargs.get("standard_logging_object"))
             if standard is None:
                 return
-            records = standard_logging_to_events(
-                standard,
-                timestamp=_timestamp(end_time),
-            )
-            append_gateway_records(Path(sidecar), records)
+            callback_kwargs = {**callback_kwargs, "standard_logging_object": standard}
+            observed_at = _timestamp(end_time) or _now()
+            records = standard_logging_to_events(standard, timestamp=observed_at)
+            append_gateway_records(sidecar, records)
         except Exception:
             # Observability must never alter the LiteLLM request outcome.
+            return
+
+        try:
+            mapped_response = _mapping(response_obj)
+            full_response: object = mapped_response if mapped_response is not None else response_obj
+            content_records = litellm_callback_to_content_events(
+                callback_kwargs,
+                full_response,
+                store=FullFidelityContentStore(sidecar.parent),
+                endpoint=_gateway_endpoint(),
+                timestamp=observed_at,
+            )
+            append_gateway_records(sidecar, content_records)
+        except Exception:
+            # Keep the already-written semantic summary if full-fidelity storage fails.
             return
 
     def log_success_event(
@@ -165,8 +186,8 @@ class ExecWeaveLiteLLMCallback(_LiteLLMCustomLogger):
         start_time: object,
         end_time: object,
     ) -> None:
-        del response_obj, start_time
-        self._emit(kwargs, end_time)
+        del start_time
+        self._emit(kwargs, response_obj, end_time)
 
     async def async_log_success_event(
         self,
@@ -175,8 +196,8 @@ class ExecWeaveLiteLLMCallback(_LiteLLMCustomLogger):
         start_time: object,
         end_time: object,
     ) -> None:
-        del response_obj, start_time
-        await asyncio.to_thread(self._emit, kwargs, end_time)
+        del start_time
+        await asyncio.to_thread(self._emit, kwargs, response_obj, end_time)
 
 
 execweave_litellm_callback = ExecWeaveLiteLLMCallback()
