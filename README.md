@@ -20,13 +20,13 @@ ExecWeave is an open-source, local-first observability project that turns AI-age
 > **Event is ground truth. The graph is a materialized view.**
 
 <p align="center">
-  <img src="docs/assets/execweave-live-demo.png" alt="ExecWeave Live execution graph" width="100%">
+  <img src="execweave-hero-demo-v2.webp" alt="ExecWeave animated live demo" width="100%">
 </p>
 
 <!-- execweave-demo:start -->
 ## Reproduce this demo
 
-The screenshot above is a real ExecWeave v0.6.3 live session. This workload deliberately creates enough activity to make the execution graph useful: multiple Python modules, JSON/CSV files, tests, file inspection, and outbound HTTP requests.
+The animation above is a real ExecWeave v0.6.3 live session. This workload deliberately creates enough activity to make the execution graph useful: multiple Python modules, JSON/CSV files, tests, file inspection, and outbound HTTP requests.
 
 Run a local Agent CLI under ExecWeave. For example:
 
@@ -42,7 +42,7 @@ generate sample JSON and CSV data, run the program and tests,
 inspect the generated files, and fetch example.com plus the GitHub API.
 ```
 
-The same workload works with `codex`, `gemini`, `cursor`, or `opencode`. Exact node, edge, event, process, and endpoint counts vary by OS, Agent version, and environment. ExecWeave records observed runtime evidence; the screenshot is one concrete run, not a fixed expected graph.
+The same workload works with `codex`, `gemini`, `cursor`, or `opencode`. Exact node, edge, event, process, and endpoint counts vary by OS, Agent version, and environment. ExecWeave records observed runtime evidence; the animation is one concrete run, not a fixed expected graph.
 <!-- execweave-demo:end -->
 
 ## Install
