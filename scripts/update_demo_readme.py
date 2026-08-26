@@ -1,0 +1,183 @@
+from __future__ import annotations
+
+import base64
+from pathlib import Path
+
+IMAGE_B64 = "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"
+
+PROMPT = """Create a small Python project in ./execweave-demo with 8 modules,
+generate sample JSON and CSV data, run the program and tests,
+inspect the generated files, and fetch example.com plus the GitHub API."""
+
+COMMON_COMMAND = """```bash
+execweave live --open -- claude
+```
+"""
+
+BLOCKS = {
+    "README.md": f"""<!-- execweave-demo:start -->
+## Reproduce this demo
+
+The screenshot above is a real ExecWeave v0.6.3 live session. This workload deliberately creates enough activity to make the execution graph useful: multiple Python modules, JSON/CSV files, tests, file inspection, and outbound HTTP requests.
+
+Run a local Agent CLI under ExecWeave. For example:
+
+{COMMON_COMMAND}
+Then paste this workload prompt into the Agent:
+
+```text
+{PROMPT}
+```
+
+The same workload works with `codex`, `gemini`, `cursor`, or `opencode`. Exact node, edge, event, process, and endpoint counts vary by OS, Agent version, and environment. ExecWeave records observed runtime evidence; the screenshot is one concrete run, not a fixed expected graph.
+<!-- execweave-demo:end -->""",
+    "README.zh-TW.md": f"""<!-- execweave-demo:start -->
+## 重現這個 Demo
+
+上面的截圖是一個真實的 ExecWeave v0.6.3 live session。這個 workload 刻意產生足夠多種活動，讓 execution graph 能清楚展示效果：多個 Python modules、JSON/CSV 檔案、tests、檔案檢查，以及對外 HTTP requests。
+
+把本機 Agent CLI 放在 ExecWeave 下執行，例如：
+
+{COMMON_COMMAND}
+接著把這段 workload prompt 貼給 Agent：
+
+```text
+{PROMPT}
+```
+
+同一個 workload 也可以用 `codex`、`gemini`、`cursor` 或 `opencode`。實際的 node、edge、event、process 與 endpoint 數量會隨 OS、Agent 版本與環境而不同。ExecWeave 記錄的是實際觀測到的 runtime evidence；上圖是一個具體執行結果，不是固定應得到的 graph。
+<!-- execweave-demo:end -->""",
+    "README.zh-CN.md": f"""<!-- execweave-demo:start -->
+## 复现这个 Demo
+
+上面的截图来自一个真实的 ExecWeave v0.6.3 live session。这个 workload 会刻意产生足够多种活动，让 execution graph 能清楚展示效果：多个 Python modules、JSON/CSV 文件、tests、文件检查，以及对外 HTTP requests。
+
+把本地 Agent CLI 放在 ExecWeave 下运行，例如：
+
+{COMMON_COMMAND}
+然后把这段 workload prompt 发送给 Agent：
+
+```text
+{PROMPT}
+```
+
+同一个 workload 也可以用于 `codex`、`gemini`、`cursor` 或 `opencode`。实际的 node、edge、event、process 和 endpoint 数量会随 OS、Agent 版本和环境而变化。ExecWeave 记录的是实际观察到的 runtime evidence；上图只是一次具体运行结果，不是固定预期 graph。
+<!-- execweave-demo:end -->""",
+    "README.ja.md": f"""<!-- execweave-demo:start -->
+## この Demo を再現する
+
+上のスクリーンショットは、実際の ExecWeave v0.6.3 live session です。この workload は execution graph の挙動が分かりやすくなるよう、複数の Python modules、JSON/CSV files、tests、file inspection、外向き HTTP requests を意図的に発生させます。
+
+ローカルの Agent CLI を ExecWeave の下で実行します。例：
+
+{COMMON_COMMAND}
+その後、次の workload prompt を Agent に貼り付けます：
+
+```text
+{PROMPT}
+```
+
+同じ workload は `codex`、`gemini`、`cursor`、`opencode` でも利用できます。node、edge、event、process、endpoint の数は OS、Agent version、environment によって変わります。ExecWeave が記録するのは実際に観測された runtime evidence であり、上図は固定の期待 graph ではなく一つの実行例です。
+<!-- execweave-demo:end -->""",
+    "README.ko.md": f"""<!-- execweave-demo:start -->
+## 이 Demo 재현하기
+
+위 스크린샷은 실제 ExecWeave v0.6.3 live session입니다. 이 workload는 execution graph가 유용하게 보이도록 여러 Python modules, JSON/CSV files, tests, file inspection, 외부 HTTP requests를 의도적으로 발생시킵니다.
+
+로컬 Agent CLI를 ExecWeave 아래에서 실행합니다. 예:
+
+{COMMON_COMMAND}
+그 다음 아래 workload prompt를 Agent에 붙여 넣습니다:
+
+```text
+{PROMPT}
+```
+
+같은 workload는 `codex`, `gemini`, `cursor`, `opencode`에서도 사용할 수 있습니다. 실제 node, edge, event, process, endpoint 수는 OS, Agent version, environment에 따라 달라집니다. ExecWeave는 실제로 관측된 runtime evidence를 기록하며, 위 그림은 고정된 예상 graph가 아니라 하나의 실제 실행 예입니다.
+<!-- execweave-demo:end -->""",
+    "README.fr.md": f"""<!-- execweave-demo:start -->
+## Reproduire cette démo
+
+La capture ci-dessus provient d'une véritable session live ExecWeave v0.6.3. Ce workload provoque volontairement assez d'activité pour rendre l'execution graph parlant : plusieurs modules Python, des fichiers JSON/CSV, des tests, l'inspection de fichiers et des requêtes HTTP sortantes.
+
+Exécutez un Agent CLI local sous ExecWeave, par exemple :
+
+{COMMON_COMMAND}
+Puis collez ce workload prompt dans l'Agent :
+
+```text
+{PROMPT}
+```
+
+Le même workload fonctionne avec `codex`, `gemini`, `cursor` ou `opencode`. Le nombre exact de nodes, edges, events, processes et endpoints dépend de l'OS, de la version de l'Agent et de l'environnement. ExecWeave enregistre le runtime evidence réellement observé ; la capture montre une exécution concrète, pas un graph attendu fixe.
+<!-- execweave-demo:end -->""",
+    "README.de.md": f"""<!-- execweave-demo:start -->
+## Diese Demo reproduzieren
+
+Der Screenshot oben stammt aus einer echten ExecWeave-v0.6.3-Live-Session. Dieser Workload erzeugt absichtlich genügend Aktivität für einen aussagekräftigen execution graph: mehrere Python modules, JSON/CSV files, tests, file inspection und ausgehende HTTP requests.
+
+Starte eine lokale Agent CLI unter ExecWeave, zum Beispiel:
+
+{COMMON_COMMAND}
+Füge danach diesen workload prompt in den Agent ein:
+
+```text
+{PROMPT}
+```
+
+Derselbe workload funktioniert auch mit `codex`, `gemini`, `cursor` oder `opencode`. Die genaue Anzahl von nodes, edges, events, processes und endpoints hängt von OS, Agent version und environment ab. ExecWeave zeichnet tatsächlich beobachtetes runtime evidence auf; der Screenshot zeigt einen konkreten Lauf und keinen fest erwarteten graph.
+<!-- execweave-demo:end -->""",
+    "README.ru.md": f"""<!-- execweave-demo:start -->
+## Воспроизвести этот demo
+
+Скриншот выше получен в реальной live session ExecWeave v0.6.3. Этот workload намеренно создаёт достаточно разнообразную активность, чтобы execution graph был наглядным: несколько Python modules, JSON/CSV files, tests, проверка файлов и исходящие HTTP requests.
+
+Запустите локальный Agent CLI под ExecWeave, например:
+
+{COMMON_COMMAND}
+Затем вставьте в Agent следующий workload prompt:
+
+```text
+{PROMPT}
+```
+
+Тот же workload работает с `codex`, `gemini`, `cursor` и `opencode`. Точное число nodes, edges, events, processes и endpoints зависит от OS, версии Agent и environment. ExecWeave записывает реально наблюдаемое runtime evidence; скриншот показывает один конкретный запуск, а не фиксированный ожидаемый graph.
+<!-- execweave-demo:end -->""",
+}
+
+OLD_ASSET = "docs/assets/execweave-viewer.png"
+NEW_ASSET = "docs/assets/execweave-live-demo.webp"
+START = "<!-- execweave-demo:start -->"
+END = "<!-- execweave-demo:end -->"
+
+
+def update_readme(path: Path, block: str) -> None:
+    text = path.read_text(encoding="utf-8")
+    text = text.replace(OLD_ASSET, NEW_ASSET)
+    if START in text:
+        before, rest = text.split(START, 1)
+        _, after = rest.split(END, 1)
+        text = before + block + after
+    else:
+        image_pos = text.index(NEW_ASSET)
+        close = text.index("</p>", image_pos) + len("</p>")
+        text = text[:close] + "\n\n" + block + text[close:]
+    path.write_text(text, encoding="utf-8")
+
+
+def main() -> None:
+    root = Path(__file__).resolve().parents[1]
+    new_asset = root / NEW_ASSET
+    new_asset.parent.mkdir(parents=True, exist_ok=True)
+    new_asset.write_bytes(base64.b64decode(IMAGE_B64))
+
+    old_asset = root / OLD_ASSET
+    if old_asset.exists():
+        old_asset.unlink()
+
+    for filename, block in BLOCKS.items():
+        update_readme(root / filename, block)
+
+
+if __name__ == "__main__":
+    main()
