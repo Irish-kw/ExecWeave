@@ -83,6 +83,9 @@ vLLM 复用 OpenAI-compatible response 与 model-catalog 共用层。`/v1/models
 
 ## LM Studio
 
+<!-- lmstudio-auto-live-v064 -->
+若要让 LM Studio 自动进入 Live Viewer，请由 ExecWeave 使用明确的本地 port 启动，例如 `execweave live --open -- lms server start --port 1234`。ExecWeave 会先确认 launch 前该 endpoint 尚未提供兼容 API，并且只有 launcher 成功结束后才 probe `/v1/models`。生成的 relation 仍为 `ADVERTISES_MODEL`；catalog entry 不会被提升为 `LOADED_MODEL`。
+
 LM Studio 复用相同 OpenAI-compatible response parser，但 `/v1/models` 使用 `ADVERTISES_MODEL`，而不是 `LOADED_MODEL`。
 
 这个区分是刻意的：LM Studio 可以让已下载 model 出现在 server catalog，并且某些设置可以 on-demand load；因此 catalog entry 本身不能证明 observation 当下 model weights 已 resident in memory。

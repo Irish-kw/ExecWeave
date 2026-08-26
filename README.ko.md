@@ -98,7 +98,7 @@ execweave live --open -- ollama serve
 | Ollama | Yes, ExecWeave가 시작한 경우(예: `ollama serve`) | `execweave-model-runtime event/probe --runtime ollama` | Yes (자동 로컬 probe) |
 | llama.cpp | Yes, 로컬 server를 ExecWeave가 시작한 경우 | `execweave-model-runtime event/probe --runtime llamacpp` | Yes (자동 로컬 probe) |
 | vLLM | Yes, 로컬 server를 ExecWeave가 시작한 경우 | `execweave-model-runtime event/probe --runtime vllm` | Yes (자동 로컬 probe) |
-| LM Studio | ExecWeave가 시작한 로컬 process만 가능하며 기존 server에는 attach하지 않음 | `execweave-model-runtime event/probe --runtime lmstudio` | No |
+| LM Studio | ExecWeave가 시작한 로컬 process만 가능하며 기존 server에는 attach하지 않음 | `execweave-model-runtime event/probe --runtime lmstudio` | Yes (명시적 `--port`로 시작 성공 후 자동 probe) |
 | LiteLLM Proxy | Yes, 로컬 proxy를 ExecWeave가 시작한 경우 | `execweave-inference-gateway event --gateway litellm` | No |
 | OpenRouter | Remote service 자체는 direct live 불가. 로컬 client/Agent를 live해야 함 | `execweave-inference-gateway event/generation --gateway openrouter` | No |
 

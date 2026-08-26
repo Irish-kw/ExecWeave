@@ -83,6 +83,9 @@ Prompt、response、reasoning text、choices、logprobs、generated token text �
 
 ## LM Studio
 
+<!-- lmstudio-auto-live-v064 -->
+LM Studio を Live Viewer に自動取り込みするには、明示的なローカル port を指定して ExecWeave 配下で起動します。例: `execweave live --open -- lms server start --port 1234`。ExecWeave は起動前に その endpoint で互換 API が既に動作していないことを確認し、launcher が成功終了した場合にだけ `/v1/models` を probe します。relation は `ADVERTISES_MODEL` のままで、catalog entry を `LOADED_MODEL` に昇格させません。
+
 LM Studio も同じ OpenAI-compatible response parser を使いますが、`/v1/models` は `LOADED_MODEL` ではなく `ADVERTISES_MODEL` として扱います。
 
 これは意図的な区別です。LM Studio は downloaded model を server catalog に表示でき、設定によっては on-demand load も可能です。そのため catalog entry だけでは observation 時点で model weights が memory resident だったとは証明できません。

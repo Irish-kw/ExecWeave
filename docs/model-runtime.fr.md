@@ -87,6 +87,9 @@ Aucun prompt, réponse, texte de raisonnement, choice, logprob ou token génér�
 
 ## LM Studio
 
+<!-- lmstudio-auto-live-v064 -->
+Pour l’ingestion automatique dans Live Viewer, lancez LM Studio sous ExecWeave avec un port local explicite, par exemple `execweave live --open -- lms server start --port 1234`. ExecWeave vérifie qu’aucune API compatible n’était déjà présente sur cet endpoint avant le lancement, puis ne probe `/v1/models` qu’après un démarrage réussi. La relation reste `ADVERTISES_MODEL` et n’est jamais promue en `LOADED_MODEL`.
+
 LM Studio réutilise le même analyseur de réponse compatible OpenAI, mais son résultat `/v1/models` est représenté comme `ADVERTISES_MODEL`, et non `LOADED_MODEL`.
 
 Cette distinction est volontaire : LM Studio peut rendre visibles au serveur des modèles téléchargés, y compris dans des configurations où un modèle est chargé à la demande. Une entrée de catalogue ne prouve donc pas à elle seule que les poids du modèle résidaient en mémoire au moment de l’observation.

@@ -87,6 +87,9 @@ No prompt, response, reasoning text, choices, logprobs, or generated token text 
 
 ## LM Studio
 
+<!-- lmstudio-auto-live-v064 -->
+For automatic Live Viewer ingestion, launch LM Studio through ExecWeave with an explicit local port, for example `execweave live --open -- lms server start --port 1234`. ExecWeave checks that the endpoint was not already serving a compatible API before launch, and only probes `/v1/models` after the launcher exits successfully. The resulting relation remains `ADVERTISES_MODEL`; a catalog entry is never upgraded to `LOADED_MODEL`.
+
 LM Studio reuses the same OpenAI-compatible response parser, but its `/v1/models` result is represented as `ADVERTISES_MODEL`, not `LOADED_MODEL`.
 
 This distinction is deliberate: LM Studio can make downloaded models visible to the server, including configurations where a model may be loaded on demand. A catalog entry therefore does not by itself prove that model weights were resident in memory at observation time.

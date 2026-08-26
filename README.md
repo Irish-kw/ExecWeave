@@ -97,11 +97,11 @@ execweave live --open -- ollama serve
 | Ollama | Yes, when launched under ExecWeave (for example `ollama serve`) | `execweave-model-runtime event/probe --runtime ollama` | Yes (automatic local probe) |
 | llama.cpp | Yes, when its local server is launched under ExecWeave | `execweave-model-runtime event/probe --runtime llamacpp` | Yes (automatic local probe) |
 | vLLM | Yes, when its local server is launched under ExecWeave | `execweave-model-runtime event/probe --runtime vllm` | Yes (automatic local probe) |
-| LM Studio | Yes only for a local process launched under ExecWeave; an already-running server is not attached | `execweave-model-runtime event/probe --runtime lmstudio` | No |
+| LM Studio | Yes only for a local process launched under ExecWeave; an already-running server is not attached | `execweave-model-runtime event/probe --runtime lmstudio` | Yes (automatic after successful `lms server start --port <port>`) |
 | LiteLLM Proxy | Yes, when the local proxy is launched under ExecWeave | `execweave-inference-gateway event --gateway litellm` | No |
 | OpenRouter | No direct remote-service process; run the local client/Agent under `live` instead | `execweave-inference-gateway event/generation --gateway openrouter` | No |
 
-Agent rows marked **Yes** require the provider hook/plugin to be configured once; `execweave live` then supplies the per-run `EXECWEAVE_SEMANTIC_SIDECAR` automatically. Ollama, llama.cpp, and vLLM rows marked **Yes** use automatic loopback model-catalog probes only when ExecWeave launches the corresponding local server. LM Studio and inference-gateway rows remain **No** until their specialized metadata can be observed automatically without inventing evidence.
+Agent rows marked **Yes** require the provider hook/plugin to be configured once; `execweave live` then supplies the per-run `EXECWEAVE_SEMANTIC_SIDECAR` automatically. Ollama, llama.cpp, and vLLM rows marked **Yes** use automatic loopback model-catalog probes only when ExecWeave launches the corresponding local server. LM Studio is also automatic for `lms server start` when an explicit `--port` is supplied, the compatible endpoint was absent before launch, and the launcher exits successfully. Inference-gateway rows remain **No** until their specialized routing metadata can be observed automatically without inventing evidence.
 
 For an already-running Ollama server, use `execweave-model-runtime probe --runtime ollama` to snapshot loaded-model state. For OpenRouter, `live` can observe the local client and its network activity, while gateway routing/usage metadata remains a separate evidence layer.
 

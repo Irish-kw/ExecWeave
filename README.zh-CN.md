@@ -98,7 +98,7 @@ execweave live --open -- ollama serve
 | Ollama | 可以，但需由 ExecWeave 启动，例如 `ollama serve` | `execweave-model-runtime event/probe --runtime ollama` | 是（自动本地 probe） |
 | llama.cpp | 可以，但需由 ExecWeave 启动本地 server | `execweave-model-runtime event/probe --runtime llamacpp` | 是（自动本地 probe） |
 | vLLM | 可以，但需由 ExecWeave 启动本地 server | `execweave-model-runtime event/probe --runtime vllm` | 是（自动本地 probe） |
-| LM Studio | 仅限由 ExecWeave 启动的本地 process；不会 attach 已运行的 server | `execweave-model-runtime event/probe --runtime lmstudio` | 否 |
+| LM Studio | 仅限由 ExecWeave 启动的本地 process；不会 attach 已运行的 server | `execweave-model-runtime event/probe --runtime lmstudio` | 是（需明确 `--port`，成功启动后自动 probe） |
 | LiteLLM Proxy | 可以，但需由 ExecWeave 启动本地 proxy | `execweave-inference-gateway event --gateway litellm` | 否 |
 | OpenRouter | 远程服务本身不能直接 live；请 live 本地 client/Agent | `execweave-inference-gateway event/generation --gateway openrouter` | 否 |
 

@@ -104,7 +104,7 @@ execweave live --open -- ollama serve
 | Ollama | Да, если запущен под ExecWeave, например `ollama serve` | `execweave-model-runtime event/probe --runtime ollama` | Да (автоматический локальный probe) |
 | llama.cpp | Да, если локальный сервер запущен под ExecWeave | `execweave-model-runtime event/probe --runtime llamacpp` | Да (автоматический локальный probe) |
 | vLLM | Да, если локальный сервер запущен под ExecWeave | `execweave-model-runtime event/probe --runtime vllm` | Да (автоматический локальный probe) |
-| LM Studio | Только для локального процесса, запущенного под ExecWeave; уже работающий сервер автоматически не attached | `execweave-model-runtime event/probe --runtime lmstudio` | Нет |
+| LM Studio | Только для локального процесса, запущенного под ExecWeave; уже работающий сервер автоматически не attached | `execweave-model-runtime event/probe --runtime lmstudio` | Да (автоматический probe после успешного запуска с `--port`) |
 | LiteLLM Proxy | Да, если локальный proxy запущен под ExecWeave | `execweave-inference-gateway event --gateway litellm` | Нет |
 | OpenRouter | Нет локального процесса удалённого сервиса для прямого запуска; вместо этого запускайте локальный client/Agent под `live` | `execweave-inference-gateway event/generation --gateway openrouter` | Нет |
 
