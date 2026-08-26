@@ -31,5 +31,5 @@ jobs:
           python-version: "3.12"
       - name: Check eight-language navigation and coverage
         run: python scripts/sync_i18n_nav.py --check
-      - name: Check German, French, and Russian structural parity
+      - name: Check translation structural parity
         run: python scripts/audit_i18n_parity.py --languages fr de ru

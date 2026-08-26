@@ -7,6 +7,7 @@ from pathlib import Path
 
 ALL_LANGS = ["zh-TW", "zh-CN", "ja", "ko", "fr", "de", "ru"]
 DEFAULT_STRICT_LANGS = ["fr", "de", "ru"]
+ALL_LANGUAGE_STRICT_STEMS = {"docs/live-graph"}
 DOCS = [
     (Path("README.md"), "README"),
     (Path("docs/phase-1-runtime-collection.md"), "docs/phase-1-runtime-collection"),
@@ -25,10 +26,13 @@ DOCS = [
 
 README_REQUIRED_SNIPPETS = [
     "v0.6.3",
+    "v0.6.4",
     "execweave live --open -- cursor",
     "execweave live --open -- opencode",
     "execweave live --open -- ollama serve",
     "execweave top -- codex",
+    "LM Studio",
+    "LiteLLM Proxy",
     "164,273 ev/s",
 ]
 
@@ -114,9 +118,16 @@ def audit_coverage() -> int:
         text = path.read_text(encoding="utf-8")
         missing = [snippet for snippet in README_REQUIRED_SNIPPETS if snippet not in text]
         if missing:
-            print(f"FAIL {lang:5} {path}: missing v0.6.3 anchors {missing}")
+            print(f"FAIL {lang:5} {path}: missing release anchors {missing}")
             failures += 1
     return failures
+
+
+def languages_for_stem(stem: str, requested: list[str]) -> list[str]:
+    languages = list(requested)
+    if stem in ALL_LANGUAGE_STRICT_STEMS:
+        languages.extend(ALL_LANGS)
+    return list(dict.fromkeys(languages))
 
 
 def main() -> int:
@@ -131,7 +142,10 @@ def main() -> int:
         nargs="+",
         choices=ALL_LANGS,
         default=DEFAULT_STRICT_LANGS,
-        help="languages to check structurally against the English canonical files",
+        help=(
+            "languages to check structurally against English across the documentation set; "
+            "selected high-risk documents are always checked across all seven translations"
+        ),
     )
     args = parser.parse_args()
 
@@ -142,7 +156,7 @@ def main() -> int:
             continue
         src_sig = signature(english_path.read_text(encoding="utf-8"))
         print(f"\n[{english_path}] canonical bytes={src_sig['bytes']}")
-        for lang in args.languages:
+        for lang in languages_for_stem(stem, args.languages):
             path = translated_path(stem, lang)
             if not path.exists():
                 continue
