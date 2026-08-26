@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 import webbrowser
@@ -16,6 +17,7 @@ from uuid import uuid4
 from .backends import create_collector
 from .graph import GRAPH_SCHEMA_VERSION, GraphAccumulator, build_execution_graph, write_execution_graph
 from .live_view import LIVE_HTML as _LIVE_HTML
+from .semantic import LiveSemanticNormalizer, merge_semantic_sidecar
 from .sink import JsonlSink
 from .validate import validate_event_stream
 from .viewer import (
@@ -28,6 +30,7 @@ from .viewer import (
 
 LIVE_DELTA_HISTORY = 256
 LIVE_DELTA_HISTORY_BYTES = 8 * 1024 * 1024
+_SEMANTIC_ENV = "EXECWEAVE_SEMANTIC_SIDECAR"
 
 _FINAL_THEME_CSS = """
 :root[data-theme="light"]{color-scheme:light;--bg:#f7f9fc;--panel:#ffffff;--panel2:#eef3f8;--text:#172033;--muted:#617083;--border:#cbd5e1;--edge:#64748b;--causal:#15803d;--noncausal:#b45309;--inferred:#7e22ce;--identity:#0369a1;--selected:#2563eb;--accent:#2563eb}
@@ -58,6 +61,8 @@ class LiveResult:
     live_url: str
     output_dir: Path
     event_stream: Path
+    semantic_sidecar: Path
+    materialized_event_stream: Path
     graph: Path
     viewer: Path
 
@@ -68,6 +73,8 @@ class LiveResult:
             "live_url": self.live_url,
             "output_dir": str(self.output_dir),
             "event_stream": str(self.event_stream),
+            "semantic_sidecar": str(self.semantic_sidecar),
+            "materialized_event_stream": str(self.materialized_event_stream),
             "graph": str(self.graph),
             "viewer": str(self.viewer),
         }
@@ -113,18 +120,35 @@ def _event_edge_key(event: dict[str, object]) -> tuple[str, str, str] | None:
     return None
 
 
+@dataclass
+class _JsonlTail:
+    path: Path
+    offset: int = 0
+    pending_bytes: bytes = b""
+    records_seen: int = 0
+
+
 class _LiveState:
-    def __init__(self, session_id: str, event_path: Path) -> None:
+    def __init__(
+        self,
+        session_id: str,
+        event_path: Path,
+        semantic_path: Path | None = None,
+    ) -> None:
         self.session_id = session_id
         self.event_path = event_path
+        self.semantic_path = semantic_path
         self._lock = threading.Lock()
         self._accumulator = GraphAccumulator(
             session_id=session_id,
             source_path=event_path,
             retain_event_ids=False,
         )
-        self._read_offset = 0
-        self._pending_bytes = b""
+        self._runtime_tail = _JsonlTail(event_path)
+        self._semantic_tail = _JsonlTail(semantic_path) if semantic_path is not None else None
+        self._semantic_normalizer = LiveSemanticNormalizer(session_id)
+        self._runtime_event_count = 0
+        self._specialized_event_count = 0
         self._finished = False
         self._final_graph: dict[str, object] | None = None
         self._final_html: str | None = None
@@ -171,8 +195,16 @@ class _LiveState:
             source_path=self.event_path,
             retain_event_ids=False,
         )
-        self._read_offset = 0
-        self._pending_bytes = b""
+        tails = [self._runtime_tail]
+        if self._semantic_tail is not None:
+            tails.append(self._semantic_tail)
+        for tail in tails:
+            tail.offset = 0
+            tail.pending_bytes = b""
+            tail.records_seen = 0
+        self._semantic_normalizer.reset()
+        self._runtime_event_count = 0
+        self._specialized_event_count = 0
         self._clear_update_history_locked()
         self._update_sequence += 1
         self._resync_floor = self._update_sequence
@@ -221,66 +253,133 @@ class _LiveState:
             self._updates_bytes -= self._update_sizes.popleft()
             self._resync_floor = max(self._resync_floor, int(evicted["sequence"]))
 
-    def _refresh_incremental_locked(self) -> None:
+    def _tail_truncated_locked(self, tail: _JsonlTail) -> bool:
         try:
-            file_size = self.event_path.stat().st_size
+            return tail.path.stat().st_size < tail.offset
         except OSError:
-            return
-        if file_size < self._read_offset:
-            self._reset_incremental_state_locked()
-        if file_size <= self._read_offset:
-            return
+            return False
 
+    def _read_tail_records_locked(
+        self,
+        tail: _JsonlTail,
+    ) -> list[tuple[int, dict[str, object]]]:
         try:
-            with self.event_path.open("rb") as handle:
-                handle.seek(self._read_offset)
+            file_size = tail.path.stat().st_size
+        except OSError:
+            return []
+        if file_size <= tail.offset:
+            return []
+        try:
+            with tail.path.open("rb") as handle:
+                handle.seek(tail.offset)
                 chunk = handle.read()
         except OSError:
-            return
+            return []
         if not chunk:
-            return
-        self._read_offset += len(chunk)
-
-        buffered = self._pending_bytes + chunk
+            return []
+        tail.offset += len(chunk)
+        buffered = tail.pending_bytes + chunk
         lines = buffered.split(b"\n")
-        self._pending_bytes = lines.pop()
+        tail.pending_bytes = lines.pop()
+        records: list[tuple[int, dict[str, object]]] = []
+        for raw_line in lines:
+            if not raw_line.strip():
+                continue
+            tail.records_seen += 1
+            try:
+                payload = json.loads(raw_line.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                continue
+            if isinstance(payload, dict):
+                records.append((tail.records_seen, payload))
+        return records
+
+    def _apply_live_event_locked(
+        self,
+        event: dict[str, object],
+        *,
+        added_nodes: set[str],
+        updated_nodes: set[str],
+        added_edges: set[tuple[str, str, str]],
+        updated_edges: set[tuple[str, str, str]],
+    ) -> bool:
+        source_id = _entity_id(event.get("source"))
+        target_id = _entity_id(event.get("target"))
+        node_ids = {value for value in (source_id, target_id) if value}
+        existing_nodes = {
+            node_id for node_id in node_ids if node_id in self._accumulator.nodes
+        }
+        edge_key = _event_edge_key(event)
+        edge_existed = edge_key in self._accumulator.edges if edge_key is not None else False
+        try:
+            self._accumulator.apply(event)
+        except (TypeError, ValueError):
+            return False
+
+        for node_id in node_ids:
+            if node_id in existing_nodes and node_id not in added_nodes:
+                updated_nodes.add(node_id)
+            else:
+                added_nodes.add(node_id)
+                updated_nodes.discard(node_id)
+        if edge_key is not None and edge_key in self._accumulator.edges:
+            if edge_existed and edge_key not in added_edges:
+                updated_edges.add(edge_key)
+            else:
+                added_edges.add(edge_key)
+                updated_edges.discard(edge_key)
+        return True
+
+    def _refresh_incremental_locked(self) -> None:
+        tails = [self._runtime_tail]
+        if self._semantic_tail is not None:
+            tails.append(self._semantic_tail)
+        if any(self._tail_truncated_locked(tail) for tail in tails):
+            self._reset_incremental_state_locked()
+
         added_nodes: set[str] = set()
         updated_nodes: set[str] = set()
         added_edges: set[tuple[str, str, str]] = set()
         updated_edges: set[tuple[str, str, str]] = set()
-        applied_count = 0
+        runtime_applied = 0
+        specialized_applied = 0
 
-        for raw_line in lines:
-            if not raw_line.strip():
+        for _, event in self._read_tail_records_locked(self._runtime_tail):
+            if not self._apply_live_event_locked(
+                event,
+                added_nodes=added_nodes,
+                updated_nodes=updated_nodes,
+                added_edges=added_edges,
+                updated_edges=updated_edges,
+            ):
                 continue
-            try:
-                event = json.loads(raw_line.decode("utf-8"))
-                if not isinstance(event, dict):
+            self._semantic_normalizer.observe_runtime_event(event)
+            self._runtime_event_count += 1
+            runtime_applied += 1
+
+        if self._semantic_tail is not None and self._semantic_normalizer.ready:
+            for line_number, record in self._read_tail_records_locked(self._semantic_tail):
+                try:
+                    normalized = self._semantic_normalizer.normalize(
+                        record,
+                        line_number=line_number,
+                    )
+                except ValueError:
                     continue
-                source_id = _entity_id(event.get("source"))
-                target_id = _entity_id(event.get("target"))
-                node_ids = {value for value in (source_id, target_id) if value}
-                existing_nodes = {node_id for node_id in node_ids if node_id in self._accumulator.nodes}
-                edge_key = _event_edge_key(event)
-                edge_existed = edge_key in self._accumulator.edges if edge_key is not None else False
-                self._accumulator.apply(event)
-            except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
-                continue
+                if normalized is None:
+                    continue
+                if not self._apply_live_event_locked(
+                    normalized,
+                    added_nodes=added_nodes,
+                    updated_nodes=updated_nodes,
+                    added_edges=added_edges,
+                    updated_edges=updated_edges,
+                ):
+                    continue
+                self._specialized_event_count += 1
+                specialized_applied += 1
 
-            applied_count += 1
-            for node_id in node_ids:
-                if node_id in existing_nodes and node_id not in added_nodes:
-                    updated_nodes.add(node_id)
-                else:
-                    added_nodes.add(node_id)
-                    updated_nodes.discard(node_id)
-            if edge_key is not None and edge_key in self._accumulator.edges:
-                if edge_existed and edge_key not in added_edges:
-                    updated_edges.add(edge_key)
-                else:
-                    added_edges.add(edge_key)
-                    updated_edges.discard(edge_key)
-
+        applied_count = runtime_applied + specialized_applied
         if not applied_count:
             return
 
@@ -291,6 +390,10 @@ class _LiveState:
         update: dict[str, object] = {
             **counts,
             "event_count_delta": applied_count,
+            "evidence_event_count_delta": {
+                "os_runtime": runtime_applied,
+                "specialized": specialized_applied,
+            },
             "nodes_added": [],
             "nodes_updated": [],
             "edges_added": [],
@@ -327,6 +430,13 @@ class _LiveState:
                 self._refresh_incremental_locked()
             payload = self._snapshot_from_accumulator_locked()
             payload["live_finished"] = self._finished
+            payload["live_evidence_counts"] = {
+                "os_runtime": self._runtime_event_count,
+                "specialized": self._specialized_event_count,
+            }
+            payload["live_specialized_provisional"] = (
+                self._specialized_event_count > 0 and not self._finished
+            )
             return payload
 
     def live_update(self, after: int | None) -> dict[str, object]:
@@ -489,9 +599,11 @@ def run_live(
     )
     run_dir.mkdir(parents=True, exist_ok=True)
     event_path = run_dir / "events.jsonl"
+    semantic_path = run_dir / "semantic.jsonl"
+    merged_event_path = run_dir / "events.semantic.jsonl"
     graph_path = run_dir / "graph.json"
     viewer_path = run_dir / "viewer.html"
-    for artifact in (event_path, graph_path, viewer_path):
+    for artifact in (event_path, semantic_path, merged_event_path, graph_path, viewer_path):
         if artifact.exists() and artifact.stat().st_size > 0:
             raise FileExistsError(f"ExecWeave live artifact already exists: {artifact}")
 
@@ -506,7 +618,7 @@ def run_live(
         collect_network=collect_network,
     )
 
-    state = _LiveState(session_id, event_path)
+    state = _LiveState(session_id, event_path, semantic_path)
     server = _LocalThreadingHTTPServer(("127.0.0.1", port), _handler_factory(state))
     server.daemon_threads = True
     server_thread = threading.Thread(
@@ -523,14 +635,28 @@ def run_live(
         webbrowser.open(live_url)
 
     return_code = 1
+    previous_semantic_sidecar = os.environ.get(_SEMANTIC_ENV)
+    os.environ[_SEMANTIC_ENV] = str(semantic_path)
     try:
-        return_code = collector.run(command)
+        try:
+            return_code = collector.run(command)
+        finally:
+            if previous_semantic_sidecar is None:
+                os.environ.pop(_SEMANTIC_ENV, None)
+            else:
+                os.environ[_SEMANTIC_ENV] = previous_semantic_sidecar
+
         validation = validate_event_stream(event_path)
         if not validation.valid:
             details = "; ".join(validation.errors)
             raise RuntimeError(f"live event stream failed validation: {details}")
 
-        execution_graph = build_execution_graph(event_path)
+        materialized_event_path = event_path
+        if semantic_path.exists() and semantic_path.stat().st_size > 0:
+            merge_semantic_sidecar(event_path, semantic_path, merged_event_path)
+            materialized_event_path = merged_event_path
+
+        execution_graph = build_execution_graph(materialized_event_path)
         graph_payload = execution_graph.to_dict()
         write_execution_graph(execution_graph, graph_path)
         write_graph_html(graph_payload, viewer_path, open_browser=False)
@@ -544,6 +670,8 @@ def run_live(
             live_url=live_url,
             output_dir=run_dir,
             event_stream=event_path,
+            semantic_sidecar=semantic_path,
+            materialized_event_stream=materialized_event_path,
             graph=graph_path,
             viewer=viewer_path,
         )
