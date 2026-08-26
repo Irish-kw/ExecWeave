@@ -60,6 +60,9 @@ def main() -> int:
             [str(_console_script(env_root, "execweave")), "--help"],
             [str(_console_script(env_root, "execweave")), "top", "--help"],
             [str(_console_script(env_root, "execweave-scalability")), "--help"],
+            [str(_console_script(env_root, "execweave-inference-gateway")), "--help"],
+            [str(_console_script(env_root, "execweave-litellm-callback")), "--print-callback"],
+            [str(_console_script(env_root, "execweave-litellm-callback")), "--print-config"],
         ]
         for command in commands:
             if not Path(command[0]).is_file():
