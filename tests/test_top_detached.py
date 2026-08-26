@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 import execweave.top as top_module
 import execweave.top_cli as top_cli_module
 
@@ -79,3 +81,24 @@ def test_top_attach_mode_does_not_launch_agent(monkeypatch) -> None:
         "command": ["codex"],
         "refresh_seconds": 0.2,
     }
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://127.0.0.1:8765/",
+        "http://example.com:8765/",
+        "http://127.0.0.1/",
+        "http://127.0.0.1:8765/live.json",
+        "http://user@127.0.0.1:8765/",
+    ],
+)
+def test_top_attach_rejects_nonlocal_or_nonbase_urls(url: str) -> None:
+    with pytest.raises(ValueError):
+        top_cli_module._validate_attach_url(url)
+
+
+def test_top_attach_accepts_loopback_forms() -> None:
+    assert top_cli_module._validate_attach_url("http://127.0.0.1:8765/")
+    assert top_cli_module._validate_attach_url("http://localhost:8765/")
+    assert top_cli_module._validate_attach_url("http://[::1]:8765/")
