@@ -170,12 +170,14 @@ def _normalize_semantic_record(
     line_number: int,
     session_id: str,
     started_at: datetime,
-    finished_at: datetime,
+    finished_at: datetime | None,
     candidates: dict[int, list[_ProcessCandidate]],
 ) -> tuple[dict[str, Any], int, int]:
     context = f"semantic sidecar line {line_number}"
     timestamp = _parse_timestamp(record.get("timestamp"), context=context)
-    if timestamp < started_at or timestamp > finished_at:
+    if timestamp < started_at:
+        raise ValueError(f"{context}: timestamp precedes the runtime session start")
+    if finished_at is not None and timestamp > finished_at:
         raise ValueError(f"{context}: timestamp is outside the runtime session interval")
 
     event_type = record.get("event_type")
@@ -242,6 +244,82 @@ def _normalize_semantic_record(
         resolved,
         unresolved,
     )
+
+
+class LiveSemanticNormalizer:
+    """Normalize append-only specialized records for disposable live graph state.
+
+    Live normalization is provisional: it resolves process references only against
+    process identities observed so far. The final artifact is rebuilt through
+    ``merge_semantic_sidecar`` after the runtime session closes.
+    """
+
+    def __init__(self, session_id: str) -> None:
+        self.session_id = session_id
+        self._started_at: datetime | None = None
+        self._candidates: dict[int, dict[str, _ProcessCandidate]] = {}
+
+    @property
+    def ready(self) -> bool:
+        return self._started_at is not None
+
+    def reset(self) -> None:
+        self._started_at = None
+        self._candidates.clear()
+
+    def observe_runtime_event(self, event: dict[str, Any]) -> None:
+        if event.get("event_type") == "session.started":
+            self._started_at = _parse_timestamp(
+                event.get("timestamp"),
+                context="live session.started",
+            )
+
+        for entity in (event.get("source"), event.get("target")):
+            if not isinstance(entity, dict) or entity.get("type") != "process":
+                continue
+            entity_id = entity.get("id")
+            attributes = entity.get("attributes") or {}
+            if not isinstance(entity_id, str) or not isinstance(attributes, dict):
+                continue
+            pid = attributes.get("pid")
+            if not isinstance(pid, int) or isinstance(pid, bool):
+                continue
+            create_time_raw = attributes.get("create_time")
+            create_time = (
+                float(create_time_raw)
+                if isinstance(create_time_raw, (int, float))
+                and not isinstance(create_time_raw, bool)
+                else None
+            )
+            self._candidates.setdefault(pid, {})[entity_id] = _ProcessCandidate(
+                pid=pid,
+                entity=deepcopy(entity),
+                create_time=create_time,
+            )
+
+    def normalize(
+        self,
+        record: dict[str, Any],
+        *,
+        line_number: int,
+    ) -> dict[str, Any] | None:
+        if self._started_at is None:
+            return None
+        candidates = {
+            pid: list(by_id.values()) for pid, by_id in self._candidates.items()
+        }
+        normalized, _, _ = _normalize_semantic_record(
+            record,
+            line_number=line_number,
+            session_id=self.session_id,
+            started_at=self._started_at,
+            finished_at=None,
+            candidates=candidates,
+        )
+        attributes = normalized.get("attributes")
+        if isinstance(attributes, dict):
+            attributes["live_normalization_provisional"] = True
+        return normalized
 
 
 def merge_semantic_sidecar(
