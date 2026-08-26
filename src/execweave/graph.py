@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .fidelity import FidelityAccumulator, derive_fidelity
 from .validate import validate_event_stream
 
 GRAPH_SCHEMA_VERSION = "0.1"
@@ -180,6 +181,7 @@ class ExecutionGraph:
     event_count: int
     nodes: list[GraphNode]
     edges: list[GraphEdge]
+    fidelity: dict[str, Any] = field(default_factory=dict)
     built_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     )
@@ -194,6 +196,7 @@ class ExecutionGraph:
             "node_count": len(self.nodes),
             "edge_count": len(self.edges),
             "built_at": self.built_at,
+            "fidelity": self.fidelity,
             "nodes": [node.to_dict() for node in self.nodes],
             "edges": [edge.to_dict() for edge in self.edges],
         }
@@ -227,6 +230,7 @@ class GraphAccumulator:
         self.event_count = 0
         self.nodes: dict[str, GraphNode] = {}
         self.edges: dict[tuple[str, str, str], GraphEdge] = {}
+        self._fidelity = FidelityAccumulator()
 
     @property
     def node_count(self) -> int:
@@ -249,6 +253,7 @@ class GraphAccumulator:
         if isinstance(schema_version, str) and schema_version:
             self.source_schema_versions.add(schema_version)
         self.event_count += 1
+        self._fidelity.observe(event)
 
         source = event.get("source")
         target = event.get("target")
@@ -298,6 +303,7 @@ class GraphAccumulator:
             edges=sorted(
                 self.edges.values(), key=lambda edge: (edge.source, edge.relation, edge.target)
             ),
+            fidelity=self._fidelity.to_dict(),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -378,6 +384,7 @@ def build_execution_graph(
         event_count=len(events),
         nodes=sorted(nodes.values(), key=lambda node: (node.type, node.id)),
         edges=sorted(edges.values(), key=lambda edge: (edge.source, edge.relation, edge.target)),
+        fidelity=derive_fidelity(events),
     )
 
 
