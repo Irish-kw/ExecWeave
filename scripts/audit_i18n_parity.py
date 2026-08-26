@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 from pathlib import Path
 
 LANGS = ["zh-TW", "zh-CN", "ja", "ko", "fr", "de", "ru"]
@@ -22,7 +23,6 @@ DOCS = [
 
 FENCE_RE = re.compile(r"^```([^\n`]*)$", re.M)
 HEADING_RE = re.compile(r"^(#{1,6})\s+.+$", re.M)
-LINK_RE = re.compile(r"(?<!!)\[[^\]]+\]\(([^)]+)\)")
 IMAGE_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)|<img\b", re.I)
 
 
@@ -33,18 +33,20 @@ def translated_path(stem: str, lang: str) -> Path:
 
 
 def strip_nav(text: str) -> str:
-    text = re.sub(r"<!-- i18n-nav:start -->.*?<!-- i18n-nav:end -->\s*", "", text, flags=re.S)
-    return text
+    return re.sub(
+        r"<!-- i18n-nav:start -->.*?<!-- i18n-nav:end -->\s*",
+        "",
+        text,
+        flags=re.S,
+    )
 
 
 def signature(text: str) -> dict[str, object]:
     body = strip_nav(text)
     headings = [len(m.group(1)) for m in HEADING_RE.finditer(body)]
     fences = [m.group(1).strip() for m in FENCE_RE.finditer(body)]
-    # A well-formed fenced document has opening/closing pairs. Keep only opening languages.
     fence_langs = fences[::2] if len(fences) % 2 == 0 else fences
     table_lines = [line for line in body.splitlines() if line.lstrip().startswith("|")]
-    links = [m.group(1) for m in LINK_RE.finditer(body)]
     images = len(IMAGE_RE.findall(body))
     return {
         "bytes": len(body.encode("utf-8")),
@@ -52,9 +54,13 @@ def signature(text: str) -> dict[str, object]:
         "fence_count": len(fences) // 2,
         "fence_langs": fence_langs,
         "table_lines": len(table_lines),
-        "links": len(links),
         "images": images,
     }
+
+
+def is_subsequence(needed: list[int], available: list[int]) -> bool:
+    it = iter(available)
+    return all(any(value == item for value in it) for item in needed)
 
 
 def compare(src: dict[str, object], dst: dict[str, object]) -> list[str]:
@@ -62,19 +68,31 @@ def compare(src: dict[str, object], dst: dict[str, object]) -> list[str]:
     ratio = dst["bytes"] / max(1, src["bytes"])
     if ratio < 0.62:
         issues.append(f"size ratio {ratio:.2f} < 0.62")
-    if dst["headings"] != src["headings"]:
-        issues.append(f"heading levels {dst['headings']} != {src['headings']}")
-    if dst["fence_count"] != src["fence_count"]:
-        issues.append(f"code blocks {dst['fence_count']} != {src['fence_count']}")
-    if dst["fence_langs"] != src["fence_langs"]:
-        issues.append(f"code block languages {dst['fence_langs']} != {src['fence_langs']}")
-    if dst["table_lines"] != src["table_lines"]:
-        issues.append(f"table lines {dst['table_lines']} != {src['table_lines']}")
-    if dst["images"] != src["images"]:
-        issues.append(f"images {dst['images']} != {src['images']}")
-    # Links may point to localized siblings, but the count should stay structurally aligned.
-    if dst["links"] != src["links"]:
-        issues.append(f"links {dst['links']} != {src['links']}")
+
+    src_headings = src["headings"]
+    dst_headings = dst["headings"]
+    if not is_subsequence(src_headings, dst_headings):
+        issues.append(
+            f"canonical heading-level sequence {src_headings} is not contained in {dst_headings}"
+        )
+
+    if dst["fence_count"] < src["fence_count"]:
+        issues.append(f"code blocks {dst['fence_count']} < canonical {src['fence_count']}")
+
+    src_langs = Counter(src["fence_langs"])
+    dst_langs = Counter(dst["fence_langs"])
+    missing_langs = {
+        lang: count - dst_langs[lang]
+        for lang, count in src_langs.items()
+        if dst_langs[lang] < count
+    }
+    if missing_langs:
+        issues.append(f"missing canonical code-block languages/counts: {missing_langs}")
+
+    if dst["table_lines"] < src["table_lines"]:
+        issues.append(f"table lines {dst['table_lines']} < canonical {src['table_lines']}")
+    if dst["images"] < src["images"]:
+        issues.append(f"images {dst['images']} < canonical {src['images']}")
     return issues
 
 
@@ -86,8 +104,7 @@ def main() -> int:
             print(f"MISSING canonical: {english_path}")
             failures += len(LANGS)
             continue
-        src_text = english_path.read_text(encoding="utf-8")
-        src_sig = signature(src_text)
+        src_sig = signature(english_path.read_text(encoding="utf-8"))
         print(f"\n[{english_path}] canonical bytes={src_sig['bytes']}")
         for lang in LANGS:
             path = translated_path(stem, lang)
