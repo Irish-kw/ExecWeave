@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import errno
+import warnings
 from pathlib import Path
 from typing import Iterable
 
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
+from watchdog.observers.polling import PollingObserver
 
 from .schema import Entity, RuntimeEvent
 from .sink import JsonlSink
@@ -76,6 +79,16 @@ class SessionFileEventHandler(FileSystemEventHandler):
 
 
 class FileWatcher:
+    """Filesystem observation with a resource-safe Linux fallback.
+
+    watchdog's Linux inotify backend allocates one kernel watch per recursively
+    observed directory. Large workspaces can therefore hit ``max_user_watches``
+    even when ExecWeave later filters events from internal paths. When the kernel
+    reports ENOSPC, fall back to watchdog's polling observer instead of aborting
+    the whole ExecWeave run. This preserves session-level file-change semantics;
+    only the collection mechanism and latency change.
+    """
+
     def __init__(
         self,
         *,
@@ -93,10 +106,31 @@ class FileWatcher:
             excluded_roots=excluded_roots,
         )
         self.observer = Observer()
+        self.fallback_reason: str | None = None
 
-    def start(self) -> None:
+    def _schedule_and_start(self) -> None:
         self.observer.schedule(self.handler, str(self.root), recursive=True)
         self.observer.start()
+
+    def start(self) -> None:
+        try:
+            self._schedule_and_start()
+        except OSError as exc:
+            if exc.errno != errno.ENOSPC:
+                raise
+            try:
+                self.observer.stop()
+                self.observer.join(timeout=1)
+            except RuntimeError:
+                pass
+            self.fallback_reason = (
+                "Linux inotify watch capacity was exhausted; ExecWeave is using "
+                "polling filesystem observation for this session. File-change "
+                "semantics are preserved, but detection may be less immediate."
+            )
+            warnings.warn(self.fallback_reason, RuntimeWarning, stacklevel=2)
+            self.observer = PollingObserver(timeout=1.0)
+            self._schedule_and_start()
 
     def stop(self) -> None:
         self.observer.stop()
