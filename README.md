@@ -20,7 +20,7 @@ ExecWeave is an open-source, local-first observability project that turns AI-age
 > **Event is ground truth. The graph is a materialized view.**
 
 <p align="center">
-  <img src="execweave-hero-demo-v2.webp" alt="ExecWeave animated live demo" width="100%">
+  <img src="docs/assets/execweave-launch-demo-v5-x.gif" alt="ExecWeave animated live demo" width="100%">
 </p>
 
 <!-- execweave-demo:start -->
