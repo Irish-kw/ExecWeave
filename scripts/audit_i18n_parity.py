@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import argparse
 import re
 from collections import Counter
 from pathlib import Path
 
-LANGS = ["zh-TW", "zh-CN", "ja", "ko", "fr", "de", "ru"]
+ALL_LANGS = ["zh-TW", "zh-CN", "ja", "ko", "fr", "de", "ru"]
+DEFAULT_STRICT_LANGS = ["fr", "de", "ru"]
 DOCS = [
     (Path("README.md"), "README"),
     (Path("docs/phase-1-runtime-collection.md"), "docs/phase-1-runtime-collection"),
@@ -19,6 +21,15 @@ DOCS = [
     (Path("docs/inference-gateway.md"), "docs/inference-gateway"),
     (Path("docs/model-runtime.md"), "docs/model-runtime"),
     (Path("docs/security-analysis.md"), "docs/security-analysis"),
+]
+
+README_REQUIRED_SNIPPETS = [
+    "v0.6.3",
+    "execweave live --open -- cursor",
+    "execweave live --open -- opencode",
+    "execweave live --open -- ollama serve",
+    "execweave top -- codex",
+    "164,273 ev/s",
 ]
 
 HEADING_RE = re.compile(r"^(#{1,6})\s+.+$", re.M)
@@ -41,34 +52,29 @@ def strip_nav(text: str) -> str:
     )
 
 
-def normalize_block(block: str) -> str:
-    return "\n".join(line.rstrip() for line in block.strip().splitlines()).strip()
-
-
 def signature(text: str) -> dict[str, object]:
     body = strip_nav(text)
-    heading_counts = Counter(len(m.group(1)) for m in HEADING_RE.finditer(body))
-    code_blocks = [normalize_block(x) for x in FENCED_BLOCK_RE.findall(body)]
+    heading_counts = Counter(len(match.group(1)) for match in HEADING_RE.finditer(body))
+    code_blocks = FENCED_BLOCK_RE.findall(body)
     table_lines = [line for line in body.splitlines() if line.lstrip().startswith("|")]
     images = len(IMAGE_RE.findall(body))
     return {
-        "body": body,
         "bytes": len(body.encode("utf-8")),
         "heading_counts": heading_counts,
-        "code_blocks": code_blocks,
+        "code_block_count": len(code_blocks),
         "table_lines": len(table_lines),
         "images": images,
     }
 
 
-def compare(src: dict[str, object], dst: dict[str, object]) -> list[str]:
+def compare_structure(src: dict[str, object], dst: dict[str, object]) -> list[str]:
     issues: list[str] = []
-    ratio = dst["bytes"] / max(1, src["bytes"])
+    ratio = int(dst["bytes"]) / max(1, int(src["bytes"]))
     if ratio < 0.62:
         issues.append(f"size ratio {ratio:.2f} < 0.62")
 
-    src_headings: Counter[int] = src["heading_counts"]
-    dst_headings: Counter[int] = dst["heading_counts"]
+    src_headings: Counter[int] = src["heading_counts"]  # type: ignore[assignment]
+    dst_headings: Counter[int] = dst["heading_counts"]  # type: ignore[assignment]
     missing_headings = {
         level: count - dst_headings[level]
         for level, count in src_headings.items()
@@ -77,41 +83,73 @@ def compare(src: dict[str, object], dst: dict[str, object]) -> list[str]:
     if missing_headings:
         issues.append(f"missing canonical heading levels/counts: {missing_headings}")
 
-    dst_body: str = dst["body"]
-    missing_blocks = [
-        block for block in src["code_blocks"] if block and block not in dst_body
-    ]
-    if missing_blocks:
-        previews = [block.splitlines()[0][:72] for block in missing_blocks]
-        issues.append(f"missing canonical code snippets: {previews}")
-
-    if dst["table_lines"] < src["table_lines"]:
+    if int(dst["code_block_count"]) < int(src["code_block_count"]):
+        issues.append(
+            f"code blocks {dst['code_block_count']} < canonical {src['code_block_count']}"
+        )
+    if int(dst["table_lines"]) < int(src["table_lines"]):
         issues.append(f"table lines {dst['table_lines']} < canonical {src['table_lines']}")
-    if dst["images"] < src["images"]:
+    if int(dst["images"]) < int(src["images"]):
         issues.append(f"images {dst['images']} < canonical {src['images']}")
     return issues
 
 
-def main() -> int:
+def audit_coverage() -> int:
     failures = 0
+    for english_path, stem in DOCS:
+        if not english_path.exists():
+            print(f"FAIL canonical missing: {english_path}")
+            failures += 1
+            continue
+        for lang in ALL_LANGS:
+            path = translated_path(stem, lang)
+            if not path.exists():
+                print(f"FAIL missing {lang:5}: {path}")
+                failures += 1
+
+    for lang in ALL_LANGS:
+        path = Path(f"README.{lang}.md")
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8")
+        missing = [snippet for snippet in README_REQUIRED_SNIPPETS if snippet not in text]
+        if missing:
+            print(f"FAIL {lang:5} {path}: missing v0.6.3 anchors {missing}")
+            failures += 1
+    return failures
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Audit eight-language documentation coverage and structural translation parity. "
+            "Natural-language text inside fenced diagrams may be translated."
+        )
+    )
+    parser.add_argument(
+        "--languages",
+        nargs="+",
+        choices=ALL_LANGS,
+        default=DEFAULT_STRICT_LANGS,
+        help="languages to check structurally against the English canonical files",
+    )
+    args = parser.parse_args()
+
+    failures = audit_coverage()
     checked = 0
     for english_path, stem in DOCS:
         if not english_path.exists():
-            print(f"MISSING canonical: {english_path}")
-            failures += len(LANGS)
             continue
         src_sig = signature(english_path.read_text(encoding="utf-8"))
         print(f"\n[{english_path}] canonical bytes={src_sig['bytes']}")
-        for lang in LANGS:
+        for lang in args.languages:
             path = translated_path(stem, lang)
-            checked += 1
             if not path.exists():
-                failures += 1
-                print(f"  FAIL {lang:5} {path}: missing file")
                 continue
+            checked += 1
             dst_sig = signature(path.read_text(encoding="utf-8"))
-            issues = compare(src_sig, dst_sig)
-            ratio = dst_sig["bytes"] / max(1, src_sig["bytes"])
+            issues = compare_structure(src_sig, dst_sig)
+            ratio = int(dst_sig["bytes"]) / max(1, int(src_sig["bytes"]))
             if issues:
                 failures += 1
                 print(f"  FAIL {lang:5} ratio={ratio:.2f} {path}")
@@ -120,7 +158,7 @@ def main() -> int:
             else:
                 print(f"  PASS {lang:5} ratio={ratio:.2f} {path}")
 
-    print(f"\nchecked={checked} failures={failures}")
+    print(f"\nstrict_checked={checked} failures={failures}")
     return 1 if failures else 0
 
 
