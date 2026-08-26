@@ -76,6 +76,34 @@ def _read(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
 
 
+def _check_event_relations(path: Path, runtime: str) -> None:
+    records = _read(path)
+    summary_relations = {
+        item["relation"]
+        for item in records
+        if item.get("attributes", {}).get("backend") == "model_runtime"
+    }
+    if summary_relations != {"SERVED_INFERENCE", "USED_MODEL"}:
+        raise RuntimeError(
+            f"unexpected {runtime} inference summary relations: {sorted(summary_relations)}"
+        )
+
+    content_relations = {
+        item["relation"]
+        for item in records
+        if item.get("attributes", {}).get("backend") == "semantic"
+    }
+    required_content_relations = {
+        "OBSERVED_INFERENCE_RESPONSE",
+        "OBSERVED_PROVIDER_METADATA",
+    }
+    missing = required_content_relations - content_relations
+    if missing:
+        raise RuntimeError(
+            f"missing {runtime} full-fidelity relations: {sorted(missing)}"
+        )
+
+
 def _check_openai_event(root: Path, runtime: str) -> None:
     output = root / f"{runtime}-event.jsonl"
     _run(
@@ -104,9 +132,7 @@ def _check_openai_event(root: Path, runtime: str) -> None:
     text = output.read_text(encoding="utf-8")
     if "/Users/private/models" in text or "PRIVATE_RESPONSE" in text or "PRIVATE_REASONING" in text:
         raise RuntimeError(f"{runtime} content/path leaked into model-runtime sidecar")
-    relations = {item["relation"] for item in _read(output)}
-    if relations != {"SERVED_INFERENCE", "USED_MODEL"}:
-        raise RuntimeError(f"unexpected {runtime} inference relations: {sorted(relations)}")
+    _check_event_relations(output, runtime)
 
 
 def main() -> int:
@@ -137,8 +163,7 @@ def main() -> int:
     ollama_text = ollama_event.read_text(encoding="utf-8")
     if "PRIVATE_OLLAMA_RESPONSE" in ollama_text or "PRIVATE_OLLAMA_THINKING" in ollama_text:
         raise RuntimeError("Ollama content leaked into model-runtime sidecar")
-    if {item["relation"] for item in _read(ollama_event)} != {"SERVED_INFERENCE", "USED_MODEL"}:
-        raise RuntimeError("unexpected Ollama inference relations")
+    _check_event_relations(ollama_event, "Ollama")
 
     llama_event = root / "llamacpp-event.jsonl"
     _run(
@@ -161,6 +186,7 @@ def main() -> int:
     llama_text = llama_event.read_text(encoding="utf-8")
     if "/Users/private/models" in llama_text or "PRIVATE_LLAMA_RESPONSE" in llama_text:
         raise RuntimeError("llama.cpp content/path leaked into model-runtime sidecar")
+    _check_event_relations(llama_event, "llama.cpp")
 
     _check_openai_event(root, "vllm")
     _check_openai_event(root, "lmstudio")
