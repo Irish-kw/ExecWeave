@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 FIDELITY_SCHEMA_VERSION = "0.1"
@@ -182,3 +184,16 @@ def derive_fidelity(events: list[dict[str, Any]]) -> dict[str, Any]:
     for event in events:
         accumulator.observe(event)
     return accumulator.to_dict()
+
+
+def write_fidelity_report(report: dict[str, Any], path: str | Path) -> Path:
+    """Write one derived fidelity declaration without mutating canonical evidence."""
+    output = Path(path).expanduser().resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    if output.exists() and output.stat().st_size > 0:
+        raise FileExistsError(f"ExecWeave fidelity artifact already exists: {output}")
+    output.write_text(
+        json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return output
