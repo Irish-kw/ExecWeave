@@ -16,6 +16,21 @@ LANGUAGES = [
     ("ru", "Русский", ".ru"),
 ]
 
+DOC_BASE_NAMES = [
+    "phase-1-runtime-collection.md",
+    "phase-2-execution-graph.md",
+    "live-graph.md",
+    "semantic-telemetry.md",
+    "claude-code-hooks.md",
+    "codex-hooks.md",
+    "gemini-hooks.md",
+    "cursor-hooks.md",
+    "opencode-plugin.md",
+    "inference-gateway.md",
+    "model-runtime.md",
+    "security-analysis.md",
+]
+
 START = "<!-- i18n-nav:start -->"
 END = "<!-- i18n-nav:end -->"
 
@@ -78,16 +93,8 @@ def replace_nav(text: str, nav: str) -> str:
 
 
 def families(root: Path) -> list[tuple[Path, str]]:
-    candidates: list[tuple[Path, str]] = [(root, "README.md")]
     docs = root / "docs"
-    for english in sorted(docs.glob("*.md")):
-        name = english.name
-        if any(name.endswith(f"{suffix}.md") for _code, _label, suffix in LANGUAGES[1:]):
-            continue
-        variants = [docs / variant_name(name, suffix) for _code, _label, suffix in LANGUAGES]
-        if all(path.exists() for path in variants):
-            candidates.append((docs, name))
-    return candidates
+    return [(root, "README.md"), *[(docs, name) for name in DOC_BASE_NAMES]]
 
 
 def sync(root: Path, check: bool) -> int:
