@@ -11,7 +11,7 @@ def main(argv: list[str] | None = None) -> int:
         from .top_cli import main as top_main
 
         return top_main(args[1:])
-    if args and args[0] == "view":
+    if args and args[0] in {"view", "graph-view"}:
         from .view_cli import main as view_main
 
         return view_main(args[1:])
