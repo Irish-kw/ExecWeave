@@ -101,7 +101,7 @@ execweave live --open -- ollama serve
 | LiteLLM Proxy | Yes, when the local proxy is launched under ExecWeave | `execweave-inference-gateway event --gateway litellm` | No |
 | OpenRouter | No direct remote-service process; run the local client/Agent under `live` instead | `execweave-inference-gateway event/generation --gateway openrouter` | No |
 
-The Agent rows marked **Yes** mean automatic delivery *after the provider integration has been configured once*. `execweave live` supplies the per-run `EXECWEAVE_SEMANTIC_SIDECAR`; configured hooks/plugins inherit it and write directly into that run. ExecWeave does not silently edit provider settings when `live` starts. Model-runtime and inference-gateway rows stay **No** until their specialized metadata can be observed automatically rather than emitted explicitly.
+Agent rows marked **Yes** require the provider hook/plugin to be configured once; `execweave live` then supplies the per-run `EXECWEAVE_SEMANTIC_SIDECAR` automatically. Ollama, llama.cpp, and vLLM rows marked **Yes** use automatic loopback model-catalog probes only when ExecWeave launches the corresponding local server. LM Studio and inference-gateway rows remain **No** until their specialized metadata can be observed automatically without inventing evidence.
 
 For an already-running Ollama server, use `execweave-model-runtime probe --runtime ollama` to snapshot loaded-model state. For OpenRouter, `live` can observe the local client and its network activity, while gateway routing/usage metadata remains a separate evidence layer.
 

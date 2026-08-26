@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 from execweave.live import _LiveState, run_live
+from execweave.live_view import LIVE_HTML
 
 
 def _write_jsonl(path: Path, records: list[dict[str, object]]) -> None:
@@ -215,3 +216,35 @@ def test_run_live_restores_existing_semantic_sidecar_environment(
     assert result.materialized_event_stream == result.event_stream
     assert not result.semantic_sidecar.exists()
     assert __import__("os").environ["EXECWEAVE_SEMANTIC_SIDECAR"] == "keep-me"
+
+
+
+def test_live_update_reports_evidence_totals_for_all_response_kinds(tmp_path: Path) -> None:
+    runtime = tmp_path / "events.jsonl"
+    semantic = tmp_path / "semantic.jsonl"
+    _write_jsonl(runtime, _runtime_records())
+    semantic.write_text("", encoding="utf-8")
+    state = _LiveState("s1", runtime, semantic)
+
+    initial = state.live_update(-1)
+    assert initial["kind"] == "snapshot"
+    assert initial["live_evidence_counts"] == {"os_runtime": 2, "specialized": 0}
+    assert initial["live_specialized_provisional"] is False
+
+    _write_jsonl(semantic, [_semantic_record()])
+    delta = state.live_update(int(initial["sequence"]))
+    assert delta["kind"] == "delta"
+    assert delta["live_evidence_counts"] == {"os_runtime": 2, "specialized": 1}
+    assert delta["live_specialized_provisional"] is True
+
+    noop = state.live_update(int(delta["sequence"]))
+    assert noop["kind"] == "noop"
+    assert noop["live_evidence_counts"] == {"os_runtime": 2, "specialized": 1}
+    assert noop["live_specialized_provisional"] is True
+
+
+def test_live_viewer_surfaces_specialized_evidence_state() -> None:
+    assert 'id="evidence"' in LIVE_HTML
+    assert "live_evidence_counts" in LIVE_HTML
+    assert "live_specialized_provisional" in LIVE_HTML
+    assert "specialized ${specialized}" in LIVE_HTML

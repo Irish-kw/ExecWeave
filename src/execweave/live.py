@@ -424,19 +424,24 @@ class _LiveState:
             ]
         self._append_update_locked(update)
 
+    def _evidence_metadata_locked(self) -> dict[str, object]:
+        return {
+            "live_evidence_counts": {
+                "os_runtime": self._runtime_event_count,
+                "specialized": self._specialized_event_count,
+            },
+            "live_specialized_provisional": (
+                self._specialized_event_count > 0 and not self._finished
+            ),
+        }
+
     def snapshot(self) -> dict[str, object]:
         with self._lock:
             if not self._finished:
                 self._refresh_incremental_locked()
             payload = self._snapshot_from_accumulator_locked()
             payload["live_finished"] = self._finished
-            payload["live_evidence_counts"] = {
-                "os_runtime": self._runtime_event_count,
-                "specialized": self._specialized_event_count,
-            }
-            payload["live_specialized_provisional"] = (
-                self._specialized_event_count > 0 and not self._finished
-            )
+            payload.update(self._evidence_metadata_locked())
             return payload
 
     def live_update(self, after: int | None) -> dict[str, object]:
@@ -448,6 +453,7 @@ class _LiveState:
                     "kind": "snapshot",
                     "sequence": self._update_sequence,
                     "graph": self._snapshot_from_accumulator_locked(),
+                    **self._evidence_metadata_locked(),
                     "live_finished": self._finished,
                 }
             oldest_sequence = (
@@ -461,6 +467,7 @@ class _LiveState:
                     "kind": "snapshot",
                     "sequence": self._update_sequence,
                     "graph": self._snapshot_from_accumulator_locked(),
+                    **self._evidence_metadata_locked(),
                     "live_finished": self._finished,
                     "resync": True,
                     "resync_reason": "future_sequence" if after > self._update_sequence else "history_gap",
@@ -471,6 +478,7 @@ class _LiveState:
                     "kind": "noop",
                     "sequence": self._update_sequence,
                     **counts,
+                    **self._evidence_metadata_locked(),
                     "live_finished": self._finished,
                 }
             updates = [dict(update) for update in self._updates if int(update["sequence"]) > after]
@@ -480,6 +488,7 @@ class _LiveState:
                 "sequence": self._update_sequence,
                 "updates": updates,
                 **counts,
+                **self._evidence_metadata_locked(),
                 "live_finished": self._finished,
             }
 
