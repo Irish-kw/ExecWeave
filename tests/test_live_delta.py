@@ -128,6 +128,31 @@ def test_live_state_resyncs_when_delta_history_is_too_old(
     assert resync["graph"]["event_count"] == 3
 
 
+def test_live_state_resyncs_when_delta_history_exceeds_byte_budget(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(live_module, "LIVE_DELTA_HISTORY_BYTES", 1)
+    event_path = tmp_path / "events.jsonl"
+    event_path.write_text("", encoding="utf-8")
+    state = _LiveState("s1", event_path)
+
+    _append(
+        event_path,
+        _event(
+            event_id="event-1",
+            sequence=1,
+            timestamp="2026-08-26T00:00:00Z",
+        ),
+    )
+    response = state.live_update(0)
+    assert response["kind"] == "snapshot"
+    assert response["resync"] is True
+    assert response["resync_reason"] == "history_gap"
+    assert response["sequence"] == 1
+    assert state._updates_bytes == 0
+
+
 def test_live_finish_is_a_sequence_visible_terminal_update(tmp_path: Path) -> None:
     event_path = tmp_path / "events.jsonl"
     event_path.write_text("", encoding="utf-8")
@@ -161,3 +186,8 @@ def test_live_finish_is_a_sequence_visible_terminal_update(tmp_path: Path) -> No
     assert terminal["sequence"] == 1
     assert terminal["updates"][0]["terminal"] is True
     assert terminal["updates"][0]["event_count"] == 1
+    final_html = state.final_html()
+    assert final_html is not None
+    assert 'id="execweave-theme-toggle"' in final_html
+    assert "execweave-theme" in final_html
+    assert 'data-theme="light"' in final_html
