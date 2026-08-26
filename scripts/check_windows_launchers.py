@@ -82,13 +82,37 @@ def main() -> int:
                 "execweave-cursor-record --backend portable --no-files --no-network "
                 "--output-dir cursor-powershell -- cursor",
             ),
+            (
+                _run_cmd,
+                "top-codex-cmd",
+                "execweave top --no-files --no-network --linger 0 "
+                "--output-dir top-codex-cmd -- codex",
+            ),
+            (
+                _run_powershell,
+                "top-codex-powershell",
+                "execweave top --no-files --no-network --linger 0 "
+                "--output-dir top-codex-powershell -- codex",
+            ),
+            (
+                _run_cmd,
+                "live-cursor-cmd",
+                "execweave live --no-files --no-network --linger 0 "
+                "--output-dir live-cursor-cmd -- cursor",
+            ),
+            (
+                _run_powershell,
+                "live-cursor-powershell",
+                "execweave live --no-files --no-network --linger 0 "
+                "--output-dir live-cursor-powershell -- cursor",
+            ),
         ]
 
         for runner, output_dir, command in cases:
             runner(command, cwd=root, env=env)
             _verify_runtime_artifacts(root, output_dir)
 
-    print("Windows CMD/PowerShell Codex/Cursor launcher smoke passed")
+    print("Windows CMD/PowerShell Codex/Cursor record, top, and live launcher smoke passed")
     return 0
 
 
