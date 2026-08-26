@@ -6,6 +6,9 @@ import tempfile
 from pathlib import Path
 
 
+_CALLBACK_PATH = "execweave.litellm_callback.execweave_litellm_callback"
+
+
 def run_cli(args: list[str], payload: dict) -> None:
     subprocess.run(
         ["execweave-inference-gateway", *args],
@@ -16,7 +19,28 @@ def run_cli(args: list[str], payload: dict) -> None:
     )
 
 
+def check_litellm_callback_cli() -> None:
+    config = subprocess.run(
+        ["execweave-litellm-callback", "--print-config"],
+        text=True,
+        check=True,
+        capture_output=True,
+    ).stdout
+    if _CALLBACK_PATH not in config or "litellm_settings:" not in config:
+        raise RuntimeError("LiteLLM callback config helper returned an invalid fragment")
+
+    callback = subprocess.run(
+        ["execweave-litellm-callback", "--print-callback"],
+        text=True,
+        check=True,
+        capture_output=True,
+    ).stdout.strip()
+    if callback != _CALLBACK_PATH:
+        raise RuntimeError(f"unexpected LiteLLM callback path: {callback!r}")
+
+
 def main() -> int:
+    check_litellm_callback_cli()
     with tempfile.TemporaryDirectory() as tmp:
         sidecar = Path(tmp) / "gateway.jsonl"
         run_cli(
