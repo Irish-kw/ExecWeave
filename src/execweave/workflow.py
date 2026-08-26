@@ -7,6 +7,7 @@ from uuid import uuid4
 from .backends import BackendName, create_collector, resolve_backend
 from .graph import build_execution_graph, write_execution_graph
 from .sink import JsonlSink
+from .theme import ensure_viewer_theme
 from .validate import validate_event_stream
 from .viewer import write_graph_html
 
@@ -98,7 +99,12 @@ def record_to_viewer(
 
     execution_graph = build_execution_graph(event_path)
     write_execution_graph(execution_graph, graph_path)
-    write_graph_html(execution_graph.to_dict(), viewer_path, open_browser=open_browser)
+    write_graph_html(execution_graph.to_dict(), viewer_path, open_browser=False)
+    ensure_viewer_theme(viewer_path)
+    if open_browser:
+        import webbrowser
+
+        webbrowser.open(viewer_path.resolve().as_uri())
 
     return RecordResult(
         session_id=session_id,
