@@ -37,9 +37,14 @@ def _entity(
     return {"type": entity_type, "id": entity_id, "name": name, "attributes": attributes or {}}
 
 
+def _endpoint_digest(endpoint: str) -> str:
+    safe_endpoint = sanitize_openai_compatible_endpoint(endpoint)
+    return hashlib.sha256(safe_endpoint.encode("utf-8")).hexdigest()[:24]
+
+
 def _api_entity(provider_name: str, endpoint: str) -> dict[str, Any]:
     safe_endpoint = sanitize_openai_compatible_endpoint(endpoint)
-    digest = hashlib.sha256(safe_endpoint.encode("utf-8")).hexdigest()[:24]
+    digest = _endpoint_digest(safe_endpoint)
     return _entity(
         "inference_api",
         f"inference-api:openai-compatible:{digest}",
@@ -131,7 +136,7 @@ def response_to_events(
     )
     request = _entity(
         "inference_request",
-        f"inference-request:openai-compatible:{native_id}",
+        f"inference-request:openai-compatible:{_endpoint_digest(endpoint)}:{native_id}",
         name=native_id,
         attributes={"provider_name": provider_name, **_usage_attributes(payload)},
     )

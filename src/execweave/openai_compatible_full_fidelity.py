@@ -8,7 +8,7 @@ from typing import Any
 
 from .content_evidence import content_observation_event
 from .content_store import ContentReference, FullFidelityContentStore
-from .openai_compatible import sanitize_openai_compatible_endpoint
+from .openai_compatible import _endpoint_digest, sanitize_openai_compatible_endpoint
 
 _REQUEST_CONTENT_KEYS = frozenset(
     {"messages", "prompt", "input", "system", "instructions", "tools", "functions"}
@@ -40,7 +40,9 @@ def _request_entity(
     native_id = _request_id(response, request_id)
     return {
         "type": "inference_request",
-        "id": f"inference-request:openai-compatible:{native_id}",
+        "id": (
+            f"inference-request:openai-compatible:{_endpoint_digest(endpoint)}:{native_id}"
+        ),
         "name": native_id,
         "attributes": {
             "protocol": "openai_compatible",

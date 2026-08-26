@@ -63,6 +63,13 @@ def test_summary_preserves_direct_api_semantics_and_sanitizes_endpoint() -> None
     assert events[0]["attributes"]["completion_tokens"] == 7
     assert events[0]["attributes"]["cached_prompt_tokens"] == 2
     assert events[0]["attributes"]["reasoning_tokens"] == 1
+    other_endpoint = response_to_events(
+        payload,
+        endpoint="https://other.example/v1",
+        provider_name="example-provider",
+        timestamp="2026-08-27T00:00:00Z",
+    )
+    assert events[0]["target"]["id"] != other_endpoint[0]["target"]["id"]
     assert sanitize_openai_compatible_endpoint(
         "http://user:pass@[::1]:8000/v1/?secret=NOPE#frag"
     ) == "http://[::1]:8000/v1"

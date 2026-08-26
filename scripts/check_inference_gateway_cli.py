@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -142,7 +143,11 @@ def main() -> int:
             r["attributes"].get("causal") is not False for r in litellm_records
         ):
             raise RuntimeError("LiteLLM gateway evidence must remain non-causal")
-    print("Inference gateway CLI smoke passed")
+    subprocess.run(
+        [sys.executable, "scripts/check_openai_compatible_cli.py"],
+        check=True,
+    )
+    print("Inference gateway and direct API CLI smoke passed")
     return 0
 
 
