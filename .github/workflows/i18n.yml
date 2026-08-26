@@ -1,0 +1,34 @@
+name: Documentation i18n
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "README*.md"
+      - "docs/*.md"
+      - "scripts/audit_i18n_parity.py"
+      - "scripts/sync_i18n_nav.py"
+      - ".github/workflows/i18n.yml"
+  pull_request:
+    paths:
+      - "README*.md"
+      - "docs/*.md"
+      - "scripts/audit_i18n_parity.py"
+      - "scripts/sync_i18n_nav.py"
+      - ".github/workflows/i18n.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check eight-language navigation and coverage
+        run: python scripts/sync_i18n_nav.py --check
+      - name: Check German, French, and Russian structural parity
+        run: python scripts/audit_i18n_parity.py --languages fr de ru
