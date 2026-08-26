@@ -113,8 +113,8 @@ class FileWatcher:
         self.observer.schedule(self.handler, str(self.root), recursive=True)
 
     def start(self) -> None:
-        self._schedule()
         try:
+            self._schedule()
             self.observer.start()
             return
         except OSError as exc:
@@ -124,14 +124,14 @@ class FileWatcher:
 
         self.observer = PollingObserver(timeout=_POLLING_FALLBACK_INTERVAL)
         self.observer_backend = "polling"
-        self._schedule()
-        self.observer.start()
         _LOGGER.warning(
             "Linux inotify resources are exhausted; ExecWeave is using the polling "
             "filesystem watcher for %s. Narrow --watch-root or increase "
             "fs.inotify.max_user_watches/max_user_instances to restore native watching.",
             self.root,
         )
+        self._schedule()
+        self.observer.start()
 
     def stop(self) -> None:
         self.observer.stop()
