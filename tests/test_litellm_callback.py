@@ -168,15 +168,16 @@ execweave_litellm_callback.log_success_event(
     assert result.return_code == 0
     assert result.semantic_sidecar.exists()
     assert result.materialized_event_stream.name == "events.semantic.jsonl"
+    semantic_rendered = result.semantic_sidecar.read_text(encoding="utf-8")
+    assert "SHOULD_NOT_APPEAR" not in semantic_rendered
+    assert "SHOULD_NOT_APPEAR_EITHER" not in semantic_rendered
+
     graph = json.loads(result.graph.read_text(encoding="utf-8"))
     relations = {edge["relation"] for edge in graph["edges"]}
-    rendered = json.dumps(graph, sort_keys=True)
     assert "SERVED_INFERENCE" in relations
     assert "REQUESTED_MODEL" in relations
     assert "ROUTED_TO_MODEL" in relations
     assert "ROUTED_TO_DEPLOYMENT" in relations
-    assert "SHOULD_NOT_APPEAR" not in rendered
-    assert "SHOULD_NOT_APPEAR_EITHER" not in rendered
 
 
 def test_litellm_callback_setup_cli(capsys) -> None:
