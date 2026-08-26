@@ -3,13 +3,16 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
-from .opencode_adapter import (
-    append_semantic_records,
-    opencode_plugin_to_semantic_events,
-    read_plugin_payload,
-)
+from .content_store import FullFidelityContentStore
+from .opencode_adapter import append_semantic_records, opencode_plugin_to_semantic_events, read_plugin_payload
+from .opencode_full_fidelity import opencode_plugin_to_content_events
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _default_sidecar(payload: dict) -> Path:
@@ -17,12 +20,8 @@ def _default_sidecar(payload: dict) -> Path:
     if not isinstance(cwd, str) or not cwd:
         cwd = str(Path.cwd())
     session_id = payload.get("sessionID")
-    if not isinstance(session_id, str) or not session_id:
-        raise ValueError("OpenCode payload has no sessionID for sidecar placement")
-    safe = "".join(
-        character if character.isalnum() or character in {"-", "_", "."} else "_"
-        for character in session_id
-    )
+    scope = session_id if isinstance(session_id, str) and session_id else "unscoped"
+    safe = "".join(character if character.isalnum() or character in {"-", "_", "."} else "_" for character in scope)
     return Path(cwd) / ".execweave" / "semantic" / "opencode" / f"{safe}.jsonl"
 
 
@@ -44,8 +43,18 @@ def main(argv: list[str] | None = None) -> int:
         if sidecar is None:
             configured = os.environ.get("EXECWEAVE_SEMANTIC_SIDECAR")
             sidecar = Path(configured) if configured else _default_sidecar(payload)
-        append_semantic_records(sidecar, opencode_plugin_to_semantic_events(payload))
-    except (OSError, TimeoutError, ValueError) as exc:
+        sidecar = Path(sidecar).expanduser().resolve()
+        observed_at = _now()
+        append_semantic_records(sidecar, opencode_plugin_to_semantic_events(payload, timestamp=observed_at))
+        append_semantic_records(
+            sidecar,
+            opencode_plugin_to_content_events(
+                payload,
+                store=FullFidelityContentStore(sidecar.parent),
+                timestamp=observed_at,
+            ),
+        )
+    except (OSError, RuntimeError, TimeoutError, TypeError, ValueError) as exc:
         print(f"ExecWeave OpenCode hook warning: {exc}", file=sys.stderr)
         if args.strict:
             return 1

@@ -7,15 +7,29 @@ import pytest
 from execweave.opencode_plugin_cli import install_plugin, plugin_text
 
 
-def test_opencode_plugin_omits_tool_output_and_sanitizes_args() -> None:
+def test_opencode_plugin_forwards_full_observable_surface() -> None:
     text = plugin_text()
     assert '"tool.execute.before"' in text
     assert '"tool.execute.after"' in text
-    assert "callID" in text
-    assert "safeArgs" in text
-    assert "output.output" not in text
-    assert "output.metadata" not in text
-    assert "parts:" not in text
+    assert '"chat.message"' in text
+    assert '"chat.params"' in text
+    assert '"experimental.chat.messages.transform"' in text
+    assert '"experimental.chat.system.transform"' in text
+    assert '"experimental.text.complete"' in text
+    assert "event: async" in text
+    assert "output.args" in text
+    assert "result: output" in text
+    assert "output.message" in text
+    assert "output.parts" in text
+    assert "safeArgs" not in text
+    assert '"shell.env"' not in text
+
+
+def test_opencode_plugin_filters_transport_headers_before_emitting() -> None:
+    text = plugin_text()
+    assert "withoutTransportCredentials(output.headers)" in text
+    assert '"authorization"' in text
+    assert '"cookie"' in text
 
 
 def test_opencode_plugin_installer_refuses_overwrite(tmp_path: Path) -> None:
