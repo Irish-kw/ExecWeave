@@ -74,9 +74,28 @@ def _get_json(url: str, *, timeout: float) -> dict[str, object]:
     return payload
 
 
-def _snapshot_signature(payload: dict[str, object]) -> str:
+def _model_snapshot_signatures(
+    payload: dict[str, object],
+) -> tuple[dict[str, str], list[dict[str, object]]]:
     models = payload.get("models")
-    return json.dumps(models, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    if not isinstance(models, list):
+        raise ValueError("Ollama /api/ps response requires models")
+    signatures: dict[str, str] = {}
+    valid_items: list[dict[str, object]] = []
+    for item in models:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("model") or item.get("name")
+        if not isinstance(name, str) or not name:
+            continue
+        signatures[name] = json.dumps(
+            item,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        valid_items.append(item)
+    return signatures, valid_items
 
 
 def _run_ollama_probe(
@@ -85,17 +104,22 @@ def _run_ollama_probe(
     sidecar: Path,
     stop_event: threading.Event,
 ) -> None:
-    previous_signature: str | None = None
+    previous_signatures: dict[str, str] = {}
     url = f"{endpoint.rstrip('/')}/api/ps"
     while not stop_event.is_set():
         try:
             payload = _get_json(url, timeout=_PROBE_TIMEOUT_SECONDS)
-            signature = _snapshot_signature(payload)
-            if signature != previous_signature:
-                records = ollama_ps_to_events(payload, endpoint=endpoint)
-                if records:
-                    append_model_runtime_records(sidecar, records)
-                previous_signature = signature
+            current_signatures, items = _model_snapshot_signatures(payload)
+            changed = [
+                item
+                for item in items
+                if current_signatures[str(item.get("model") or item.get("name"))]
+                != previous_signatures.get(str(item.get("model") or item.get("name")))
+            ]
+            if changed:
+                records = ollama_ps_to_events({"models": changed}, endpoint=endpoint)
+                append_model_runtime_records(sidecar, records)
+            previous_signatures = current_signatures
         except (HTTPError, URLError, OSError, TimeoutError, ValueError, json.JSONDecodeError):
             pass
         stop_event.wait(_PROBE_INTERVAL_SECONDS)
