@@ -26,7 +26,7 @@ ExecWeave ist ein Open-Source-, local-first Observability-Projekt, das die Aktiv
 > **Das Event ist die ground truth; der Graph ist eine materialized view.**
 
 <p align="center">
-  <img src="docs/assets/execweave-live-demo.png" alt="ExecWeave Live execution graph" width="100%">
+  <img src="docs/assets/execweave-launch-demo-v5-x.gif" alt="ExecWeave Live execution graph" width="100%">
 </p>
 
 <!-- execweave-demo:start -->
@@ -90,41 +90,41 @@ execweave live --open -- python my_agent.py
 execweave live --open -- ollama serve
 ```
 
-`execweave live` streamt Process-, File- und Network-Evidence für den von ExecWeave gestarteten Command Tree. Agent-Semantic-Hooks, Model-Runtime-API-Metadaten oder Inference-Gateway-Routing-Metadaten werden **nicht** automatisch in den Live Viewer injiziert.
+`execweave live` streamt Process-, File- und Network-Evidence für den gestarteten Command Tree. Seit v0.6.4 speisen konfigurierte Claude/Codex/Gemini/Cursor-Hooks und das OpenCode-Plugin automatisch den run-spezifischen Live-Sidecar; unter ExecWeave gestartete Ollama-, llama.cpp- und vLLM-Server erhalten zusätzlich einen automatischen lokalen Model-Catalog-Probe.
 
 #### Live-Capability-Matrix
 
 | Integration | Direct OS-runtime live | Specialized metadata | Automatisch im Live Viewer |
 | --- | --- | --- | --- |
-| Claude Code | Ja | `execweave-claude-record` / hooks | Nein |
-| OpenAI Codex | Ja | `execweave-codex-record` / hooks | Nein |
-| Gemini CLI | Ja | `execweave-gemini-record` / hooks | Nein |
-| Cursor | Ja | `execweave-cursor-record` / hooks | Nein |
-| OpenCode | Ja | `execweave-opencode-record` / plugin | Nein |
-| Ollama | Ja, wenn es unter ExecWeave gestartet wird, z. B. `ollama serve` | `execweave-model-runtime event/probe --runtime ollama` | Nein |
-| llama.cpp | Ja, wenn der lokale Server unter ExecWeave gestartet wird | `execweave-model-runtime event/probe --runtime llamacpp` | Nein |
-| vLLM | Ja, wenn der lokale Server unter ExecWeave gestartet wird | `execweave-model-runtime event/probe --runtime vllm` | Nein |
+| Claude Code | Ja | `execweave-claude-record` / hooks | Ja (konfigurierter Hook/Plugin) |
+| OpenAI Codex | Ja | `execweave-codex-record` / hooks | Ja (konfigurierter Hook/Plugin) |
+| Gemini CLI | Ja | `execweave-gemini-record` / hooks | Ja (konfigurierter Hook/Plugin) |
+| Cursor | Ja | `execweave-cursor-record` / hooks | Ja (konfigurierter Hook/Plugin) |
+| OpenCode | Ja | `execweave-opencode-record` / plugin | Ja (konfigurierter Hook/Plugin) |
+| Ollama | Ja, wenn es unter ExecWeave gestartet wird, z. B. `ollama serve` | `execweave-model-runtime event/probe --runtime ollama` | Ja (automatischer lokaler Probe) |
+| llama.cpp | Ja, wenn der lokale Server unter ExecWeave gestartet wird | `execweave-model-runtime event/probe --runtime llamacpp` | Ja (automatischer lokaler Probe) |
+| vLLM | Ja, wenn der lokale Server unter ExecWeave gestartet wird | `execweave-model-runtime event/probe --runtime vllm` | Ja (automatischer lokaler Probe) |
 | LM Studio | Nur für einen lokalen Prozess, der unter ExecWeave gestartet wurde; ein bereits laufender Server wird nicht attached | `execweave-model-runtime event/probe --runtime lmstudio` | Nein |
 | LiteLLM Proxy | Ja, wenn der lokale Proxy unter ExecWeave gestartet wird | `execweave-inference-gateway event --gateway litellm` | Nein |
 | OpenRouter | Kein direkt startbarer Remote-Service-Prozess; stattdessen den lokalen Client/Agent unter `live` ausführen | `execweave-inference-gateway event/generation --gateway openrouter` | Nein |
 
 Für einen bereits laufenden Ollama-Server kann `execweave-model-runtime probe --runtime ollama` den geladenen Modellzustand snapshotten. Bei OpenRouter kann `live` den lokalen Client und dessen Network-Aktivität beobachten; Gateway-Routing-/Usage-Metadaten bleiben eine separate Evidence-Layer.
 
-<!-- v0.6.3-live -->
-### v0.6.3 Live-Observability
+<!-- v0.6.4-live -->
+### v0.6.4 Live-Observability
 
-Dieselbe Live-Session kann im Browser oder Terminal betrachtet werden:
+`top` lässt den Agent im ursprünglichen Terminal interaktiv und öffnet das Dashboard in einem separaten Terminalfenster:
 
 ```bash
-execweave top -- codex          # Terminal dashboard
-execweave top --open -- codex   # Terminal + Web Viewer
+execweave top -- codex
+execweave top --open -- codex
 ```
 
-Live-Updates verwenden inkrementelle Snapshots/Deltas mit begrenzter History, statt den vollständigen Graph wiederholt neu zu bauen und zu übertragen. Live- und Standalone-Viewer unterstützen einen persistenten Dark/Light-Theme-Schalter. Unter Linux werden sehr große rekursive Filesystem-Scopes vorab geprüft und bei Bedarf automatisch von inotify auf Polling zurückgestuft, sodass ein erschöpfter inotify-Watch-Pool die Session nicht abbricht.
+Live-Updates verwenden inkrementelle Snapshots/Deltas mit begrenzter History. Live- und Standalone-Viewer behalten die Dark/Light-Auswahl. Unter Linux werden sehr große rekursive Filesystem-Scopes vorab geprüft und bei Bedarf automatisch von inotify auf Polling zurückgestuft.
 
-`live` ist eine generische OS-Runtime-Ansicht und keine Integrations-Whitelist. Spezialisierte Agent-Semantic-, Model-Runtime- und Gateway-Metadaten bleiben getrennte Evidence-Layer und werden in v0.6.3 nicht automatisch in den Live Viewer injiziert.
+v0.6.4 erstellt für jeden Live-Run einen gemeinsamen Specialized-Evidence-Sidecar. Konfigurierte Claude/Codex/Gemini/Cursor-Hooks und das OpenCode-Plugin erscheinen automatisch im selben Live Graph; unter ExecWeave gestartete Ollama-, llama.cpp- und vLLM-Server werden automatisch über ihre Loopback-API nach dem Model Catalog abgefragt. Diese spezialisierten Live-Events sind provisional; nach Ende des Befehls wird der finale Graph aus dem canonical Runtime+Semantic-Merge neu aufgebaut. Fehlende Evidence wird nicht erfunden.
 
-Der reproduzierbare Graph-Scalability-Benchmark läuft mit `execweave-scalability`; CI deckt 10k, 100k und 1M synthetische Events ab.
+Mit `execweave-scalability` lässt sich der Graph-Scalability-Benchmark reproduzieren; CI deckt 10k, 100k und 1M synthetische Events ab.
 
 #### Scalability-Benchmark
 
@@ -375,7 +375,7 @@ Security Findings bleiben hinsichtlich ihrer Evidence-Grenzen explizit. Ein mög
 
 ## Aktueller Stand
 
-ExecWeave `main` ist derzeit **v0.6.3** und wird aktiv weiterentwickelt.
+ExecWeave `main` ist derzeit **v0.6.4** und wird aktiv weiterentwickelt.
 
 Der Baseline umfasst Runtime Collection, Graph-Materialisierung und -Abfragen, Standalone/Live Viewer, Claude/Codex/Gemini/Cursor/OpenCode Semantic Integrations, konservative Tool → Process Correlation, OpenRouter/LiteLLM Gateway Metadata, Ollama/llama.cpp/vLLM/LM Studio Runtime Metadata, exakte Gateway ↔ Model Runtime Request Identity, veröffentlichte PyPI wheel/sdist-Pakete, reproduzierbares Overhead Benchmarking, Cross-Platform Command-Launcher-Kompatibilität, Large-Graph Browser Safety Guards, inkrementelles Live JSONL Tail/Cache und Cross-Platform CI unter Python 3.10/3.12.
 

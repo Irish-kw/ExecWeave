@@ -20,7 +20,7 @@ ExecWeave 是開源、local-first 的 observability 專案，會把 AI Agent 活
 > **Event 是 ground truth；Graph 是 materialized view。**
 
 <p align="center">
-  <img src="docs/assets/execweave-live-demo.png" alt="ExecWeave Live execution graph" width="100%">
+  <img src="docs/assets/execweave-launch-demo-v5-x.gif" alt="ExecWeave Live execution graph" width="100%">
 </p>
 
 <!-- execweave-demo:start -->
@@ -84,39 +84,39 @@ execweave live --open -- python my_agent.py
 execweave live --open -- ollama serve
 ```
 
-`execweave live` 即時呈現它所啟動 command tree 的 process、file、network evidence。Agent semantic hooks、model-runtime API metadata、inference-gateway routing metadata **目前不會自動注入 Live Viewer**。
+`execweave live` 即時呈現所啟動 command tree 的 process、file、network evidence。從 v0.6.4 起，已設定的 Claude/Codex/Gemini/Cursor hooks 與 OpenCode plugin 會自動寫入本次 run 的 live sidecar；由 ExecWeave 啟動的 Ollama、llama.cpp、vLLM server 也會自動進行本機 model-catalog probe。
 
 #### Live 能力矩陣
 
 | Integration | 直接 OS-runtime live | 專用 metadata | 自動進入 Live Viewer |
 | --- | --- | --- | --- |
-| Claude Code | 可以 | `execweave-claude-record` / hooks | 否 |
-| OpenAI Codex | 可以 | `execweave-codex-record` / hooks | 否 |
-| Gemini CLI | 可以 | `execweave-gemini-record` / hooks | 否 |
-| Cursor | 可以 | `execweave-cursor-record` / hooks | 否 |
-| OpenCode | 可以 | `execweave-opencode-record` / plugin | 否 |
-| Ollama | 可以，但需由 ExecWeave 啟動，例如 `ollama serve` | `execweave-model-runtime event/probe --runtime ollama` | 否 |
-| llama.cpp | 可以，但需由 ExecWeave 啟動本機 server | `execweave-model-runtime event/probe --runtime llamacpp` | 否 |
-| vLLM | 可以，但需由 ExecWeave 啟動本機 server | `execweave-model-runtime event/probe --runtime vllm` | 否 |
+| Claude Code | 可以 | `execweave-claude-record` / hooks | 是（已設定 hook/plugin） |
+| OpenAI Codex | 可以 | `execweave-codex-record` / hooks | 是（已設定 hook/plugin） |
+| Gemini CLI | 可以 | `execweave-gemini-record` / hooks | 是（已設定 hook/plugin） |
+| Cursor | 可以 | `execweave-cursor-record` / hooks | 是（已設定 hook/plugin） |
+| OpenCode | 可以 | `execweave-opencode-record` / plugin | 是（已設定 hook/plugin） |
+| Ollama | 可以，但需由 ExecWeave 啟動，例如 `ollama serve` | `execweave-model-runtime event/probe --runtime ollama` | 是（自動本機 probe） |
+| llama.cpp | 可以，但需由 ExecWeave 啟動本機 server | `execweave-model-runtime event/probe --runtime llamacpp` | 是（自動本機 probe） |
+| vLLM | 可以，但需由 ExecWeave 啟動本機 server | `execweave-model-runtime event/probe --runtime vllm` | 是（自動本機 probe） |
 | LM Studio | 只有由 ExecWeave 啟動的本機 process；不會 attach 已在執行的 server | `execweave-model-runtime event/probe --runtime lmstudio` | 否 |
 | LiteLLM Proxy | 可以，但需由 ExecWeave 啟動本機 proxy | `execweave-inference-gateway event --gateway litellm` | 否 |
 | OpenRouter | 遠端服務本身不能直接 live；請 live 本機 client/Agent | `execweave-inference-gateway event/generation --gateway openrouter` | 否 |
 
 若 Ollama 已經在背景執行，可用 `execweave-model-runtime probe --runtime ollama` snapshot 目前 loaded-model state。OpenRouter 則可由 `live` 觀察本機 client 與 network activity，而 gateway routing/usage metadata 仍保持為獨立 evidence layer。
 
-<!-- v0.6.3-live -->
-### v0.6.3 即時可觀測性
+<!-- v0.6.4-live -->
+### v0.6.4 即時可觀測性
 
-同一個 live session 可以用瀏覽器或 Terminal 查看：
+`top` 會讓 Agent 保持在原本 Terminal 內互動，並在另一個 Terminal 視窗開啟 dashboard：
 
 ```bash
-execweave top -- codex          # Terminal dashboard
-execweave top --open -- codex   # Terminal + Web Viewer
+execweave top -- codex
+execweave top --open -- codex
 ```
 
-Live 更新改用增量 snapshot/delta 與有界歷史，不再反覆重建並傳送整張 graph。Live 與 standalone Viewer 都支援會記住偏好的 Dark/Light 切換。在 Linux 上，超大型 recursive filesystem scope 會先做資源預檢；若 inotify watch 空間不足，會自動降級為 polling，因此不會因 inotify watch exhaustion 直接中止 session。
+Live 更新採用增量 snapshot/delta 與有界歷史，Live 與 standalone Viewer 支援持久化 Dark/Light theme。Linux 的大型 recursive filesystem scope 會先做資源預檢，必要時由 inotify 自動降級為 polling。
 
-`live` 是通用 OS-runtime view，不是 integration whitelist。Agent semantic、model-runtime、gateway metadata 仍是分離的 evidence layers，在 v0.6.3 不會自動注入 Live Viewer。
+v0.6.4 為每個 live run 建立共享 specialized-evidence sidecar。已設定的 Claude/Codex/Gemini/Cursor hooks 與 OpenCode plugin 會自動進入同一張 Live Graph；由 ExecWeave 啟動的 Ollama、llama.cpp、vLLM server 會自動以 loopback API probe model catalog。這些 live specialized events 是 provisional；command 結束後仍以 canonical runtime + semantic merge 重建 final graph。缺少的 evidence 不會被推測或補造。
 
 可用 `execweave-scalability` 重現 graph scalability benchmark；CI 覆蓋 10k、100k 與 1M synthetic events。
 
@@ -285,7 +285,7 @@ Possible sensitive-file → network path 不等於 byte-level exfiltration；sec
 
 ## 目前狀態
 
-ExecWeave `main` 目前為 **v0.6.3**。Baseline 已包含 runtime collection、graph materialization/query、standalone/live Viewer、五種 Agent/IDE semantic integrations、保守 Tool → Process correlation、OpenRouter/LiteLLM、Ollama/llama.cpp/vLLM/LM Studio、exact Gateway ↔ Model Runtime request identity、已發布的 PyPI packaging、可重跑 overhead benchmark、跨平台 command launcher compatibility、large-graph browser safety guards、incremental Live JSONL tail/cache，以及跨平台 CI。
+ExecWeave `main` 目前為 **v0.6.4**。Baseline 已包含 runtime collection、graph materialization/query、standalone/live Viewer、五種 Agent/IDE semantic integrations、保守 Tool → Process correlation、OpenRouter/LiteLLM、Ollama/llama.cpp/vLLM/LM Studio、exact Gateway ↔ Model Runtime request identity、已發布的 PyPI packaging、可重跑 overhead benchmark、跨平台 command launcher compatibility、large-graph browser safety guards、incremental Live JSONL tail/cache，以及跨平台 CI。
 
 ## 隱私
 

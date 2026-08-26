@@ -83,20 +83,20 @@ execweave live --open -- python my_agent.py
 execweave live --open -- ollama serve
 ```
 
-`execweave live` always streams process, file, and network evidence for the command tree it launches. In v0.6.4 it also exports a run-specific semantic sidecar to the child environment. When a supported Agent hook/plugin is configured, its semantic events are automatically ingested into the same Live Viewer; a separate provider `*-record` wrapper is not required for that live session.
+`execweave live` streams process, file, and network evidence for the command tree it launches. In v0.6.4, configured Claude/Codex/Gemini/Cursor hooks and the OpenCode plugin automatically feed the per-run live sidecar. Ollama, llama.cpp, and vLLM server launches also receive automatic local model-catalog probes.
 
 #### Live capability matrix
 
 | Integration | Direct OS-runtime live | Specialized metadata | Automatically in Live Viewer |
 | --- | --- | --- | --- |
-| Claude Code | Yes | `execweave-claude-record` / hooks | **Yes** (configured hooks) |
-| OpenAI Codex | Yes | `execweave-codex-record` / hooks | **Yes** (configured hooks) |
-| Gemini CLI | Yes | `execweave-gemini-record` / hooks | **Yes** (configured hooks) |
-| Cursor | Yes | `execweave-cursor-record` / hooks | **Yes** (configured hooks) |
-| OpenCode | Yes | `execweave-opencode-record` / plugin | **Yes** (installed plugin) |
-| Ollama | Yes, when launched under ExecWeave (for example `ollama serve`) | `execweave-model-runtime event/probe --runtime ollama` | No |
-| llama.cpp | Yes, when its local server is launched under ExecWeave | `execweave-model-runtime event/probe --runtime llamacpp` | No |
-| vLLM | Yes, when its local server is launched under ExecWeave | `execweave-model-runtime event/probe --runtime vllm` | No |
+| Claude Code | Yes | `execweave-claude-record` / hooks | Yes (configured hook/plugin) |
+| OpenAI Codex | Yes | `execweave-codex-record` / hooks | Yes (configured hook/plugin) |
+| Gemini CLI | Yes | `execweave-gemini-record` / hooks | Yes (configured hook/plugin) |
+| Cursor | Yes | `execweave-cursor-record` / hooks | Yes (configured hook/plugin) |
+| OpenCode | Yes | `execweave-opencode-record` / plugin | Yes (configured hook/plugin) |
+| Ollama | Yes, when launched under ExecWeave (for example `ollama serve`) | `execweave-model-runtime event/probe --runtime ollama` | Yes (automatic local probe) |
+| llama.cpp | Yes, when its local server is launched under ExecWeave | `execweave-model-runtime event/probe --runtime llamacpp` | Yes (automatic local probe) |
+| vLLM | Yes, when its local server is launched under ExecWeave | `execweave-model-runtime event/probe --runtime vllm` | Yes (automatic local probe) |
 | LM Studio | Yes only for a local process launched under ExecWeave; an already-running server is not attached | `execweave-model-runtime event/probe --runtime lmstudio` | No |
 | LiteLLM Proxy | Yes, when the local proxy is launched under ExecWeave | `execweave-inference-gateway event --gateway litellm` | No |
 | OpenRouter | No direct remote-service process; run the local client/Agent under `live` instead | `execweave-inference-gateway event/generation --gateway openrouter` | No |

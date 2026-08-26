@@ -20,7 +20,7 @@ ExecWeave は、AI エージェントの活動をインタラクティブな exe
 > **Event is ground truth. The graph is a materialized view.**
 
 <p align="center">
-  <img src="docs/assets/execweave-live-demo.png" alt="ExecWeave Live execution graph" width="100%">
+  <img src="docs/assets/execweave-launch-demo-v5-x.gif" alt="ExecWeave Live execution graph" width="100%">
 </p>
 
 <!-- execweave-demo:start -->
@@ -84,39 +84,39 @@ execweave live --open -- python my_agent.py
 execweave live --open -- ollama serve
 ```
 
-`execweave live` は、起動した command tree の process / file / network evidence をリアルタイム表示します。Agent semantic hooks、model-runtime API metadata、inference-gateway routing metadata は **現在 Live Viewer に自動注入されません**。
+`execweave live` は起動した command tree の process/file/network evidence をリアルタイム表示します。v0.6.4 では設定済み Claude/Codex/Gemini/Cursor hooks と OpenCode plugin が run 固有の live sidecar へ自動送信され、ExecWeave 配下で起動した Ollama、llama.cpp、vLLM server にはローカル model-catalog probe が自動実行されます。
 
 #### Live capability matrix
 
 | Integration | Direct OS-runtime live | Specialized metadata | Auto in Live Viewer |
 | --- | --- | --- | --- |
-| Claude Code | Yes | `execweave-claude-record` / hooks | No |
-| OpenAI Codex | Yes | `execweave-codex-record` / hooks | No |
-| Gemini CLI | Yes | `execweave-gemini-record` / hooks | No |
-| Cursor | Yes | `execweave-cursor-record` / hooks | No |
-| OpenCode | Yes | `execweave-opencode-record` / plugin | No |
-| Ollama | Yes, ExecWeave から起動する場合（例: `ollama serve`） | `execweave-model-runtime event/probe --runtime ollama` | No |
-| llama.cpp | Yes, ローカル server を ExecWeave から起動する場合 | `execweave-model-runtime event/probe --runtime llamacpp` | No |
-| vLLM | Yes, ローカル server を ExecWeave から起動する場合 | `execweave-model-runtime event/probe --runtime vllm` | No |
+| Claude Code | Yes | `execweave-claude-record` / hooks | Yes（設定済み hook/plugin） |
+| OpenAI Codex | Yes | `execweave-codex-record` / hooks | Yes（設定済み hook/plugin） |
+| Gemini CLI | Yes | `execweave-gemini-record` / hooks | Yes（設定済み hook/plugin） |
+| Cursor | Yes | `execweave-cursor-record` / hooks | Yes（設定済み hook/plugin） |
+| OpenCode | Yes | `execweave-opencode-record` / plugin | Yes（設定済み hook/plugin） |
+| Ollama | Yes, ExecWeave から起動する場合（例: `ollama serve`） | `execweave-model-runtime event/probe --runtime ollama` | Yes（自動ローカル probe） |
+| llama.cpp | Yes, ローカル server を ExecWeave から起動する場合 | `execweave-model-runtime event/probe --runtime llamacpp` | Yes（自動ローカル probe） |
+| vLLM | Yes, ローカル server を ExecWeave から起動する場合 | `execweave-model-runtime event/probe --runtime vllm` | Yes（自動ローカル probe） |
 | LM Studio | ExecWeave から起動したローカル process のみ。既存 server には attach しません | `execweave-model-runtime event/probe --runtime lmstudio` | No |
 | LiteLLM Proxy | Yes, ローカル proxy を ExecWeave から起動する場合 | `execweave-inference-gateway event --gateway litellm` | No |
 | OpenRouter | Remote service 自体は direct live 不可。ローカル client/Agent を live してください | `execweave-inference-gateway event/generation --gateway openrouter` | No |
 
 Ollama がすでにバックグラウンドで動作中なら、`execweave-model-runtime probe --runtime ollama` で loaded-model state を snapshot できます。OpenRouter では `live` がローカル client と network activity を観測し、gateway routing/usage metadata は別の evidence layer のままです。
 
-<!-- v0.6.3-live -->
-### v0.6.3 ライブ可観測性
+<!-- v0.6.4-live -->
+### v0.6.4 ライブ可観測性
 
-同じ live session をブラウザまたは Terminal で確認できます：
+`top` は Agent を元の Terminal で対話可能なままにし、dashboard を別の Terminal ウィンドウで開きます：
 
 ```bash
-execweave top -- codex          # Terminal dashboard
-execweave top --open -- codex   # Terminal + Web Viewer
+execweave top -- codex
+execweave top --open -- codex
 ```
 
-Live 更新は増分 snapshot/delta と有界履歴を使用し、graph 全体の再構築・再送を繰り返しません。Live と standalone Viewer は、設定を保持する Dark/Light 切り替えに対応します。Linux では非常に大きな recursive filesystem scope を事前に確認し、inotify watch 容量が不足する場合は自動的に polling へフォールバックするため、inotify watch exhaustion で session 全体が停止しません。
+Live 更新は増分 snapshot/delta と有界履歴を使用し、Live/standalone Viewer は永続的な Dark/Light theme をサポートします。Linux の大規模 recursive filesystem scope は事前確認され、必要なら inotify から polling へ自動フォールバックします。
 
-`live` は汎用 OS-runtime view であり integration whitelist ではありません。Agent semantic、model-runtime、gateway metadata は分離された evidence layer のままで、v0.6.3 では Live Viewer に自動注入されません。
+v0.6.4 では各 live run に共有 specialized-evidence sidecar があります。設定済み Claude/Codex/Gemini/Cursor hooks と OpenCode plugin は同じ Live Graph に自動反映され、ExecWeave 配下で起動した Ollama、llama.cpp、vLLM server は loopback API から model catalog を自動 probe します。live specialized events は provisional であり、command 終了後は canonical runtime + semantic merge から final graph を再構築します。存在しない evidence は推測しません。
 
 `execweave-scalability` で graph scalability benchmark を再現でき、CI は 10k、100k、1M synthetic events を検証します。
 
@@ -239,7 +239,7 @@ Security findings は evidence limit を維持し、possible sensitive-file → 
 
 ## Current status
 
-ExecWeave `main` は現在 **v0.6.3**。Runtime collection、execution graph、5 種の Agent/IDE integration、OpenRouter/LiteLLM、Ollama/llama.cpp/vLLM/LM Studio、exact Gateway ↔ Runtime identity、公開済み PyPI packaging、reference overhead benchmark、cross-platform command-launcher compatibility、large-graph browser safety guards、incremental Live JSONL tail/cache、cross-platform CI が baseline に含まれます。
+ExecWeave `main` は現在 **v0.6.4**。Runtime collection、execution graph、5 種の Agent/IDE integration、OpenRouter/LiteLLM、Ollama/llama.cpp/vLLM/LM Studio、exact Gateway ↔ Runtime identity、公開済み PyPI packaging、reference overhead benchmark、cross-platform command-launcher compatibility、large-graph browser safety guards、incremental Live JSONL tail/cache、cross-platform CI が baseline に含まれます。
 
 ## Privacy
 
