@@ -26,7 +26,8 @@ def _linux_inotify_directory_budget() -> int | None:
     watchdog's recursive inotify observer consumes approximately one kernel watch
     per directory. ExecWeave does not know how many watches editors, language
     servers, containers, or other processes already consume, so it deliberately
-    reserves most of the kernel limit for the rest of the system.
+    reserves most of the kernel limit for the rest of the system. The returned
+    budget never exceeds one quarter of the configured per-user watch limit.
     """
 
     if not sys.platform.startswith("linux"):
@@ -35,10 +36,11 @@ def _linux_inotify_directory_budget() -> int | None:
         configured = int(_LINUX_INOTIFY_LIMIT.read_text(encoding="utf-8").strip())
     except (OSError, ValueError):
         configured = 32768
-    return max(
-        LINUX_INOTIFY_MIN_SAFE_DIRS,
-        min(LINUX_INOTIFY_MAX_SAFE_DIRS, configured // 4),
-    )
+
+    quarter = max(1, configured // 4)
+    if quarter < LINUX_INOTIFY_MIN_SAFE_DIRS:
+        return quarter
+    return min(LINUX_INOTIFY_MAX_SAFE_DIRS, quarter)
 
 
 def _tree_exceeds_directory_budget(root: Path, budget: int) -> bool:
