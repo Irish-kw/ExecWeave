@@ -1,6 +1,7 @@
 name: Documentation i18n
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
     paths:
