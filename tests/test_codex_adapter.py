@@ -93,7 +93,7 @@ def test_post_tool_use_is_neutral_about_success_or_failure() -> None:
     assert "tool_response" not in event["attributes"]
 
 
-def test_unknown_codex_hook_is_ignored() -> None:
+def test_semantic_adapter_ignores_non_summary_hook() -> None:
     payload = {**_base("PermissionRequest"), "tool_name": "Bash", "tool_input": {}}
     assert codex_hook_to_semantic_events(payload) == []
 
@@ -109,12 +109,27 @@ def test_required_tool_identity_is_enforced() -> None:
         codex_hook_to_semantic_events(payload)
 
 
-def test_codex_hook_config_uses_supported_lifecycle_events() -> None:
+def test_codex_hook_config_uses_current_upstream_lifecycle_events() -> None:
     config = codex_hook_config("execweave-codex-hook --strict")
     hooks = config["hooks"]
-    assert set(hooks) == {"SessionStart", "PreToolUse", "PostToolUse"}
-    assert hooks["PreToolUse"][0]["matcher"] == ".*"
-    assert hooks["PostToolUse"][0]["matcher"] == ".*"
+    assert set(hooks) == {
+        "PreToolUse",
+        "PermissionRequest",
+        "PostToolUse",
+        "PreCompact",
+        "PostCompact",
+        "SessionStart",
+        "SessionEnd",
+        "UserPromptSubmit",
+        "SubagentStart",
+        "SubagentStop",
+        "Stop",
+        "Interrupt",
+    }
+    for event_name in {"PreToolUse", "PermissionRequest", "PostToolUse"}:
+        assert hooks[event_name][0]["matcher"] == "*"
+    for event_name in set(hooks) - {"PreToolUse", "PermissionRequest", "PostToolUse"}:
+        assert "matcher" not in hooks[event_name][0]
     assert hooks["PreToolUse"][0]["hooks"][0]["command"] == "execweave-codex-hook --strict"
 
 
