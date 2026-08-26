@@ -1,0 +1,42 @@
+name: Package Smoke
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "pyproject.toml"
+      - "src/**"
+      - ".github/workflows/package-smoke.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  wheel:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build wheel and sdist
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build twine
+          python -m build
+          python -m twine check dist/*
+      - name: Install clean wheel
+        shell: bash
+        run: |
+          wheel="$(ls dist/*.whl)"
+          python -m venv .wheel-smoke
+          .wheel-smoke/bin/python -m pip install --upgrade pip
+          .wheel-smoke/bin/python -m pip install "$wheel"
+      - name: Smoke installed entry points
+        shell: bash
+        run: |
+          .wheel-smoke/bin/execweave --help
+          .wheel-smoke/bin/execweave top --help
+          .wheel-smoke/bin/execweave-top --help
+          .wheel-smoke/bin/execweave-scalability --help
