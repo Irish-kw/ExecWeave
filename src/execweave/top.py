@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
+import shlex
 import shutil
+import subprocess
 import sys
 import threading
 import time
@@ -233,19 +236,29 @@ def format_dashboard(
         f"{infer_value:>5} {model[:21]:<21} {state.event_count:>6} "
         f"{_evidence_summary(state):<17} {command_text}"
     )
-    title = f"ExecWeave Top  [{state.connection_status}]  seq={state.sequence}  nodes={state.node_count}  edges={state.edge_count}"
+    title = (
+        f"ExecWeave Top  [{state.connection_status}]  seq={state.sequence}  "
+        f"nodes={state.node_count}  edges={state.edge_count}"
+    )
     lines = [title[:width], "─" * min(width, max(len(title), 80)), header[:width], row[:width]]
     if state.compact:
         lines.extend(
             [
                 "",
-                "Large-graph protective mode: category details are bounded; collection and the Web Viewer remain available.",
+                "Large-graph protective mode: category details are bounded; "
+                "collection and the Web Viewer remain available.",
             ]
         )
     if state.recent:
         lines.extend(["", "Recent activity"])
         lines.extend(f"  {item}"[:width] for item in reversed(state.recent))
-    lines.extend(["", "Web Viewer: use `execweave top --open -- ...` to display both Terminal and Browser views."])
+    lines.extend(
+        [
+            "",
+            "This dashboard is attached to the live session; the Agent remains interactive "
+            "in the original terminal.",
+        ]
+    )
     return "\n".join(lines)
 
 
@@ -288,6 +301,7 @@ class TerminalTopClient:
             process_cache=self.process_cache,
         )
         if self._interactive:
+            self.stream.write("\x1b]0;ExecWeave Top\x07")
             self.stream.write("\x1b[2J\x1b[H")
         self.stream.write(dashboard + "\n")
         self.stream.flush()
@@ -306,6 +320,115 @@ class TerminalTopClient:
             self.stop_event.wait(self.refresh_seconds)
 
 
+def run_attached_top(
+    live_url: str,
+    *,
+    command: list[str],
+    refresh_seconds: float = 0.50,
+    stream: TextIO | None = None,
+) -> None:
+    """Render an existing live session in the current terminal."""
+    stop_event = threading.Event()
+    client = TerminalTopClient(
+        live_url=live_url,
+        command=command,
+        refresh_seconds=refresh_seconds,
+        stream=stream or sys.stdout,
+        stop_event=stop_event,
+    )
+    try:
+        client.run()
+    except KeyboardInterrupt:
+        stop_event.set()
+
+
+def _dashboard_attach_argv(
+    live_url: str,
+    *,
+    command: list[str],
+    refresh_seconds: float,
+) -> list[str]:
+    return [
+        sys.executable,
+        "-m",
+        "execweave",
+        "top",
+        "--attach",
+        live_url,
+        "--attach-command-json",
+        json.dumps(command, ensure_ascii=False),
+        "--refresh",
+        str(refresh_seconds),
+    ]
+
+
+def _launch_macos_terminal(argv: list[str]) -> bool:
+    osascript = shutil.which("osascript")
+    if osascript is None:
+        return False
+    command = shlex.join(argv)
+    escaped = command.replace("\\", "\\\\").replace('"', '\\"')
+    script = (
+        'tell application "Terminal"\n'
+        "activate\n"
+        f'do script "{escaped}"\n'
+        "end tell"
+    )
+    subprocess.Popen(
+        [osascript, "-e", script],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    return True
+
+
+def _launch_linux_terminal(argv: list[str]) -> bool:
+    if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+        return False
+    candidates = (
+        ("x-terminal-emulator", ["-e"]),
+        ("gnome-terminal", ["--"]),
+        ("konsole", ["-e"]),
+        ("kitty", []),
+        ("alacritty", ["-e"]),
+    )
+    for executable, prefix in candidates:
+        path = shutil.which(executable)
+        if path is None:
+            continue
+        subprocess.Popen(
+            [path, *prefix, *argv],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return True
+    return False
+
+
+def launch_dashboard_terminal(
+    live_url: str,
+    *,
+    command: list[str],
+    refresh_seconds: float,
+) -> bool:
+    """Launch the Top client in a separate terminal without touching Agent stdio."""
+    argv = _dashboard_attach_argv(
+        live_url,
+        command=command,
+        refresh_seconds=refresh_seconds,
+    )
+    try:
+        if os.name == "nt":
+            creationflags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+            subprocess.Popen(argv, creationflags=creationflags)
+            return True
+        if sys.platform == "darwin":
+            return _launch_macos_terminal(argv)
+        return _launch_linux_terminal(argv)
+    except OSError:
+        return False
+
+
 def run_top(
     command: list[str],
     *,
@@ -322,25 +445,47 @@ def run_top(
 ) -> LiveResult:
     if not command:
         raise ValueError("command must not be empty")
-    output = stream or sys.stdout
+
     stop_event = threading.Event()
     terminal_thread: threading.Thread | None = None
 
     def announce(live_url: str) -> None:
         nonlocal terminal_thread
-        client = TerminalTopClient(
-            live_url=live_url,
+        if stream is not None:
+            client = TerminalTopClient(
+                live_url=live_url,
+                command=command,
+                refresh_seconds=refresh_seconds,
+                stream=stream,
+                stop_event=stop_event,
+            )
+            terminal_thread = threading.Thread(
+                target=client.run,
+                name="execweave-top-inline",
+                daemon=True,
+            )
+            terminal_thread.start()
+            return
+
+        launched = launch_dashboard_terminal(
+            live_url,
             command=command,
             refresh_seconds=refresh_seconds,
-            stream=output,
-            stop_event=stop_event,
         )
-        terminal_thread = threading.Thread(
-            target=client.run,
-            name="execweave-top",
-            daemon=True,
-        )
-        terminal_thread.start()
+        if not launched:
+            attach = shlex.join(
+                _dashboard_attach_argv(
+                    live_url,
+                    command=command,
+                    refresh_seconds=refresh_seconds,
+                )
+            )
+            print(
+                "ExecWeave Top: no GUI terminal was detected. "
+                f"Open another terminal and run: {attach}",
+                file=sys.stderr,
+                flush=True,
+            )
 
     try:
         return run_live(
