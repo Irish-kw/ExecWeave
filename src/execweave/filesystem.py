@@ -1,13 +1,27 @@
 from __future__ import annotations
 
+import errno
+import logging
+import sys
 from pathlib import Path
 from typing import Iterable
 
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
+from watchdog.observers.polling import PollingObserver
 
 from .schema import Entity, RuntimeEvent
 from .sink import JsonlSink
+
+_LOGGER = logging.getLogger(__name__)
+_POLLING_FALLBACK_INTERVAL = 1.0
+_INOTIFY_RESOURCE_ERRNOS = {errno.ENOSPC, errno.EMFILE}
+
+
+def _is_inotify_resource_error(exc: OSError) -> bool:
+    if exc.errno not in _INOTIFY_RESOURCE_ERRNOS:
+        return False
+    return sys.platform.startswith("linux") or "inotify" in str(exc).lower()
 
 
 class SessionFileEventHandler(FileSystemEventHandler):
@@ -93,10 +107,31 @@ class FileWatcher:
             excluded_roots=excluded_roots,
         )
         self.observer = Observer()
+        self.observer_backend = "native"
+
+    def _schedule(self) -> None:
+        self.observer.schedule(self.handler, str(self.root), recursive=True)
 
     def start(self) -> None:
-        self.observer.schedule(self.handler, str(self.root), recursive=True)
+        self._schedule()
+        try:
+            self.observer.start()
+            return
+        except OSError as exc:
+            if not _is_inotify_resource_error(exc):
+                raise
+            self.observer.unschedule_all()
+
+        self.observer = PollingObserver(timeout=_POLLING_FALLBACK_INTERVAL)
+        self.observer_backend = "polling"
+        self._schedule()
         self.observer.start()
+        _LOGGER.warning(
+            "Linux inotify resources are exhausted; ExecWeave is using the polling "
+            "filesystem watcher for %s. Narrow --watch-root or increase "
+            "fs.inotify.max_user_watches/max_user_instances to restore native watching.",
+            self.root,
+        )
 
     def stop(self) -> None:
         self.observer.stop()
