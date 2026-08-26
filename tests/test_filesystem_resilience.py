@@ -68,6 +68,15 @@ def _watcher(tmp_path: Path) -> FileWatcher:
     )
 
 
+def test_linux_inotify_budget_respects_small_kernel_limit(monkeypatch, tmp_path: Path) -> None:
+    limit = tmp_path / "max_user_watches"
+    limit.write_text("4096\n", encoding="utf-8")
+    monkeypatch.setattr(filesystem_module.sys, "platform", "linux")
+    monkeypatch.setattr(filesystem_module, "_LINUX_INOTIFY_LIMIT", limit)
+
+    assert filesystem_module._linux_inotify_directory_budget() == 1024
+
+
 @pytest.mark.parametrize("error_number", [errno.ENOSPC, errno.EMFILE])
 def test_inotify_resource_exhaustion_during_start_falls_back_to_polling(
     monkeypatch,
