@@ -23,8 +23,8 @@ jobs:
         run: python scripts/sync_i18n_v063_once.py
       - name: Synchronize eight-language navigation
         run: python scripts/sync_i18n_nav.py
-      - name: Audit translation parity
-        run: python scripts/audit_i18n_parity.py
+      - name: Audit eight-language coverage and new-language parity
+        run: python scripts/audit_i18n_parity.py --languages fr de ru
       - name: Validate diff
         run: git diff --check
       - name: Commit synchronized documentation
