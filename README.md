@@ -82,7 +82,7 @@ Reference GitHub Actions result for the incremental `GraphAccumulator` synthetic
 | 100k | 0.654 s | 152,816 ev/s | 10,001 | 10,000 | 25.8 MiB | 8.6 MiB |
 | **1M** | **6.087 s** | **164,273 ev/s** | **10,001** | **10,000** | **23.5 MiB** | **8.6 MiB** |
 
-At **1,000,000 events**, the incremental graph retained **0 raw event IDs**. This benchmark measures graph accumulation and snapshot materialization, not end-to-end collector or browser throughput.
+At **1,000,000 events**, the incremental in-memory graph did not duplicate raw event IDs; raw evidence remains separate from the materialized graph. This benchmark measures graph accumulation and snapshot materialization, not end-to-end collector or browser throughput.
 
 Or build the full artifact pipeline:
 

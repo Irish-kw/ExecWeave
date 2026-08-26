@@ -82,7 +82,7 @@ GitHub Actions에서 실행한 incremental `GraphAccumulator` synthetic workload
 | 100k | 0.654 s | 152,816 ev/s | 10,001 | 10,000 | 25.8 MiB | 8.6 MiB |
 | **1M** | **6.087 s** | **164,273 ev/s** | **10,001** | **10,000** | **23.5 MiB** | **8.6 MiB** |
 
-**1,000,000 events**에서 incremental graph가 유지한 **raw event IDs는 0개**입니다. 이 benchmark는 graph accumulation과 snapshot materialization을 측정하며 end-to-end collector 또는 browser throughput을 의미하지 않습니다.
+**1,000,000 events**에서 incremental in-memory graph는 raw event IDs를 중복 보관하지 않으며, raw evidence는 materialized graph와 분리된 상태로 유지됩니다. 이 benchmark는 graph accumulation과 snapshot materialization을 측정하며 end-to-end collector 또는 browser throughput을 의미하지 않습니다.
 
 ## Performance / footprint
 

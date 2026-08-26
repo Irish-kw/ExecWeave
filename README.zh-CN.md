@@ -82,7 +82,7 @@ Live 更新改用增量 snapshot/delta 与有界历史，不再反复重建并�
 | 100k | 0.654 s | 152,816 ev/s | 10,001 | 10,000 | 25.8 MiB | 8.6 MiB |
 | **1M** | **6.087 s** | **164,273 ev/s** | **10,001** | **10,000** | **23.5 MiB** | **8.6 MiB** |
 
-在 **1,000,000 events** 时，incremental graph 保留的 **raw event IDs 为 0**。这个 benchmark 测量的是 graph accumulation 与 snapshot materialization，不是 end-to-end collector 或 browser throughput。
+在 **1,000,000 events** 下，incremental in-memory graph 不会重复保存 raw event IDs；raw evidence 与 materialized graph 保持分离。这个 benchmark 测量的是 graph accumulation 与 snapshot materialization，不是 end-to-end collector 或 browser throughput。
 
 ## 性能与空间占用
 
