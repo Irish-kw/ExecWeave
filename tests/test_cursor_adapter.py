@@ -99,9 +99,25 @@ def test_cursor_config_and_sidecar_io(tmp_path: Path) -> None:
     assert config["version"] == 1
     assert set(config["hooks"]) == {
         "sessionStart",
+        "sessionEnd",
         "preToolUse",
         "postToolUse",
         "postToolUseFailure",
+        "subagentStart",
+        "subagentStop",
+        "beforeShellExecution",
+        "afterShellExecution",
+        "beforeMCPExecution",
+        "afterMCPExecution",
+        "beforeReadFile",
+        "afterFileEdit",
+        "beforeSubmitPrompt",
+        "preCompact",
+        "stop",
+        "afterAgentResponse",
+        "afterAgentThought",
+        "beforeTabFileRead",
+        "afterTabFileEdit",
     }
     payload = {
         **_base("preToolUse"),
