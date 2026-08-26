@@ -51,7 +51,27 @@ execweave live --open -- codex
 
 # Gemini CLI
 execweave live --open -- gemini
+
+# Cursor
+execweave live --open -- cursor
 ```
+
+<!-- v0.6.3-live -->
+### v0.6.3 即時可觀測性
+
+同一個 live session 可以用瀏覽器或 Terminal 查看：
+
+```bash
+execweave top -- codex          # Terminal dashboard
+execweave top --open -- codex   # Terminal + Web Viewer
+```
+
+Live 更新改用增量 snapshot/delta 與有界歷史，不再反覆重建並傳送整張 graph。Live 與 standalone Viewer 都支援會記住偏好的 Dark/Light 切換。在 Linux 上，超大型 recursive filesystem scope 會先做資源預檢；若 inotify watch 空間不足，會自動降級為 polling，因此不會因 inotify watch exhaustion 直接中止 session。
+
+`execweave live --open -- cursor` 可用於通用 runtime telemetry；若需要 Cursor semantic hooks 與保守的 tool/process correlation，請使用 `execweave-cursor-record --open -- cursor`。
+
+可用 `execweave-scalability` 重現 graph scalability benchmark；CI 覆蓋 10k、100k 與 1M synthetic events。
+
 
 建立完整 artifact pipeline：
 
@@ -171,9 +191,9 @@ Portable filesystem observation 是 session-correlated，不是 process-causal�
 
 未來 native collectors 包含 Linux eBPF、Windows ETW、macOS Endpoint Security。
 
-## v0.6.2 Safety Patch
+## v0.6.3 Safety Patch
 
-v0.6.2 強化長時間與高 cardinality session 的資源安全，但**不改變 evidence semantics 或 graph schema 0.1**：
+v0.6.3 強化長時間與高 cardinality session 的資源安全，但**不改變 evidence semantics 或 graph schema 0.1**：
 
 - 過度寬廣的 recursive filesystem scope（例如 filesystem root、使用者 home 或 users-home parent）不再直接進行 recursive filesystem observation；process、network、semantic collection 仍可繼續。
 - Standalone 與 Live Viewer 在超過安全預算（1,500 nodes、4,000 edges，或估計 5,000 SVG elements）時停止 SVG materialization，避免 browser memory 被大型 graph 拖垮；canonical `graph.json` evidence artifact 仍保持完整。
@@ -206,7 +226,7 @@ Possible sensitive-file → network path 不等於 byte-level exfiltration；sec
 
 ## 目前狀態
 
-ExecWeave `main` 目前為 **v0.6.2**。Baseline 已包含 runtime collection、graph materialization/query、standalone/live Viewer、五種 Agent/IDE semantic integrations、保守 Tool → Process correlation、OpenRouter/LiteLLM、Ollama/llama.cpp/vLLM/LM Studio、exact Gateway ↔ Model Runtime request identity、已發布的 PyPI packaging、可重跑 overhead benchmark、跨平台 command launcher compatibility、large-graph browser safety guards、incremental Live JSONL tail/cache，以及跨平台 CI。
+ExecWeave `main` 目前為 **v0.6.3**。Baseline 已包含 runtime collection、graph materialization/query、standalone/live Viewer、五種 Agent/IDE semantic integrations、保守 Tool → Process correlation、OpenRouter/LiteLLM、Ollama/llama.cpp/vLLM/LM Studio、exact Gateway ↔ Model Runtime request identity、已發布的 PyPI packaging、可重跑 overhead benchmark、跨平台 command launcher compatibility、large-graph browser safety guards、incremental Live JSONL tail/cache，以及跨平台 CI。
 
 ## 隱私
 

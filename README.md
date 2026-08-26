@@ -51,7 +51,27 @@ execweave live --open -- codex
 
 # Gemini CLI
 execweave live --open -- gemini
+
+# Cursor
+execweave live --open -- cursor
 ```
+
+<!-- v0.6.3-live -->
+### v0.6.3 live observability
+
+Use the same live session in either the browser or terminal:
+
+```bash
+execweave top -- codex          # Terminal dashboard
+execweave top --open -- codex   # Terminal + Web Viewer
+```
+
+Live updates use incremental snapshots/deltas with bounded history instead of repeatedly rebuilding and transferring the full graph. Live and standalone viewers support a persistent Dark/Light theme switch. On Linux, very large recursive filesystem scopes are preflighted and automatically fall back from inotify to polling when needed, so an exhausted inotify watch pool does not abort the session.
+
+`execweave live --open -- cursor` is supported for generic runtime telemetry. For Cursor semantic hooks and conservative tool/process correlation, use `execweave-cursor-record --open -- cursor`.
+
+Run the reproducible graph scalability benchmark with `execweave-scalability`; CI covers 10k, 100k, and 1M synthetic events.
+
 
 Or build the full artifact pipeline:
 
@@ -227,9 +247,9 @@ Portable filesystem watching is session-correlated rather than process-causal, a
 
 Future native collectors remain planned for Linux eBPF, Windows ETW, and macOS Endpoint Security.
 
-## v0.6.2 safety patch
+## v0.6.3 safety patch
 
-v0.6.2 hardens long-running and high-cardinality sessions without changing evidence semantics or graph schema 0.1:
+v0.6.3 hardens long-running and high-cardinality sessions without changing evidence semantics or graph schema 0.1:
 
 - Broad recursive filesystem scopes such as a filesystem root, user home, or users-home parent are no longer recursively observed as-is; process, network, and semantic collection can continue.
 - Standalone and Live Viewers stop SVG materialization above the safety budget (1,500 nodes, 4,000 edges, or an estimated 5,000 SVG elements) instead of exhausting browser memory. The canonical `graph.json` evidence artifact remains complete.
@@ -290,7 +310,7 @@ Security findings remain explicit about evidence limits. A possible sensitive-fi
 
 ## Current status
 
-ExecWeave `main` is currently **v0.6.2** and under active development.
+ExecWeave `main` is currently **v0.6.3** and under active development.
 
 The baseline includes runtime collection, graph materialization/querying, standalone/live Viewer, Claude/Codex/Gemini/Cursor/OpenCode semantic integrations, conservative Tool → Process correlation, OpenRouter/LiteLLM gateway metadata, Ollama/llama.cpp/vLLM/LM Studio runtime metadata, exact Gateway ↔ Model Runtime request identity, published PyPI wheel/sdist packaging, reproducible overhead benchmarking, cross-platform command-launcher compatibility, large-graph browser safety guards, incremental Live JSONL tail/cache, and cross-platform CI on Python 3.10/3.12.
 

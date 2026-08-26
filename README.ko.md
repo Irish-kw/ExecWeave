@@ -51,7 +51,27 @@ execweave live --open -- codex
 
 # Gemini CLI
 execweave live --open -- gemini
+
+# Cursor
+execweave live --open -- cursor
 ```
+
+<!-- v0.6.3-live -->
+### v0.6.3 라이브 관측성
+
+동일한 live session을 브라우저 또는 Terminal에서 확인할 수 있습니다:
+
+```bash
+execweave top -- codex          # Terminal dashboard
+execweave top --open -- codex   # Terminal + Web Viewer
+```
+
+Live 업데이트는 증분 snapshot/delta와 제한된 이력을 사용하므로 전체 graph를 반복해서 재구성하고 전송하지 않습니다. Live 및 standalone Viewer는 선택을 기억하는 Dark/Light 전환을 지원합니다. Linux에서는 매우 큰 recursive filesystem scope를 사전 점검하고 inotify watch 용량이 부족하면 자동으로 polling으로 전환하므로 inotify watch exhaustion 때문에 session 전체가 중단되지 않습니다.
+
+`execweave live --open -- cursor`는 일반 runtime telemetry에 사용할 수 있습니다. Cursor semantic hooks와 보수적인 tool/process correlation이 필요하면 `execweave-cursor-record --open -- cursor`를 사용하세요.
+
+`execweave-scalability`로 graph scalability benchmark를 재현할 수 있으며 CI는 10k, 100k, 1M synthetic events를 검증합니다.
+
 
 ## Performance / footprint
 
@@ -134,9 +154,9 @@ v0.6.1부터 모든 recorder는 child command 실행 전에 공통 cross-platfor
 
 Portable filesystem observation은 process-causal이 아니라 session-correlated입니다. Future native collectors는 Linux eBPF, Windows ETW, macOS Endpoint Security를 계획하고 있습니다.
 
-## v0.6.2 Safety Patch
+## v0.6.3 Safety Patch
 
-v0.6.2는 long-running / high-cardinality session의 resource safety를 강화하지만 **evidence semantics와 graph schema 0.1은 변경하지 않습니다**.
+v0.6.3는 long-running / high-cardinality session의 resource safety를 강화하지만 **evidence semantics와 graph schema 0.1은 변경하지 않습니다**.
 
 - filesystem root, user home, users-home parent처럼 지나치게 넓은 recursive scope에서는 recursive filesystem observation을 그대로 시작하지 않으며 process / network / semantic collection은 계속할 수 있습니다.
 - Standalone / Live Viewer가 safety budget(1,500 nodes, 4,000 edges 또는 추정 5,000 SVG elements)을 초과하면 SVG materialization을 중단해 browser memory exhaustion을 방지합니다. Canonical `graph.json` evidence artifact는 완전하게 유지됩니다.
@@ -160,7 +180,7 @@ Security findings는 evidence limit를 유지하며 possible sensitive-file → 
 
 ## Current status
 
-ExecWeave `main`은 현재 **v0.6.2**입니다. Runtime collection, execution graph, 5개 Agent/IDE integration, OpenRouter/LiteLLM, Ollama/llama.cpp/vLLM/LM Studio, exact Gateway ↔ Runtime identity, 공개된 PyPI packaging, reference overhead benchmark, cross-platform command-launcher compatibility, large-graph browser safety guards, incremental Live JSONL tail/cache, cross-platform CI가 baseline에 포함됩니다.
+ExecWeave `main`은 현재 **v0.6.3**입니다. Runtime collection, execution graph, 5개 Agent/IDE integration, OpenRouter/LiteLLM, Ollama/llama.cpp/vLLM/LM Studio, exact Gateway ↔ Runtime identity, 공개된 PyPI packaging, reference overhead benchmark, cross-platform command-launcher compatibility, large-graph browser safety guards, incremental Live JSONL tail/cache, cross-platform CI가 baseline에 포함됩니다.
 
 ## Privacy
 

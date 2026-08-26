@@ -51,7 +51,27 @@ execweave live --open -- codex
 
 # Gemini CLI
 execweave live --open -- gemini
+
+# Cursor
+execweave live --open -- cursor
 ```
+
+<!-- v0.6.3-live -->
+### v0.6.3 实时可观测性
+
+同一个 live session 可以使用浏览器或 Terminal 查看：
+
+```bash
+execweave top -- codex          # Terminal dashboard
+execweave top --open -- codex   # Terminal + Web Viewer
+```
+
+Live 更新改用增量 snapshot/delta 与有界历史，不再反复重建并传输整张 graph。Live 与 standalone Viewer 都支持会记住偏好的 Dark/Light 切换。在 Linux 上，超大型 recursive filesystem scope 会先进行资源预检；如果 inotify watch 空间不足，会自动降级为 polling，因此不会因 inotify watch exhaustion 直接终止 session。
+
+`execweave live --open -- cursor` 可用于通用 runtime telemetry；如需 Cursor semantic hooks 与保守的 tool/process correlation，请使用 `execweave-cursor-record --open -- cursor`。
+
+可用 `execweave-scalability` 重现 graph scalability benchmark；CI 覆盖 10k、100k 和 1M synthetic events。
+
 
 ## 性能与空间占用
 
@@ -134,9 +154,9 @@ execweave run --backend strace -- your-command
 
 Portable filesystem observation 是 session-correlated，不是 process-causal。未来 native collectors 包括 Linux eBPF、Windows ETW、macOS Endpoint Security。
 
-## v0.6.2 Safety Patch
+## v0.6.3 Safety Patch
 
-v0.6.2 提升长时间与高 cardinality session 的资源安全，但**不改变 evidence semantics 或 graph schema 0.1**：
+v0.6.3 提升长时间与高 cardinality session 的资源安全，但**不改变 evidence semantics 或 graph schema 0.1**：
 
 - 对 filesystem root、用户 home、users-home parent 等过宽 recursive scope，不再直接进行 recursive filesystem observation；process、network、semantic collection 仍可继续。
 - Standalone 与 Live Viewer 超过安全预算（1,500 nodes、4,000 edges，或估算 5,000 SVG elements）后停止 SVG materialization，避免大型 graph 耗尽浏览器内存；canonical `graph.json` evidence artifact 仍保持完整。
@@ -160,7 +180,7 @@ Security findings 会保留 evidence limits；possible sensitive-file → networ
 
 ## 当前状态
 
-ExecWeave `main` 当前为 **v0.6.2**，baseline 已包含 runtime collection、execution graph、五种 Agent/IDE integrations、OpenRouter/LiteLLM、Ollama/llama.cpp/vLLM/LM Studio、exact Gateway ↔ Runtime identity、已发布的 PyPI packaging、reference overhead benchmark、cross-platform command launcher compatibility、large-graph browser safety guards、incremental Live JSONL tail/cache 与 cross-platform CI。
+ExecWeave `main` 当前为 **v0.6.3**，baseline 已包含 runtime collection、execution graph、五种 Agent/IDE integrations、OpenRouter/LiteLLM、Ollama/llama.cpp/vLLM/LM Studio、exact Gateway ↔ Runtime identity、已发布的 PyPI packaging、reference overhead benchmark、cross-platform command launcher compatibility、large-graph browser safety guards、incremental Live JSONL tail/cache 与 cross-platform CI。
 
 ## 隐私
 
