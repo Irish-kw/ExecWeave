@@ -1,0 +1,41 @@
+name: i18n navigation sync
+
+on:
+  push:
+    branches:
+      - fix/linux-inotify-watch-exhaustion
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Synchronize eight-language navigation
+        run: python scripts/sync_i18n_nav.py
+
+      - name: Validate patch
+        run: git diff --check
+
+      - name: Commit synchronized navigation
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No navigation changes required."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README*.md docs/*.md
+          git commit -m "docs: synchronize eight-language navigation"
+          git push origin HEAD:fix/linux-inotify-watch-exhaustion
