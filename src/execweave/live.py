@@ -4,15 +4,18 @@ import json
 import threading
 import time
 import webbrowser
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from socketserver import TCPServer
+from urllib.parse import parse_qs, urlsplit
 from uuid import uuid4
 
 from .backends import create_collector
 from .graph import GRAPH_SCHEMA_VERSION, GraphAccumulator, build_execution_graph, write_execution_graph
+from .live_view import LIVE_HTML as _LIVE_HTML
 from .sink import JsonlSink
 from .validate import validate_event_stream
 from .viewer import (
@@ -23,63 +26,7 @@ from .viewer import (
     write_graph_html,
 )
 
-
-_LIVE_HTML = r"""<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ExecWeave Live</title>
-<style>
-:root{color-scheme:dark;--bg:#0b0f14;--panel:#111821;--panel2:#18222e;--text:#e8edf3;--muted:#8ea0b5;--border:#2a3949;--edge:#72869c;--causal:#70d6a6;--noncausal:#f2b76d;--selected:#73b7ff}
-*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(--text);font:14px/1.4 system-ui,sans-serif}
-#app{display:grid;grid-template-columns:minmax(0,1fr) 320px;grid-template-rows:54px minmax(0,1fr);width:100%;height:100%}
-header{grid-column:1/3;display:flex;align-items:center;gap:12px;padding:0 14px;background:var(--panel);border-bottom:1px solid var(--border)}
-#status{border:1px solid var(--border);border-radius:999px;padding:3px 8px;color:var(--causal)}#stats{color:var(--muted);white-space:nowrap}
-header input{margin-left:auto;width:min(420px,36vw);padding:7px 9px;border:1px solid var(--border);border-radius:7px;background:var(--panel2);color:var(--text)}
-#wrap{position:relative;overflow:hidden}svg{width:100%;height:100%;display:block;cursor:grab;user-select:none}svg.panning{cursor:grabbing}
-#protective{position:absolute;inset:18px;z-index:4;display:grid;place-items:center;padding:24px;text-align:center;border:1px solid var(--border);border-radius:12px;background:rgba(17,24,33,.96)}#protective[hidden]{display:none}#protective strong{display:block;margin-bottom:8px;font-size:20px}#protective p{max-width:680px;margin:6px auto;color:var(--muted)}
-aside{overflow:auto;border-left:1px solid var(--border);background:var(--panel);padding:13px}aside pre{white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.45 ui-monospace,monospace}
-.controls{position:absolute;left:10px;top:10px;z-index:3}.controls button{padding:6px 9px;border:1px solid var(--border);border-radius:7px;background:var(--panel);color:var(--text);cursor:pointer}
-.node rect{stroke:var(--border);stroke-width:1.1;rx:8;ry:8}.node text{fill:var(--text);pointer-events:none}.node .type{fill:var(--muted);font-size:9px}.node.dim{opacity:.12}
-.edge{fill:none;stroke:var(--edge);stroke-width:1.3;opacity:.72;marker-end:url(#arrow)}.edge.causal{stroke:var(--causal)}.edge.noncausal{stroke:var(--noncausal);stroke-dasharray:6 5}.edge.dim{opacity:.06}.edge-hit{fill:none;stroke:transparent;stroke-width:10;cursor:pointer}.label{fill:var(--muted);font-size:8.5px;pointer-events:none}
-@media(max-width:820px){#app{grid-template-columns:1fr;grid-template-rows:54px minmax(0,1fr) 190px}header{grid-column:1}aside{border-left:0;border-top:1px solid var(--border)}}
-</style>
-</head>
-<body>
-<div id="app">
-<header><strong>ExecWeave Live</strong><span id="status">LIVE</span><span id="stats">Waiting for events…</span><input id="search" placeholder="Search node id, name, type…"></header>
-<div id="wrap"><div class="controls"><button id="fit">Fit</button></div><div id="protective" hidden><div><strong>LARGE GRAPH PROTECTIVE MODE</strong><p id="protective-summary"></p><p>Live SVG rendering has stopped to protect browser memory. Collection continues and no evidence is deleted or reclassified.</p></div></div><svg id="svg"><defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="context-stroke"></path></marker></defs><g id="viewport"><g id="edges"></g><g id="labels"></g><g id="nodes"></g></g></svg></div>
-<aside><strong>Selection</strong><div id="details" style="color:var(--muted);margin-top:10px">Click a node or edge.</div></aside>
-</div>
-<script>
-(()=>{
-const MAX_NODES=1500,MAX_EDGES=4000,MAX_DOM_ELEMENTS=5000;
-const svg=document.getElementById('svg'),viewport=document.getElementById('viewport'),edgeLayer=document.getElementById('edges'),labelLayer=document.getElementById('labels'),nodeLayer=document.getElementById('nodes'),details=document.getElementById('details'),search=document.getElementById('search'),stats=document.getElementById('stats'),status=document.getElementById('status'),protective=document.getElementById('protective'),protectiveSummary=document.getElementById('protective-summary');
-let graph={nodes:[],edges:[]},positions=new Map(),transform={x:35,y:35,scale:1},pan=null,lastSignature='';
-function color(type){let h=0;for(const c of String(type||'unknown'))h=((h<<5)-h+c.charCodeAt(0))|0;return `hsl(${Math.abs(h)%360} 38% 27%)`}
-function short(node){const value=node.name||node.id||node.type||'node';return value.length>28?value.slice(0,25)+'…':value}
-function graphCounts(data){const nodes=Number(data.node_count)||((data.nodes||[]).length),edges=Number(data.edge_count)||((data.edges||[]).length);return{nodes,edges,estimated:nodes*4+edges*3}}
-function withinRenderBudget(data){const counts=graphCounts(data);return counts.nodes<=MAX_NODES&&counts.edges<=MAX_EDGES&&counts.estimated<=MAX_DOM_ELEMENTS}
-function enterProtectiveMode(data){const counts=graphCounts(data);edgeLayer.replaceChildren();labelLayer.replaceChildren();nodeLayer.replaceChildren();positions=new Map();svg.style.display='none';protective.hidden=false;protectiveSummary.textContent=`${counts.nodes} nodes · ${counts.edges} edges · about ${counts.estimated} SVG elements exceeds the live safety budget.`;status.textContent='PROTECTED'}
-function leaveProtectiveMode(){protective.hidden=true;svg.style.display='block'}
-function layout(){const ids=graph.nodes.map(n=>n.id),nodeMap=new Map(graph.nodes.map(n=>[n.id,n])),incoming=new Map(ids.map(id=>[id,0])),outgoing=new Map(ids.map(id=>[id,[]]));for(const e of graph.edges){if(!nodeMap.has(e.source)||!nodeMap.has(e.target))continue;incoming.set(e.target,(incoming.get(e.target)||0)+1);outgoing.get(e.source).push(e.target)}let roots=ids.filter(id=>(incoming.get(id)||0)===0);if(!roots.length&&ids.length)roots=[ids[0]];const depth=new Map(),queue=roots.map(id=>[id,0]);for(let i=0;i<queue.length;i++){const [id,d]=queue[i];if(depth.has(id))continue;depth.set(id,d);for(const next of outgoing.get(id)||[])queue.push([next,d+1])}let maxDepth=0;depth.forEach(value=>{if(value>maxDepth)maxDepth=value});for(const id of ids)if(!depth.has(id))depth.set(id,maxDepth+1);const layers=new Map();for(const id of ids){const d=depth.get(id);if(!layers.has(d))layers.set(d,[]);layers.get(d).push(id)}for(const [d,list] of layers){list.sort((a,b)=>String(nodeMap.get(a)?.type).localeCompare(String(nodeMap.get(b)?.type))||a.localeCompare(b));list.forEach((id,i)=>{if(!positions.has(id))positions.set(id,{x:d*235,y:i*76})})}}
-function anchor(id,right){const p=positions.get(id)||{x:0,y:0};return{x:p.x+(right?160:0),y:p.y+25}}
-function curve(e){const a=anchor(e.source,true),b=anchor(e.target,false),bend=Math.max(38,Math.abs(b.x-a.x)*.42);return `M ${a.x} ${a.y} C ${a.x+bend} ${a.y}, ${b.x-bend} ${b.y}, ${b.x} ${b.y}`}
-function currentEdge(id,fallback){return(graph.edges||[]).find(edge=>edge.id===id)||fallback}
-function currentNode(id,fallback){return(graph.nodes||[]).find(node=>node.id===id)||fallback}
-function show(value){details.innerHTML='';const pre=document.createElement('pre');pre.textContent=JSON.stringify(value,null,2);details.appendChild(pre)}
-function render(){leaveProtectiveMode();layout();edgeLayer.replaceChildren();labelLayer.replaceChildren();nodeLayer.replaceChildren();for(const e of graph.edges){if(!positions.has(e.source)||!positions.has(e.target))continue;const edgeId=e.id||`${e.source}:${e.relation}:${e.target}`,visible=document.createElementNS('http://www.w3.org/2000/svg','path');visible.setAttribute('d',curve(e));visible.classList.add('edge');if(e.causal===true)visible.classList.add('causal');else if(e.causal===false)visible.classList.add('noncausal');visible.dataset.source=e.source;visible.dataset.target=e.target;visible.dataset.relation=String(e.relation||'').toLowerCase();edgeLayer.appendChild(visible);const hit=document.createElementNS('http://www.w3.org/2000/svg','path');hit.setAttribute('d',curve(e));hit.classList.add('edge-hit');hit.dataset.edgeId=edgeId;hit.onclick=ev=>{ev.stopPropagation();show(currentEdge(edgeId,e))};edgeLayer.appendChild(hit);const a=anchor(e.source,true),b=anchor(e.target,false),label=document.createElementNS('http://www.w3.org/2000/svg','text');label.setAttribute('x',(a.x+b.x)/2);label.setAttribute('y',(a.y+b.y)/2-6);label.setAttribute('text-anchor','middle');label.classList.add('label');label.dataset.edgeId=edgeId;label.textContent=e.count>1?`${e.relation} ×${e.count}`:e.relation;labelLayer.appendChild(label)}for(const n of graph.nodes){const p=positions.get(n.id);if(!p)continue;const group=document.createElementNS('http://www.w3.org/2000/svg','g');group.classList.add('node');group.dataset.id=n.id;group.dataset.search=`${n.id} ${n.name||''} ${n.type||''}`.toLowerCase();group.setAttribute('transform',`translate(${p.x} ${p.y})`);const rect=document.createElementNS('http://www.w3.org/2000/svg','rect');rect.setAttribute('width',160);rect.setAttribute('height',50);rect.setAttribute('fill',color(n.type));group.appendChild(rect);const type=document.createElementNS('http://www.w3.org/2000/svg','text');type.setAttribute('x',10);type.setAttribute('y',15);type.classList.add('type');type.textContent=n.type||'unknown';group.appendChild(type);const label=document.createElementNS('http://www.w3.org/2000/svg','text');label.setAttribute('x',10);label.setAttribute('y',34);label.textContent=short(n);group.appendChild(label);group.onclick=ev=>{ev.stopPropagation();show(currentNode(n.id,n))};nodeLayer.appendChild(group)}applySearch()}
-function refreshEdgeLabels(){const byId=new Map((graph.edges||[]).map(edge=>[edge.id||`${edge.source}:${edge.relation}:${edge.target}`,edge]));labelLayer.querySelectorAll('.label[data-edge-id]').forEach(label=>{const edge=byId.get(label.dataset.edgeId);if(edge)label.textContent=edge.count>1?`${edge.relation} ×${edge.count}`:edge.relation})}
-function applyTransform(){viewport.setAttribute('transform',`translate(${transform.x} ${transform.y}) scale(${transform.scale})`)}
-function fit(){if(!positions.size)return;let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;positions.forEach(p=>{if(p.x<minX)minX=p.x;if(p.x>maxX)maxX=p.x;if(p.y<minY)minY=p.y;if(p.y>maxY)maxY=p.y});maxX+=160;maxY+=50;const box=svg.getBoundingClientRect(),w=Math.max(1,maxX-minX),h=Math.max(1,maxY-minY),scale=Math.min(1.2,Math.max(.07,Math.min((box.width-60)/w,(box.height-60)/h)));transform={x:30-minX*scale,y:30-minY*scale,scale};applyTransform()}
-function applySearch(){const q=search.value.trim().toLowerCase();const matched=new Set();document.querySelectorAll('.node').forEach(el=>{const ok=!q||el.dataset.search.includes(q);el.classList.toggle('dim',!ok);if(ok)matched.add(el.dataset.id)});document.querySelectorAll('.edge').forEach(el=>{const keep=!q||matched.has(el.dataset.source)||matched.has(el.dataset.target)||el.dataset.relation.includes(q);el.classList.toggle('dim',!keep)})}
-async function poll(){try{const response=await fetch('/graph.json',{cache:'no-store'});if(!response.ok)throw new Error(String(response.status));const data=await response.json(),finished=!!data.live_finished;delete data.live_finished;const signature=`${data.node_count||0}:${data.edge_count||0}`;graph=data;stats.textContent=`${data.node_count||0} nodes · ${data.edge_count||0} edges · ${data.event_count||0} events`;if(!withinRenderBudget(data)){if(lastSignature!=='PROTECTED')enterProtectiveMode(data);else{const counts=graphCounts(data);protectiveSummary.textContent=`${counts.nodes} nodes · ${counts.edges} edges · about ${counts.estimated} SVG elements exceeds the live safety budget.`}lastSignature='PROTECTED';status.textContent=finished?'FINISHED':'PROTECTED'}else{status.textContent=finished?'FINISHED':'LIVE';if(signature!==lastSignature){lastSignature=signature;render();if(positions.size<4)fit()}else refreshEdgeLabels()}if(finished){setTimeout(()=>{location.href='/final'},250);return}}catch(_){status.textContent='RECONNECTING'}setTimeout(poll,500)}
-svg.onpointerdown=e=>{if(e.target.closest?.('.node'))return;pan={x:e.clientX,y:e.clientY,tx:transform.x,ty:transform.y};svg.classList.add('panning');svg.setPointerCapture(e.pointerId)};svg.onpointermove=e=>{if(!pan)return;transform.x=pan.tx+e.clientX-pan.x;transform.y=pan.ty+e.clientY-pan.y;applyTransform()};svg.onpointerup=e=>{pan=null;svg.classList.remove('panning');try{svg.releasePointerCapture(e.pointerId)}catch(_){}};svg.addEventListener('wheel',e=>{e.preventDefault();const rect=svg.getBoundingClientRect(),mx=e.clientX-rect.left,my=e.clientY-rect.top,old=transform.scale,next=Math.min(4,Math.max(.07,old*Math.exp(-e.deltaY*.0012))),gx=(mx-transform.x)/old,gy=(my-transform.y)/old;transform.scale=next;transform.x=mx-gx*next;transform.y=my-gy*next;applyTransform()},{passive:false});search.oninput=applySearch;document.getElementById('fit').onclick=fit;window.onresize=fit;applyTransform();poll();
-})();
-</script>
-</body>
-</html>"""
+LIVE_DELTA_HISTORY = 256
 
 
 @dataclass(frozen=True)
@@ -128,6 +75,22 @@ def _compact_live_graph(graph: dict[str, object]) -> dict[str, object]:
     }
 
 
+def _entity_id(entity: object) -> str | None:
+    if not isinstance(entity, dict):
+        return None
+    value = entity.get("id")
+    return value if isinstance(value, str) and value else None
+
+
+def _event_edge_key(event: dict[str, object]) -> tuple[str, str, str] | None:
+    source_id = _entity_id(event.get("source"))
+    target_id = _entity_id(event.get("target"))
+    relation = event.get("relation")
+    if source_id and target_id and isinstance(relation, str) and relation:
+        return (source_id, relation, target_id)
+    return None
+
+
 class _LiveState:
     def __init__(self, session_id: str, event_path: Path) -> None:
         self.session_id = session_id
@@ -140,9 +103,12 @@ class _LiveState:
         )
         self._read_offset = 0
         self._pending_bytes = b""
-        self._last_graph: dict[str, object] = self._empty_graph()
         self._finished = False
+        self._final_graph: dict[str, object] | None = None
         self._final_html: str | None = None
+        self._update_sequence = 0
+        self._resync_floor = 0
+        self._updates: deque[dict[str, object]] = deque(maxlen=LIVE_DELTA_HISTORY)
 
     def _empty_graph(self) -> dict[str, object]:
         return {
@@ -157,6 +123,19 @@ class _LiveState:
             "edges": [],
         }
 
+    def _counts_locked(self) -> dict[str, object]:
+        if self._finished and self._final_graph is not None:
+            return {
+                "event_count": int(self._final_graph.get("event_count", 0) or 0),
+                "node_count": int(self._final_graph.get("node_count", 0) or 0),
+                "edge_count": int(self._final_graph.get("edge_count", 0) or 0),
+            }
+        return {
+            "event_count": self._accumulator.event_count,
+            "node_count": self._accumulator.node_count,
+            "edge_count": self._accumulator.edge_count,
+        }
+
     def _reset_incremental_state_locked(self) -> None:
         self._accumulator = GraphAccumulator(
             session_id=self.session_id,
@@ -165,9 +144,20 @@ class _LiveState:
         )
         self._read_offset = 0
         self._pending_bytes = b""
-        self._last_graph = self._empty_graph()
+        self._updates.clear()
+        self._update_sequence += 1
+        self._resync_floor = self._update_sequence
 
     def _snapshot_from_accumulator_locked(self) -> dict[str, object]:
+        if self._finished and self._final_graph is not None:
+            graph = self._final_graph
+            node_count = int(graph.get("node_count", 0) or 0)
+            edge_count = int(graph.get("edge_count", 0) or 0)
+            return (
+                dict(graph)
+                if _within_live_payload_budget(node_count, edge_count)
+                else _compact_live_graph(graph)
+            )
         if _within_live_payload_budget(
             self._accumulator.node_count,
             self._accumulator.edge_count,
@@ -184,6 +174,11 @@ class _LiveState:
                 "edge_count": self._accumulator.edge_count,
             }
         )
+
+    def _append_update_locked(self, update: dict[str, object]) -> None:
+        self._update_sequence += 1
+        update["sequence"] = self._update_sequence
+        self._updates.append(update)
 
     def _refresh_incremental_locked(self) -> None:
         try:
@@ -208,38 +203,155 @@ class _LiveState:
         buffered = self._pending_bytes + chunk
         lines = buffered.split(b"\n")
         self._pending_bytes = lines.pop()
-        applied = False
+        added_nodes: set[str] = set()
+        updated_nodes: set[str] = set()
+        added_edges: set[tuple[str, str, str]] = set()
+        updated_edges: set[tuple[str, str, str]] = set()
+        applied_count = 0
+
         for raw_line in lines:
             if not raw_line.strip():
                 continue
             try:
                 event = json.loads(raw_line.decode("utf-8"))
+                if not isinstance(event, dict):
+                    continue
+                source_id = _entity_id(event.get("source"))
+                target_id = _entity_id(event.get("target"))
+                node_ids = {value for value in (source_id, target_id) if value}
+                existing_nodes = {node_id for node_id in node_ids if node_id in self._accumulator.nodes}
+                edge_key = _event_edge_key(event)
+                edge_existed = edge_key in self._accumulator.edges if edge_key is not None else False
                 self._accumulator.apply(event)
             except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
                 continue
-            applied = True
-        if applied:
-            self._last_graph = self._snapshot_from_accumulator_locked()
+
+            applied_count += 1
+            for node_id in node_ids:
+                if node_id in existing_nodes and node_id not in added_nodes:
+                    updated_nodes.add(node_id)
+                else:
+                    added_nodes.add(node_id)
+                    updated_nodes.discard(node_id)
+            if edge_key is not None and edge_key in self._accumulator.edges:
+                if edge_existed and edge_key not in added_edges:
+                    updated_edges.add(edge_key)
+                else:
+                    added_edges.add(edge_key)
+                    updated_edges.discard(edge_key)
+
+        if not applied_count:
+            return
+
+        counts = self._counts_locked()
+        node_count = int(counts["node_count"])
+        edge_count = int(counts["edge_count"])
+        compact = not _within_live_payload_budget(node_count, edge_count)
+        update: dict[str, object] = {
+            **counts,
+            "event_count_delta": applied_count,
+            "nodes_added": [],
+            "nodes_updated": [],
+            "edges_added": [],
+            "edges_updated": [],
+        }
+        if compact:
+            update["live_payload_compact"] = True
+        else:
+            update["nodes_added"] = [
+                self._accumulator.nodes[node_id].to_dict()
+                for node_id in sorted(added_nodes)
+                if node_id in self._accumulator.nodes
+            ]
+            update["nodes_updated"] = [
+                self._accumulator.nodes[node_id].to_dict()
+                for node_id in sorted(updated_nodes - added_nodes)
+                if node_id in self._accumulator.nodes
+            ]
+            update["edges_added"] = [
+                self._accumulator.edges[key].to_dict()
+                for key in sorted(added_edges)
+                if key in self._accumulator.edges
+            ]
+            update["edges_updated"] = [
+                self._accumulator.edges[key].to_dict()
+                for key in sorted(updated_edges - added_edges)
+                if key in self._accumulator.edges
+            ]
+        self._append_update_locked(update)
 
     def snapshot(self) -> dict[str, object]:
         with self._lock:
             if not self._finished:
                 self._refresh_incremental_locked()
-            payload = dict(self._last_graph)
+            payload = self._snapshot_from_accumulator_locked()
             payload["live_finished"] = self._finished
             return payload
 
-    def finish(self, graph: dict[str, object]) -> None:
-        node_count = int(graph.get("node_count", 0) or 0)
-        edge_count = int(graph.get("edge_count", 0) or 0)
+    def live_update(self, after: int | None) -> dict[str, object]:
         with self._lock:
-            self._last_graph = (
-                dict(graph)
-                if _within_live_payload_budget(node_count, edge_count)
-                else _compact_live_graph(graph)
+            if not self._finished:
+                self._refresh_incremental_locked()
+            if after is None or after < 0:
+                return {
+                    "kind": "snapshot",
+                    "sequence": self._update_sequence,
+                    "graph": self._snapshot_from_accumulator_locked(),
+                    "live_finished": self._finished,
+                }
+            oldest_sequence = (
+                int(self._updates[0]["sequence"]) if self._updates else self._update_sequence + 1
             )
+            history_gap = after < self._resync_floor or (
+                self._updates and after < oldest_sequence - 1
+            )
+            if after > self._update_sequence or history_gap:
+                return {
+                    "kind": "snapshot",
+                    "sequence": self._update_sequence,
+                    "graph": self._snapshot_from_accumulator_locked(),
+                    "live_finished": self._finished,
+                    "resync": True,
+                    "resync_reason": "future_sequence" if after > self._update_sequence else "history_gap",
+                }
+            counts = self._counts_locked()
+            if after == self._update_sequence:
+                return {
+                    "kind": "noop",
+                    "sequence": self._update_sequence,
+                    **counts,
+                    "live_finished": self._finished,
+                }
+            updates = [dict(update) for update in self._updates if int(update["sequence"]) > after]
+            return {
+                "kind": "delta",
+                "base_sequence": after,
+                "sequence": self._update_sequence,
+                "updates": updates,
+                **counts,
+                "live_finished": self._finished,
+            }
+
+    def finish(self, graph: dict[str, object]) -> None:
+        with self._lock:
+            self._final_graph = dict(graph)
             self._final_html = render_graph_html(graph)
             self._finished = True
+            counts = self._counts_locked()
+            node_count = int(counts["node_count"])
+            edge_count = int(counts["edge_count"])
+            terminal: dict[str, object] = {
+                **counts,
+                "event_count_delta": 0,
+                "nodes_added": [],
+                "nodes_updated": [],
+                "edges_added": [],
+                "edges_updated": [],
+                "terminal": True,
+            }
+            if not _within_live_payload_budget(node_count, edge_count):
+                terminal["live_payload_compact"] = True
+            self._append_update_locked(terminal)
 
     def final_html(self) -> str | None:
         with self._lock:
@@ -261,13 +373,26 @@ def _handler_factory(state: _LiveState):
             self.wfile.write(body)
 
         def do_GET(self) -> None:
-            path = self.path.split("?", 1)[0]
+            parsed = urlsplit(self.path)
+            path = parsed.path
             if path == "/":
                 self._send(_LIVE_HTML.encode("utf-8"), "text/html; charset=utf-8")
                 return
             if path == "/graph.json":
                 payload = json.dumps(
                     state.snapshot(), ensure_ascii=False, separators=(",", ":")
+                ).encode("utf-8")
+                self._send(payload, "application/json; charset=utf-8")
+                return
+            if path == "/live.json":
+                values = parse_qs(parsed.query).get("after", [])
+                try:
+                    after = int(values[0]) if values else None
+                except (TypeError, ValueError):
+                    self._send(b"Invalid after sequence", "text/plain; charset=utf-8", 400)
+                    return
+                payload = json.dumps(
+                    state.live_update(after), ensure_ascii=False, separators=(",", ":")
                 ).encode("utf-8")
                 self._send(payload, "application/json; charset=utf-8")
                 return
