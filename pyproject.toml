@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "execweave"
-version = "0.6.3"
+version = "0.6.4"
 description = "Turn AI-agent runtime behavior into a local interactive execution graph."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -78,13 +78,3 @@ execweave-scalability = "execweave.scalability_benchmark:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/execweave"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-
-[tool.ruff]
-target-version = "py310"
-line-length = 100
-
-[tool.ruff.lint]
-select = ["E4", "E7", "E9", "F"]
