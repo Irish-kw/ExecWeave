@@ -174,6 +174,10 @@ class ExecWeaveLiteLLMCallback(_LiteLLMCustomLogger):
                 endpoint=_gateway_endpoint(),
                 timestamp=observed_at,
             )
+            for record in content_records:
+                attributes = record.get("attributes")
+                if isinstance(attributes, dict):
+                    attributes.setdefault("gateway", "litellm")
             append_gateway_records(sidecar, content_records)
         except Exception:
             # Keep the already-written semantic summary if full-fidelity storage fails.
