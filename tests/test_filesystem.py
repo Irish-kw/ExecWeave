@@ -88,6 +88,34 @@ def test_file_watcher_falls_back_when_inotify_resources_are_exhausted(
     assert polling.joined is True
 
 
+def test_file_watcher_falls_back_when_inotify_schedule_exhausts_resources(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class ExhaustedDuringScheduleObserver(_FakeObserver):
+        instances = []
+
+        def schedule(self, handler, path: str, *, recursive: bool = False):
+            raise OSError(errno.EMFILE, "inotify instance limit reached")
+
+    class FakePollingObserver(_FakeObserver):
+        instances = []
+
+    monkeypatch.setattr(filesystem, "Observer", ExhaustedDuringScheduleObserver)
+    monkeypatch.setattr(filesystem, "PollingObserver", FakePollingObserver)
+
+    watcher = _make_watcher(tmp_path)
+    watcher.start()
+
+    native = ExhaustedDuringScheduleObserver.instances[-1]
+    polling = FakePollingObserver.instances[-1]
+    assert native.unscheduled is True
+    assert watcher.observer is polling
+    assert watcher.observer_backend == "polling"
+    assert polling.started is True
+    assert polling.scheduled[0][1:] == (str(tmp_path.resolve()), True)
+
+
 def test_file_watcher_does_not_hide_unrelated_observer_errors(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
