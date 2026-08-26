@@ -72,6 +72,17 @@ Live updates use incremental snapshots/deltas with bounded history instead of re
 
 Run the reproducible graph scalability benchmark with `execweave-scalability`; CI covers 10k, 100k, and 1M synthetic events.
 
+#### Scalability benchmark
+
+Reference GitHub Actions result for the incremental `GraphAccumulator` synthetic workload (`retain_event_ids=False`):
+
+| Events | Apply time | Throughput | Nodes | Edges | Apply RSS Δ | Snapshot |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 10k | 0.114 s | 87,681 ev/s | 10,001 | 10,000 | 35.9 MiB | 8.5 MiB |
+| 100k | 0.654 s | 152,816 ev/s | 10,001 | 10,000 | 25.8 MiB | 8.6 MiB |
+| **1M** | **6.087 s** | **164,273 ev/s** | **10,001** | **10,000** | **23.5 MiB** | **8.6 MiB** |
+
+At **1,000,000 events**, the incremental graph retained **0 raw event IDs**. This benchmark measures graph accumulation and snapshot materialization, not end-to-end collector or browser throughput.
 
 Or build the full artifact pipeline:
 
@@ -326,7 +337,7 @@ Review artifacts before sharing them.
 - [`Phase 2 — Execution Graph`](docs/phase-2-execution-graph.md)
 - [`Live Graph`](docs/live-graph.md)
 - [`Semantic Telemetry`](docs/semantic-telemetry.md)
-- [`Claude Code Hooks`](docs/claude-code-hooks.md)
+- [`Claude Code Hooks`](docs/claude-hooks.md)
 - [`OpenAI Codex Hooks`](docs/codex-hooks.md)
 - [`Gemini CLI Hooks`](docs/gemini-hooks.md)
 - [`Cursor Hooks`](docs/cursor-hooks.md)
