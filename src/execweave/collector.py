@@ -9,6 +9,7 @@ from typing import Iterable
 
 import psutil
 
+from .auto_specialized import auto_specialized_probe
 from .command import resolve_launch_command
 from .filesystem import FileWatcher
 from .schema import Entity, RuntimeEvent
@@ -165,12 +166,13 @@ class RuntimeCollector:
             if snapshot is not None:
                 self._record_process_start(snapshot, parent=session, relation="LAUNCHED")
 
-            while process.poll() is None:
-                self._sample_process_tree(root)
-                time.sleep(self.poll_interval)
+            with auto_specialized_probe(command):
+                while process.poll() is None:
+                    self._sample_process_tree(root)
+                    time.sleep(self.poll_interval)
 
-            self._sample_process_tree(root)
-            self._mark_disappeared_processes(set())
+                self._sample_process_tree(root)
+                self._mark_disappeared_processes(set())
             return_code = int(process.returncode or 0)
             return return_code
         finally:
