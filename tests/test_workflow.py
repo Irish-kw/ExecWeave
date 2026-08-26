@@ -1,3 +1,4 @@
+import json
 import sys
 from pathlib import Path
 
@@ -24,19 +25,25 @@ def test_record_to_viewer_portable_end_to_end(tmp_path: Path) -> None:
     assert result.return_code == 0
     assert result.output_dir == output_dir.resolve()
     assert result.event_stream == (output_dir / "events.jsonl").resolve()
+    assert result.fidelity == (output_dir / "fidelity.json").resolve()
     assert result.graph == (output_dir / "graph.json").resolve()
     assert result.viewer == (output_dir / "viewer.html").resolve()
     assert result.event_stream.exists()
+    assert result.fidelity.exists()
     assert result.graph.exists()
     assert result.viewer.exists()
 
     validation = validate_event_stream(result.event_stream)
     assert validation.valid is True
     graph = load_graph(result.graph)
+    fidelity = json.loads(result.fidelity.read_text(encoding="utf-8"))
     assert graph["session_id"] == result.session_id
     assert graph["event_count"] == result.event_count
     assert graph["node_count"] == result.node_count
     assert graph["edge_count"] == result.edge_count
+    assert fidelity == graph["fidelity"]
+    assert fidelity["fidelity_schema_version"] == "0.1"
+    assert "byte_level_dataflow" in fidelity["claims_not_supported"]
     assert "ExecWeave" in result.viewer.read_text(encoding="utf-8")
 
 
@@ -55,6 +62,7 @@ def test_record_to_viewer_preserves_nonzero_command_exit(tmp_path: Path) -> None
 
     assert result.return_code == 7
     assert validate_event_stream(result.event_stream).valid is True
+    assert result.fidelity.exists()
     assert result.graph.exists()
     assert result.viewer.exists()
 
