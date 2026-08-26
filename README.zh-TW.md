@@ -20,8 +20,30 @@ ExecWeave 是開源、local-first 的 observability 專案，會把 AI Agent 活
 > **Event 是 ground truth；Graph 是 materialized view。**
 
 <p align="center">
-  <img src="docs/assets/execweave-viewer.png" alt="ExecWeave Live execution graph" width="100%">
+  <img src="docs/assets/execweave-live-demo.webp" alt="ExecWeave Live execution graph" width="100%">
 </p>
+
+<!-- execweave-demo:start -->
+## 重現這個 Demo
+
+上面的截圖是一個真實的 ExecWeave v0.6.3 live session。這個 workload 刻意產生足夠多種活動，讓 execution graph 能清楚展示效果：多個 Python modules、JSON/CSV 檔案、tests、檔案檢查，以及對外 HTTP requests。
+
+把本機 Agent CLI 放在 ExecWeave 下執行，例如：
+
+```bash
+execweave live --open -- claude
+```
+
+接著把這段 workload prompt 貼給 Agent：
+
+```text
+Create a small Python project in ./execweave-demo with 8 modules,
+generate sample JSON and CSV data, run the program and tests,
+inspect the generated files, and fetch example.com plus the GitHub API.
+```
+
+同一個 workload 也可以用 `codex`、`gemini`、`cursor` 或 `opencode`。實際的 node、edge、event、process 與 endpoint 數量會隨 OS、Agent 版本與環境而不同。ExecWeave 記錄的是實際觀測到的 runtime evidence；上圖是一個具體執行結果，不是固定應得到的 graph。
+<!-- execweave-demo:end -->
 
 ## 安裝
 

@@ -20,8 +20,30 @@ ExecWeave는 AI 에이전트 활동을 인터랙티브 execution graph로 변환
 > **Event is ground truth. The graph is a materialized view.**
 
 <p align="center">
-  <img src="docs/assets/execweave-viewer.png" alt="ExecWeave Live execution graph" width="100%">
+  <img src="docs/assets/execweave-live-demo.webp" alt="ExecWeave Live execution graph" width="100%">
 </p>
+
+<!-- execweave-demo:start -->
+## 이 Demo 재현하기
+
+위 스크린샷은 실제 ExecWeave v0.6.3 live session입니다. 이 workload는 execution graph가 유용하게 보이도록 여러 Python modules, JSON/CSV files, tests, file inspection, 외부 HTTP requests를 의도적으로 발생시킵니다.
+
+로컬 Agent CLI를 ExecWeave 아래에서 실행합니다. 예:
+
+```bash
+execweave live --open -- claude
+```
+
+그 다음 아래 workload prompt를 Agent에 붙여 넣습니다:
+
+```text
+Create a small Python project in ./execweave-demo with 8 modules,
+generate sample JSON and CSV data, run the program and tests,
+inspect the generated files, and fetch example.com plus the GitHub API.
+```
+
+같은 workload는 `codex`, `gemini`, `cursor`, `opencode`에서도 사용할 수 있습니다. 실제 node, edge, event, process, endpoint 수는 OS, Agent version, environment에 따라 달라집니다. ExecWeave는 실제로 관측된 runtime evidence를 기록하며, 위 그림은 고정된 예상 graph가 아니라 하나의 실제 실행 예입니다.
+<!-- execweave-demo:end -->
 
 ## Installation
 

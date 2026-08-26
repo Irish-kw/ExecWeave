@@ -20,8 +20,30 @@ ExecWeave は、AI エージェントの活動をインタラクティブな exe
 > **Event is ground truth. The graph is a materialized view.**
 
 <p align="center">
-  <img src="docs/assets/execweave-viewer.png" alt="ExecWeave Live execution graph" width="100%">
+  <img src="docs/assets/execweave-live-demo.webp" alt="ExecWeave Live execution graph" width="100%">
 </p>
+
+<!-- execweave-demo:start -->
+## この Demo を再現する
+
+上のスクリーンショットは、実際の ExecWeave v0.6.3 live session です。この workload は execution graph の挙動が分かりやすくなるよう、複数の Python modules、JSON/CSV files、tests、file inspection、外向き HTTP requests を意図的に発生させます。
+
+ローカルの Agent CLI を ExecWeave の下で実行します。例：
+
+```bash
+execweave live --open -- claude
+```
+
+その後、次の workload prompt を Agent に貼り付けます：
+
+```text
+Create a small Python project in ./execweave-demo with 8 modules,
+generate sample JSON and CSV data, run the program and tests,
+inspect the generated files, and fetch example.com plus the GitHub API.
+```
+
+同じ workload は `codex`、`gemini`、`cursor`、`opencode` でも利用できます。node、edge、event、process、endpoint の数は OS、Agent version、environment によって変わります。ExecWeave が記録するのは実際に観測された runtime evidence であり、上図は固定の期待 graph ではなく一つの実行例です。
+<!-- execweave-demo:end -->
 
 ## Installation
 

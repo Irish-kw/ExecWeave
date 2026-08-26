@@ -26,8 +26,30 @@ ExecWeave ist ein Open-Source-, local-first Observability-Projekt, das die Aktiv
 > **Das Event ist die ground truth; der Graph ist eine materialized view.**
 
 <p align="center">
-  <img src="docs/assets/execweave-viewer.png" alt="ExecWeave Live execution graph" width="100%">
+  <img src="docs/assets/execweave-live-demo.webp" alt="ExecWeave Live execution graph" width="100%">
 </p>
+
+<!-- execweave-demo:start -->
+## Diese Demo reproduzieren
+
+Der Screenshot oben stammt aus einer echten ExecWeave-v0.6.3-Live-Session. Dieser Workload erzeugt absichtlich genügend Aktivität für einen aussagekräftigen execution graph: mehrere Python modules, JSON/CSV files, tests, file inspection und ausgehende HTTP requests.
+
+Starte eine lokale Agent CLI unter ExecWeave, zum Beispiel:
+
+```bash
+execweave live --open -- claude
+```
+
+Füge danach diesen workload prompt in den Agent ein:
+
+```text
+Create a small Python project in ./execweave-demo with 8 modules,
+generate sample JSON and CSV data, run the program and tests,
+inspect the generated files, and fetch example.com plus the GitHub API.
+```
+
+Derselbe workload funktioniert auch mit `codex`, `gemini`, `cursor` oder `opencode`. Die genaue Anzahl von nodes, edges, events, processes und endpoints hängt von OS, Agent version und environment ab. ExecWeave zeichnet tatsächlich beobachtetes runtime evidence auf; der Screenshot zeigt einen konkreten Lauf und keinen fest erwarteten graph.
+<!-- execweave-demo:end -->
 
 ## Installation
 
