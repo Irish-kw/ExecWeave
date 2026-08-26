@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import errno
+import os
+import sys
 import warnings
 from pathlib import Path
 from typing import Iterable
@@ -11,6 +13,70 @@ from watchdog.observers.polling import PollingObserver
 
 from .schema import Entity, RuntimeEvent
 from .sink import JsonlSink
+
+LINUX_INOTIFY_MIN_SAFE_DIRS = 2048
+LINUX_INOTIFY_MAX_SAFE_DIRS = 32768
+_LINUX_INOTIFY_LIMIT = Path("/proc/sys/fs/inotify/max_user_watches")
+
+
+def _linux_inotify_directory_budget() -> int | None:
+    """Return a conservative per-session directory budget on Linux.
+
+    watchdog's recursive inotify observer consumes approximately one kernel watch
+    per directory. ExecWeave does not know how many watches editors, language
+    servers, containers, or other processes already consume, so it deliberately
+    reserves most of the kernel limit for the rest of the system.
+    """
+
+    if not sys.platform.startswith("linux"):
+        return None
+    try:
+        configured = int(_LINUX_INOTIFY_LIMIT.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        configured = 32768
+    return max(
+        LINUX_INOTIFY_MIN_SAFE_DIRS,
+        min(LINUX_INOTIFY_MAX_SAFE_DIRS, configured // 4),
+    )
+
+
+def _tree_exceeds_directory_budget(root: Path, budget: int) -> bool:
+    """Boundedly count directories without following symlinks.
+
+    Count the tree watchdog's recursive native observer would have to watch,
+    including directories whose *events* are later filtered. This intentionally
+    avoids underestimating kernel pressure from large internal/cache trees.
+    Traversal stops as soon as the budget is exceeded.
+    """
+
+    count = 1
+    stack = [root]
+    while stack:
+        current = stack.pop()
+        try:
+            iterator = os.scandir(current)
+        except OSError:
+            continue
+        with iterator:
+            for entry in iterator:
+                try:
+                    is_directory = entry.is_dir(follow_symlinks=False)
+                except OSError:
+                    continue
+                if not is_directory:
+                    continue
+                count += 1
+                if count > budget:
+                    return True
+                stack.append(Path(entry.path))
+    return False
+
+
+def _prefer_polling_on_linux(root: Path) -> tuple[bool, int | None]:
+    budget = _linux_inotify_directory_budget()
+    if budget is None:
+        return False, None
+    return _tree_exceeds_directory_budget(root, budget), budget
 
 
 class SessionFileEventHandler(FileSystemEventHandler):
@@ -79,14 +145,16 @@ class SessionFileEventHandler(FileSystemEventHandler):
 
 
 class FileWatcher:
-    """Filesystem observation with a resource-safe Linux fallback.
+    """Filesystem observation with resource-safe Linux fallbacks.
 
-    watchdog's Linux inotify backend allocates one kernel watch per recursively
-    observed directory. Large workspaces can therefore hit ``max_user_watches``
-    even when ExecWeave later filters events from internal paths. When the kernel
-    reports ENOSPC, fall back to watchdog's polling observer instead of aborting
-    the whole ExecWeave run. This preserves session-level file-change semantics;
-    only the collection mechanism and latency change.
+    Native OS notifications remain the default. On Linux, large recursive trees
+    are preflighted before allocating inotify watches. If a tree exceeds the
+    conservative session budget, or if the kernel still returns ENOSPC because
+    other programs already consumed the global/user watch pool, ExecWeave falls
+    back to watchdog's polling observer instead of aborting the run.
+
+    The observation semantics stay session-level and non-causal. Only the
+    collection mechanism and detection latency change.
     """
 
     def __init__(
@@ -105,33 +173,55 @@ class FileWatcher:
             sink=sink,
             excluded_roots=excluded_roots,
         )
-        self.observer = Observer()
+        prefer_polling, budget = _prefer_polling_on_linux(self.root)
+        self.observer_kind = "polling" if prefer_polling else "native"
+        self.observer = PollingObserver(timeout=1.0) if prefer_polling else Observer()
         self.fallback_reason: str | None = None
+        self._started = False
+        if prefer_polling:
+            self.fallback_reason = (
+                "ExecWeave selected polling filesystem observation because this Linux "
+                f"workspace exceeds the conservative recursive inotify budget ({budget} "
+                "directories). File-change semantics are preserved, but detection may "
+                "be less immediate."
+            )
 
     def _schedule_and_start(self) -> None:
         self.observer.schedule(self.handler, str(self.root), recursive=True)
         self.observer.start()
+        self._started = True
+
+    def _shutdown_observer(self, timeout: float) -> None:
+        try:
+            self.observer.stop()
+        except RuntimeError:
+            pass
+        try:
+            self.observer.join(timeout=timeout)
+        except RuntimeError:
+            pass
+        self._started = False
 
     def start(self) -> None:
+        if self.fallback_reason is not None:
+            warnings.warn(self.fallback_reason, RuntimeWarning, stacklevel=2)
         try:
             self._schedule_and_start()
         except OSError as exc:
-            if exc.errno != errno.ENOSPC:
+            if exc.errno != errno.ENOSPC or self.observer_kind == "polling":
                 raise
-            try:
-                self.observer.stop()
-                self.observer.join(timeout=1)
-            except RuntimeError:
-                pass
+            self._shutdown_observer(timeout=1)
             self.fallback_reason = (
                 "Linux inotify watch capacity was exhausted; ExecWeave is using "
                 "polling filesystem observation for this session. File-change "
                 "semantics are preserved, but detection may be less immediate."
             )
             warnings.warn(self.fallback_reason, RuntimeWarning, stacklevel=2)
+            self.observer_kind = "polling"
             self.observer = PollingObserver(timeout=1.0)
             self._schedule_and_start()
 
     def stop(self) -> None:
-        self.observer.stop()
-        self.observer.join(timeout=5)
+        if not self._started:
+            return
+        self._shutdown_observer(timeout=5)
