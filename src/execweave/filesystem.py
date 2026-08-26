@@ -17,6 +17,7 @@ from .sink import JsonlSink
 LINUX_INOTIFY_MIN_SAFE_DIRS = 2048
 LINUX_INOTIFY_MAX_SAFE_DIRS = 32768
 _LINUX_INOTIFY_LIMIT = Path("/proc/sys/fs/inotify/max_user_watches")
+_INOTIFY_RESOURCE_ERRNOS = {errno.ENOSPC, errno.EMFILE}
 
 
 def _linux_inotify_directory_budget() -> int | None:
@@ -77,6 +78,12 @@ def _prefer_polling_on_linux(root: Path) -> tuple[bool, int | None]:
     if budget is None:
         return False, None
     return _tree_exceeds_directory_budget(root, budget), budget
+
+
+def _is_linux_inotify_resource_error(exc: OSError) -> bool:
+    """Return whether watchdog failed because Linux inotify resources are exhausted."""
+
+    return sys.platform.startswith("linux") and exc.errno in _INOTIFY_RESOURCE_ERRNOS
 
 
 class SessionFileEventHandler(FileSystemEventHandler):
@@ -149,9 +156,9 @@ class FileWatcher:
 
     Native OS notifications remain the default. On Linux, large recursive trees
     are preflighted before allocating inotify watches. If a tree exceeds the
-    conservative session budget, or if the kernel still returns ENOSPC because
-    other programs already consumed the global/user watch pool, ExecWeave falls
-    back to watchdog's polling observer instead of aborting the run.
+    conservative session budget, or if the kernel still returns ENOSPC/EMFILE
+    because other programs already consumed the watch/instance pool, ExecWeave
+    falls back to watchdog's polling observer instead of aborting the run.
 
     The observation semantics stay session-level and non-causal. Only the
     collection mechanism and detection latency change.
@@ -193,6 +200,10 @@ class FileWatcher:
 
     def _shutdown_observer(self, timeout: float) -> None:
         try:
+            self.observer.unschedule_all()
+        except (AttributeError, RuntimeError):
+            pass
+        try:
             self.observer.stop()
         except RuntimeError:
             pass
@@ -208,12 +219,12 @@ class FileWatcher:
         try:
             self._schedule_and_start()
         except OSError as exc:
-            if exc.errno != errno.ENOSPC or self.observer_kind == "polling":
+            if not _is_linux_inotify_resource_error(exc) or self.observer_kind == "polling":
                 raise
             self._shutdown_observer(timeout=1)
             self.fallback_reason = (
-                "Linux inotify watch capacity was exhausted; ExecWeave is using "
-                "polling filesystem observation for this session. File-change "
+                "Linux inotify watch or instance capacity was exhausted; ExecWeave is "
+                "using polling filesystem observation for this session. File-change "
                 "semantics are preserved, but detection may be less immediate."
             )
             warnings.warn(self.fallback_reason, RuntimeWarning, stacklevel=2)
