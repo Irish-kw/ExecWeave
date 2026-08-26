@@ -13,7 +13,7 @@
 
 # Live Graph
 
-ExecWeave は AI Agent / command の実行中に local execution graph を更新できます。
+ExecWeave は AI Agent または任意の command がまだ実行中の間に、local execution graph を stream できます。
 
 ```bash
 execweave live --open -- claude
@@ -21,9 +21,11 @@ execweave live --open -- claude
 
 ## Current contract
 
-Live MVP は意図的に `portable` collector を使います。Linux `strace` は command 終了後に trace を parse するため、強い syscall attribution は持ちますが live source ではありません。
+Live MVP は意図的に `portable` collector を使用します。
 
-Post-run の強い Linux evidence：
+Linux `strace` backend は現在 command 終了後に trace file を parse します。より強い syscall-backed attribution を提供しますが、現在の実装では live event source ではありません。ExecWeave は post-processed evidence を live telemetry として扱いません。
+
+より強い Linux post-run attribution が必要な場合：
 
 ```bash
 execweave record --backend strace --open -- claude
@@ -38,28 +40,46 @@ portable collector
   ↓
 events.jsonl
   ↓
-partial graph
+partial graph materialization
   ↓
-127.0.0.1 HTTP server
+localhost HTTP server
   ↓
 /graph.json
   ↓
-browser
+browser viewer
 ```
 
-Browser は `/graph.json` を polling します。Command 終了後、ExecWeave は complete stream を validate し、`graph.json` / standalone `viewer.html` を書き、final viewer を短時間 serve して終了します。
+Run が active な間、browser は `/graph.json` を polling します。各 snapshot は final artifact と同じ Phase 1 event-stream contract と Phase 2 graph contract から構築されます。
+
+Command 終了時、ExecWeave は：
+
+1. completed event stream を validate する；
+2. `graph.json` を書く；
+3. standalone `viewer.html` を書く；
+4. live graph を finished として mark する；
+5. local server を停止する前に final viewer を短時間 serve する。
 
 ## Network exposure
 
-Server は `127.0.0.1` のみに bind し、`0.0.0.0` には公開しません。
+Live server は次の address のみに bind します。
+
+```text
+127.0.0.1
+```
+
+`0.0.0.0` には公開されず、LAN 上の別 host から到達することを意図していません。
+
+Port を明示する場合：
 
 ```bash
 execweave live --port 8765 --open -- claude
 ```
 
-Default port `0` は OS に available local port を選ばせます。
+Default の port `0` は available local port を OS に選択させます。
 
 ## Artifacts
+
+Default run directory は：
 
 ```text
 .execweave/runs/<session-id>/
@@ -68,29 +88,51 @@ Default port `0` は OS に available local port を選ばせます。
 └── viewer.html
 ```
 
+別 directory を指定する場合：
+
 ```bash
 execweave live --output-dir my-live-run --open -- claude
 ```
 
-既存 non-empty artifacts は overwrite されません。
+既存の non-empty artifact は overwrite せず拒否されます。
 
-## Incomplete snapshot
+## Incomplete snapshots
 
-実行中の `events.jsonl` は自然に incomplete です。Live snapshot は `allow_incomplete` を使いますが、malformed JSON、session mismatch、invalid entity、broken sequence などの structural validation は維持します。Final graph は complete-session validation 後だけ作成します。
+Live run 中の `events.jsonl` は session がまだ終了していないため、意図的に incomplete です。
 
-## Portable limitations
+したがって live graph snapshot は graph builder の `allow_incomplete` mode を使用します。ただし structural validation は維持されます。Malformed JSON、inconsistent session、invalid entity、broken sequence ordering は valid graph evidence として扱われません。
 
-- process discovery は polling-based
-- short-lived process を逃す可能性
-- filesystem は session-correlated で process-attributed ではない
-- network visibility は OS/permission 依存
+Final graph は通常の complete-session validation が成功した後にのみ構築されます。
 
-Viewer はこれらを causal edge に upgrade しません。
+## Portable-backend limitations
 
-Standalone Viewer は filters、observed-only、Timeline、focus、cluster expansion、Saved Views、inferred edge styling も提供します。
+現在の live MVP は portable collector の guarantee を引き継ぎます。
+
+- process discovery は polling-based；
+- 非常に短命な process は見逃される可能性がある；
+- filesystem change は process-attributed ではなく session-correlated；
+- per-process network inspection は OS の visibility と permission に依存する。
+
+これらの limitation は event attribution metadata に残ります。Live Viewer は non-causal observation を causal edge に upgrade しません。
 
 ## Future native live backends
 
-Linux eBPF、Windows ETW、macOS Endpoint Security を同じ ExecWeave event semantics に接続し、completeness / attribution / overhead を改善する予定です。
+予定している collector：
 
-CI は live session、final artifacts、stream validation、graph summary と `/graph.json` endpoint をテストします。
+- Linux eBPF；
+- Windows ETW；
+- macOS Endpoint Security。
+
+目標は同じ ExecWeave event semantics を維持したまま completeness、process attribution、runtime overhead を改善することです。
+
+## CI coverage
+
+Repository CI configuration には次を行う `live` smoke path が含まれます。
+
+- local live session を開始；
+- 短い command を実行；
+- final artifact を書く；
+- `events.jsonl` を validate；
+- resulting graph を summarize。
+
+Unit/integration test は localhost `/graph.json` endpoint も直接 exercise します。
