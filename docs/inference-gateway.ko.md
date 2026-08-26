@@ -95,6 +95,28 @@ OpenRouter response metadata는 requested model과 response model을 분리하�
 
 ## LiteLLM Proxy
 
+<!-- litellm-auto-live-v064 -->
+### Live Viewer 자동 callback
+
+LiteLLM Proxy에 ExecWeave custom callback을 한 번 설정하면 현재 `execweave live` session의 run-specific sidecar로 routing/usage metadata를 자동 전송할 수 있습니다. 설정 조각은 다음으로 출력합니다:
+
+```bash
+execweave-litellm-callback --print-config
+```
+
+출력된 callback을 기존 `litellm_settings.callbacks`에 병합하고 다른 callbacks를 덮어쓰지 마십시오. import path는 `execweave.litellm_callback.execweave_litellm_callback`이므로 LiteLLM Proxy를 실행하는 Python environment에서 ExecWeave를 import할 수 있어야 합니다.
+
+설정된 로컬 proxy를 ExecWeave 아래에서 실행합니다:
+
+```bash
+execweave live --open -- litellm --config config.yaml
+```
+
+`execweave live`는 `EXECWEAVE_SEMANTIC_SIDECAR`를 proxy process에 전달합니다. 이 run-specific variable이 없으면 callback은 no-op입니다. `EXECWEAVE_LITELLM_ENDPOINT`로 endpoint identity를 재정의할 수 있고, 없으면 `PROXY_BASE_URL`, 마지막으로 `http://localhost:4000`을 사용합니다.
+
+callback은 LiteLLM `standard_logging_object`에서 call ID, model group, resolved model, deployment model ID, token counts, reported cost, response time, cache-hit, call type만 whitelist로 추출합니다. messages, response content, model parameters, 임의 metadata, API-key metadata, provider `api_base`는 저장하지 않습니다. `model_group`은 requested model, `model`은 resolved model, `model_id`는 deployment identity로 보존하며 권위 있는 provider evidence가 없으면 provider를 추론하지 않습니다.
+
+
 LiteLLM은 `model_runtime`이 아니라 `inference_gateway`로 모델링합니다. OpenAI-compatible response는 동일한 gateway evidence layer를 통해 request/model usage metadata를 제공합니다.
 
 `--provider-name`과 `--deployment-id`는 caller / adapter가 authoritative routing metadata를 가지고 있을 때만 edge를 생성합니다. ExecWeave는 `azure/...` 같은 model string에서 provider / deployment를 **추측하지 않습니다**. routing facts가 없으면 해당 edge를 만들지 않습니다.

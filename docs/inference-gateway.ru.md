@@ -95,6 +95,28 @@ deployment      = deployment-west
 
 ## LiteLLM Proxy
 
+<!-- litellm-auto-live-v064 -->
+### Автоматический callback для Live Viewer
+
+LiteLLM Proxy можно один раз настроить на custom callback ExecWeave, после чего routing/usage metadata автоматически попадают в run-specific sidecar текущей сессии `execweave live`. Фрагмент конфигурации выводится командой:
+
+```bash
+execweave-litellm-callback --print-config
+```
+
+Добавьте выведенный callback в существующий `litellm_settings.callbacks`, не заменяя другие callbacks. Import path: `execweave.litellm_callback.execweave_litellm_callback`, поэтому ExecWeave должен быть доступен для import в Python environment, где работает LiteLLM Proxy.
+
+После настройки запускайте локальный proxy под ExecWeave:
+
+```bash
+execweave live --open -- litellm --config config.yaml
+```
+
+`execweave live` передаёт `EXECWEAVE_SEMANTIC_SIDECAR` процессу proxy. Без этой run-specific variable callback работает как no-op. `EXECWEAVE_LITELLM_ENDPOINT` может переопределить endpoint identity; иначе используется `PROXY_BASE_URL`, затем `http://localhost:4000`.
+
+Callback извлекает из LiteLLM `standard_logging_object` только whitelist: call ID, model group, resolved model, deployment model ID, token counts, reported cost, response time, cache-hit и call type. Messages, response content, model parameters, произвольная metadata, API-key metadata и provider `api_base` не сохраняются. `model_group` сохраняется как requested model, `model` как resolved model, `model_id` как deployment identity; provider не выводится без авторитетного provider evidence.
+
+
 LiteLLM моделируется как `inference_gateway`, а не как `model_runtime`. Его OpenAI-совместимый ответ добавляет метаданные запроса/модели/usage через тот же слой gateway-доказательств.
 
 `--provider-name` и `--deployment-id` создаются только когда вызывающей стороне или адаптеру доступны авторитетные routing-метаданные. ExecWeave **не выводит** провайдера или deployment из строки модели вроде `azure/...`. Когда эти routing-факты недоступны, соответствующие рёбра не создаются.

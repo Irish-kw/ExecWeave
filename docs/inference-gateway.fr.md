@@ -95,6 +95,28 @@ Les métadonnées de réponse OpenRouter conservent le modèle demandé séparé
 
 ## LiteLLM Proxy
 
+<!-- litellm-auto-live-v064 -->
+### Callback automatique dans Live Viewer
+
+LiteLLM Proxy peut charger une fois le custom callback ExecWeave puis envoyer automatiquement les métadonnées de routage/usage vers le sidecar du run `execweave live` courant. Affichez le fragment de configuration avec :
+
+```bash
+execweave-litellm-callback --print-config
+```
+
+Ajoutez le callback imprimé à `litellm_settings.callbacks` sans remplacer les callbacks existants. Son import path est `execweave.litellm_callback.execweave_litellm_callback`; ExecWeave doit donc être importable dans l’environnement Python qui exécute LiteLLM Proxy.
+
+Lancez ensuite le proxy local configuré sous ExecWeave :
+
+```bash
+execweave live --open -- litellm --config config.yaml
+```
+
+`execweave live` transmet `EXECWEAVE_SEMANTIC_SIDECAR` au processus proxy. Sans cette variable propre au run, le callback est un no-op. `EXECWEAVE_LITELLM_ENDPOINT` peut remplacer l’identité de l’endpoint ; sinon le callback utilise `PROXY_BASE_URL`, puis `http://localhost:4000`.
+
+Le callback ne lit dans `standard_logging_object` qu’une liste blanche : call ID, model group, resolved model, deployment model ID, token counts, reported cost, response time, cache-hit et call type. Il ne conserve ni messages, ni contenu de réponse, ni paramètres de modèle, ni metadata arbitraire, ni metadata de clé API, ni `api_base` provider. `model_group` reste le requested model, `model` le resolved model et `model_id` l’identité de deployment ; aucun provider n’est déduit sans preuve autoritative.
+
+
 LiteLLM est modélisé comme un `inference_gateway`, et non comme un `model_runtime`. Sa réponse compatible OpenAI contribue les métadonnées de requête/modèle/usage via la même couche de preuves de passerelle.
 
 `--provider-name` et `--deployment-id` ne sont émis que lorsque des métadonnées de routage faisant autorité sont disponibles pour l’appelant ou l’adaptateur. ExecWeave **n’infère pas** un fournisseur ou un déploiement à partir d’une chaîne de modèle telle que `azure/...`. Lorsque ces faits de routage sont indisponibles, les arêtes correspondantes sont omises.

@@ -95,6 +95,28 @@ OpenRouter-Antwortmetadaten halten das angeforderte Modell getrennt vom Antwortm
 
 ## LiteLLM Proxy
 
+<!-- litellm-auto-live-v064 -->
+### Automatischer Live-Viewer-Callback
+
+LiteLLM Proxy kann den ExecWeave Custom Callback einmal konfigurieren und danach Routing-/Usage-Metadaten automatisch in den run-spezifischen Sidecar der aktuellen `execweave live`-Session schreiben. Das Konfigurationsfragment erhalten Sie mit:
+
+```bash
+execweave-litellm-callback --print-config
+```
+
+Fügen Sie den ausgegebenen Callback zu `litellm_settings.callbacks` hinzu, ohne bestehende Callbacks zu überschreiben. Der Import-Pfad lautet `execweave.litellm_callback.execweave_litellm_callback`; ExecWeave muss daher in der Python-Umgebung des LiteLLM Proxy importierbar sein.
+
+Starten Sie den konfigurierten lokalen Proxy unter ExecWeave:
+
+```bash
+execweave live --open -- litellm --config config.yaml
+```
+
+`execweave live` vererbt `EXECWEAVE_SEMANTIC_SIDECAR` an den Proxy-Prozess. Fehlt diese run-spezifische Variable, ist der Callback ein no-op. `EXECWEAVE_LITELLM_ENDPOINT` kann die Endpoint-Identität überschreiben; sonst werden `PROXY_BASE_URL` und anschließend `http://localhost:4000` verwendet.
+
+Der Callback liest aus LiteLLM `standard_logging_object` ausschließlich eine Whitelist: Call ID, Model Group, resolved model, Deployment Model ID, Token Counts, reported cost, response time, cache-hit und call type. Messages, Response-Inhalt, Model Parameters, beliebige Metadata, API-Key-Metadata und Provider-`api_base` werden nicht gespeichert. `model_group` bleibt requested model, `model` resolved model und `model_id` Deployment-Identität; ohne autoritative Provider-Evidence wird kein Provider abgeleitet.
+
+
 LiteLLM wird als `inference_gateway` modelliert, nicht als `model_runtime`. Seine OpenAI-kompatible Antwort liefert Request-/Modell-/Usage-Metadaten über dieselbe Gateway-Belegschicht.
 
 `--provider-name` und `--deployment-id` werden nur ausgegeben, wenn autoritative Routing-Metadaten dem Aufrufer oder Adapter vorliegen. ExecWeave **leitet keinen** Provider oder kein Deployment aus einer Modellzeichenfolge wie `azure/...` ab. Wenn diese Routing-Fakten nicht verfügbar sind, werden die entsprechenden Kanten ausgelassen.

@@ -99,7 +99,7 @@ execweave live --open -- ollama serve
 | llama.cpp | 可以，但需由 ExecWeave 啟動本機 server | `execweave-model-runtime event/probe --runtime llamacpp` | 是（自動本機 probe） |
 | vLLM | 可以，但需由 ExecWeave 啟動本機 server | `execweave-model-runtime event/probe --runtime vllm` | 是（自動本機 probe） |
 | LM Studio | 只有由 ExecWeave 啟動的本機 process；不會 attach 已在執行的 server | `execweave-model-runtime event/probe --runtime lmstudio` | 是（需明確 `--port`，成功啟動後自動 probe） |
-| LiteLLM Proxy | 可以，但需由 ExecWeave 啟動本機 proxy | `execweave-inference-gateway event --gateway litellm` | 否 |
+| LiteLLM Proxy | 可以，但需由 ExecWeave 啟動本機 proxy | `execweave-inference-gateway event --gateway litellm` / configured callback | 是（已設定 callback） |
 | OpenRouter | 遠端服務本身不能直接 live；請 live 本機 client/Agent | `execweave-inference-gateway event/generation --gateway openrouter` | 否 |
 
 若 Ollama 已經在背景執行，可用 `execweave-model-runtime probe --runtime ollama` snapshot 目前 loaded-model state。OpenRouter 則可由 `live` 觀察本機 client 與 network activity，而 gateway routing/usage metadata 仍保持為獨立 evidence layer。

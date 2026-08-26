@@ -95,6 +95,28 @@ OpenRouter response metadata keeps the requested model separate from the respons
 
 ## LiteLLM Proxy
 
+<!-- litellm-auto-live-v064 -->
+### Automatic Live Viewer callback
+
+LiteLLM Proxy can load ExecWeave as a custom callback once and then feed routing/usage metadata into the current `execweave live` sidecar automatically. Print the configuration fragment with:
+
+```bash
+execweave-litellm-callback --print-config
+```
+
+Merge the printed callback into your existing `litellm_settings.callbacks` configuration instead of replacing other callbacks. The callback import path is `execweave.litellm_callback.execweave_litellm_callback`, so ExecWeave must be importable in the Python environment that runs LiteLLM Proxy.
+
+Then launch the configured local proxy under ExecWeave, for example:
+
+```bash
+execweave live --open -- litellm --config config.yaml
+```
+
+`execweave live` provides `EXECWEAVE_SEMANTIC_SIDECAR` to the proxy process. If that run-specific variable is absent, the callback is a no-op. `EXECWEAVE_LITELLM_ENDPOINT` can override the stored proxy endpoint identity; otherwise the callback uses `PROXY_BASE_URL` when present and falls back to `http://localhost:4000`.
+
+The callback reads LiteLLM's `standard_logging_object` only through a strict whitelist: call ID, model group, resolved model, deployment model ID, token counts, reported cost, response time, cache-hit state, and call type. It does not persist messages, response content, model parameters, arbitrary metadata, API-key metadata, or provider `api_base`. `model_group` is preserved as the requested model, `model` as the resolved model, and `model_id` as deployment identity. Provider identity is omitted unless authoritative provider evidence is supplied separately; ExecWeave does not infer it from model names or provider URLs.
+
+
 LiteLLM is modeled as an `inference_gateway`, not a `model_runtime`. Its OpenAI-compatible response contributes request/model usage metadata through the same gateway evidence layer.
 
 `--provider-name` and `--deployment-id` are only emitted when authoritative routing metadata is available to the caller or adapter. ExecWeave does **not** infer a provider or deployment from a model string such as `azure/...`. When those routing facts are unavailable, the corresponding edges are omitted.

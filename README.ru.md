@@ -105,7 +105,7 @@ execweave live --open -- ollama serve
 | llama.cpp | Да, если локальный сервер запущен под ExecWeave | `execweave-model-runtime event/probe --runtime llamacpp` | Да (автоматический локальный probe) |
 | vLLM | Да, если локальный сервер запущен под ExecWeave | `execweave-model-runtime event/probe --runtime vllm` | Да (автоматический локальный probe) |
 | LM Studio | Только для локального процесса, запущенного под ExecWeave; уже работающий сервер автоматически не attached | `execweave-model-runtime event/probe --runtime lmstudio` | Да (автоматический probe после успешного запуска с `--port`) |
-| LiteLLM Proxy | Да, если локальный proxy запущен под ExecWeave | `execweave-inference-gateway event --gateway litellm` | Нет |
+| LiteLLM Proxy | Да, если локальный proxy запущен под ExecWeave | `execweave-inference-gateway event --gateway litellm` / configured callback | Да (настроенный callback) |
 | OpenRouter | Нет локального процесса удалённого сервиса для прямого запуска; вместо этого запускайте локальный client/Agent под `live` | `execweave-inference-gateway event/generation --gateway openrouter` | Нет |
 
 Для уже работающего сервера Ollama используйте `execweave-model-runtime probe --runtime ollama`, чтобы получить snapshot состояния загруженных моделей. Для OpenRouter `live` может наблюдать локальный client и его network activity, а gateway routing/usage metadata остаются отдельным evidence layer.

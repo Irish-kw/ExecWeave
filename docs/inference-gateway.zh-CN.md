@@ -95,6 +95,28 @@ OpenRouter response metadata 会把 requested model 与 response model 分开，
 
 ## LiteLLM Proxy
 
+<!-- litellm-auto-live-v064 -->
+### 自动进入 Live Viewer 的 callback
+
+LiteLLM Proxy 可先配置一次 ExecWeave custom callback，之后在当前 `execweave live` session 中自动把 routing/usage metadata 写入 run-specific sidecar。可先打印配置片段：
+
+```bash
+execweave-litellm-callback --print-config
+```
+
+请把打印出的 callback 合并到现有 `litellm_settings.callbacks`，不要覆盖已有的其他 callbacks。callback import path 为 `execweave.litellm_callback.execweave_litellm_callback`，因此运行 LiteLLM Proxy 的 Python environment 必须能够 import ExecWeave。
+
+随后由 ExecWeave 启动已配置的本地 proxy，例如：
+
+```bash
+execweave live --open -- litellm --config config.yaml
+```
+
+`execweave live` 会把 `EXECWEAVE_SEMANTIC_SIDECAR` 传给 proxy process；若没有这个 run-specific environment variable，callback 完全 no-op。可用 `EXECWEAVE_LITELLM_ENDPOINT` 覆盖记录中的 proxy endpoint identity；否则优先使用 `PROXY_BASE_URL`，最后 fallback 到 `http://localhost:4000`。
+
+callback 只从 LiteLLM `standard_logging_object` 白名单提取 call ID、model group、resolved model、deployment model ID、token counts、reported cost、response time、cache-hit 与 call type。不会保存 messages、response content、model parameters、任意 metadata、API-key metadata 或 provider `api_base`。`model_group` 作为 requested model、`model` 作为 resolved model、`model_id` 作为 deployment identity；没有权威 provider evidence 时不会建立 provider edge，也不会从 model name 或 provider URL 猜测。
+
+
 LiteLLM 被建模为 `inference_gateway`，而不是 `model_runtime`。它的 OpenAI-compatible response 通过相同 gateway evidence layer 提供 request/model usage metadata。
 
 `--provider-name` 与 `--deployment-id` 只有在 caller 或 adapter 拥有 authoritative routing metadata 时才建立。ExecWeave **不会**从 `azure/...` 之类的 model string 推测 provider 或 deployment；没有这些 routing facts 时，就不建立对应 edge。
