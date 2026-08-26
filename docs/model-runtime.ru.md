@@ -1,5 +1,6 @@
 # Интеграции runtime моделей
 
+<!-- i18n-nav:start -->
 <p align="center">
   <a href="model-runtime.md">English</a> |
   <a href="model-runtime.zh-TW.md">繁體中文</a> |
@@ -10,6 +11,7 @@
   <a href="model-runtime.de.md">Deutsch</a> |
   <strong>Русский</strong>
 </p>
+<!-- i18n-nav:end -->
 
 Runtime моделей отделены от семантических адаптеров Agent/IDE и шлюзов инференса. Они описывают, что сообщает локальный или self-hosted сервер инференса; они не доказывают, какой Agent инициировал запрос.
 

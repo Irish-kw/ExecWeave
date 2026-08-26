@@ -1,12 +1,17 @@
 # Cursor Hooks
 
+<!-- i18n-nav:start -->
 <p align="center">
   <a href="cursor-hooks.md">English</a> |
   <a href="cursor-hooks.zh-TW.md">繁體中文</a> |
   <strong>简体中文</strong> |
   <a href="cursor-hooks.ja.md">日本語</a> |
-  <a href="cursor-hooks.ko.md">한국어</a>
+  <a href="cursor-hooks.ko.md">한국어</a> |
+  <a href="cursor-hooks.fr.md">Français</a> |
+  <a href="cursor-hooks.de.md">Deutsch</a> |
+  <a href="cursor-hooks.ru.md">Русский</a>
 </p>
+<!-- i18n-nav:end -->
 
 ExecWeave 使用 Cursor 原生 Hook，将 Agent / Tool / Command 的逻辑语义证据加入执行图，同时不会把 provider metadata 误当成 OS 因果证据。
 

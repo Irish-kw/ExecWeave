@@ -4,7 +4,10 @@
   <strong>繁體中文</strong> |
   <a href="live-graph.zh-CN.md">简体中文</a> |
   <a href="live-graph.ja.md">日本語</a> |
-  <a href="live-graph.ko.md">한국어</a>
+  <a href="live-graph.ko.md">한국어</a> |
+  <a href="live-graph.fr.md">Français</a> |
+  <a href="live-graph.de.md">Deutsch</a> |
+  <a href="live-graph.ru.md">Русский</a>
 </p>
 <!-- i18n-nav:end -->
 

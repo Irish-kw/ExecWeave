@@ -1,5 +1,6 @@
 # Intégrations de passerelle d’inférence
 
+<!-- i18n-nav:start -->
 <p align="center">
   <a href="inference-gateway.md">English</a> |
   <a href="inference-gateway.zh-TW.md">繁體中文</a> |
@@ -10,6 +11,7 @@
   <a href="inference-gateway.de.md">Deutsch</a> |
   <a href="inference-gateway.ru.md">Русский</a>
 </p>
+<!-- i18n-nav:end -->
 
 Les passerelles d’inférence forment une couche distincte entre un Agent/client et le fournisseur/runtime de modèle. Le baseline actuel prend en charge **OpenRouter** et **LiteLLM Proxy**.
 

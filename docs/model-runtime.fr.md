@@ -1,5 +1,6 @@
 # Intégrations de runtime de modèle
 
+<!-- i18n-nav:start -->
 <p align="center">
   <a href="model-runtime.md">English</a> |
   <a href="model-runtime.zh-TW.md">繁體中文</a> |
@@ -10,6 +11,7 @@
   <a href="model-runtime.de.md">Deutsch</a> |
   <a href="model-runtime.ru.md">Русский</a>
 </p>
+<!-- i18n-nav:end -->
 
 Les runtimes de modèle sont séparés des adaptateurs sémantiques Agent/IDE et des passerelles d’inférence. Ils décrivent ce qu’un serveur d’inférence local ou auto-hébergé rapporte ; ils ne prouvent pas quel Agent a initié une requête.
 

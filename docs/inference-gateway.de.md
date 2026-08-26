@@ -1,5 +1,6 @@
 # Inference-Gateway-Integrationen
 
+<!-- i18n-nav:start -->
 <p align="center">
   <a href="inference-gateway.md">English</a> |
   <a href="inference-gateway.zh-TW.md">繁體中文</a> |
@@ -10,6 +11,7 @@
   <strong>Deutsch</strong> |
   <a href="inference-gateway.ru.md">Русский</a>
 </p>
+<!-- i18n-nav:end -->
 
 Inference-Gateways bilden eine separate Schicht zwischen Agent/Client und Modell-Provider/-Runtime. Die aktuelle Basisimplementierung unterstützt **OpenRouter** und **LiteLLM Proxy**.
 

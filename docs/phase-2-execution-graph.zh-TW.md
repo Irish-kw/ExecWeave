@@ -4,7 +4,10 @@
   <strong>繁體中文</strong> |
   <a href="phase-2-execution-graph.zh-CN.md">简体中文</a> |
   <a href="phase-2-execution-graph.ja.md">日本語</a> |
-  <a href="phase-2-execution-graph.ko.md">한국어</a>
+  <a href="phase-2-execution-graph.ko.md">한국어</a> |
+  <a href="phase-2-execution-graph.fr.md">Français</a> |
+  <a href="phase-2-execution-graph.de.md">Deutsch</a> |
+  <a href="phase-2-execution-graph.ru.md">Русский</a>
 </p>
 <!-- i18n-nav:end -->
 

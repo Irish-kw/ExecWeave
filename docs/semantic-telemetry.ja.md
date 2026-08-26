@@ -4,7 +4,10 @@
   <a href="semantic-telemetry.zh-TW.md">繁體中文</a> |
   <a href="semantic-telemetry.zh-CN.md">简体中文</a> |
   <strong>日本語</strong> |
-  <a href="semantic-telemetry.ko.md">한국어</a>
+  <a href="semantic-telemetry.ko.md">한국어</a> |
+  <a href="semantic-telemetry.fr.md">Français</a> |
+  <a href="semantic-telemetry.de.md">Deutsch</a> |
+  <a href="semantic-telemetry.ru.md">Русский</a>
 </p>
 <!-- i18n-nav:end -->
 

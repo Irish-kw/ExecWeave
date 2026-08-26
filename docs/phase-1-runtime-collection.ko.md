@@ -4,7 +4,10 @@
   <a href="phase-1-runtime-collection.zh-TW.md">繁體中文</a> |
   <a href="phase-1-runtime-collection.zh-CN.md">简体中文</a> |
   <a href="phase-1-runtime-collection.ja.md">日本語</a> |
-  <strong>한국어</strong>
+  <strong>한국어</strong> |
+  <a href="phase-1-runtime-collection.fr.md">Français</a> |
+  <a href="phase-1-runtime-collection.de.md">Deutsch</a> |
+  <a href="phase-1-runtime-collection.ru.md">Русский</a>
 </p>
 <!-- i18n-nav:end -->
 

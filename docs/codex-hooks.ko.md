@@ -4,7 +4,10 @@
   <a href="codex-hooks.zh-TW.md">繁體中文</a> |
   <a href="codex-hooks.zh-CN.md">简体中文</a> |
   <a href="codex-hooks.ja.md">日本語</a> |
-  <strong>한국어</strong>
+  <strong>한국어</strong> |
+  <a href="codex-hooks.fr.md">Français</a> |
+  <a href="codex-hooks.de.md">Deutsch</a> |
+  <a href="codex-hooks.ru.md">Русский</a>
 </p>
 <!-- i18n-nav:end -->
 

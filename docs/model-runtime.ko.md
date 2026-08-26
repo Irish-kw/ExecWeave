@@ -1,12 +1,17 @@
 # Model Runtime Integrations
 
+<!-- i18n-nav:start -->
 <p align="center">
   <a href="model-runtime.md">English</a> |
   <a href="model-runtime.zh-TW.md">繁體中文</a> |
   <a href="model-runtime.zh-CN.md">简体中文</a> |
   <a href="model-runtime.ja.md">日本語</a> |
-  <strong>한국어</strong>
+  <strong>한국어</strong> |
+  <a href="model-runtime.fr.md">Français</a> |
+  <a href="model-runtime.de.md">Deutsch</a> |
+  <a href="model-runtime.ru.md">Русский</a>
 </p>
+<!-- i18n-nav:end -->
 
 Model Runtime은 Agent/IDE semantic adapter 및 Inference Gateway와 다른 계층입니다. local / self-hosted inference server가 스스로 보고한 정보를 표현하며 어떤 Agent가 request를 시작했는지는 단독으로 증명하지 않습니다.
 

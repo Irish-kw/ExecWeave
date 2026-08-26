@@ -1,5 +1,6 @@
 # Cursor Hooks
 
+<!-- i18n-nav:start -->
 <p align="center">
   <a href="cursor-hooks.md">English</a> |
   <a href="cursor-hooks.zh-TW.md">繁體中文</a> |
@@ -10,6 +11,7 @@
   <strong>Deutsch</strong> |
   <a href="cursor-hooks.ru.md">Русский</a>
 </p>
+<!-- i18n-nav:end -->
 
 ExecWeave nutzt Cursors native Hook-Oberfläche, um logische Agent-/Tool-/Command-Belege zum Laufzeitgraphen hinzuzufügen, ohne Provider-Metadaten als OS-Kausalität zu behandeln.
 

@@ -1,5 +1,6 @@
 # Model-Runtime-Integrationen
 
+<!-- i18n-nav:start -->
 <p align="center">
   <a href="model-runtime.md">English</a> |
   <a href="model-runtime.zh-TW.md">繁體中文</a> |
@@ -10,6 +11,7 @@
   <strong>Deutsch</strong> |
   <a href="model-runtime.ru.md">Русский</a>
 </p>
+<!-- i18n-nav:end -->
 
 Model-Runtimes sind von semantischen Agent-/IDE-Adaptern und Inference-Gateways getrennt. Sie beschreiben, was ein lokaler oder selbst gehosteter Inferenzserver meldet; sie beweisen nicht, welcher Agent eine Anfrage initiiert hat.
 

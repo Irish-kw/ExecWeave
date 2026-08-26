@@ -1,12 +1,17 @@
 # ExecWeave
 
+<!-- i18n-nav:start -->
 <p align="center">
   <a href="README.md">English</a> |
   <strong>繁體中文</strong> |
   <a href="README.zh-CN.md">简体中文</a> |
   <a href="README.ja.md">日本語</a> |
-  <a href="README.ko.md">한국어</a>
+  <a href="README.ko.md">한국어</a> |
+  <a href="README.fr.md">Français</a> |
+  <a href="README.de.md">Deutsch</a> |
+  <a href="README.ru.md">Русский</a>
 </p>
+<!-- i18n-nav:end -->
 
 **看見 AI Agent 在你的電腦上實際做了什麼。**
 

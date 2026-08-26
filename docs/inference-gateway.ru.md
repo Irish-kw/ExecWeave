@@ -1,5 +1,6 @@
 # Интеграции шлюзов инференса
 
+<!-- i18n-nav:start -->
 <p align="center">
   <a href="inference-gateway.md">English</a> |
   <a href="inference-gateway.zh-TW.md">繁體中文</a> |
@@ -10,6 +11,7 @@
   <a href="inference-gateway.de.md">Deutsch</a> |
   <strong>Русский</strong>
 </p>
+<!-- i18n-nav:end -->
 
 Шлюзы инференса — отдельный слой между Agent/client и провайдером/runtime модели. Текущая базовая реализация поддерживает **OpenRouter** и **LiteLLM Proxy**.
 

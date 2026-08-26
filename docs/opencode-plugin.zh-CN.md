@@ -1,12 +1,17 @@
 # OpenCode Plugin
 
+<!-- i18n-nav:start -->
 <p align="center">
   <a href="opencode-plugin.md">English</a> |
   <a href="opencode-plugin.zh-TW.md">繁體中文</a> |
   <strong>简体中文</strong> |
   <a href="opencode-plugin.ja.md">日本語</a> |
-  <a href="opencode-plugin.ko.md">한국어</a>
+  <a href="opencode-plugin.ko.md">한국어</a> |
+  <a href="opencode-plugin.fr.md">Français</a> |
+  <a href="opencode-plugin.de.md">Deutsch</a> |
+  <a href="opencode-plugin.ru.md">Русский</a>
 </p>
+<!-- i18n-nav:end -->
 
 ExecWeave 通过 project-local plugin 与 OpenCode 集成。OpenCode 在 `tool.execute.before` 与 `tool.execute.after` 中都提供精确的 `sessionID + callID`，因此同一个 logical tool call 不需要依赖 heuristic 来配对 lifecycle events。
 

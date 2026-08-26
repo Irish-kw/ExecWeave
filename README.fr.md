@@ -6,6 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/Irish-kw/ExecWeave?style=flat&label=Stars)](https://github.com/Irish-kw/ExecWeave/stargazers)
 
+<!-- i18n-nav:start -->
 <p align="center">
   <a href="README.md">English</a> |
   <a href="README.zh-TW.md">繁體中文</a> |
@@ -16,6 +17,7 @@
   <a href="README.de.md">Deutsch</a> |
   <a href="README.ru.md">Русский</a>
 </p>
+<!-- i18n-nav:end -->
 
 **Voyez ce que les agents d’IA font réellement sur votre machine.**
 

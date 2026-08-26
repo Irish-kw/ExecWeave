@@ -1,5 +1,6 @@
 # Hooks Cursor
 
+<!-- i18n-nav:start -->
 <p align="center">
   <a href="cursor-hooks.md">English</a> |
   <a href="cursor-hooks.zh-TW.md">繁體中文</a> |
@@ -10,6 +11,7 @@
   <a href="cursor-hooks.de.md">Deutsch</a> |
   <strong>Русский</strong>
 </p>
+<!-- i18n-nav:end -->
 
 ExecWeave использует нативную hook-поверхность Cursor для добавления логических доказательств Agent / Tool / Command в runtime-граф, не считая метаданные провайдера доказательством причинности ОС.
 
