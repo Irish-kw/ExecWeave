@@ -74,7 +74,7 @@ def test_record_to_viewer_preserves_nonzero_command_exit(tmp_path: Path) -> None
     assert result.viewer.exists()
 
 
-def test_record_preflight_rejects_conflicts_before_agent_runs(tmp_path: Paath) -> None:
+def test_record_preflight_rejects_conflicts_before_agent_runs(tmp_path: Path) -> None:
     output_dir = tmp_path / "existing"
     output_dir.mkdir()
     (output_dir / "graph.json").write_text("old graph", encoding="utf-8")
