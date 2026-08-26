@@ -17,6 +17,18 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Make section boundary language independent
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("scripts/sync_v064_live_matrix.py")
+          text = path.read_text(encoding="utf-8")
+          old = '''    scale = text.find("#### Scalability", start)\n    if scale < 0:\n        raise RuntimeError("Scalability heading not found")\n    return text[:start] + section.rstrip() + "\\n\\n" + text[scale:]\n'''
+          new = '''    benchmark = text.find("\\n#### ", start)\n    if benchmark < 0:\n        raise RuntimeError("benchmark heading not found")\n    benchmark += 1\n    return text[:start] + section.rstrip() + "\\n\\n" + text[benchmark:]\n'''
+          if old not in text:
+              raise SystemExit("expected synchronizer block not found")
+          path.write_text(text.replace(old, new), encoding="utf-8")
+          PY
       - name: Synchronize live capability matrix
         run: python scripts/sync_v064_live_matrix.py
       - name: Remove one-time synchronizer and commit
