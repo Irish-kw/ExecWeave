@@ -19,7 +19,7 @@ _PROBE_TIMEOUT_SECONDS = 0.35
 
 
 def _command_name(value: str) -> str:
-    name = Path(value).name.lower()
+    name = value.replace("\\", "/").rsplit("/", 1)[-1].lower()
     for suffix in (".exe", ".cmd", ".bat", ".ps1"):
         if name.endswith(suffix):
             return name[: -len(suffix)]
