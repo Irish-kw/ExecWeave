@@ -9,7 +9,7 @@ from typing import Any
 from .fidelity import FidelityAccumulator, derive_fidelity
 from .validate import validate_event_stream
 
-GRAPH_SCHEMA_VERSION = "0.1"
+GRAPH_SCHEMA_VERSION = "0.2"
 
 
 @dataclass
