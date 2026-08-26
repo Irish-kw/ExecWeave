@@ -26,7 +26,7 @@ ExecWeave est un projet d’observabilité open source et local-first qui transf
 > **L’Event est la ground truth ; le Graph est une materialized view.**
 
 <p align="center">
-  <img src="docs/assets/execweave-live-demo.webp" alt="ExecWeave Live execution graph" width="100%">
+  <img src="docs/assets/execweave-live-demo.png" alt="ExecWeave Live execution graph" width="100%">
 </p>
 
 <!-- execweave-demo:start -->

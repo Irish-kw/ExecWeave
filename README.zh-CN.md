@@ -20,7 +20,7 @@ ExecWeave 是开源、local-first 的 observability 项目，将 AI Agent 活动
 > **Event 是 ground truth；Graph 是 materialized view。**
 
 <p align="center">
-  <img src="docs/assets/execweave-live-demo.webp" alt="ExecWeave Live execution graph" width="100%">
+  <img src="docs/assets/execweave-live-demo.png" alt="ExecWeave Live execution graph" width="100%">
 </p>
 
 <!-- execweave-demo:start -->

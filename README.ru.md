@@ -26,7 +26,7 @@ ExecWeave — это open-source, local-first проект наблюдаемо�
 > **Event — это ground truth; Graph — materialized view.**
 
 <p align="center">
-  <img src="docs/assets/execweave-live-demo.webp" alt="ExecWeave Live execution graph" width="100%">
+  <img src="docs/assets/execweave-live-demo.png" alt="ExecWeave Live execution graph" width="100%">
 </p>
 
 <!-- execweave-demo:start -->
