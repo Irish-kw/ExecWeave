@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import execweave.auto_specialized as auto_module
+import execweave.collector as collector_module
+from execweave.live import run_live
 
 
 class _OllamaHandler(BaseHTTPRequestHandler):
@@ -43,6 +46,14 @@ def _line_count(path: Path) -> int:
     return len(path.read_text(encoding="utf-8").splitlines())
 
 
+def _start_ollama_server(payload: dict[str, object]) -> tuple[ThreadingHTTPServer, threading.Thread]:
+    _OllamaHandler.payload = payload
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _OllamaHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server, thread
+
+
 def test_ollama_serve_detection_is_cross_platform() -> None:
     assert auto_module._is_ollama_serve(["ollama", "serve"])
     assert auto_module._is_ollama_serve([r"C:\\Tools\\ollama.exe", "SERVE"])
@@ -75,19 +86,18 @@ def test_ollama_live_probe_appends_only_new_or_changed_model_evidence(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    _OllamaHandler.payload = {
-        "models": [
-            {
-                "name": "model-a:latest",
-                "size": 100,
-                "size_vram": 80,
-                "details": {"parameter_size": "7B", "quantization_level": "Q4_K_M"},
-            }
-        ]
-    }
-    server = ThreadingHTTPServer(("127.0.0.1", 0), _OllamaHandler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
+    server, thread = _start_ollama_server(
+        {
+            "models": [
+                {
+                    "name": "model-a:latest",
+                    "size": 100,
+                    "size_vram": 80,
+                    "details": {"parameter_size": "7B", "quantization_level": "Q4_K_M"},
+                }
+            ]
+        }
+    )
     port = server.server_address[1]
 
     sidecar = tmp_path / "semantic.jsonl"
@@ -130,6 +140,61 @@ def test_ollama_live_probe_appends_only_new_or_changed_model_evidence(
             "model-b:latest",
         }
         assert all(record["attributes"]["provider"] == "ollama" for record in records)
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_run_live_automatically_materializes_ollama_loaded_model(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    server, thread = _start_ollama_server(
+        {
+            "models": [
+                {
+                    "name": "live-model:latest",
+                    "size": 123,
+                    "size_vram": 100,
+                    "details": {"parameter_size": "8B"},
+                }
+            ]
+        }
+    )
+    port = server.server_address[1]
+    monkeypatch.setenv("OLLAMA_HOST", f"127.0.0.1:{port}")
+    monkeypatch.setattr(auto_module, "_PROBE_INTERVAL_SECONDS", 0.02)
+    monkeypatch.setattr(auto_module, "_PROBE_TIMEOUT_SECONDS", 0.20)
+    monkeypatch.setattr(
+        collector_module,
+        "resolve_launch_command",
+        lambda command: [sys.executable, "-c", "import time; time.sleep(0.25)"],
+    )
+
+    try:
+        result = run_live(
+            ["ollama", "serve"],
+            watch_root=tmp_path,
+            output_dir=tmp_path / "ollama-live",
+            poll_interval=0.03,
+            collect_filesystem=False,
+            collect_network=False,
+            port=0,
+            open_browser=False,
+            linger_seconds=0,
+        )
+        assert result.return_code == 0
+        assert result.semantic_sidecar.exists()
+        graph = json.loads(result.graph.read_text(encoding="utf-8"))
+        assert graph["source_path"].endswith("events.semantic.jsonl")
+        assert any(
+            edge["relation"] == "LOADED_MODEL" for edge in graph["edges"]
+        )
+        assert any(
+            node.get("type") == "model" and node.get("name") == "live-model:latest"
+            for node in graph["nodes"]
+        )
     finally:
         server.shutdown()
         server.server_close()
