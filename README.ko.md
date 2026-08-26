@@ -40,21 +40,42 @@ cd ExecWeave
 python -m pip install -e ".[dev]"
 ```
 
-Claude Code, OpenAI Codex 또는 Gemini CLI를 실시간으로 관찰:
+Live OS-runtime telemetry는 **모든 로컬 command**에 사용할 수 있습니다. 아래 항목은 whitelist가 아니라 예시입니다:
 
 ```bash
-# Claude Code
+# Agent / IDE CLI
 execweave live --open -- claude
-
-# OpenAI Codex
 execweave live --open -- codex
-
-# Gemini CLI
 execweave live --open -- gemini
-
-# Cursor
 execweave live --open -- cursor
+execweave live --open -- opencode
+
+# 임의의 로컬 프로그램
+execweave live --open -- python my_agent.py
+
+# ExecWeave가 시작하는 로컬 model runtime
+execweave live --open -- ollama serve
 ```
+
+`execweave live`는 자신이 시작한 command tree의 process, file, network evidence를 실시간으로 보여 줍니다. Agent semantic hooks, model-runtime API metadata, inference-gateway routing metadata는 **현재 Live Viewer에 자동으로 주입되지 않습니다**.
+
+#### Live capability matrix
+
+| Integration | Direct OS-runtime live | Specialized metadata | Auto in Live Viewer |
+| --- | --- | --- | --- |
+| Claude Code | Yes | `execweave-claude-record` / hooks | No |
+| OpenAI Codex | Yes | `execweave-codex-record` / hooks | No |
+| Gemini CLI | Yes | `execweave-gemini-record` / hooks | No |
+| Cursor | Yes | `execweave-cursor-record` / hooks | No |
+| OpenCode | Yes | `execweave-opencode-record` / plugin | No |
+| Ollama | Yes, ExecWeave가 시작한 경우(예: `ollama serve`) | `execweave-model-runtime event/probe --runtime ollama` | No |
+| llama.cpp | Yes, 로컬 server를 ExecWeave가 시작한 경우 | `execweave-model-runtime event/probe --runtime llamacpp` | No |
+| vLLM | Yes, 로컬 server를 ExecWeave가 시작한 경우 | `execweave-model-runtime event/probe --runtime vllm` | No |
+| LM Studio | ExecWeave가 시작한 로컬 process만 가능하며 기존 server에는 attach하지 않음 | `execweave-model-runtime event/probe --runtime lmstudio` | No |
+| LiteLLM Proxy | Yes, 로컬 proxy를 ExecWeave가 시작한 경우 | `execweave-inference-gateway event --gateway litellm` | No |
+| OpenRouter | Remote service 자체는 direct live 불가. 로컬 client/Agent를 live해야 함 | `execweave-inference-gateway event/generation --gateway openrouter` | No |
+
+Ollama가 이미 백그라운드에서 실행 중이면 `execweave-model-runtime probe --runtime ollama`로 loaded-model state를 snapshot할 수 있습니다. OpenRouter에서는 `live`가 로컬 client와 network activity를 관측하고 gateway routing/usage metadata는 별도 evidence layer로 유지됩니다.
 
 <!-- v0.6.3-live -->
 ### v0.6.3 라이브 관측성
@@ -68,7 +89,7 @@ execweave top --open -- codex   # Terminal + Web Viewer
 
 Live 업데이트는 증분 snapshot/delta와 제한된 이력을 사용하므로 전체 graph를 반복해서 재구성하고 전송하지 않습니다. Live 및 standalone Viewer는 선택을 기억하는 Dark/Light 전환을 지원합니다. Linux에서는 매우 큰 recursive filesystem scope를 사전 점검하고 inotify watch 용량이 부족하면 자동으로 polling으로 전환하므로 inotify watch exhaustion 때문에 session 전체가 중단되지 않습니다.
 
-`execweave live --open -- cursor`는 일반 runtime telemetry에 사용할 수 있습니다. Cursor semantic hooks와 보수적인 tool/process correlation이 필요하면 `execweave-cursor-record --open -- cursor`를 사용하세요.
+`live`는 일반 OS-runtime view이며 integration whitelist가 아닙니다. Agent semantic, model-runtime, gateway metadata는 분리된 evidence layer로 유지되며 v0.6.3에서는 Live Viewer에 자동으로 주입되지 않습니다.
 
 `execweave-scalability`로 graph scalability benchmark를 재현할 수 있으며 CI는 10k, 100k, 1M synthetic events를 검증합니다.
 

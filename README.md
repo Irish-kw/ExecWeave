@@ -40,21 +40,42 @@ cd ExecWeave
 python -m pip install -e ".[dev]"
 ```
 
-Watch Claude Code, OpenAI Codex, or Gemini CLI live:
+Live OS-runtime telemetry works with **any local command**. The names below are examples, not a whitelist:
 
 ```bash
-# Claude Code
+# Agent / IDE CLIs
 execweave live --open -- claude
-
-# OpenAI Codex
 execweave live --open -- codex
-
-# Gemini CLI
 execweave live --open -- gemini
-
-# Cursor
 execweave live --open -- cursor
+execweave live --open -- opencode
+
+# Any local program
+execweave live --open -- python my_agent.py
+
+# A local model runtime launched under ExecWeave
+execweave live --open -- ollama serve
 ```
+
+`execweave live` streams process, file, and network evidence for the command tree it launches. It does **not** automatically inject Agent semantic hooks, model-runtime API metadata, or inference-gateway routing metadata into the Live Viewer.
+
+#### Live capability matrix
+
+| Integration | Direct OS-runtime live | Specialized metadata | Automatically in Live Viewer |
+| --- | --- | --- | --- |
+| Claude Code | Yes | `execweave-claude-record` / hooks | No |
+| OpenAI Codex | Yes | `execweave-codex-record` / hooks | No |
+| Gemini CLI | Yes | `execweave-gemini-record` / hooks | No |
+| Cursor | Yes | `execweave-cursor-record` / hooks | No |
+| OpenCode | Yes | `execweave-opencode-record` / plugin | No |
+| Ollama | Yes, when launched under ExecWeave (for example `ollama serve`) | `execweave-model-runtime event/probe --runtime ollama` | No |
+| llama.cpp | Yes, when its local server is launched under ExecWeave | `execweave-model-runtime event/probe --runtime llamacpp` | No |
+| vLLM | Yes, when its local server is launched under ExecWeave | `execweave-model-runtime event/probe --runtime vllm` | No |
+| LM Studio | Yes only for a local process launched under ExecWeave; an already-running server is not attached | `execweave-model-runtime event/probe --runtime lmstudio` | No |
+| LiteLLM Proxy | Yes, when the local proxy is launched under ExecWeave | `execweave-inference-gateway event --gateway litellm` | No |
+| OpenRouter | No direct remote-service process; run the local client/Agent under `live` instead | `execweave-inference-gateway event/generation --gateway openrouter` | No |
+
+For an already-running Ollama server, use `execweave-model-runtime probe --runtime ollama` to snapshot loaded-model state. For OpenRouter, `live` can observe the local client and its network activity, while gateway routing/usage metadata remains a separate evidence layer.
 
 <!-- v0.6.3-live -->
 ### v0.6.3 live observability
@@ -68,7 +89,7 @@ execweave top --open -- codex   # Terminal + Web Viewer
 
 Live updates use incremental snapshots/deltas with bounded history instead of repeatedly rebuilding and transferring the full graph. Live and standalone viewers support a persistent Dark/Light theme switch. On Linux, very large recursive filesystem scopes are preflighted and automatically fall back from inotify to polling when needed, so an exhausted inotify watch pool does not abort the session.
 
-`execweave live --open -- cursor` is supported for generic runtime telemetry. For Cursor semantic hooks and conservative tool/process correlation, use `execweave-cursor-record --open -- cursor`.
+`live` is a generic OS-runtime view rather than an integration whitelist. Specialized Agent semantic, model-runtime, and gateway metadata remain separate evidence layers and are not automatically injected into the Live Viewer in v0.6.3.
 
 Run the reproducible graph scalability benchmark with `execweave-scalability`; CI covers 10k, 100k, and 1M synthetic events.
 

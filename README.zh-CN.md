@@ -40,21 +40,42 @@ cd ExecWeave
 python -m pip install -e ".[dev]"
 ```
 
-实时观察 Claude Code、OpenAI Codex 或 Gemini CLI：
+Live OS-runtime telemetry 可用于 **任何本地 command**；下面只是示例，不是 whitelist：
 
 ```bash
-# Claude Code
+# Agent / IDE CLI
 execweave live --open -- claude
-
-# OpenAI Codex
 execweave live --open -- codex
-
-# Gemini CLI
 execweave live --open -- gemini
-
-# Cursor
 execweave live --open -- cursor
+execweave live --open -- opencode
+
+# 任意本地程序
+execweave live --open -- python my_agent.py
+
+# 由 ExecWeave 启动的本地 model runtime
+execweave live --open -- ollama serve
 ```
+
+`execweave live` 实时呈现它所启动 command tree 的 process、file、network evidence。Agent semantic hooks、model-runtime API metadata、inference-gateway routing metadata **目前不会自动注入 Live Viewer**。
+
+#### Live 能力矩阵
+
+| Integration | 直接 OS-runtime live | 专用 metadata | 自动进入 Live Viewer |
+| --- | --- | --- | --- |
+| Claude Code | 可以 | `execweave-claude-record` / hooks | 否 |
+| OpenAI Codex | 可以 | `execweave-codex-record` / hooks | 否 |
+| Gemini CLI | 可以 | `execweave-gemini-record` / hooks | 否 |
+| Cursor | 可以 | `execweave-cursor-record` / hooks | 否 |
+| OpenCode | 可以 | `execweave-opencode-record` / plugin | 否 |
+| Ollama | 可以，但需由 ExecWeave 启动，例如 `ollama serve` | `execweave-model-runtime event/probe --runtime ollama` | 否 |
+| llama.cpp | 可以，但需由 ExecWeave 启动本地 server | `execweave-model-runtime event/probe --runtime llamacpp` | 否 |
+| vLLM | 可以，但需由 ExecWeave 启动本地 server | `execweave-model-runtime event/probe --runtime vllm` | 否 |
+| LM Studio | 仅限由 ExecWeave 启动的本地 process；不会 attach 已运行的 server | `execweave-model-runtime event/probe --runtime lmstudio` | 否 |
+| LiteLLM Proxy | 可以，但需由 ExecWeave 启动本地 proxy | `execweave-inference-gateway event --gateway litellm` | 否 |
+| OpenRouter | 远程服务本身不能直接 live；请 live 本地 client/Agent | `execweave-inference-gateway event/generation --gateway openrouter` | 否 |
+
+如果 Ollama 已在后台运行，可用 `execweave-model-runtime probe --runtime ollama` snapshot 当前 loaded-model state。OpenRouter 可由 `live` 观察本地 client 与 network activity，而 gateway routing/usage metadata 仍保持为独立 evidence layer。
 
 <!-- v0.6.3-live -->
 ### v0.6.3 实时可观测性
@@ -68,7 +89,7 @@ execweave top --open -- codex   # Terminal + Web Viewer
 
 Live 更新改用增量 snapshot/delta 与有界历史，不再反复重建并传输整张 graph。Live 与 standalone Viewer 都支持会记住偏好的 Dark/Light 切换。在 Linux 上，超大型 recursive filesystem scope 会先进行资源预检；如果 inotify watch 空间不足，会自动降级为 polling，因此不会因 inotify watch exhaustion 直接终止 session。
 
-`execweave live --open -- cursor` 可用于通用 runtime telemetry；如需 Cursor semantic hooks 与保守的 tool/process correlation，请使用 `execweave-cursor-record --open -- cursor`。
+`live` 是通用 OS-runtime view，不是 integration whitelist。Agent semantic、model-runtime、gateway metadata 仍是分离的 evidence layers，在 v0.6.3 不会自动注入 Live Viewer。
 
 可用 `execweave-scalability` 重现 graph scalability benchmark；CI 覆盖 10k、100k 和 1M synthetic events。
 
