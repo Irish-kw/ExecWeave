@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,6 +15,7 @@ from urllib.request import Request, urlopen
 from .model_runtime import (
     append_model_runtime_records,
     llamacpp_models_to_events,
+    lmstudio_models_to_events,
     ollama_ps_to_events,
     vllm_models_to_events,
 )
@@ -23,7 +25,10 @@ _OLLAMA_DEFAULT_ENDPOINT = "http://127.0.0.1:11434"
 _PROBE_INTERVAL_SECONDS = 0.50
 _PROBE_TIMEOUT_SECONDS = 0.35
 _PROBE_STARTUP_GRACE_SECONDS = 0.10
+_POST_PROBE_ATTEMPTS = 6
+_POST_PROBE_RETRY_SECONDS = 0.10
 _LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1", "0.0.0.0", "::"}
+_PROBE_ERRORS = (HTTPError, URLError, OSError, TimeoutError, ValueError, json.JSONDecodeError)
 
 
 @dataclass(frozen=True)
@@ -60,6 +65,15 @@ def _is_vllm_server(command: list[str]) -> bool:
         if value == "-m" and command[index + 1] == "vllm.entrypoints.openai.api_server":
             return True
     return False
+
+
+def _is_lmstudio_server_start(command: list[str]) -> bool:
+    return (
+        len(command) >= 3
+        and _command_name(command[0]) == "lms"
+        and command[1].lower() == "server"
+        and command[2].lower() == "start"
+    )
 
 
 def _flag_value(command: list[str], flag: str) -> str | None:
@@ -110,6 +124,22 @@ def _ollama_endpoint_from_environment() -> str | None:
     return _local_endpoint(hostname, port)
 
 
+def _lmstudio_post_probe_spec(command: list[str]) -> _ProbeSpec | None:
+    if not _is_lmstudio_server_start(command):
+        return None
+    raw_port = _flag_value(command, "--port")
+    if raw_port is None:
+        return None
+    host = _flag_value(command, "--bind") or os.environ.get("LMS_SERVER_HOST", "").strip()
+    host = host or "127.0.0.1"
+    try:
+        port = int(raw_port)
+    except ValueError:
+        return None
+    endpoint = _local_endpoint(host, port)
+    return _ProbeSpec("lmstudio", endpoint, "/v1/models") if endpoint else None
+
+
 def _probe_spec(command: list[str]) -> _ProbeSpec | None:
     if _is_ollama_serve(command):
         endpoint = _ollama_endpoint_from_environment()
@@ -139,6 +169,8 @@ def _probe_records(spec: _ProbeSpec, payload: dict[str, object]) -> list[dict[st
         return llamacpp_models_to_events(payload, endpoint=spec.endpoint)
     if spec.runtime == "vllm":
         return vllm_models_to_events(payload, endpoint=spec.endpoint)
+    if spec.runtime == "lmstudio":
+        return lmstudio_models_to_events(payload, endpoint=spec.endpoint)
     return []
 
 
@@ -189,7 +221,7 @@ def _run_model_probe(
             if changed:
                 append_model_runtime_records(sidecar, changed)
             previous = current
-        except (HTTPError, URLError, OSError, TimeoutError, ValueError, json.JSONDecodeError):
+        except _PROBE_ERRORS:
             pass
         stop_event.wait(_PROBE_INTERVAL_SECONDS)
 
@@ -205,6 +237,51 @@ def _run_ollama_probe(
         sidecar=sidecar,
         stop_event=stop_event,
     )
+
+
+def prepare_post_command_specialized_probe(command: list[str]) -> _ProbeSpec | None:
+    """Prepare an attribution-safe post-command probe for short-lived launch CLIs.
+
+    LM Studio's `lms server start` exits after starting a persistent server. ExecWeave
+    only prepares this probe when the user supplied an explicit local port and no
+    compatible API is already observable at that endpoint before launch.
+    """
+    spec = _lmstudio_post_probe_spec(command)
+    if spec is None:
+        return None
+    try:
+        _get_json(
+            f"{spec.endpoint.rstrip('/')}{spec.path}",
+            timeout=_PROBE_TIMEOUT_SECONDS,
+        )
+    except _PROBE_ERRORS:
+        return spec
+    return None
+
+
+def run_post_command_specialized_probe(
+    spec: _ProbeSpec | None,
+    *,
+    return_code: int,
+) -> None:
+    """Materialize a prepared short-lived launcher probe after successful exit."""
+    configured_sidecar = os.environ.get(_SEMANTIC_ENV)
+    if spec is None or return_code != 0 or not configured_sidecar:
+        return
+    url = f"{spec.endpoint.rstrip('/')}{spec.path}"
+    for attempt in range(_POST_PROBE_ATTEMPTS):
+        try:
+            payload = _get_json(url, timeout=_PROBE_TIMEOUT_SECONDS)
+            records = _probe_records(spec, payload)
+            if records:
+                append_model_runtime_records(
+                    Path(configured_sidecar).expanduser().resolve(),
+                    records,
+                )
+            return
+        except _PROBE_ERRORS:
+            if attempt + 1 < _POST_PROBE_ATTEMPTS:
+                time.sleep(_POST_PROBE_RETRY_SECONDS)
 
 
 @contextmanager
