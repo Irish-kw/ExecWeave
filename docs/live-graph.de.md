@@ -21,7 +21,7 @@ execweave live --open -- claude
 
 ## Aktueller Vertrag
 
-Die Live-Runtime-Schicht verwendet bewusst das plattformübergreifende `portable`-Backend. In v0.6.4 kann die Live-Sitzung zusätzlich einen zweiten append-only Strom spezialisierter Belege über einen laufbezogenen semantischen Sidecar aufnehmen.
+Der Live-Runtime-Collector verwendet bewusst das plattformübergreifende `portable`-Backend. Seit v0.6.4 kann jeder Live-Lauf zusätzlich einen zweiten append-only Strom spezialisierter Belege über einen laufbezogenen Sidecar aufnehmen.
 
 ExecWeave exportiert den Sidecar-Pfad an den gestarteten Befehl als:
 
@@ -29,13 +29,19 @@ ExecWeave exportiert den Sidecar-Pfad an den gestarteten Befehl als:
 EXECWEAVE_SEMANTIC_SIDECAR
 ```
 
-Bereits konfigurierte Hooks für Claude Code, OpenAI Codex, Gemini CLI und Cursor erben diese Variable automatisch. Das installierte OpenCode-Plugin tut dasselbe. Deren semantische Ereignisse können dadurch im selben Live Viewer erscheinen, ohne auf einen separaten `*-record`-Befehl wechseln zu müssen.
+Spezialisierte Belege können über mehrere attribution-sichere Wege automatisch eintreffen:
 
-Das bedeutet **nicht**, dass `live` Anbieter-Einstellungen stillschweigend verändert. Die Hook-/Plugin-Integration muss einmal vorab eingerichtet worden sein. Model-Runtime- und Inference-Gateway-Metadaten benötigen weiterhin ihre expliziten Emitter, bis diese Integrationen einen automatischen Beobachtungspfad besitzen.
+- konfigurierte Hooks für Claude Code, OpenAI Codex, Gemini CLI und Cursor;
+- das installierte OpenCode-Plugin;
+- Loopback-Model-Catalog-Probes, wenn ExecWeave erkannte lokale Ollama-, llama.cpp- oder vLLM-Server startet;
+- ein success-gated LM-Studio-Post-Launch-Probe für `lms server start --port <port>`, sofern vor dem Start kein kompatibler Endpoint existierte;
+- der ExecWeave-Custom-Callback für LiteLLM Proxy, nachdem er einmal konfiguriert wurde und der Proxy innerhalb der aktuellen `execweave live`-Umgebung gestartet wird.
+
+Das bedeutet **nicht**, dass `live` Anbieter-, Gateway- oder Runtime-Einstellungen stillschweigend verändert. Hook-/Plugin-/Callback-Integrationen müssen dort, wo nötig, einmal eingerichtet werden. Automatische Model-Runtime-Probes sind auf erkannte lokale Startbefehle und Loopback-Endpoints beschränkt. OpenRouter-Routing-Metadaten bleiben nicht automatisch, weil entfernte HTTPS-/Netzwerkbeobachtung keine autoritativen Provider-Routingdetails offenlegt.
 
 Das Linux-Backend `strace` parst Trace-Dateien derzeit erst nach dem Ende des Befehls. Es liefert stärkere, auf Systemaufrufen basierende Zuordnung, ist in der aktuellen Implementierung jedoch keine Live-Ereignisquelle. ExecWeave bezeichnet nachbearbeitete Belege nicht als Live-Telemetrie.
 
-Für stärkere Linux-Zuordnung nach dem Lauf verwenden Sie:
+Für stärkere Linux-Zuordnung nach dem Lauf:
 
 ```bash
 execweave record --backend strace --open -- claude
@@ -44,35 +50,39 @@ execweave record --backend strace --open -- claude
 ## Datenfluss in v0.6.4
 
 ```text
-                         ┌─ Provider-Hook / Plugin ─→ semantic.jsonl ─┐
-Befehl ─→ portable ─→ events.jsonl ──────────────────────────────────┤
-                                                                    ↓
-                                                     inkrementeller Live-Normalizer
-                                                                    ↓
-                                                         GraphAccumulator
-                                                                    ↓
-                                                     localhost HTTP-Server
-                                                                    ↓
-                                                        /live.json-Deltas
-                                                                    ↓
-                                                          Browser / Top
+specialized producers ─┐
+  Agent hooks/plugin   │
+  model-runtime probe  ├─→ semantic.jsonl ────────────────┐
+  LiteLLM callback     │                                  │
+                      ─┘                                  │
+                                                         ↓
+Befehl ─→ portable ─→ events.jsonl ───────→ incremental live normalizer
+                                                         ↓
+                                                  GraphAccumulator
+                                                         ↓
+                                              localhost HTTP server
+                                                         ↓
+                                                 /live.json deltas
+                                                         ↓
+                                                   browser / Top
 ```
 
 OS-Runtime-Belege bleiben der unabhängige Ground-Truth-Strom. Spezialisierte Belege werden nur vorläufig in den Live-Graph normalisiert; sie dürfen weder den rohen Runtime-Strom umschreiben noch fehlende Belege erzeugen.
 
-Der Browser und das abgekoppelte `execweave top`-Dashboard konsumieren sequenznummerierte `/live.json`-Snapshots/Deltas. `/graph.json` bleibt als aktueller Snapshot-Endpunkt verfügbar. Die inkrementelle Aufnahme liest nur neu angehängte JSONL-Bytes und puffert eine unvollständige letzte Zeile bis zu ihrem Zeilenumbruch.
+Browser und abgekoppeltes `execweave top`-Dashboard konsumieren sequenznummerierte `/live.json`-Snapshots/Deltas. `/graph.json` bleibt als aktueller Snapshot-Endpunkt verfügbar. Die inkrementelle Aufnahme liest nur neu angehängte JSONL-Bytes und puffert eine unvollständige letzte Zeile bis zu ihrem Zeilenumbruch.
 
 Wenn der Befehl endet, führt ExecWeave Folgendes aus:
 
 1. validiert den abgeschlossenen Runtime-Ereignisstrom;
-2. führt bei vorhandenen spezialisierten Belegen die kanonische Runtime+Semantic-Zusammenführung nach `events.semantic.jsonl` aus;
-3. baut den finalen Graphen aus diesem kanonischen Strom neu auf, statt dem vorläufigen Live-Zustand zu vertrauen;
-4. schreibt `graph.json` und den eigenständigen `viewer.html`;
-5. markiert den Live-Graph als abgeschlossen und stellt den finalen Viewer kurz bereit, bevor der lokale Server beendet wird.
+2. vervollständigt jede vorbereitete, attribution-sichere Post-Command-Spezialbeobachtung;
+3. führt bei vorhandenen spezialisierten Belegen die kanonische Runtime+Specialized-Zusammenführung nach `events.semantic.jsonl` aus;
+4. baut den finalen Graphen aus diesem kanonischen Strom neu auf, statt dem vorläufigen Live-Zustand zu vertrauen;
+5. schreibt `graph.json` und den eigenständigen `viewer.html`;
+6. markiert den Live-Graph als abgeschlossen und stellt den finalen Viewer kurz bereit, bevor der lokale Server beendet wird.
 
 Wenn keine spezialisierten Ereignisse eintreffen, bleibt die finale Materialisierung runtime-only.
 
-## Automatisch sichtbare Agent-Integrationen
+## Automatisch sichtbare spezialisierte Integrationen
 
 | Integration | Automatische Lieferung in den v0.6.4 Live Viewer |
 | --- | --- |
@@ -81,12 +91,18 @@ Wenn keine spezialisierten Ereignisse eintreffen, bleibt die finale Materialisie
 | Gemini CLI | **Ja**, nachdem die ExecWeave-Hooks konfiguriert wurden |
 | Cursor | **Ja**, nachdem die ExecWeave-Hooks konfiguriert wurden |
 | OpenCode | **Ja**, nachdem das ExecWeave-Plugin installiert wurde |
+| Ollama | **Ja**, für erkannte lokale `ollama serve`-Starts |
+| llama.cpp | **Ja**, für erkannte lokale `llama-server`-Starts |
+| vLLM | **Ja**, für erkannte lokale vLLM-Server-Starts |
+| LM Studio | **Ja**, nach erfolgreichem `lms server start --port <port>`, wenn der Endpoint vorher nicht existierte |
+| LiteLLM Proxy | **Ja**, nachdem der ExecWeave-Callback konfiguriert wurde und der Proxy den Live-Sidecar erbt |
+| OpenRouter | **Nein** für automatische Routing-Metadaten; OS-/Netzwerkaktivität des lokalen Clients kann weiterhin beobachtet werden |
 
-Alle fünf Integrationen verwenden denselben laufbezogenen Sidecar-Vertrag. Die CI-Regressionsabdeckung ruft jeden Provider-Adapter gegen ein gemeinsames `EXECWEAVE_SEMANTIC_SIDECAR` auf und prüft, dass die resultierenden Provider-Belege in den Live-Graph materialisiert werden.
+Diese Integrationen teilen denselben laufbezogenen Specialized-Sidecar-Vertrag, behalten aber ihre Belegschichten und Semantik. Ein Model-Katalog beweist nicht, dass ein Agent eine Anfrage verursacht hat; eine Gateway-Antwort beweist nicht, welcher OS-Prozess sie verursacht hat; fehlende Identität wird niemals erfunden.
 
 ## Terminal Top
 
-`top` rendert nicht mehr über das Agent-Terminal. Das ursprüngliche Terminal bleibt für den Agent interaktiv, während das Dashboard in einem separaten Terminalfenster an dieselbe localhost-Live-Sitzung angehängt wird:
+`top` rendert nicht über dem Agent-Terminal. Das ursprüngliche Terminal bleibt interaktiv, während sich das Dashboard in einem separaten Terminalfenster an dieselbe localhost-Live-Sitzung anhängt:
 
 ```bash
 execweave top -- codex
@@ -126,7 +142,7 @@ Das Standard-Laufverzeichnis ist:
 └── viewer.html
 ```
 
-`events.jsonl` bleibt runtime-only. `semantic.jsonl` ist der rohe spezialisierte Sidecar. Der finale `graph.json` wird bei vorhandenen spezialisierten Belegen aus `events.semantic.jsonl` erstellt, andernfalls direkt aus `events.jsonl`.
+`events.jsonl` bleibt runtime-only. `semantic.jsonl` ist der rohe spezialisierte Sidecar und kann Agent/IDE-, Model-Runtime- oder Inference-Gateway-Belege enthalten. Der finale `graph.json` wird bei vorhandenen spezialisierten Belegen aus `events.semantic.jsonl` erstellt, andernfalls direkt aus `events.jsonl`.
 
 Ein anderes Verzeichnis wählen:
 
@@ -144,9 +160,29 @@ Der Live-Normalizer arbeitet deshalb inkrementell und konservativ. Bereits beoba
 
 Eine Trunkierung des Sidecars setzt die vorläufige Materialisierung zurück und spielt die aktuellen Dateien erneut ein. Unvollständige abschließende JSONL-Datensätze werden gepuffert statt als vollständige Ereignisse behandelt. Der finale Graph wird weiterhin nach erfolgreicher Runtime-Validierung aus der kanonischen Zusammenführung neu aufgebaut.
 
+## Grenze automatischer Model-Runtime-Probes
+
+Automatische Model-Runtime-Beobachtung ist bewusst eng begrenzt. ExecWeave probt nur erkannte lokale Server-Startbefehle und Local-/Loopback-Endpoints. Probe-Fehler sind fail-open und verändern niemals das Ergebnis des gestarteten Befehls.
+
+Bei Ollama, llama.cpp und vLLM kann lokaler Model-State/-Katalog während des Serverlaufs abgetastet werden. LM Studio unterscheidet sich: `lms server start` ist ein kurzlebiger Launcher für einen persistenten Server. ExecWeave bereitet die Beobachtung vor dem Start vor, ordnet einen bereits vorhandenen kompatiblen Endpoint nicht der aktuellen Sitzung zu und materialisiert den Post-Launch-Katalog nur nach erfolgreichem Launcher-Exit.
+
+Katalogrelationen behalten Runtime-spezifische Semantik. Beispielsweise ist die Katalogsichtbarkeit von LM Studio `ADVERTISES_MODEL` und kein Beweis dafür, dass Gewichte zu diesem Zeitpunkt im Speicher resident waren.
+
+## Grenze des LiteLLM-Callbacks
+
+LiteLLM Proxy kann `execweave.litellm_callback.execweave_litellm_callback` einmal über seine Custom-Callback-Konfiguration laden. Läuft der Proxy innerhalb von `execweave live`, erbt er `EXECWEAVE_SEMANTIC_SIDECAR` und schreibt nur whitelisted Routing-/Usage-Metadaten in diesen Lauf.
+
+Der Callback speichert keine Messages, Response-Inhalte, Model-Parameter, beliebige Metadaten, API-Key-Metadaten oder Provider-`api_base`. Provider-Identität wird nicht aus Model-Strings oder URLs hergeleitet. Ohne laufbezogene Sidecar-Umgebungsvariable ist der Callback ein No-op.
+
+LiteLLM-Konfigurationsfragment ausgeben:
+
+```bash
+execweave-litellm-callback --print-config
+```
+
 ## Einschränkungen des portablen Backends
 
-Die aktuelle Live-Runtime-Schicht erbt die Garantien des portablen Collectors:
+Die aktuelle Live-Runtime-Schicht erbt die Einschränkungen des portablen Collectors:
 
 - Prozesserkennung erfolgt per Polling;
 - sehr kurzlebige Prozesse können verpasst werden;
@@ -157,7 +193,7 @@ Diese Einschränkungen bleiben in den Zuordnungsmetadaten der Ereignisse sichtba
 
 ## Sicherheit für große Sitzungen
 
-Live-Aktualisierungen verwenden eine begrenzte Delta-Historie, anstatt bei jeder Abfrage den vollständigen Ereignisstrom erneut einzulesen. Überschreitet der Graph das Sicherheitsbudget des Viewers, wechselt der Live-Endpunkt zu einer kompakten Payload nur mit Zählerwerten, damit Sammlung und finale kanonische Artefakterzeugung weiterlaufen können, ohne den Browser zur Materialisierung eines unsicheren SVG-Graphen zu zwingen.
+Live-Aktualisierungen verwenden eine begrenzte Delta-Historie, anstatt bei jeder Abfrage den vollständigen Ereignisstrom erneut einzulesen. Überschreitet der Graph das Sicherheitsbudget des Viewers, wechselt der Live-Endpunkt zu einer kompakten Payload nur mit Zählerwerten, damit Sammlung und finale kanonische Artefakterzeugung weiterlaufen können, ohne den Browser zur Materialisierung eines unsicheren großen SVG-Graphen zu zwingen.
 
 ## Zukünftige native Live-Backends
 
@@ -176,9 +212,12 @@ Die CI-Konfiguration des Repositorys deckt Folgendes ab:
 - Start einer localhost-Live-Sitzung und finale Artefakterzeugung;
 - sequenznummeriertes Snapshot-/Delta-Verhalten und Resynchronisierung;
 - unvollständige abschließende JSONL-Datensätze;
-- semantischen Sidecar, der eintrifft, bevor Runtime-Identität verfügbar ist;
-- Trunkierung und Replay des semantischen Sidecars;
-- kanonischen finalen Runtime+Semantic-Neuaufbau;
+- Sidecar-Ankunft, bevor Runtime-Identität verfügbar ist;
+- Sidecar-Trunkierung und Replay;
+- kanonischen finalen Runtime+Specialized-Neuaufbau;
 - automatische Shared-Sidecar-Lieferung für Claude, Codex, Gemini, Cursor und OpenCode;
+- automatische lokale Model-Runtime-Probes für Ollama, llama.cpp und vLLM sowie attribution-sichere LM-Studio-Startbehandlung;
+- Datenschutz, fail-open Verhalten und finale Live-Graph-Materialisierung des LiteLLM-Callbacks;
 - abgekoppeltes Top-Verhalten ohne Start eines zweiten Agent;
-- Top-Attach-URLs ausschließlich auf localhost.
+- Top-Attach-URLs ausschließlich auf localhost;
+- Clean-Wheel-Installation des LiteLLM-Callback-Setup-Befehls.
