@@ -72,6 +72,17 @@ Live 更新は増分 snapshot/delta と有界履歴を使用し、graph 全体�
 
 `execweave-scalability` で graph scalability benchmark を再現でき、CI は 10k、100k、1M synthetic events を検証します。
 
+#### Scalability benchmark
+
+GitHub Actions 上の incremental `GraphAccumulator` synthetic workload の reference result（`retain_event_ids=False`）：
+
+| Events | Apply time | Throughput | Nodes | Edges | Apply RSS Δ | Snapshot |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 10k | 0.114 s | 87,681 ev/s | 10,001 | 10,000 | 35.9 MiB | 8.5 MiB |
+| 100k | 0.654 s | 152,816 ev/s | 10,001 | 10,000 | 25.8 MiB | 8.6 MiB |
+| **1M** | **6.087 s** | **164,273 ev/s** | **10,001** | **10,000** | **23.5 MiB** | **8.6 MiB** |
+
+**1,000,000 events** 時点で incremental graph が保持する **raw event IDs は 0** です。この benchmark は graph accumulation と snapshot materialization を測定するもので、end-to-end collector や browser throughput の測定ではありません。
 
 ## Performance / footprint
 
