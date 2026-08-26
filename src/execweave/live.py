@@ -27,6 +27,28 @@ from .viewer import (
 )
 
 LIVE_DELTA_HISTORY = 256
+LIVE_DELTA_HISTORY_BYTES = 8 * 1024 * 1024
+
+_FINAL_THEME_CSS = """
+:root[data-theme="light"]{color-scheme:light;--bg:#f7f9fc;--panel:#ffffff;--panel2:#eef3f8;--text:#172033;--muted:#617083;--border:#cbd5e1;--edge:#64748b;--causal:#15803d;--noncausal:#b45309;--inferred:#7e22ce;--identity:#0369a1;--selected:#2563eb;--accent:#2563eb}
+#execweave-theme-toggle{position:fixed;right:14px;bottom:14px;z-index:9999;border:1px solid var(--border);background:var(--panel);color:var(--text);border-radius:8px;padding:7px 10px;cursor:pointer;box-shadow:0 4px 18px rgba(15,23,42,.12)}
+#execweave-theme-toggle:hover{border-color:var(--selected,var(--accent))}
+:root[data-theme="light"] .node text{fill:#f8fafc}:root[data-theme="light"] .node .node-type{fill:#cbd5e1}
+""".strip()
+
+_FINAL_THEME_CONTROLS = r"""
+<button id="execweave-theme-toggle" type="button" aria-label="Switch to light theme" title="Switch to light theme">Light</button>
+<script>
+(()=>{const key='execweave-theme',button=document.getElementById('execweave-theme-toggle');function apply(theme,persist=false){const next=theme==='light'?'light':'dark';document.documentElement.dataset.theme=next;const light=next==='light';button.textContent=light?'Dark':'Light';button.setAttribute('aria-label',light?'Switch to dark theme':'Switch to light theme');button.title=light?'Switch to dark theme':'Switch to light theme';if(persist){try{localStorage.setItem(key,next)}catch(_){}}}let initial='dark';try{if(localStorage.getItem(key)==='light')initial='light'}catch(_){}apply(initial);button.onclick=()=>apply(document.documentElement.dataset.theme==='light'?'dark':'light',true)})();
+</script>
+""".strip()
+
+
+def _inject_final_theme(html: str) -> str:
+    if 'id="execweave-theme-toggle"' in html:
+        return html
+    themed = html.replace("</style>", _FINAL_THEME_CSS + "\n</style>", 1)
+    return themed.replace("</body>", _FINAL_THEME_CONTROLS + "\n</body>", 1)
 
 
 @dataclass(frozen=True)
@@ -108,7 +130,9 @@ class _LiveState:
         self._final_html: str | None = None
         self._update_sequence = 0
         self._resync_floor = 0
-        self._updates: deque[dict[str, object]] = deque(maxlen=LIVE_DELTA_HISTORY)
+        self._updates: deque[dict[str, object]] = deque()
+        self._update_sizes: deque[int] = deque()
+        self._updates_bytes = 0
 
     def _empty_graph(self) -> dict[str, object]:
         return {
@@ -136,6 +160,11 @@ class _LiveState:
             "edge_count": self._accumulator.edge_count,
         }
 
+    def _clear_update_history_locked(self) -> None:
+        self._updates.clear()
+        self._update_sizes.clear()
+        self._updates_bytes = 0
+
     def _reset_incremental_state_locked(self) -> None:
         self._accumulator = GraphAccumulator(
             session_id=self.session_id,
@@ -144,7 +173,7 @@ class _LiveState:
         )
         self._read_offset = 0
         self._pending_bytes = b""
-        self._updates.clear()
+        self._clear_update_history_locked()
         self._update_sequence += 1
         self._resync_floor = self._update_sequence
 
@@ -178,7 +207,19 @@ class _LiveState:
     def _append_update_locked(self, update: dict[str, object]) -> None:
         self._update_sequence += 1
         update["sequence"] = self._update_sequence
+        encoded_size = len(
+            json.dumps(update, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        )
         self._updates.append(update)
+        self._update_sizes.append(encoded_size)
+        self._updates_bytes += encoded_size
+        while (
+            len(self._updates) > LIVE_DELTA_HISTORY
+            or self._updates_bytes > LIVE_DELTA_HISTORY_BYTES
+        ):
+            evicted = self._updates.popleft()
+            self._updates_bytes -= self._update_sizes.popleft()
+            self._resync_floor = max(self._resync_floor, int(evicted["sequence"]))
 
     def _refresh_incremental_locked(self) -> None:
         try:
@@ -335,7 +376,7 @@ class _LiveState:
     def finish(self, graph: dict[str, object]) -> None:
         with self._lock:
             self._final_graph = dict(graph)
-            self._final_html = render_graph_html(graph)
+            self._final_html = _inject_final_theme(render_graph_html(graph))
             self._finished = True
             counts = self._counts_locked()
             node_count = int(counts["node_count"])
