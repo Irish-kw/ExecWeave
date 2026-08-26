@@ -51,22 +51,32 @@ def _channel_for_event(event_type: str) -> str | None:
         return "process"
     if event_type.startswith("filesystem."):
         return "filesystem"
-    if event_type == "network.connection":
+    if event_type.startswith("network.connection"):
         return "network"
     if event_type.startswith("semantic."):
         return "specialized"
     return None
 
 
+def _entity_type(entity: object) -> str | None:
+    if not isinstance(entity, dict):
+        return None
+    value = entity.get("type")
+    return value if isinstance(value, str) and value else None
+
+
 @dataclass
 class FidelityAccumulator:
-    """Bounded summary of what a stream can and cannot substantiate.
+    """Summarize what a stream can and cannot substantiate.
 
     Fidelity is intentionally orthogonal to finding severity. It describes capture
     and attribution strength, not whether an observed behavior is benign or severe.
+    The accumulator retains bounded counters/sets of vocabulary values, never raw
+    event objects.
     """
 
     backends: set[str] = field(default_factory=set)
+    session_ids: set[str] = field(default_factory=set)
     attribution_modes: dict[str, set[str]] = field(
         default_factory=lambda: {
             "process": set(),
@@ -77,14 +87,21 @@ class FidelityAccumulator:
     )
     event_type_counts: dict[str, int] = field(default_factory=dict)
     unresolved_process_references: int = 0
+    observed_process_count: int = 0
     event_count: int = 0
 
     def observe(self, event: dict[str, Any]) -> None:
         self.event_count += 1
+        session_id = event.get("session_id")
+        if isinstance(session_id, str) and session_id:
+            self.session_ids.add(session_id)
+
         event_type = event.get("event_type")
         if not isinstance(event_type, str):
             event_type = "unknown"
         self.event_type_counts[event_type] = self.event_type_counts.get(event_type, 0) + 1
+        if event_type == "process.started" and _entity_type(event.get("target")) == "process":
+            self.observed_process_count += 1
 
         attributes = event.get("attributes")
         if not isinstance(attributes, dict):
@@ -143,10 +160,12 @@ class FidelityAccumulator:
         else:
             not_supported.add("short_lived_process_capture")
 
+        # Sampling is a capture mechanism, not an attribution/trust grade. In
+        # particular, session-correlated filesystem/provider evidence may be
+        # event-driven rather than sampled and therefore must not set this flag.
         sampled = any(
-            mode in {"process_polled", "session_correlated"}
-            for values in self.attribution_modes.values()
-            for mode in values
+            "process_polled" in self.attribution_modes[channel]
+            for channel in ("process", "network")
         )
 
         limitations: list[str] = [
@@ -155,7 +174,11 @@ class FidelityAccumulator:
         ]
         if "portable" in self.backends:
             limitations.append(
-                "Portable process/network collection is sampled and may miss short-lived activity."
+                "Portable process/network collection is sampled and may miss activity that exists entirely between samples."
+            )
+        if "strace" in self.backends:
+            limitations.append(
+                "Strace evidence is limited to the traced command lineage and selected syscall classes; it is not OS-wide visibility."
             )
         if "session_correlated" in self.attribution_modes["filesystem"]:
             limitations.append(
@@ -163,16 +186,23 @@ class FidelityAccumulator:
             )
         if self.unresolved_process_references:
             limitations.append(
-                "Some process references were unresolved; process attribution counts are lower bounds."
+                "At least one observed process-start relationship referenced a parent that was not resolved in collector state; this proves incomplete parentage resolution, not a count of missed processes."
             )
 
+        session_id = next(iter(self.session_ids)) if len(self.session_ids) == 1 else None
         return {
             "fidelity_schema_version": FIDELITY_SCHEMA_VERSION,
+            "session_id": session_id,
             "backend_observed": sorted(self.backends),
             "event_count": self.event_count,
+            "observed_process_count": self.observed_process_count,
             "attribution_modes": modes,
             "sampled_evidence_present": sampled,
             "unresolved_process_references": self.unresolved_process_references,
+            # Current events do not contain a sound signal that distinguishes a
+            # missed descendant from an unresolved/out-of-scope parent. Null is
+            # deliberate: do not turn an unknowable quantity into a guessed zero.
+            "missed_process_lower_bound": None,
             "claims_supported": sorted(supported),
             "claims_not_supported": sorted(not_supported),
             "limitations": limitations,

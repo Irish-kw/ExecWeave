@@ -73,6 +73,8 @@ def test_portable_fidelity_is_sampled_without_lowering_behavior_severity() -> No
 
     fidelity = derive_fidelity(events)
 
+    assert fidelity["session_id"] == "s1"
+    assert fidelity["observed_process_count"] == 1
     assert fidelity["sampled_evidence_present"] is True
     assert fidelity["attribution_modes"]["process"] == ["process_polled"]
     assert fidelity["attribution_modes"]["filesystem"] == ["session_correlated"]
@@ -82,6 +84,40 @@ def test_portable_fidelity_is_sampled_without_lowering_behavior_severity() -> No
     assert "byte_level_dataflow" in fidelity["claims_not_supported"]
     assert "tamper_evident_evidence" in fidelity["claims_not_supported"]
     assert "severity" not in fidelity
+
+
+def test_session_correlated_evidence_is_not_automatically_sampled() -> None:
+    event = _event(
+        sequence=1,
+        event_type="semantic.tool_call",
+        relation="CALLED_TOOL",
+        backend="claude_hook",
+        attribution=None,
+        source_type="agent",
+        target_type="tool_call",
+    )
+
+    fidelity = derive_fidelity([event])
+
+    assert fidelity["attribution_modes"]["specialized"] == ["session_correlated"]
+    assert fidelity["sampled_evidence_present"] is False
+
+
+def test_network_attempt_is_part_of_network_attribution_contract() -> None:
+    event = _event(
+        sequence=1,
+        event_type="network.connection_attempt",
+        relation="CONNECT_ATTEMPTED",
+        backend="strace",
+        attribution="syscall",
+        source_type="process",
+        target_type="network_endpoint",
+    )
+
+    fidelity = derive_fidelity([event])
+
+    assert fidelity["attribution_modes"]["network"] == ["syscall_attributed"]
+    assert "process_attributed_network" in fidelity["claims_supported"]
 
 
 def test_syscall_fidelity_records_stronger_attribution_without_claiming_complete_visibility() -> None:
@@ -120,9 +156,10 @@ def test_syscall_fidelity_records_stronger_attribution_without_claiming_complete
     assert "process_attributed_network" in fidelity["claims_supported"]
     assert "complete_process_tree" in fidelity["claims_not_supported"]
     assert "byte_level_dataflow" in fidelity["claims_not_supported"]
+    assert any("not OS-wide visibility" in item for item in fidelity["limitations"])
 
 
-def test_unresolved_process_reference_is_reported_as_lower_bound() -> None:
+def test_unresolved_process_reference_does_not_invent_missed_process_count() -> None:
     event = _event(
         sequence=1,
         event_type="process.started",
@@ -139,7 +176,9 @@ def test_unresolved_process_reference_is_reported_as_lower_bound() -> None:
     fidelity = derive_fidelity([event])
 
     assert fidelity["unresolved_process_references"] == 1
-    assert any("lower bounds" in item for item in fidelity["limitations"])
+    assert fidelity["missed_process_lower_bound"] is None
+    assert any("incomplete parentage resolution" in item for item in fidelity["limitations"])
+    assert any("not a count of missed processes" in item for item in fidelity["limitations"])
 
 
 def test_graph_accumulator_embeds_live_fidelity() -> None:
@@ -159,6 +198,7 @@ def test_graph_accumulator_embeds_live_fidelity() -> None:
     payload = accumulator.to_dict()
 
     assert payload["fidelity"]["fidelity_schema_version"] == "0.1"
+    assert payload["fidelity"]["session_id"] == "s1"
     assert payload["fidelity"]["sampled_evidence_present"] is True
 
 
@@ -199,6 +239,7 @@ def test_final_graph_embeds_fidelity_block(tmp_path: Path) -> None:
     graph = build_execution_graph(path).to_dict()
 
     assert graph["fidelity"]["fidelity_schema_version"] == "0.1"
+    assert graph["fidelity"]["session_id"] == "s1"
     assert graph["fidelity"]["backend_observed"] == ["portable"]
     assert "byte_level_dataflow" in graph["fidelity"]["claims_not_supported"]
 
