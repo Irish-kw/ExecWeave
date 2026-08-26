@@ -21,8 +21,8 @@ DOCS = [
     (Path("docs/security-analysis.md"), "docs/security-analysis"),
 ]
 
-FENCE_RE = re.compile(r"^```([^\n`]*)$", re.M)
 HEADING_RE = re.compile(r"^(#{1,6})\s+.+$", re.M)
+FENCED_BLOCK_RE = re.compile(r"```[^\n`]*\n(.*?)\n```", re.S)
 IMAGE_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)|<img\b", re.I)
 
 
@@ -41,26 +41,24 @@ def strip_nav(text: str) -> str:
     )
 
 
+def normalize_block(block: str) -> str:
+    return "\n".join(line.rstrip() for line in block.strip().splitlines()).strip()
+
+
 def signature(text: str) -> dict[str, object]:
     body = strip_nav(text)
-    headings = [len(m.group(1)) for m in HEADING_RE.finditer(body)]
-    fences = [m.group(1).strip() for m in FENCE_RE.finditer(body)]
-    fence_langs = fences[::2] if len(fences) % 2 == 0 else fences
+    heading_counts = Counter(len(m.group(1)) for m in HEADING_RE.finditer(body))
+    code_blocks = [normalize_block(x) for x in FENCED_BLOCK_RE.findall(body)]
     table_lines = [line for line in body.splitlines() if line.lstrip().startswith("|")]
     images = len(IMAGE_RE.findall(body))
     return {
+        "body": body,
         "bytes": len(body.encode("utf-8")),
-        "headings": headings,
-        "fence_count": len(fences) // 2,
-        "fence_langs": fence_langs,
+        "heading_counts": heading_counts,
+        "code_blocks": code_blocks,
         "table_lines": len(table_lines),
         "images": images,
     }
-
-
-def is_subsequence(needed: list[int], available: list[int]) -> bool:
-    it = iter(available)
-    return all(any(value == item for value in it) for item in needed)
 
 
 def compare(src: dict[str, object], dst: dict[str, object]) -> list[str]:
@@ -69,25 +67,23 @@ def compare(src: dict[str, object], dst: dict[str, object]) -> list[str]:
     if ratio < 0.62:
         issues.append(f"size ratio {ratio:.2f} < 0.62")
 
-    src_headings = src["headings"]
-    dst_headings = dst["headings"]
-    if not is_subsequence(src_headings, dst_headings):
-        issues.append(
-            f"canonical heading-level sequence {src_headings} is not contained in {dst_headings}"
-        )
-
-    if dst["fence_count"] < src["fence_count"]:
-        issues.append(f"code blocks {dst['fence_count']} < canonical {src['fence_count']}")
-
-    src_langs = Counter(src["fence_langs"])
-    dst_langs = Counter(dst["fence_langs"])
-    missing_langs = {
-        lang: count - dst_langs[lang]
-        for lang, count in src_langs.items()
-        if dst_langs[lang] < count
+    src_headings: Counter[int] = src["heading_counts"]
+    dst_headings: Counter[int] = dst["heading_counts"]
+    missing_headings = {
+        level: count - dst_headings[level]
+        for level, count in src_headings.items()
+        if dst_headings[level] < count
     }
-    if missing_langs:
-        issues.append(f"missing canonical code-block languages/counts: {missing_langs}")
+    if missing_headings:
+        issues.append(f"missing canonical heading levels/counts: {missing_headings}")
+
+    dst_body: str = dst["body"]
+    missing_blocks = [
+        block for block in src["code_blocks"] if block and block not in dst_body
+    ]
+    if missing_blocks:
+        previews = [block.splitlines()[0][:72] for block in missing_blocks]
+        issues.append(f"missing canonical code snippets: {previews}")
 
     if dst["table_lines"] < src["table_lines"]:
         issues.append(f"table lines {dst['table_lines']} < canonical {src['table_lines']}")
