@@ -14,6 +14,10 @@ ExecWeave는 AI 에이전트 활동을 인터랙티브 execution graph로 변환
 
 > **Event is ground truth. The graph is a materialized view.**
 
+<p align="center">
+  <img src="docs/assets/execweave-viewer.png" alt="ExecWeave Live execution graph" width="100%">
+</p>
+
 ## Installation
 
 ExecWeave는 PyPI에 정식 공개되어 있습니다. 최신 공개 release 설치:

@@ -14,6 +14,10 @@ ExecWeave is an open-source, local-first observability project that turns AI-age
 
 > **Event is ground truth. The graph is a materialized view.**
 
+<p align="center">
+  <img src="docs/assets/execweave-viewer.png" alt="ExecWeave Live execution graph" width="100%">
+</p>
+
 ## Install
 
 ExecWeave is published on PyPI as a standard Python wheel/sdist. Install the latest published release with:

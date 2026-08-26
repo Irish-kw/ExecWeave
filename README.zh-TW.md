@@ -14,6 +14,10 @@ ExecWeave 是開源、local-first 的 observability 專案，會把 AI Agent 活
 
 > **Event 是 ground truth；Graph 是 materialized view。**
 
+<p align="center">
+  <img src="docs/assets/execweave-viewer.png" alt="ExecWeave Live execution graph" width="100%">
+</p>
+
 ## 安裝
 
 ExecWeave 已正式發布到 PyPI，標準安裝方式為：
