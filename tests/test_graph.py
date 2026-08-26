@@ -256,7 +256,7 @@ def test_graph_writer_refuses_existing_nonempty_output_and_preserves_metadata(
     written = write_execution_graph(graph, output, metadata=metadata)
     assert written == output.resolve()
     payload = json.loads(output.read_text(encoding="utf-8"))
-    assert payload["graph_schema_version"] == "0.1"
+    assert payload["graph_schema_version"] == "0.2"
     assert payload["metadata"] == metadata
 
     with pytest.raises(FileExistsError):
