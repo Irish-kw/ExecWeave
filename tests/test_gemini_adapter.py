@@ -4,7 +4,11 @@ import json
 from io import StringIO
 from pathlib import Path
 
-from execweave.gemini_adapter import append_semantic_records, gemini_hook_to_semantic_events, read_hook_payload
+from execweave.gemini_adapter import (
+    append_semantic_records,
+    gemini_hook_to_semantic_events,
+    read_hook_payload,
+)
 from execweave.gemini_hook_cli import gemini_hook_config
 
 
@@ -29,14 +33,31 @@ def test_session_start_records_provider_session_without_transcript() -> None:
 
 
 def test_before_tool_records_shell_command_and_unique_request_identity() -> None:
-    payload = {**_base("BeforeTool"), "tool_name": "run_shell_command", "tool_input": {"command": "python task.py"}}
+    payload = {
+        **_base("BeforeTool"),
+        "tool_name": "run_shell_command",
+        "tool_input": {"command": "python task.py"},
+    }
     first = gemini_hook_to_semantic_events(payload)
-    second = gemini_hook_to_semantic_events({**payload, "timestamp": "2026-08-25T08:20:01Z"})
-    assert {event["relation"] for event in first} == {"REQUESTED_TOOL_CALL", "USES_TOOL", "DECLARED_COMMAND"}
-    first_call = next(event["target"] for event in first if event["relation"] == "REQUESTED_TOOL_CALL")
-    second_call = next(event["target"] for event in second if event["relation"] == "REQUESTED_TOOL_CALL")
+    second = gemini_hook_to_semantic_events(
+        {**payload, "timestamp": "2026-08-25T08:20:01Z"}
+    )
+    assert {event["relation"] for event in first} == {
+        "REQUESTED_TOOL_CALL",
+        "USES_TOOL",
+        "DECLARED_COMMAND",
+    }
+    first_call = next(
+        event["target"] for event in first if event["relation"] == "REQUESTED_TOOL_CALL"
+    )
+    second_call = next(
+        event["target"] for event in second if event["relation"] == "REQUESTED_TOOL_CALL"
+    )
     assert first_call["id"] != second_call["id"]
-    assert first_call["attributes"]["identity_semantics"] == "provider_hook_without_unique_tool_call_id"
+    assert (
+        first_call["attributes"]["identity_semantics"]
+        == "provider_hook_without_unique_tool_call_id"
+    )
 
 
 def test_after_tool_does_not_assert_direct_before_tool_linkage_or_store_content() -> None:
@@ -44,14 +65,20 @@ def test_after_tool_does_not_assert_direct_before_tool_linkage_or_store_content(
         **_base("AfterTool", "2026-08-25T08:20:02Z"),
         "tool_name": "run_shell_command",
         "tool_input": {"command": "false"},
-        "tool_response": {"llmContent": "secret output", "returnDisplay": "secret output", "error": None},
+        "tool_response": {
+            "llmContent": "secret output",
+            "returnDisplay": "secret output",
+            "error": None,
+        },
     }
     events = gemini_hook_to_semantic_events(payload)
     assert len(events) == 1
     event = events[0]
     assert event["relation"] == "TOOL_RESULT_RETURNED"
     assert "secret output" not in json.dumps(event)
-    assert "no direct BeforeTool linkage asserted" in event["attributes"]["result_identity_semantics"]
+    assert "no direct BeforeTool linkage asserted" in event["attributes"][
+        "result_identity_semantics"
+    ]
 
 
 def test_after_tool_marks_provider_reported_error_without_storing_error_body() -> None:
@@ -72,7 +99,13 @@ def test_mcp_context_uses_explicit_server_identity_without_connection_details() 
         **_base("BeforeTool"),
         "tool_name": "mcp_acme_search",
         "tool_input": {"query": "x"},
-        "mcp_context": {"server_name": "acme", "tool_name": "search", "command": "npx", "args": ["--token", "secret"], "url": "https://secret.example"},
+        "mcp_context": {
+            "server_name": "acme",
+            "tool_name": "search",
+            "command": "npx",
+            "args": ["--token", "secret"],
+            "url": "https://secret.example",
+        },
     }
     events = gemini_hook_to_semantic_events(payload)
     relations = {event["relation"] for event in events}
@@ -85,9 +118,26 @@ def test_mcp_context_uses_explicit_server_identity_without_connection_details() 
 
 def test_gemini_hook_config_and_sidecar_io(tmp_path: Path) -> None:
     config = gemini_hook_config("execweave-gemini-hook --strict")
-    assert set(config["hooks"]) == {"SessionStart", "BeforeTool", "AfterTool"}
+    assert set(config["hooks"]) == {
+        "SessionStart",
+        "SessionEnd",
+        "BeforeAgent",
+        "AfterAgent",
+        "BeforeModel",
+        "AfterModel",
+        "BeforeToolSelection",
+        "BeforeTool",
+        "AfterTool",
+        "PreCompress",
+        "Notification",
+    }
     assert config["hooks"]["BeforeTool"][0]["matcher"] == ".*"
-    payload = {**_base("BeforeTool"), "tool_name": "read_file", "tool_input": {"file_path": "README.md"}}
+    assert config["hooks"]["AfterTool"][0]["matcher"] == ".*"
+    payload = {
+        **_base("BeforeTool"),
+        "tool_name": "read_file",
+        "tool_input": {"file_path": "README.md"},
+    }
     parsed = read_hook_payload(StringIO(json.dumps(payload)))
     records = gemini_hook_to_semantic_events(parsed)
     output = append_semantic_records(tmp_path / "gemini.jsonl", records)
