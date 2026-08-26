@@ -9,7 +9,11 @@ from typing import Iterable
 
 import psutil
 
-from .auto_specialized import auto_specialized_probe
+from .auto_specialized import (
+    auto_specialized_probe,
+    prepare_post_command_specialized_probe,
+    run_post_command_specialized_probe,
+)
 from .command import resolve_launch_command
 from .filesystem import FileWatcher
 from .schema import Entity, RuntimeEvent
@@ -159,6 +163,7 @@ class RuntimeCollector:
 
         process: subprocess.Popen[bytes] | None = None
         return_code = 1
+        post_command_probe = prepare_post_command_specialized_probe(command)
         try:
             process = subprocess.Popen(launch_command, cwd=str(self.watch_root))
             root = psutil.Process(process.pid)
@@ -174,6 +179,10 @@ class RuntimeCollector:
                 self._sample_process_tree(root)
                 self._mark_disappeared_processes(set())
             return_code = int(process.returncode or 0)
+            run_post_command_specialized_probe(
+                post_command_probe,
+                return_code=return_code,
+            )
             return return_code
         finally:
             if watcher is not None:
