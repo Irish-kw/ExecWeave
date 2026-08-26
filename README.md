@@ -41,7 +41,6 @@ Create a small Python project in ./execweave-demo with 8 modules,
 generate sample JSON and CSV data, run the program and tests,
 inspect the generated files, and fetch example.com plus the GitHub API.
 ```
-
 The same workload works with `codex`, `gemini`, `cursor`, or `opencode`. Exact node, edge, event, process, and endpoint counts vary by OS, Agent version, and environment. ExecWeave records observed runtime evidence; the animation is one concrete run, not a fixed expected graph.
 <!-- execweave-demo:end -->
 
@@ -84,23 +83,25 @@ execweave live --open -- python my_agent.py
 execweave live --open -- ollama serve
 ```
 
-`execweave live` streams process, file, and network evidence for the command tree it launches. It does **not** automatically inject Agent semantic hooks, model-runtime API metadata, or inference-gateway routing metadata into the Live Viewer.
+`execweave live` always streams process, file, and network evidence for the command tree it launches. In v0.6.4 it also exports a run-specific semantic sidecar to the child environment. When a supported Agent hook/plugin is configured, its semantic events are automatically ingested into the same Live Viewer; a separate provider `*-record` wrapper is not required for that live session.
 
 #### Live capability matrix
 
 | Integration | Direct OS-runtime live | Specialized metadata | Automatically in Live Viewer |
 | --- | --- | --- | --- |
-| Claude Code | Yes | `execweave-claude-record` / hooks | No |
-| OpenAI Codex | Yes | `execweave-codex-record` / hooks | No |
-| Gemini CLI | Yes | `execweave-gemini-record` / hooks | No |
-| Cursor | Yes | `execweave-cursor-record` / hooks | No |
-| OpenCode | Yes | `execweave-opencode-record` / plugin | No |
+| Claude Code | Yes | `execweave-claude-record` / hooks | **Yes** (configured hooks) |
+| OpenAI Codex | Yes | `execweave-codex-record` / hooks | **Yes** (configured hooks) |
+| Gemini CLI | Yes | `execweave-gemini-record` / hooks | **Yes** (configured hooks) |
+| Cursor | Yes | `execweave-cursor-record` / hooks | **Yes** (configured hooks) |
+| OpenCode | Yes | `execweave-opencode-record` / plugin | **Yes** (installed plugin) |
 | Ollama | Yes, when launched under ExecWeave (for example `ollama serve`) | `execweave-model-runtime event/probe --runtime ollama` | No |
 | llama.cpp | Yes, when its local server is launched under ExecWeave | `execweave-model-runtime event/probe --runtime llamacpp` | No |
 | vLLM | Yes, when its local server is launched under ExecWeave | `execweave-model-runtime event/probe --runtime vllm` | No |
 | LM Studio | Yes only for a local process launched under ExecWeave; an already-running server is not attached | `execweave-model-runtime event/probe --runtime lmstudio` | No |
 | LiteLLM Proxy | Yes, when the local proxy is launched under ExecWeave | `execweave-inference-gateway event --gateway litellm` | No |
 | OpenRouter | No direct remote-service process; run the local client/Agent under `live` instead | `execweave-inference-gateway event/generation --gateway openrouter` | No |
+
+The Agent rows marked **Yes** mean automatic delivery *after the provider integration has been configured once*. `execweave live` supplies the per-run `EXECWEAVE_SEMANTIC_SIDECAR`; configured hooks/plugins inherit it and write directly into that run. ExecWeave does not silently edit provider settings when `live` starts. Model-runtime and inference-gateway rows stay **No** until their specialized metadata can be observed automatically rather than emitted explicitly.
 
 For an already-running Ollama server, use `execweave-model-runtime probe --runtime ollama` to snapshot loaded-model state. For OpenRouter, `live` can observe the local client and its network activity, while gateway routing/usage metadata remains a separate evidence layer.
 
@@ -118,7 +119,7 @@ The detached dashboard is an attach-only client for the same localhost live sess
 
 Live updates use incremental snapshots/deltas with bounded history instead of repeatedly rebuilding and transferring the full graph. Live and standalone viewers support a persistent Dark/Light theme switch. On Linux, very large recursive filesystem scopes are preflighted and automatically fall back from inotify to polling when needed, so an exhausted inotify watch pool does not abort the session.
 
-v0.6.4 also gives each live run a shared specialized-evidence sidecar. Integrations that emit semantic, model-runtime, or gateway evidence into that sidecar can appear incrementally in the same live graph. This live normalization is provisional; after the command exits, the final graph is rebuilt from the canonical runtime + semantic merge. Missing specialized evidence is never invented.
+v0.6.4 gives each live run a shared specialized-evidence sidecar. Configured Claude Code, Codex, Gemini CLI, Cursor, and OpenCode integrations inherit that sidecar automatically, so their provider semantic evidence can appear incrementally beside OS-runtime evidence in the same live graph. This live normalization is provisional; after the command exits, the final graph is rebuilt from the canonical runtime + semantic merge. Missing specialized evidence is never invented.
 
 Run the reproducible graph scalability benchmark with `execweave-scalability`; CI covers 10k, 100k, and 1M synthetic events.
 
