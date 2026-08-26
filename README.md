@@ -104,19 +104,21 @@ execweave live --open -- ollama serve
 
 For an already-running Ollama server, use `execweave-model-runtime probe --runtime ollama` to snapshot loaded-model state. For OpenRouter, `live` can observe the local client and its network activity, while gateway routing/usage metadata remains a separate evidence layer.
 
-<!-- v0.6.3-live -->
-### v0.6.3 live observability
+<!-- v0.6.4-live -->
+### v0.6.4 live observability
 
-Use the same live session in either the browser or terminal:
+`top` keeps the Agent fully interactive in the terminal where you launched it and opens the dashboard in a **separate terminal window**:
 
 ```bash
-execweave top -- codex          # Terminal dashboard
-execweave top --open -- codex   # Terminal + Web Viewer
+execweave top -- codex          # Agent here + detached Top dashboard
+execweave top --open -- codex   # Agent here + detached Top dashboard + Web Viewer
 ```
+
+The detached dashboard is an attach-only client for the same localhost live session; it never launches a second Agent process. On Windows it uses a new console, on macOS it opens Terminal, and on desktop Linux it uses an available terminal emulator. In a headless environment, ExecWeave prints an attach command instead of taking over the Agent terminal.
 
 Live updates use incremental snapshots/deltas with bounded history instead of repeatedly rebuilding and transferring the full graph. Live and standalone viewers support a persistent Dark/Light theme switch. On Linux, very large recursive filesystem scopes are preflighted and automatically fall back from inotify to polling when needed, so an exhausted inotify watch pool does not abort the session.
 
-`live` is a generic OS-runtime view rather than an integration whitelist. Specialized Agent semantic, model-runtime, and gateway metadata remain separate evidence layers and are not automatically injected into the Live Viewer in v0.6.3.
+v0.6.4 also gives each live run a shared specialized-evidence sidecar. Integrations that emit semantic, model-runtime, or gateway evidence into that sidecar can appear incrementally in the same live graph. This live normalization is provisional; after the command exits, the final graph is rebuilt from the canonical runtime + semantic merge. Missing specialized evidence is never invented.
 
 Run the reproducible graph scalability benchmark with `execweave-scalability`; CI covers 10k, 100k, and 1M synthetic events.
 
@@ -369,9 +371,9 @@ Security findings remain explicit about evidence limits. A possible sensitive-fi
 
 ## Current status
 
-ExecWeave `main` is currently **v0.6.3** and under active development.
+ExecWeave `main` is currently **v0.6.4** and under active development.
 
-The baseline includes runtime collection, graph materialization/querying, standalone/live Viewer, Claude/Codex/Gemini/Cursor/OpenCode semantic integrations, conservative Tool → Process correlation, OpenRouter/LiteLLM gateway metadata, Ollama/llama.cpp/vLLM/LM Studio runtime metadata, exact Gateway ↔ Model Runtime request identity, published PyPI wheel/sdist packaging, reproducible overhead benchmarking, cross-platform command-launcher compatibility, large-graph browser safety guards, incremental Live JSONL tail/cache, and cross-platform CI on Python 3.10/3.12.
+The baseline includes runtime collection, graph materialization/querying, standalone/live Viewer, detached terminal Top dashboard, provisional multi-layer live evidence with canonical final semantic merge, Claude/Codex/Gemini/Cursor/OpenCode semantic integrations, conservative Tool → Process correlation, OpenRouter/LiteLLM gateway metadata, Ollama/llama.cpp/vLLM/LM Studio runtime metadata, exact Gateway ↔ Model Runtime request identity, published PyPI wheel/sdist packaging, reproducible overhead benchmarking, cross-platform command-launcher compatibility, large-graph browser safety guards, incremental Live JSONL tail/cache, and cross-platform CI on Python 3.10/3.12.
 
 ## Privacy
 
