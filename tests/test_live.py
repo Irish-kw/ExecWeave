@@ -3,7 +3,8 @@ import sys
 import threading
 import time
 from pathlib import Path
-from urllib.request import urlopen
+from urllib.parse import parse_qs, urlsplit
+from urllib.request import Request, urlopen
 
 import execweave.live as live_module
 from execweave.cli import build_parser
@@ -178,12 +179,20 @@ def test_live_graph_serves_snapshot_and_writes_final_artifacts(tmp_path: Path) -
     if "error" in state:
         raise state["error"]  # type: ignore[misc]
 
-    url = str(state["url"])
+    authenticated_url = str(state["url"])
+    parsed = urlsplit(authenticated_url)
+    token_values = parse_qs(parsed.query).get("t", [])
+    assert len(token_values) == 1 and token_values[0]
+    base_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
     payload: dict[str, object] | None = None
     deadline = time.monotonic() + 3
     while time.monotonic() < deadline:
         try:
-            with urlopen(url + "graph.json", timeout=1) as response:
+            request = Request(
+                base_url + "graph.json",
+                headers={"X-ExecWeave-Token": token_values[0]},
+            )
+            with urlopen(request, timeout=1) as response:
                 payload = json.loads(response.read().decode("utf-8"))
             break
         except OSError:
@@ -202,6 +211,7 @@ def test_live_graph_serves_snapshot_and_writes_final_artifacts(tmp_path: Path) -
 
     result = state["result"]
     assert result.return_code == 0  # type: ignore[union-attr]
+    assert result.live_url == base_url  # type: ignore[union-attr]
     assert result.event_stream.exists()  # type: ignore[union-attr]
     assert result.graph.exists()  # type: ignore[union-attr]
     assert result.viewer.exists()  # type: ignore[union-attr]

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hmac
 import json
 import os
+import secrets
 import threading
 import time
 import webbrowser
@@ -11,7 +13,7 @@ from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from socketserver import TCPServer
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit
 from uuid import uuid4
 
 from .backends import create_collector
@@ -31,6 +33,7 @@ from .viewer import (
 LIVE_DELTA_HISTORY = 256
 LIVE_DELTA_HISTORY_BYTES = 8 * 1024 * 1024
 _SEMANTIC_ENV = "EXECWEAVE_SEMANTIC_SIDECAR"
+_LIVE_TOKEN_HEADER = "X-ExecWeave-Token"
 
 _FINAL_THEME_CSS = """
 :root[data-theme="light"]{color-scheme:light;--bg:#f7f9fc;--panel:#ffffff;--panel2:#eef3f8;--text:#172033;--muted:#617083;--border:#cbd5e1;--edge:#64748b;--causal:#15803d;--noncausal:#b45309;--inferred:#7e22ce;--identity:#0369a1;--selected:#2563eb;--accent:#2563eb}
@@ -52,6 +55,31 @@ def _inject_final_theme(html: str) -> str:
         return html
     themed = html.replace("</style>", _FINAL_THEME_CSS + "\n</style>", 1)
     return themed.replace("</body>", _FINAL_THEME_CONTROLS + "\n</body>", 1)
+
+
+def _inject_live_auth(html: str) -> str:
+    marker = "(()=>{\nconst MAX_NODES="
+    replacement = (
+        "(()=>{\n"
+        "const liveAuthToken=new URLSearchParams(location.search).get('t')||'';"
+        "if(liveAuthToken){try{history.replaceState(null,'',location.pathname)}catch(_){}}\n"
+        "const MAX_NODES="
+    )
+    authenticated = html.replace(marker, replacement, 1)
+    authenticated = authenticated.replace(
+        "fetch(`/live.json?after=${liveSequence}`,{cache:'no-store'})",
+        "fetch(`/live.json?after=${liveSequence}`,{cache:'no-store',headers:{'X-ExecWeave-Token':liveAuthToken}})",
+        1,
+    )
+    authenticated = authenticated.replace(
+        "if(finished){setTimeout(()=>{location.href='/final'},250);return}",
+        "if(finished){setTimeout(async()=>{try{const finalResponse=await fetch('/final',{cache:'no-store',headers:{'X-ExecWeave-Token':liveAuthToken}});if(!finalResponse.ok)throw new Error(String(finalResponse.status));const finalHtml=await finalResponse.text();document.open();document.write(finalHtml);document.close()}catch(_){status.textContent='RECONNECTING'}},250);return}",
+        1,
+    )
+    return authenticated
+
+
+_AUTHENTICATED_LIVE_HTML = _inject_live_auth(_LIVE_HTML)
 
 
 @dataclass(frozen=True)
@@ -518,7 +546,7 @@ class _LiveState:
             return self._final_html
 
 
-def _handler_factory(state: _LiveState):
+def _handler_factory(state: _LiveState, token: str):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, format: str, *args: object) -> None:
             return
@@ -529,14 +557,26 @@ def _handler_factory(state: _LiveState):
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Referrer-Policy", "no-referrer")
             self.end_headers()
             self.wfile.write(body)
 
+        def _authorized(self, parsed) -> bool:
+            candidate = self.headers.get(_LIVE_TOKEN_HEADER)
+            if candidate is None:
+                values = parse_qs(parsed.query).get("t", [])
+                if len(values) == 1:
+                    candidate = values[0]
+            return bool(candidate) and hmac.compare_digest(candidate, token)
+
         def do_GET(self) -> None:
             parsed = urlsplit(self.path)
+            if not self._authorized(parsed):
+                self._send(b"Unauthorized", "text/plain; charset=utf-8", 401)
+                return
             path = parsed.path
             if path == "/":
-                self._send(_LIVE_HTML.encode("utf-8"), "text/html; charset=utf-8")
+                self._send(_AUTHENTICATED_LIVE_HTML.encode("utf-8"), "text/html; charset=utf-8")
                 return
             if path == "/graph.json":
                 payload = json.dumps(
@@ -591,7 +631,7 @@ def run_live(
     linger_seconds: float = 2.0,
     announce: Callable[[str], None] | None = None,
 ) -> LiveResult:
-    """Run a command with the portable collector and expose a localhost live graph."""
+    """Run a command with the portable collector and expose an authenticated localhost graph."""
     if not command:
         raise ValueError("command must not be empty")
     if port < 0 or port > 65535:
@@ -600,6 +640,7 @@ def run_live(
         raise ValueError("linger_seconds must be >= 0")
 
     session_id = uuid4().hex
+    live_token = secrets.token_urlsafe(32)
     root = Path(watch_root).expanduser().resolve()
     run_dir = (
         Path(output_dir).expanduser().resolve()
@@ -628,7 +669,7 @@ def run_live(
     )
 
     state = _LiveState(session_id, event_path, semantic_path)
-    server = _LocalThreadingHTTPServer(("127.0.0.1", port), _handler_factory(state))
+    server = _LocalThreadingHTTPServer(("127.0.0.1", port), _handler_factory(state, live_token))
     server.daemon_threads = True
     server_thread = threading.Thread(
         target=server.serve_forever,
@@ -638,10 +679,11 @@ def run_live(
     server_thread.start()
     host, selected_port = server.server_address[:2]
     live_url = f"http://{host}:{selected_port}/"
+    authenticated_live_url = f"{live_url}?{urlencode({'t': live_token})}"
     if announce is not None:
-        announce(live_url)
+        announce(authenticated_live_url)
     if open_browser:
-        webbrowser.open(live_url)
+        webbrowser.open(authenticated_live_url)
 
     return_code = 1
     previous_semantic_sidecar = os.environ.get(_SEMANTIC_ENV)

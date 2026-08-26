@@ -4,8 +4,10 @@ import json
 import os
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from collections import deque
@@ -13,12 +15,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TextIO
 from urllib.error import HTTPError, URLError
-from urllib.request import urlopen
+from urllib.parse import parse_qs, urlsplit, urlunsplit
+from urllib.request import Request, urlopen
 
 import psutil
 
 from .collector import infer_agent_name
 from .live import LiveResult, run_live
+
+
+_ATTACH_TOKEN_PREFIX = "execweave-top-"
+_ATTACH_TOKEN_SUFFIX = ".token"
+_LIVE_TOKEN_HEADER = "X-ExecWeave-Token"
 
 
 @dataclass
@@ -262,17 +270,70 @@ def format_dashboard(
     return "\n".join(lines)
 
 
+def _split_authenticated_live_url(raw: str) -> tuple[str, str]:
+    parsed = urlsplit(raw)
+    values = parse_qs(parsed.query).get("t", [])
+    if len(values) != 1 or not values[0]:
+        raise ValueError("live server did not provide an authentication token")
+    base = urlunsplit((parsed.scheme, parsed.netloc, parsed.path or "/", "", ""))
+    return base, values[0]
+
+
+def _create_attach_token_file(token: str) -> Path:
+    if not token:
+        raise ValueError("live authentication token must not be empty")
+    fd, raw_path = tempfile.mkstemp(prefix=_ATTACH_TOKEN_PREFIX, suffix=_ATTACH_TOKEN_SUFFIX)
+    path = Path(raw_path)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
+            handle.write(token)
+        if os.name != "nt":
+            os.chmod(path, 0o600)
+    except BaseException:
+        path.unlink(missing_ok=True)
+        raise
+    return path
+
+
+def _consume_attach_token_file(raw_path: str | Path) -> str:
+    path = Path(raw_path).expanduser().resolve()
+    temp_root = Path(tempfile.gettempdir()).resolve()
+    if path.parent != temp_root:
+        raise ValueError("detached dashboard token file must be in the system temp directory")
+    if not (path.name.startswith(_ATTACH_TOKEN_PREFIX) and path.name.endswith(_ATTACH_TOKEN_SUFFIX)):
+        raise ValueError("invalid detached dashboard token file name")
+    try:
+        info = path.lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_size > 512:
+            raise ValueError("invalid detached dashboard token file")
+        if os.name != "nt":
+            if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o077:
+                raise ValueError("detached dashboard token file permissions are not private")
+        token = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ValueError("detached dashboard token file is unavailable") from exc
+    finally:
+        path.unlink(missing_ok=True)
+    if not token:
+        raise ValueError("detached dashboard token file is empty")
+    return token
+
+
 class TerminalTopClient:
     def __init__(
         self,
         *,
         live_url: str,
+        token: str,
         command: list[str],
         refresh_seconds: float,
         stream: TextIO,
         stop_event: threading.Event,
     ) -> None:
+        if not token:
+            raise ValueError("live authentication token must not be empty")
         self.live_url = live_url.rstrip("/")
+        self.token = token
         self.command = list(command)
         self.refresh_seconds = max(0.1, refresh_seconds)
         self.stream = stream
@@ -284,7 +345,8 @@ class TerminalTopClient:
 
     def _fetch(self) -> dict[str, object]:
         url = f"{self.live_url}/live.json?after={self.state.sequence}"
-        with urlopen(url, timeout=max(1.0, self.refresh_seconds * 4)) as response:
+        request = Request(url, headers={_LIVE_TOKEN_HEADER: self.token})
+        with urlopen(request, timeout=max(1.0, self.refresh_seconds * 4)) as response:
             payload = json.loads(response.read().decode("utf-8"))
         if not isinstance(payload, dict):
             raise ValueError("live endpoint returned a non-object payload")
@@ -323,14 +385,16 @@ class TerminalTopClient:
 def run_attached_top(
     live_url: str,
     *,
+    token: str,
     command: list[str],
     refresh_seconds: float = 0.50,
     stream: TextIO | None = None,
 ) -> None:
-    """Render an existing live session in the current terminal."""
+    """Render an existing authenticated live session in the current terminal."""
     stop_event = threading.Event()
     client = TerminalTopClient(
         live_url=live_url,
+        token=token,
         command=command,
         refresh_seconds=refresh_seconds,
         stream=stream or sys.stdout,
@@ -345,6 +409,7 @@ def run_attached_top(
 def _dashboard_attach_argv(
     live_url: str,
     *,
+    token_file: Path,
     command: list[str],
     refresh_seconds: float,
 ) -> list[str]:
@@ -355,6 +420,8 @@ def _dashboard_attach_argv(
         "top",
         "--attach",
         live_url,
+        "--attach-token-file",
+        str(token_file),
         "--attach-command-json",
         json.dumps(command, ensure_ascii=False),
         "--refresh",
@@ -408,12 +475,14 @@ def _launch_linux_terminal(argv: list[str]) -> bool:
 def launch_dashboard_terminal(
     live_url: str,
     *,
+    token_file: Path,
     command: list[str],
     refresh_seconds: float,
 ) -> bool:
     """Launch the Top client in a separate terminal without touching Agent stdio."""
     argv = _dashboard_attach_argv(
         live_url,
+        token_file=token_file,
         command=command,
         refresh_seconds=refresh_seconds,
     )
@@ -448,12 +517,15 @@ def run_top(
 
     stop_event = threading.Event()
     terminal_thread: threading.Thread | None = None
+    token_file: Path | None = None
 
-    def announce(live_url: str) -> None:
-        nonlocal terminal_thread
+    def announce(authenticated_live_url: str) -> None:
+        nonlocal terminal_thread, token_file
+        live_url, token = _split_authenticated_live_url(authenticated_live_url)
         if stream is not None:
             client = TerminalTopClient(
                 live_url=live_url,
+                token=token,
                 command=command,
                 refresh_seconds=refresh_seconds,
                 stream=stream,
@@ -467,8 +539,10 @@ def run_top(
             terminal_thread.start()
             return
 
+        token_file = _create_attach_token_file(token)
         launched = launch_dashboard_terminal(
             live_url,
+            token_file=token_file,
             command=command,
             refresh_seconds=refresh_seconds,
         )
@@ -476,6 +550,7 @@ def run_top(
             attach = shlex.join(
                 _dashboard_attach_argv(
                     live_url,
+                    token_file=token_file,
                     command=command,
                     refresh_seconds=refresh_seconds,
                 )
@@ -504,3 +579,5 @@ def run_top(
         stop_event.set()
         if terminal_thread is not None:
             terminal_thread.join(timeout=3)
+        if token_file is not None:
+            token_file.unlink(missing_ok=True)

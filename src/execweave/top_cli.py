@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from .top import run_attached_top, run_top
+from .top import _consume_attach_token_file, run_attached_top, run_top
 
 
 def _clean_command(command: list[str]) -> list[str]:
@@ -65,6 +65,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Open the Web Viewer in addition to the detached terminal dashboard",
     )
     parser.add_argument("--attach", default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--attach-token-file", default=None, help=argparse.SUPPRESS)
     parser.add_argument("--attach-command-json", default="[]", help=argparse.SUPPRESS)
     parser.add_argument("command", nargs=argparse.REMAINDER, help="Command to execute")
     return parser
@@ -107,9 +108,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.attach is not None:
         try:
             live_url = _validate_attach_url(args.attach)
+            if args.attach_token_file is None:
+                raise ValueError("detached dashboard attach token is required")
+            token = _consume_attach_token_file(args.attach_token_file)
             command = _parse_attach_command(args.attach_command_json)
             run_attached_top(
                 live_url,
+                token=token,
                 command=command,
                 refresh_seconds=args.refresh,
             )
