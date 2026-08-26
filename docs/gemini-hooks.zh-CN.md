@@ -57,9 +57,23 @@ conservative correlation
 graph + viewer
 ```
 
-Provider-integrated run 可生成 runtime、semantic 和 correlated 三层 artifact，包括 `events.jsonl`、`semantic.jsonl`、`events.semantic.jsonl`、`events.correlated.jsonl` 及对应 Graph/Viewer。
+Provider-integrated run 可以产生：
 
-Raw runtime 和 provider sidecar 保持分离；correlation 生成新的 derived stream，不改写 observed evidence。
+```text
+.execweave/runs/<run-id>/
+├── events.jsonl
+├── graph.json
+├── viewer.html
+├── semantic.jsonl
+├── events.semantic.jsonl
+├── graph.semantic.json
+├── viewer.semantic.html
+├── events.correlated.jsonl
+├── graph.correlated.json
+└── viewer.correlated.html
+```
+
+Raw runtime 和 provider sidecar evidence 保持分离；correlation 生成新的 derived stream，不改写 observed input evidence。
 
 ## Event mapping
 
@@ -132,6 +146,8 @@ causal: false
 
 Ambiguous、no-match、compound、shell builtin 或 unsupported command 不生成 edge。
 
+Correlated Viewer 会显示 matched / ambiguous / no-match / unsupported 数量，因此 missing edge 不会被静默解释成“什么都没发生”。
+
 ## Privacy
 
 默认不采集 prompt、transcript、raw tool result、raw error body、MCP command/arguments/URL 或 file content。Command、path、tool、session ID、MCP server/tool name 等 metadata 仍可能敏感，分享 artifact 前请检查。
@@ -144,5 +160,7 @@ Ambiguous、no-match、compound、shell builtin 或 unsupported command 不生�
 
 - https://github.com/google-gemini/gemini-cli/blob/main/docs/hooks/reference.md
 - https://github.com/google-gemini/gemini-cli/blob/main/docs/hooks/index.md
+
+Provider hook schema 可能演进。ExecWeave 只记录 provider 实际传递的字段，即使 semantic hook 不可用，也保留独立 OS runtime collection 的价值。
 
 另见 [`Semantic Telemetry`](semantic-telemetry.zh-CN.md)。
