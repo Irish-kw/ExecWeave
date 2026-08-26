@@ -4,7 +4,10 @@
   <a href="gemini-hooks.zh-TW.md">繁體中文</a> |
   <a href="gemini-hooks.zh-CN.md">简体中文</a> |
   <strong>日本語</strong> |
-  <a href="gemini-hooks.ko.md">한국어</a>
+  <a href="gemini-hooks.ko.md">한국어</a> |
+  <a href="gemini-hooks.fr.md">Français</a> |
+  <a href="gemini-hooks.de.md">Deutsch</a> |
+  <a href="gemini-hooks.ru.md">Русский</a>
 </p>
 <!-- i18n-nav:end -->
 
@@ -38,19 +41,37 @@ execweave-gemini-hook --print-config
 execweave-gemini-record --open -- gemini
 ```
 
-Recorder は `EXECWEAVE_SEMANTIC_SIDECAR` で今回の Gemini child process を run-specific sidecar に bind し、共通 `provider_record` pipeline を使用します。
+Recorder は `EXECWEAVE_SEMANTIC_SIDECAR` で今回の Gemini child process を run-specific sidecar に bind し、共通 provider-record pipeline を使用します。
 
 ```text
-runtime evidence + Gemini hook evidence
-                ↓
-       semantic merge
-                ↓
-   conservative correlation
-                ↓
-          graph + viewer
+runtime evidence
+      +
+Gemini hook evidence
+      ↓
+validated semantic merge
+      ↓
+conservative correlation
+      ↓
+graph + viewer
 ```
 
-Runtime-only、semantic、correlated artifacts は分離して保存され、correlation が raw observed evidence を書き換えることはありません。
+Provider-integrated run では次の artifacts を生成できます。
+
+```text
+.execweave/runs/<run-id>/
+├── events.jsonl
+├── graph.json
+├── viewer.html
+├── semantic.jsonl
+├── events.semantic.jsonl
+├── graph.semantic.json
+├── viewer.semantic.html
+├── events.correlated.jsonl
+├── graph.correlated.json
+└── viewer.correlated.html
+```
+
+Raw runtime と provider sidecar evidence は分離したままです。Correlation は observed input evidence を書き換えるのではなく derived stream を生成します。
 
 ## Event mapping
 
@@ -88,7 +109,7 @@ tool_call --VIA_MCP--> mcp_server
 mcp_server --EXPOSES_TOOL--> tool
 ```
 
-MCP launch command、arguments、URL は artifact に保存しません。
+MCP launch command、arguments、URL は sensitive connection metadata や credential を含む可能性があるため artifact に保存しません。
 
 ### AfterTool
 
@@ -123,6 +144,8 @@ causal: false
 
 です。Ambiguous / no-match / compound / shell builtin / unsupported call は edge を生成しません。
 
+Correlated Viewer は matched / ambiguous / no-match / unsupported count を表示するため、missing edge が暗黙に「何も起きなかった」と解釈されることを防ぎます。
+
 ## Privacy
 
 Prompt、transcript、raw tool result、raw error body、MCP command/args/URL、file content はデフォルトでは収集しません。一方、command、path、tool name、session identifier、MCP server/tool name などの metadata は機密情報になり得るため、artifact 共有前に確認してください。
@@ -135,5 +158,7 @@ Prompt、transcript、raw tool result、raw error body、MCP command/args/URL、
 
 - https://github.com/google-gemini/gemini-cli/blob/main/docs/hooks/reference.md
 - https://github.com/google-gemini/gemini-cli/blob/main/docs/hooks/index.md
+
+Provider hook schema は将来変化する可能性があります。ExecWeave は provider が実際に deliver した field のみを記録し、semantic hook が利用できない場合でも独立した OS runtime collection を有用なまま保ちます。
 
 [`Semantic Telemetry`](semantic-telemetry.ja.md) も参照してください。

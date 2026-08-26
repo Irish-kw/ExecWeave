@@ -4,81 +4,179 @@
   <a href="codex-hooks.zh-TW.md">繁體中文</a> |
   <a href="codex-hooks.zh-CN.md">简体中文</a> |
   <strong>日本語</strong> |
-  <a href="codex-hooks.ko.md">한국어</a>
+  <a href="codex-hooks.ko.md">한국어</a> |
+  <a href="codex-hooks.fr.md">Français</a> |
+  <a href="codex-hooks.de.md">Deutsch</a> |
+  <a href="codex-hooks.ru.md">Русский</a>
 </p>
 <!-- i18n-nav:end -->
 
-# OpenAI Codex Lifecycle Hooks
+# OpenAI Codex lifecycle hooks
 
-ExecWeave は OpenAI Codex lifecycle hooks を provider-level semantic evidence として収集する native adapter を提供します。Hook は logical tool call と declared command を示せますが OS child PID は提供しないため、Tool → Process を直接 observed/causal として扱いません。
+ExecWeave は、OS runtime telemetry と同じ local run に provider-level semantic evidence を追加するための native OpenAI Codex lifecycle-hook adapter を提供します。
 
-## Supported events
+この integration は意図的に保守的です。Codex lifecycle hook は、どの logical tool call が要求されたか、shell execution ではどの command が宣言されたかを ExecWeave に伝えられます。ただし OS child PID は提供しないため、ExecWeave は provider hook 由来の Tool → Process attribution を directly observed または causal evidence として提示しません。
+
+## Current support
+
+ExecWeave は現在、次の Codex lifecycle event を使用します。
 
 - `SessionStart`
 - `PreToolUse`
 - `PostToolUse`
 
-`SessionStart` で model があれば `OpenAI Codex --USED_MODEL--> model`。
+Adapter は Codex が実際に deliver した hook だけを記録します。Unknown lifecycle event は推測せず無視します。
 
-`PreToolUse` は `tool_use_id` を stable call identity とし：
+### `SessionStart`
+
+Model name が存在する場合、ExecWeave は次を記録します。
+
+```text
+OpenAI Codex --USED_MODEL--> model
+```
+
+Adapter は transcript file の内容を読み取ったりコピーしたりしません。
+
+### `PreToolUse`
+
+ExecWeave は provider の `tool_use_id` を stable logical tool-call identity として使用します。
 
 ```text
 OpenAI Codex --REQUESTED_TOOL_CALL--> tool_call
 tool_call --USES_TOOL--> tool
-tool_call --DECLARED_COMMAND--> command   # Bash の場合
 ```
 
-`PostToolUse` は neutral な：
+Canonical Codex `Bash` hook tool では、string の `tool_input.command` があると次も生成します。
+
+```text
+tool_call --DECLARED_COMMAND--> command
+```
+
+Declared command は semantic provider evidence です。後続の conservative correlation には有用ですが、特定の OS process がその command を実行した証拠ではありません。
+
+### `PostToolUse`
+
+ExecWeave は現在 neutral な completion relation を記録します。
 
 ```text
 tool_call --TOOL_CALL_RETURNED--> tool
 ```
 
-として記録します。現 payload では reliable success/failure discriminator が不足するため、`SUCCEEDED/FAILED` を推測しません。Raw `tool_response` content も保存しません。
+`PostToolUse` を `TOOL_CALL_SUCCEEDED` または `TOOL_CALL_FAILED` に意図的に変換しません。現在の Codex hook payload は、その claim を安全に行うのに十分 reliable な success/failure discriminator を提供していません。
 
-## Setup
+ExecWeave は raw `tool_response` を semantic telemetry に保存しません。String response については response type と character count だけを保存します。
+
+## Configure Codex
+
+ExecWeave をインストールした後、対応している lifecycle-hook configuration fragment を生成します。
 
 ```bash
 execweave-codex-hook --print-config
 ```
 
-生成された hooks を Codex `hooks.json` に merge します。Adapter は default fail-open、`--strict` は debug 用です。
+出力された `hooks` object を Codex の `hooks.json` configuration に merge してください。
 
-## Record
+生成される configuration は `SessionStart`、`PreToolUse`、`PostToolUse` に `execweave-codex-hook` を登録します。
+
+Hook adapter はデフォルトで fail-open です。Telemetry problem は warning を表示しますが、Codex を意図的に block しません。Adapter 自体を debug する場合は：
+
+```bash
+execweave-codex-hook --strict
+```
+
+## Record one Codex run
+
+Codex が hook を invoke するよう設定した後：
 
 ```bash
 execweave-codex-record --open -- codex
 ```
 
-Recorder は Codex child process に run-specific sidecar path を継承させ、runtime/semantic/correlated artifacts を分離して生成します。Hook event が無ければ runtime-only に fallback します。
+`execweave-codex-record` は Codex configuration を変更しません。Inherited environment variable を使って child Codex process を run-specific semantic sidecar に bind するだけです。
+
+Lifecycle hook が発火すると、run directory には layered artifact が含まれます。
 
 ```text
-.events runtime only
-semantic.jsonl provider evidence
-.events.semantic merged observed evidence
-events.correlated.jsonl derived inference
+.execweave/runs/<run-id>/
+├── events.jsonl              # runtime evidence only
+├── graph.json                # runtime-only graph
+├── viewer.html               # runtime-only viewer
+├── semantic.jsonl            # Codex lifecycle-hook evidence only
+├── events.semantic.jsonl     # validated runtime + semantic stream
+├── graph.semantic.json       # runtime + semantic graph
+├── viewer.semantic.html      # runtime + semantic viewer
+├── events.correlated.jsonl   # derived stream; observed evidence unchanged
+├── graph.correlated.json     # graph with inferred bridges + correlation metadata
+└── viewer.correlated.html    # viewer with correlation summary
 ```
 
-## Correlation
+Codex hook event が届かない場合、recorder は安全に runtime-only artifact へ fallback します。
 
-Declared `Bash` command と runtime evidence を比較し、unique candidate がある場合のみ：
+## Tool → Process correlation
+
+次のような `Bash` declaration の場合：
+
+```text
+tool_call --DECLARED_COMMAND--> "python task.py"
+```
+
+ExecWeave はその semantic declaration を bounded runtime process evidence と比較できます。既存の conservative matcher により 1 つの process candidate だけが一意に support された場合のみ、次を emit します。
 
 ```text
 tool_call --CORRELATED_WITH_PROCESS--> process
 ```
 
-を生成します。常に `inferred: true`, `causal: false`。Ambiguous/no-match/builtin/compound/unsupported は no edge です。Graph metadata の Correlation Summary で `matched / ambiguous / no match / unsupported` を区別できます。
+そのような bridge は常に：
 
-Viewer の **observed only** は inferred edge を focus/layout 前に除外します。
+```text
+inferred: true
+causal: false
+```
 
-## Privacy
+のままです。
 
-保存するのは session/turn/model/tool/tool-use ID、input key names、declared Bash command、PostToolUse response type/length など必要な metadata です。Prompt、transcript content、raw tool response、file content、provider-derived child PID は収集しません。
+Ambiguous、unmatched、shell-builtin、compound、その他 unsupported な call では bridge を生成しません。Correlated graph は run-level correlation summary を保持するため、Viewer はすべての missing edge を同じものとして扱わず、`matched`、`ambiguous`、`no match`、`unsupported` を区別できます。
 
-## Upstream limitations
+Viewer には **observed only** もあり、focus traversal と layout の前に inferred edge を除去します。
 
-Codex hooks は進化中です。`PostToolUse` outcome signal は限定的で、`codex exec` や一部 Windows path に hook coverage gap が報告されています。これらは semantic coverage の制約であり、独立した OS runtime collector は引き続き動作します。
+## Evidence and privacy boundary
 
-> Provider semantics は Agent が何をしようとしたか、OS telemetry は machine が何を観測したかを示します。両者をつなぐ場合も unique evidence に基づく explicit non-causal inference として扱います。
+ExecWeave の Codex adapter は graph construction に必要な semantic metadata を現在保存します。
 
-詳細は [`Semantic Telemetry`](semantic-telemetry.ja.md)。
+- Codex session ID
+- 提供された場合の turn ID
+- model name
+- tool name
+- tool-use ID
+- input key name
+- declared `Bash` command
+- `PostToolUse` の response type / response length
+
+意図的に収集しないもの：
+
+- prompt text
+- transcript-file contents
+- raw `tool_response` contents
+- file contents
+- provider-derived Tool → Process PID
+
+Command には secret や sensitive path が含まれる可能性があります。Artifact を共有する前に review してください。
+
+## Current upstream limitations
+
+Codex lifecycle hook は進化中です。そのため ExecWeave はこの integration を native semantic adapter として扱い、すべての Codex execution mode が完全な lifecycle coverage を公開する証拠とは扱いません。
+
+Known constraint：
+
+1. `PostToolUse` は現在 reliable な success/failure signal を ExecWeave に与えないため、relation は neutral な `TOOL_CALL_RETURNED` です。
+2. 一部の `codex exec` path では lifecycle-hook dispatch に最近 gap がありました。Lifecycle-hook telemetry の初期 target としては interactive Codex CLI の方が安全です。
+3. 一部の Windows command-execution path でも hook-coverage gap が報告されています。
+4. Provider hook は directly observed Tool → Process attribution に必要な OS child PID を提供しません。
+
+これらの limitation は semantic coverage に影響しますが、独立した OS runtime collector には影響しません。Provider hook が一切発火しなくても runtime evidence は利用できます。
+
+## Design rule
+
+Codex integration は ExecWeave の他部分と同じ evidence rule に従います。
+
+> Provider semantics は Agent が何をしていると述べたかを説明し、OS telemetry は machine が実際に何を観測したかを説明します。両者の correlation は evidence が unique な場合にのみ、explicit な non-causal inference として接続できます。

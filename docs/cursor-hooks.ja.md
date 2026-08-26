@@ -1,12 +1,17 @@
 # Cursor Hooks
 
+<!-- i18n-nav:start -->
 <p align="center">
   <a href="cursor-hooks.md">English</a> |
   <a href="cursor-hooks.zh-TW.md">繁體中文</a> |
   <a href="cursor-hooks.zh-CN.md">简体中文</a> |
   <strong>日本語</strong> |
-  <a href="cursor-hooks.ko.md">한국어</a>
+  <a href="cursor-hooks.ko.md">한국어</a> |
+  <a href="cursor-hooks.fr.md">Français</a> |
+  <a href="cursor-hooks.de.md">Deutsch</a> |
+  <a href="cursor-hooks.ru.md">Русский</a>
 </p>
+<!-- i18n-nav:end -->
 
 ExecWeave は Cursor のネイティブ Hook を利用し、Agent / Tool / Command の論理的なセマンティック証拠を実行グラフへ追加します。Provider metadata を OS レベルの因果証拠として扱うことはありません。
 

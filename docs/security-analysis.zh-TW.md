@@ -4,7 +4,10 @@
   <strong>繁體中文</strong> |
   <a href="security-analysis.zh-CN.md">简体中文</a> |
   <a href="security-analysis.ja.md">日本語</a> |
-  <a href="security-analysis.ko.md">한국어</a>
+  <a href="security-analysis.ko.md">한국어</a> |
+  <a href="security-analysis.fr.md">Français</a> |
+  <a href="security-analysis.de.md">Deutsch</a> |
+  <a href="security-analysis.ru.md">Русский</a>
 </p>
 <!-- i18n-nav:end -->
 

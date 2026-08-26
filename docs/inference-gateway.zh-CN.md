@@ -1,12 +1,17 @@
 # Inference Gateway Integrations
 
+<!-- i18n-nav:start -->
 <p align="center">
   <a href="inference-gateway.md">English</a> |
   <a href="inference-gateway.zh-TW.md">繁體中文</a> |
   <strong>简体中文</strong> |
   <a href="inference-gateway.ja.md">日本語</a> |
-  <a href="inference-gateway.ko.md">한국어</a>
+  <a href="inference-gateway.ko.md">한국어</a> |
+  <a href="inference-gateway.fr.md">Français</a> |
+  <a href="inference-gateway.de.md">Deutsch</a> |
+  <a href="inference-gateway.ru.md">Русский</a>
 </p>
+<!-- i18n-nav:end -->
 
 Inference Gateway 是 Agent/client 与 model provider/runtime 之间的独立层。当前 baseline 支持 **OpenRouter** 与 **LiteLLM Proxy**。
 

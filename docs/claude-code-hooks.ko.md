@@ -4,7 +4,10 @@
   <a href="claude-code-hooks.zh-TW.md">繁體中文</a> |
   <a href="claude-code-hooks.zh-CN.md">简体中文</a> |
   <a href="claude-code-hooks.ja.md">日本語</a> |
-  <strong>한국어</strong>
+  <strong>한국어</strong> |
+  <a href="claude-code-hooks.fr.md">Français</a> |
+  <a href="claude-code-hooks.de.md">Deutsch</a> |
+  <a href="claude-code-hooks.ru.md">Русский</a>
 </p>
 <!-- i18n-nav:end -->
 

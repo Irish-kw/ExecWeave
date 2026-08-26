@@ -4,7 +4,10 @@
   <strong>繁體中文</strong> |
   <a href="gemini-hooks.zh-CN.md">简体中文</a> |
   <a href="gemini-hooks.ja.md">日本語</a> |
-  <a href="gemini-hooks.ko.md">한국어</a>
+  <a href="gemini-hooks.ko.md">한국어</a> |
+  <a href="gemini-hooks.fr.md">Français</a> |
+  <a href="gemini-hooks.de.md">Deutsch</a> |
+  <a href="gemini-hooks.ru.md">Русский</a>
 </p>
 <!-- i18n-nav:end -->
 
