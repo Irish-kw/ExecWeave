@@ -4,14 +4,21 @@ import argparse
 import json
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from .claude_adapter import append_semantic_records, claude_hook_to_semantic_events, read_hook_payload
+from .claude_full_fidelity import claude_hook_to_content_events
+from .content_store import FullFidelityContentStore
 
 
 def _hook_handler(command: str) -> dict[str, str]:
     return {"type": "command", "command": command}
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def claude_hook_config(command: str = "execweave-claude-hook") -> dict[str, Any]:
@@ -21,11 +28,16 @@ def claude_hook_config(command: str = "execweave-claude-hook") -> dict[str, Any]
     return {
         "hooks": {
             "SessionStart": [plain_group],
+            "UserPromptSubmit": [plain_group],
+            "MessageDisplay": [plain_group],
             "PreToolUse": [tool_group],
             "PostToolUse": [tool_group],
             "PostToolUseFailure": [tool_group],
+            "PostToolBatch": [plain_group],
             "SubagentStart": [plain_group],
             "SubagentStop": [plain_group],
+            "Stop": [plain_group],
+            "StopFailure": [plain_group],
         }
     }
 
@@ -89,9 +101,19 @@ def main(argv: list[str] | None = None) -> int:
         if sidecar is None:
             configured = os.environ.get("EXECWEAVE_SEMANTIC_SIDECAR")
             sidecar = Path(configured) if configured else _default_sidecar(payload)
-        records = claude_hook_to_semantic_events(payload)
+        sidecar = Path(sidecar).expanduser().resolve()
+        observed_at = _now()
+        records = claude_hook_to_semantic_events(payload, timestamp=observed_at)
+        content_store = FullFidelityContentStore(sidecar.parent)
+        records.extend(
+            claude_hook_to_content_events(
+                payload,
+                store=content_store,
+                timestamp=observed_at,
+            )
+        )
         append_semantic_records(sidecar, records)
-    except (OSError, TimeoutError, ValueError) as exc:
+    except (OSError, RuntimeError, TimeoutError, TypeError, ValueError) as exc:
         print(f"ExecWeave Claude hook warning: {exc}", file=sys.stderr)
         return 1 if args.strict else 0
     return 0

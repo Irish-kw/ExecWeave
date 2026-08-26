@@ -170,16 +170,23 @@ def test_hook_config_covers_supported_events() -> None:
 
     assert set(hooks) == {
         "SessionStart",
+        "UserPromptSubmit",
+        "MessageDisplay",
         "PreToolUse",
         "PostToolUse",
         "PostToolUseFailure",
+        "PostToolBatch",
         "SubagentStart",
         "SubagentStop",
+        "Stop",
+        "StopFailure",
     }
     for event_name, groups in hooks.items():
         assert groups[0]["hooks"][0]["command"] == "custom-execweave-hook"
         if event_name in {"PreToolUse", "PostToolUse", "PostToolUseFailure"}:
             assert groups[0]["matcher"] == "*"
+        else:
+            assert "matcher" not in groups[0]
 
 
 def test_hook_cli_auto_scopes_sidecar_by_claude_session(monkeypatch, tmp_path: Path) -> None:
@@ -202,13 +209,21 @@ def test_hook_cli_auto_scopes_sidecar_by_claude_session(monkeypatch, tmp_path: P
         "REQUESTED_TOOL_CALL",
         "USES_TOOL",
         "DECLARED_TARGET",
+        "OBSERVED_PROVIDER_METADATA",
+        "HAS_TOOL_INPUT",
     ]
+    content_root = output.parent / "content" / "sha256"
+    assert content_root.is_dir()
+    assert any(content_root.iterdir())
 
 
 def test_hook_cli_print_config(capsys) -> None:
     assert claude_hook_main(["--print-config", "--command", "custom-hook"]) == 0
     config = json.loads(capsys.readouterr().out)
     assert config["hooks"]["PreToolUse"][0]["hooks"][0]["command"] == "custom-hook"
+    assert "UserPromptSubmit" in config["hooks"]
+    assert "PostToolBatch" in config["hooks"]
+    assert "Stop" in config["hooks"]
 
 
 def test_hook_cli_is_fail_open_by_default(monkeypatch, tmp_path: Path, capsys) -> None:

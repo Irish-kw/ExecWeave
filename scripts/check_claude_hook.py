@@ -10,8 +10,9 @@ def main() -> int:
     output = Path("claude-hook-smoke.jsonl").resolve()
     if output.exists():
         output.unlink()
+    content_root = output.parent / "content" / "sha256"
 
-    secret = "THIS-CONTENT-MUST-NOT-BE-STORED"
+    secret = "THIS-CONTENT-MUST-BE-STORED-FULL-FIDELITY"
     payload = {
         "session_id": "ci-claude-session",
         "prompt_id": "ci-prompt",
@@ -42,10 +43,21 @@ def main() -> int:
 
     records = [json.loads(line) for line in output.read_text(encoding="utf-8").splitlines()]
     relations = [record.get("relation") for record in records]
-    if relations != ["REQUESTED_TOOL_CALL", "USES_TOOL", "DECLARED_TARGET"]:
+    expected = [
+        "REQUESTED_TOOL_CALL",
+        "USES_TOOL",
+        "DECLARED_TARGET",
+        "OBSERVED_PROVIDER_METADATA",
+        "HAS_TOOL_INPUT",
+    ]
+    if relations != expected:
         raise SystemExit(f"unexpected Claude hook relations: {relations}")
     if secret in output.read_text(encoding="utf-8"):
-        raise SystemExit("Claude Write content leaked into semantic sidecar")
+        raise SystemExit("Claude Write content was inlined into semantic sidecar")
+    if not content_root.exists():
+        raise SystemExit("Claude full-fidelity content store was not created")
+    if not any(secret.encode("utf-8") in path.read_bytes() for path in content_root.iterdir()):
+        raise SystemExit("Claude Write content was not preserved in full-fidelity content store")
 
     config = subprocess.run(
         ["execweave-claude-hook", "--print-config"],
@@ -56,11 +68,16 @@ def main() -> int:
     parsed = json.loads(config.stdout)
     required = {
         "SessionStart",
+        "UserPromptSubmit",
+        "MessageDisplay",
         "PreToolUse",
         "PostToolUse",
         "PostToolUseFailure",
+        "PostToolBatch",
         "SubagentStart",
         "SubagentStop",
+        "Stop",
+        "StopFailure",
     }
     if set(parsed.get("hooks", {})) != required:
         raise SystemExit("generated Claude hook config is incomplete")
