@@ -1,0 +1,58 @@
+name: Normalize uploaded README image
+
+on:
+  push:
+    paths:
+      - ".github/workflows/normalize-uploaded-readme-image.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  normalize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Move uploaded image and update READMEs
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_image="1a4d08e1-efe8-4c09-b41b-e97cb24cfa43.png"
+          target_image="docs/assets/execweave-live-demo.png"
+
+          test -f "$source_image"
+          mkdir -p docs/assets
+          rm -f docs/assets/execweave-live-demo.webp
+          git mv "$source_image" "$target_image"
+
+          python - <<'PY'
+          from pathlib import Path
+
+          readmes = [
+              Path("README.md"),
+              Path("README.zh-TW.md"),
+              Path("README.zh-CN.md"),
+              Path("README.ja.md"),
+              Path("README.ko.md"),
+              Path("README.fr.md"),
+              Path("README.de.md"),
+              Path("README.ru.md"),
+          ]
+          old = "docs/assets/execweave-live-demo.webp"
+          new = "docs/assets/execweave-live-demo.png"
+          for path in readmes:
+              text = path.read_text(encoding="utf-8")
+              if old not in text:
+                  raise SystemExit(f"missing expected image reference in {path}")
+              path.write_text(text.replace(old, new), encoding="utf-8")
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README*.md docs/assets
+          git commit -m "docs: normalize README live demo image"
+          git push origin HEAD:main
