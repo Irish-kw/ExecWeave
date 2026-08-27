@@ -66,9 +66,15 @@ def _inject_live_auth(html: str) -> str:
 
 def _inject_final_theme(html: str) -> str:
     themed = _base_inject_final_theme(html)
-    return themed.replace(
+    themed = themed.replace(
         "#execweave-theme-toggle{position:fixed;right:14px;bottom:14px;",
         "#execweave-theme-toggle{position:fixed;right:14px;top:14px;",
+        1,
+    )
+    return themed.replace(
+        "</style>",
+        "#save-preset{position:fixed;right:14px;top:58px;z-index:9998;"
+        "box-shadow:0 4px 18px rgba(15,23,42,.12)}\n</style>",
         1,
     )
 
