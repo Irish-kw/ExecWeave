@@ -6,7 +6,7 @@ import webbrowser
 from pathlib import Path
 
 from .theme import ensure_viewer_theme
-from .viewer import build_viewer_from_graph
+from .viewer_projection import build_viewer_from_graph
 
 
 def build_parser() -> argparse.ArgumentParser:

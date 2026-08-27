@@ -10,7 +10,7 @@ from .graph import build_execution_graph, write_execution_graph
 from .sink import JsonlSink
 from .theme import ensure_viewer_theme
 from .validate import validate_event_stream
-from .viewer import write_graph_html
+from .viewer_projection import write_graph_html
 
 
 @dataclass(frozen=True)

@@ -11,7 +11,7 @@ from .backends import BackendName
 from .correlation import CorrelationResult, correlate_tool_process
 from .graph import build_execution_graph, write_execution_graph
 from .semantic import SemanticMergeResult, merge_semantic_sidecar
-from .viewer import write_graph_html
+from .viewer_projection import write_graph_html
 from .workflow import RecordResult, record_to_viewer
 
 _SEMANTIC_ENV = "EXECWEAVE_SEMANTIC_SIDECAR"

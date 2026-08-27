@@ -22,10 +22,11 @@ from .live_view import LIVE_HTML as _LIVE_HTML
 from .semantic import LiveSemanticNormalizer, merge_semantic_sidecar
 from .sink import JsonlSink
 from .validate import validate_event_stream
-from .viewer import (
+from .viewer_projection import (
     VIEWER_MAX_DOM_ELEMENTS,
     VIEWER_MAX_EDGES,
     VIEWER_MAX_NODES,
+    project_viewer_graph,
     render_graph_html,
     write_graph_html,
 )
@@ -185,6 +186,7 @@ class _LiveState:
         self._updates: deque[dict[str, object]] = deque()
         self._update_sizes: deque[int] = deque()
         self._updates_bytes = 0
+        self._viewer_projection_ever_active = False
 
     def _empty_graph(self) -> dict[str, object]:
         return {
@@ -212,6 +214,25 @@ class _LiveState:
             "edge_count": self._accumulator.edge_count,
         }
 
+    def _projected_graph_locked(self) -> dict[str, object]:
+        raw_graph = (
+            dict(self._final_graph)
+            if self._finished and self._final_graph is not None
+            else self._accumulator.to_dict()
+        )
+        projected = project_viewer_graph(raw_graph)
+        if isinstance(projected.get("viewer_projection"), dict):
+            self._viewer_projection_ever_active = True
+        return projected
+
+    @staticmethod
+    def _projected_counts(graph: dict[str, object]) -> dict[str, object]:
+        return {
+            "event_count": int(graph.get("event_count", 0) or 0),
+            "node_count": int(graph.get("node_count", 0) or 0),
+            "edge_count": int(graph.get("edge_count", 0) or 0),
+        }
+
     def _clear_update_history_locked(self) -> None:
         self._updates.clear()
         self._update_sizes.clear()
@@ -237,31 +258,17 @@ class _LiveState:
         self._update_sequence += 1
         self._resync_floor = self._update_sequence
 
-    def _snapshot_from_accumulator_locked(self) -> dict[str, object]:
-        if self._finished and self._final_graph is not None:
-            graph = self._final_graph
-            node_count = int(graph.get("node_count", 0) or 0)
-            edge_count = int(graph.get("edge_count", 0) or 0)
-            return (
-                dict(graph)
-                if _within_live_payload_budget(node_count, edge_count)
-                else _compact_live_graph(graph)
-            )
-        if _within_live_payload_budget(
-            self._accumulator.node_count,
-            self._accumulator.edge_count,
-        ):
-            return self._accumulator.to_dict()
-        return _compact_live_graph(
-            {
-                "graph_schema_version": GRAPH_SCHEMA_VERSION,
-                "session_id": self.session_id,
-                "source_path": self._accumulator.source_path,
-                "source_schema_versions": sorted(self._accumulator.source_schema_versions),
-                "event_count": self._accumulator.event_count,
-                "node_count": self._accumulator.node_count,
-                "edge_count": self._accumulator.edge_count,
-            }
+    def _snapshot_from_accumulator_locked(
+        self,
+        projected: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        graph = projected if projected is not None else self._projected_graph_locked()
+        node_count = int(graph.get("node_count", 0) or 0)
+        edge_count = int(graph.get("edge_count", 0) or 0)
+        return (
+            graph
+            if _within_live_payload_budget(node_count, edge_count)
+            else _compact_live_graph(graph)
         )
 
     def _append_update_locked(self, update: dict[str, object]) -> None:
@@ -476,11 +483,13 @@ class _LiveState:
         with self._lock:
             if not self._finished:
                 self._refresh_incremental_locked()
+            projected = self._projected_graph_locked()
+            projected_counts = self._projected_counts(projected)
             if after is None or after < 0:
                 return {
                     "kind": "snapshot",
                     "sequence": self._update_sequence,
-                    "graph": self._snapshot_from_accumulator_locked(),
+                    "graph": self._snapshot_from_accumulator_locked(projected),
                     **self._evidence_metadata_locked(),
                     "live_finished": self._finished,
                 }
@@ -494,18 +503,26 @@ class _LiveState:
                 return {
                     "kind": "snapshot",
                     "sequence": self._update_sequence,
-                    "graph": self._snapshot_from_accumulator_locked(),
+                    "graph": self._snapshot_from_accumulator_locked(projected),
                     **self._evidence_metadata_locked(),
                     "live_finished": self._finished,
                     "resync": True,
                     "resync_reason": "future_sequence" if after > self._update_sequence else "history_gap",
                 }
-            counts = self._counts_locked()
+            counts = projected_counts if self._viewer_projection_ever_active else self._counts_locked()
             if after == self._update_sequence:
                 return {
                     "kind": "noop",
                     "sequence": self._update_sequence,
                     **counts,
+                    **self._evidence_metadata_locked(),
+                    "live_finished": self._finished,
+                }
+            if self._viewer_projection_ever_active:
+                return {
+                    "kind": "snapshot",
+                    "sequence": self._update_sequence,
+                    "graph": self._snapshot_from_accumulator_locked(projected),
                     **self._evidence_metadata_locked(),
                     "live_finished": self._finished,
                 }
