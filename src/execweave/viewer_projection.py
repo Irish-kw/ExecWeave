@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import json
+import webbrowser
 from collections import defaultdict
 from copy import deepcopy
 from pathlib import Path
@@ -14,7 +15,10 @@ from .viewer import (
     VIEWER_MAX_EDGES as VIEWER_MAX_EDGES,
     VIEWER_MAX_NODES as VIEWER_MAX_NODES,
     render_graph_html as _render_graph_html,
-    write_graph_html as _write_graph_html,
+)
+from .viewer_content_inspector import (
+    decorate_viewer_content_references,
+    inject_standalone_content_inspector,
 )
 
 EPHEMERAL_PORT_MIN = 49152
@@ -165,16 +169,15 @@ def _cluster_for_group(
 
 
 def project_viewer_graph(graph: dict[str, Any]) -> dict[str, Any]:
-    """Collapse noisy localhost ephemeral endpoints without changing raw evidence.
+    """Apply bounded presentation-only projections without changing raw evidence.
 
-    This is a presentation projection only. Eligible endpoints must be leaf-like
-    network_endpoint nodes with exactly one incident CONNECTED_TO edge from a
-    process. At least four eligible endpoints from the same process are required.
-    The originals are embedded as expansion evidence so the standalone viewer can
-    restore every node and edge on demand.
+    Full-fidelity content nodes receive validated, viewer-only reference metadata.
+    No content bytes are embedded. Noisy localhost ephemeral endpoints are then
+    collapsed only when they satisfy the existing conservative leaf/group rules.
     """
-    nodes = [node for node in graph.get("nodes", []) if isinstance(node, dict)]
-    edges = [edge for edge in graph.get("edges", []) if isinstance(edge, dict)]
+    decorated = decorate_viewer_content_references(graph)
+    nodes = [node for node in decorated.get("nodes", []) if isinstance(node, dict)]
+    edges = [edge for edge in decorated.get("edges", []) if isinstance(edge, dict)]
     node_by_id = {
         node["id"]: node for node in nodes if isinstance(node.get("id"), str)
     }
@@ -217,7 +220,7 @@ def project_viewer_graph(graph: dict[str, Any]) -> dict[str, Any]:
         if len(members) >= LOOPBACK_CLUSTER_THRESHOLD
     }
     if not qualifying:
-        return dict(graph)
+        return decorated
 
     collapsed_node_ids: set[str] = set()
     collapsed_edge_ids: set[str] = set()
@@ -240,7 +243,7 @@ def project_viewer_graph(graph: dict[str, Any]) -> dict[str, Any]:
             if isinstance(edge.get("id"), str)
         )
 
-    projected = deepcopy(graph)
+    projected = deepcopy(decorated)
     projected["nodes"] = [
         deepcopy(node) for node in nodes if node.get("id") not in collapsed_node_ids
     ] + cluster_nodes
@@ -276,7 +279,8 @@ def project_viewer_graph(graph: dict[str, Any]) -> dict[str, Any]:
 
 
 def render_graph_html(graph: dict[str, Any]) -> str:
-    return _render_graph_html(project_viewer_graph(graph))
+    html = _render_graph_html(project_viewer_graph(graph))
+    return inject_standalone_content_inspector(html)
 
 
 def write_graph_html(
@@ -285,11 +289,14 @@ def write_graph_html(
     *,
     open_browser: bool = False,
 ) -> Path:
-    return _write_graph_html(
-        project_viewer_graph(graph),
-        path,
-        open_browser=open_browser,
-    )
+    output = Path(path).expanduser().resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    if output.exists() and output.stat().st_size > 0:
+        raise FileExistsError(f"ExecWeave viewer output already exists: {output}")
+    output.write_text(render_graph_html(graph), encoding="utf-8")
+    if open_browser:
+        webbrowser.open(output.as_uri())
+    return output
 
 
 def build_viewer_from_graph(
