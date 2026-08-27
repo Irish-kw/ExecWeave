@@ -20,6 +20,9 @@ Path = _core.Path
 _JsonlTail = _core._JsonlTail
 LIVE_DELTA_HISTORY = _core.LIVE_DELTA_HISTORY
 LIVE_DELTA_HISTORY_BYTES = _core.LIVE_DELTA_HISTORY_BYTES
+VIEWER_MAX_NODES = _core.VIEWER_MAX_NODES
+VIEWER_MAX_EDGES = _core.VIEWER_MAX_EDGES
+VIEWER_MAX_DOM_ELEMENTS = _core.VIEWER_MAX_DOM_ELEMENTS
 _LIVE_HTML = _core._LIVE_HTML
 render_graph_html = _projected_render_graph_html
 write_graph_html = _projected_write_graph_html
@@ -27,6 +30,15 @@ write_graph_html = _projected_write_graph_html
 LIVE_RAW_EVENT_HISTORY = 320
 _BaseLiveState = _core._LiveState
 _base_inject_live_auth = _core._inject_live_auth
+
+
+def _within_live_payload_budget(node_count: int, edge_count: int) -> bool:
+    estimated_dom = node_count * 4 + edge_count * 3
+    return (
+        node_count <= VIEWER_MAX_NODES
+        and edge_count <= VIEWER_MAX_EDGES
+        and estimated_dom <= VIEWER_MAX_DOM_ELEMENTS
+    )
 
 
 def _inject_live_auth(html: str) -> str:
@@ -105,7 +117,7 @@ class _LiveState(_BaseLiveState):
         edge_count = int(graph.get("edge_count", 0) or 0)
         return (
             graph
-            if _core._within_live_payload_budget(node_count, edge_count)
+            if _within_live_payload_budget(node_count, edge_count)
             else _core._compact_live_graph(graph)
         )
 
