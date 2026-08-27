@@ -1,0 +1,156 @@
+name: README v0.6.9 Cleanup
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/readme-v069-cleanup.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Consolidate README around v0.6.9
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          files = [
+              "README.md",
+              "README.zh-TW.md",
+              "README.zh-CN.md",
+              "README.ja.md",
+              "README.ko.md",
+              "README.fr.md",
+              "README.de.md",
+              "README.ru.md",
+          ]
+
+          intro = {
+              "README.md": "ExecWeave is a source-available, local-first observability project that turns AI-agent activity into an interactive execution graph while keeping observed evidence, provider content, and derived inference explicitly separated.",
+              "README.zh-TW.md": "ExecWeave 是一個 source-available、local-first 的可觀測性專案，會把 AI Agent 活動轉成互動式 execution graph，並明確區分 observed evidence、provider content 與 derived inference。",
+              "README.zh-CN.md": "ExecWeave 是一个 source-available、local-first 的可观测性项目，把 AI Agent 活动转换为交互式 execution graph，并明确区分 observed evidence、provider content 与 derived inference。",
+              "README.ja.md": "ExecWeave は source-available、local-first の observability プロジェクトで、AI Agent の活動をインタラクティブな execution graph に変換し、observed evidence、provider content、derived inference を明確に分離します。",
+              "README.ko.md": "ExecWeave는 AI Agent 활동을 인터랙티브 execution graph로 변환하면서 observed evidence, provider content, derived inference를 명확히 분리하는 source-available, local-first observability 프로젝트입니다.",
+              "README.fr.md": "ExecWeave est un projet d’observabilité source-available et local-first qui transforme l’activité des agents IA en execution graph interactif, tout en séparant explicitement observed evidence, provider content et derived inference.",
+              "README.de.md": "ExecWeave ist ein source-available, local-first Observability-Projekt, das Aktivitäten von AI Agents in einen interaktiven execution graph umwandelt und observed evidence, provider content sowie derived inference ausdrücklich getrennt hält.",
+              "README.ru.md": "ExecWeave — source-available, local-first проект наблюдаемости, который преобразует активность AI Agent в интерактивный execution graph и явно разделяет observed evidence, provider content и derived inference.",
+          }
+
+          release = {
+              "README.md": "The current release is **v0.6.9**.",
+              "README.zh-TW.md": "目前正式版本是 **v0.6.9**。",
+              "README.zh-CN.md": "当前正式版本是 **v0.6.9**。",
+              "README.ja.md": "現在の正式リリースは **v0.6.9** です。",
+              "README.ko.md": "현재 정식 릴리스는 **v0.6.9**입니다.",
+              "README.fr.md": "La version stable actuelle est **v0.6.9**.",
+              "README.de.md": "Die aktuelle stabile Version ist **v0.6.9**.",
+              "README.ru.md": "Текущий стабильный релиз — **v0.6.9**.",
+          }
+
+          performance = {
+              "README.md": "ExecWeave includes bounded filesystem/viewer protections, incremental Live JSONL tailing, large-graph safety guards, detached Top, and provisional live sidecars for configured provider integrations.",
+              "README.zh-TW.md": "ExecWeave 具備 bounded filesystem/viewer protection、incremental Live JSONL tailing、large-graph safety guard、detached Top，以及 configured provider integration 使用的 provisional live sidecar。",
+              "README.zh-CN.md": "ExecWeave 包含 bounded filesystem/viewer protection、incremental Live JSONL tailing、large-graph safety guard、detached Top，以及 configured provider integration 使用的 provisional live sidecar。",
+              "README.ja.md": "ExecWeave は bounded filesystem/viewer protection、incremental Live JSONL tailing、large-graph safety guard、detached Top、configured provider integration 用 provisional live sidecar を備えています。",
+              "README.ko.md": "ExecWeave는 bounded filesystem/viewer protection, incremental Live JSONL tailing, large-graph safety guard, detached Top, configured provider integration용 provisional live sidecar를 포함합니다.",
+              "README.fr.md": "ExecWeave inclut des protections bornées pour le filesystem/viewer, le suivi incrémental Live JSONL, des garde-fous pour les grands graphes, Top détaché et des live sidecars provisoires pour les provider integrations configurées.",
+              "README.de.md": "ExecWeave umfasst begrenzte filesystem/viewer protections, inkrementelles Live-JSONL-Tailing, large-graph safety guards, detached Top und provisorische Live-Sidecars für konfigurierte Provider-Integrationen.",
+              "README.ru.md": "ExecWeave включает bounded filesystem/viewer protection, incremental Live JSONL tailing, large-graph safety guards, detached Top и provisional live sidecars для настроенных provider integrations.",
+          }
+
+          license_text = {
+              "README.md": "ExecWeave is licensed under the **PolyForm Noncommercial License 1.0.0**. Noncommercial use, modification, and redistribution are permitted under its terms. Commercial use requires a separate written commercial license from the licensor. See [`LICENSE`](LICENSE).",
+              "README.zh-TW.md": "ExecWeave 採用 **PolyForm Noncommercial License 1.0.0**。依授權條款可進行非商業使用、修改與散布；商業用途需要另外取得授權方的書面商業授權。詳見 [`LICENSE`](LICENSE)。",
+              "README.zh-CN.md": "ExecWeave 采用 **PolyForm Noncommercial License 1.0.0**。依许可条款可进行非商业使用、修改和分发；商业用途需要另行取得许可方的书面商业许可。详见 [`LICENSE`](LICENSE)。",
+              "README.ja.md": "ExecWeave は **PolyForm Noncommercial License 1.0.0** の下で提供されます。非商用の利用・変更・再配布はその条件に従って許可され、商用利用にはライセンサーから別途書面による商用ライセンスが必要です。詳しくは [`LICENSE`](LICENSE) を参照してください。",
+              "README.ko.md": "ExecWeave는 **PolyForm Noncommercial License 1.0.0**에 따라 제공됩니다. 비상업적 사용, 수정 및 재배포는 해당 조건에 따라 허용되며, 상업적 사용에는 라이선서의 별도 서면 상업용 라이선스가 필요합니다. [`LICENSE`](LICENSE)를 참조하세요.",
+              "README.fr.md": "ExecWeave est distribué sous **PolyForm Noncommercial License 1.0.0**. L’utilisation, la modification et la redistribution non commerciales sont autorisées selon ses conditions. Toute utilisation commerciale nécessite une licence commerciale écrite distincte du concédant. Voir [`LICENSE`](LICENSE).",
+              "README.de.md": "ExecWeave steht unter der **PolyForm Noncommercial License 1.0.0**. Nichtkommerzielle Nutzung, Änderung und Weiterverteilung sind gemäß den Lizenzbedingungen gestattet. Kommerzielle Nutzung erfordert eine separate schriftliche kommerzielle Lizenz des Lizenzgebers. Siehe [`LICENSE`](LICENSE).",
+              "README.ru.md": "ExecWeave распространяется по **PolyForm Noncommercial License 1.0.0**. Некоммерческое использование, изменение и распространение разрешены на условиях лицензии. Для коммерческого использования требуется отдельная письменная коммерческая лицензия от лицензиара. См. [`LICENSE`](LICENSE).",
+          }
+
+          old = re.compile(r"(?<!\d)(?:v)?0\.6\.[0-8](?!\d)")
+
+          for filename in files:
+              path = Path(filename)
+              text = path.read_text(encoding="utf-8")
+              parts = text.split("\n\n")
+
+              # Replace the introductory paragraph that still narrates the old licensing transition.
+              for i, part in enumerate(parts):
+                  if "v0.6.8" in part and not part.startswith("## "):
+                      parts[i] = intro[filename]
+                      break
+
+              # Turn the first main-vs-release transition paragraph into a current-release statement.
+              main_release = [i for i, part in enumerate(parts) if "`main`" in part and "v0.6.9" in part]
+              if main_release:
+                  first = main_release[0]
+                  parts[first] = release[filename]
+                  if first + 1 < len(parts) and "git+https://github.com/Irish-kw/ExecWeave.git@main" in parts[first + 1]:
+                      parts[first + 1] = ""
+                  # Later matches are release-hardening/current-status transition prose.
+                  for i in main_release[1:]:
+                      parts[i] = ""
+
+              # Rewrite historical performance/change-log prose as present-tense capability prose.
+              for i, part in enumerate(parts):
+                  if "v0.6.3" in part or "v0.6.4" in part:
+                      parts[i] = performance[filename]
+
+              # License is the final section in every root README; replace it with current terms only.
+              try:
+                  lic = parts.index("## License")
+              except ValueError:
+                  raise SystemExit(f"{filename}: missing License section")
+              parts = parts[: lic + 1] + [license_text[filename]]
+
+              parts = [part for part in parts if part != ""]
+              cleaned = "\n\n".join(parts).rstrip() + "\n"
+
+              leftovers = old.findall(cleaned)
+              if leftovers:
+                  raise SystemExit(f"{filename}: old version references remain: {leftovers}")
+              if "v0.6.9" not in cleaned:
+                  raise SystemExit(f"{filename}: current v0.6.9 reference missing")
+
+              path.write_text(cleaned, encoding="utf-8")
+          PY
+
+      - name: Verify README scope and version cleanup
+        run: |
+          set -euo pipefail
+          git diff -- README*.md
+          if grep -En '(^|[^0-9])v?0\.6\.[0-8]([^0-9]|$)' README*.md; then
+            echo "Old pre-v0.6.9 version reference remains in a root README" >&2
+            exit 1
+          fi
+          test "$(git diff --name-only | grep '^README.*\.md$' | wc -l)" -eq 8
+          test -z "$(git diff --name-only | grep -v '^README.*\.md$' || true)"
+
+      - name: Commit README consolidation
+        run: |
+          set -euo pipefail
+          base="$(git rev-parse HEAD)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md README.zh-TW.md README.zh-CN.md README.ja.md README.ko.md README.fr.md README.de.md README.ru.md
+          git diff --cached --quiet && { echo "No README changes produced" >&2; exit 1; }
+          git commit -m "docs: consolidate README for v0.6.9"
+          git fetch origin main
+          test "$(git rev-parse origin/main)" = "$base"
+          git push origin HEAD:main
