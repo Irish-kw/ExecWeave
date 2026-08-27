@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from execweave.live import LIVE_HTML, _LiveState, _inject_final_theme
+from execweave.live import _LIVE_HTML as LIVE_HTML, _LiveState, _inject_final_theme
 from execweave.viewer_projection import (
     is_internal_hook_runtime_event,
     project_viewer_graph,
