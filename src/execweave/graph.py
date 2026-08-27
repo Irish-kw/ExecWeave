@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .fidelity import FidelityAccumulator, derive_fidelity
+from .provider_lifecycle import ProviderLifecycleAnnotation, provider_lifecycle_annotation
 from .validate import validate_event_stream
 
 GRAPH_SCHEMA_VERSION = "0.2"
@@ -68,6 +69,7 @@ class GraphEdge:
     confidence_values: list[float] = field(default_factory=list)
     confidence_semantics: set[str] = field(default_factory=set)
     supporting_event_ids: set[str] = field(default_factory=set)
+    provider_lifecycle: set[ProviderLifecycleAnnotation] = field(default_factory=set)
 
     def observe(self, event: dict[str, Any], *, retain_event_id: bool = True) -> None:
         self.count += 1
@@ -126,6 +128,9 @@ class GraphEdge:
                 self.supporting_event_ids.update(
                     value for value in supporting if isinstance(value, str) and value
                 )
+        lifecycle = provider_lifecycle_annotation(event)
+        if lifecycle is not None:
+            self.provider_lifecycle.add(lifecycle)
 
     def to_dict(self) -> dict[str, Any]:
         if self.causal_values == {True}:
@@ -146,7 +151,7 @@ class GraphEdge:
             identity_exact = False
         else:
             identity_exact = None
-        return {
+        payload: dict[str, Any] = {
             "id": self.id,
             "source": self.source,
             "target": self.target,
@@ -171,6 +176,11 @@ class GraphEdge:
             "confidence_semantics": sorted(self.confidence_semantics),
             "supporting_event_ids": sorted(self.supporting_event_ids),
         }
+        if self.provider_lifecycle:
+            payload["provider_lifecycle"] = [
+                annotation.to_dict() for annotation in sorted(self.provider_lifecycle)
+            ]
+        return payload
 
 
 @dataclass
