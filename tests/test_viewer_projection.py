@@ -136,6 +136,23 @@ def test_threshold_requires_at_least_four_eligible_endpoints() -> None:
     assert projected == raw
 
 
+def test_edge_without_string_id_is_not_eligible_for_collapse() -> None:
+    addresses = [f"127.0.0.1:{50000 + index}" for index in range(4)]
+    raw = _graph({"process:p1": addresses})
+    edge = raw["edges"][0]
+    assert isinstance(edge, dict)
+    edge.pop("id")
+
+    projected = project_viewer_graph(raw)
+
+    assert "viewer_projection" not in projected
+    assert {node["id"] for node in projected["nodes"]} == {
+        "process:p1",
+        *(f"endpoint:{address}" for address in addresses),
+    }
+    assert len(projected["edges"]) == 4
+
+
 def test_low_ports_and_non_loopback_addresses_do_not_collapse() -> None:
     raw = _graph(
         {

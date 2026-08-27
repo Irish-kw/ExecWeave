@@ -206,6 +206,7 @@ def project_viewer_graph(graph: dict[str, Any]) -> dict[str, Any]:
         if (
             edge.get("target") != node_id
             or edge.get("relation") != "CONNECTED_TO"
+            or not isinstance(edge.get("id"), str)
             or not isinstance(source, str)
         ):
             continue
