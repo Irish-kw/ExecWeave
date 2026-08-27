@@ -13,69 +13,42 @@
 </p>
 <!-- i18n-nav:end -->
 
-ExecWeave integrates with OpenCode through a project-local plugin. OpenCode exposes exact `sessionID + callID` values on `tool.execute.before` and `tool.execute.after`, so one logical tool call can be identified without heuristically pairing lifecycle events.
+ExecWeave integrates with OpenCode through a project-local plugin. OpenCode exposes exact `sessionID + callID` values on tool before/after hooks, so one logical tool call can be identified without heuristic pairing. That identity remains provider-level evidence and is not an OS PID.
 
-## Install
-
-Install the generated plugin into the current project:
+## Install and record
 
 ```bash
 execweave-opencode-plugin --install
-```
-
-It creates:
-
-```text
-.opencode/plugins/execweave.ts
-```
-
-OpenCode automatically loads project plugins from that directory. ExecWeave refuses to overwrite an existing plugin unless `--force` is supplied.
-
-Then record a run:
-
-```bash
 execweave-opencode-record --open -- opencode
 ```
 
-## Captured semantic evidence
+The generated plugin is installed at `.opencode/plugins/execweave.ts`. ExecWeave refuses to overwrite an existing plugin unless `--force` is explicitly supplied.
 
-The baseline plugin emits minimal metadata for:
+## Full observation surface
 
-- `chat.message`
-- `tool.execute.before`
-- `tool.execute.after`
+v0.6.5 is not limited to the old three-event minimal-metadata contract. The generated plugin/hook path can preserve content exposed by OpenCode across chat messages, tool execution before/after, model-context/system transforms, completed assistant text, provider bus events, request headers after credential filtering, tool definitions, commands, permission requests, and compaction context when those hooks fire.
 
-Typical graph relationships are:
+Typical logical graph relationships still include Agent → tool call, tool call → tool, declared command/target, and returned-result observations. Content storage does not change their evidence semantics.
 
-```text
-agent --USED_MODEL--> model
-agent --REQUESTED_TOOL_CALL--> tool_call
-tool_call --USES_TOOL--> tool
-tool_call --DECLARED_COMMAND--> command
-tool_call --DECLARED_TARGET--> file
-tool_call --TOOL_CALL_RETURNED--> tool
-```
+## Full-fidelity content
 
-The OpenCode `callID` is used directly in the `tool_call` identity.
+Complete values supplied by the OpenCode plugin are stored in the local content-addressed store and referenced from the semantic JSONL sidecar. Covered regressions include complete chat message/parts, tool args and results, model context, system prompt values, assistant text, provider events, tool definitions, command arguments/parts, permission data, and compaction prompts/context.
 
-## Privacy boundary
-
-OpenCode's after-hook can see tool output, but the generated ExecWeave plugin deliberately does not forward `output.output` or `output.metadata`.
-
-Arguments are reduced before they leave the plugin:
-
-- `bash`: declared `command`
-- file-oriented tools: path-like fields such as `filePath`, `file_path`, or `path`
-- optional working-directory metadata
-
-Raw write content, chat message parts, and tool output are not sent to the ExecWeave hook.
+Known transport credentials such as authorization/cookie fields are filtered from the relevant headers/provider-metadata projection. Application-level secrets embedded in tool args, messages, results, or other content values are preserved. Do not assume full-fidelity content has been secret-redacted.
 
 ## Tool to process correlation
 
-`callID` proves logical call identity inside OpenCode; it is not an OS PID. Tool → Process remains a derived conservative bridge and is created only when runtime evidence yields one uniquely supported process.
+`sessionID + callID` proves exact logical call identity inside OpenCode. It does not prove which OS process executed the call. Tool → Process remains a separately derived conservative bridge and is emitted only when independent runtime evidence yields one uniquely supported process.
 
-Derived bridges remain `inferred: true` and `causal: false`.
+```text
+inferred: true
+causal: false
+```
 
-## Evidence boundary
+Ambiguous or unsupported calls produce no bridge.
 
-The plugin reports OpenCode semantic intent. Runtime collectors independently establish process/file/network observations. ExecWeave never treats the provider plugin as proof that a declared command or file action actually occurred.
+## Privacy and evidence boundary
+
+OpenCode run evidence can contain prompts/messages, system/context data, tool arguments and output, commands, permission patterns, provider event content, paths, identifiers, and application secrets. Treat the run directory as sensitive and review it before sharing.
+
+The plugin proves what OpenCode exposed at the semantic/provider layer. Runtime collectors independently establish process/file/network observations. Full-fidelity provider content does not by itself prove command execution, completed file access, or byte-level data flow.

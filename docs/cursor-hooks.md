@@ -13,73 +13,46 @@
 </p>
 <!-- i18n-nav:end -->
 
-ExecWeave uses Cursor's native hook surface to add logical Agent / Tool / Command evidence to the runtime graph without treating provider metadata as OS causality.
+ExecWeave uses Cursor's native hook surface to add provider semantic/content evidence to a run without treating that evidence as OS causality.
 
 ## Quick start
 
-Generate a hook configuration and add it to your Cursor hook settings:
-
 ```bash
 execweave-cursor-hook --print-config
-```
-
-Then record a Cursor run:
-
-```bash
 execweave-cursor-record --open -- cursor
 ```
 
-The run-bound recorder preserves runtime, semantic, and correlated artifacts separately.
+The run-bound recorder keeps runtime, semantic, and correlated artifacts separate.
 
-## Events
+## Observation surface
 
-The baseline consumes:
+The v0.6.5 hook configuration covers the broader Cursor lifecycle surface, including session start/end, tool before/after/failure, subagents, shell and MCP execution, file reads/edits, prompt submission, compaction/stop, Agent response/thought events, and tab file read/edit events when Cursor exposes them.
 
-- `sessionStart`
-- `preToolUse`
-- `postToolUse`
-- `postToolUseFailure`
+Cursor provides stable logical tool-call identity for its tool hooks. That identity is not an OS PID.
 
-Cursor exposes a stable `tool_use_id`, so `preToolUse` and the corresponding post hook can share an exact logical `tool_call` identity.
+## Full-fidelity content
 
-Typical semantic edges are:
+When Cursor explicitly supplies a content value, v0.6.5 stores the complete supplied value in the local content-addressed store and places only its reference in the semantic JSONL event.
 
-```text
-agent --USED_MODEL--> model
-agent --REQUESTED_TOOL_CALL--> tool_call
-tool_call --USES_TOOL--> tool
-tool_call --DECLARED_COMMAND--> command
-tool_call --DECLARED_TARGET--> file
-tool_call --TOOL_CALL_RETURNED--> tool
-```
+Covered regressions include complete prompt text, tool input/output and failure text, shell command/output, MCP command/input/result, file content supplied by read hooks, edit structures, final Agent responses, provider-labeled thought text, and subagent summaries.
 
-`postToolUseFailure` is represented separately as `TOOL_CALL_FAILED`.
+These fields are preserved as provider observations with their evidence limitations. For example, content supplied by `beforeReadFile` does not assert that an OS read completed, and an edit structure does not assert a complete post-edit file snapshot unless the provider actually supplied one.
+
+Known transport credentials are filtered from the provider-metadata projection where defined. Secrets embedded inside content values are preserved. Full-fidelity content is not a general secret-redaction layer.
 
 ## Tool to process correlation
 
-Cursor hook evidence does not provide the OS child PID. A Shell call therefore does not directly become a process edge.
-
-When runtime evidence independently exposes one uniquely supported process, ExecWeave may derive:
-
-```text
-tool_call --CORRELATED_WITH_PROCESS--> process
-```
-
-The bridge is always:
+Cursor hook evidence does not provide the child OS PID. A Shell call therefore becomes a process bridge only when independent runtime evidence yields one uniquely supported candidate:
 
 ```text
 inferred: true
 causal: false
 ```
 
-Ambiguous or unsupported calls produce no bridge.
+Ambiguous or unsupported calls produce no bridge. Stable provider tool-call identity proves logical identity inside Cursor, not machine-level process attribution.
 
-## Privacy boundary
+## Privacy and evidence boundary
 
-The adapter intentionally does not persist prompt text, transcript paths, user email, agent messages, or tool output. It keeps only the identifiers and declared metadata needed for observability, such as model identity, conversation/generation IDs, tool name/use ID, command, and declared file path.
+Cursor run evidence can contain prompts, tool arguments/results, shell output, file content, edit data, assistant responses, provider-labeled thought text, commands, paths, identifiers, MCP values, and embedded application secrets. Review the complete run directory before sharing it.
 
-Commands and paths can still be sensitive. Review artifacts before sharing them.
-
-## Evidence boundary
-
-A Cursor hook proves what Cursor reported at the semantic layer. It does not prove that a declared command executed, that a declared file was actually accessed, or that data moved between resources. OS collectors remain the source for runtime evidence.
+A Cursor hook proves only what Cursor reported or supplied at the provider layer. It does not by itself prove that a declared command executed, that a file was accessed by a specific process, or that bytes flowed between resources.

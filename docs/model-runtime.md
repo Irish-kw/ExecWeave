@@ -13,13 +13,13 @@
 </p>
 <!-- i18n-nav:end -->
 
-Model runtimes are separate from Agent/IDE semantic adapters and inference gateways. They describe what a local or self-hosted inference server reports; they do not prove which Agent initiated a request.
+Model runtimes are separate from Agent/IDE semantic adapters and inference gateways. They describe what a local or self-hosted inference integration point reports; they do not prove which Agent initiated a request.
 
 Current baseline supports **Ollama**, **llama.cpp**, **vLLM**, and **LM Studio**.
 
 ## CLI
 
-Convert final response metadata into inference events:
+Capture one supplied final runtime response from stdin:
 
 ```bash
 execweave-model-runtime event --runtime ollama --sidecar model-runtime.jsonl
@@ -28,82 +28,34 @@ execweave-model-runtime event --runtime vllm --sidecar model-runtime.jsonl
 execweave-model-runtime event --runtime lmstudio --sidecar model-runtime.jsonl
 ```
 
-Probe runtime state or model catalogs:
+Capture a caller-supplied request+response exchange:
 
 ```bash
-execweave-model-runtime probe --runtime ollama --sidecar model-runtime.jsonl
-execweave-model-runtime probe --runtime llamacpp --metrics --sidecar model-runtime.jsonl
-execweave-model-runtime probe --runtime vllm --sidecar model-runtime.jsonl
-execweave-model-runtime probe --runtime lmstudio --sidecar model-runtime.jsonl
+execweave-model-runtime exchange --runtime ollama --sidecar model-runtime.jsonl
 ```
 
-Default endpoints are:
+The `exchange` command accepts the same four runtime choices and requires JSON-object `request` and `response` fields. It records explicit caller-supplied evidence; it is not transparent network interception.
 
-- Ollama: `http://localhost:11434`
-- llama.cpp: `http://localhost:8080`
-- vLLM: `http://localhost:8000`
-- LM Studio: `http://localhost:1234`
+Runtime state/model catalogs remain available through `probe`. Default endpoints remain Ollama `11434`, llama.cpp `8080`, vLLM `8000`, and LM Studio `1234` on localhost.
 
-## OpenAI-compatible shared layer
+## Full-fidelity content
 
-llama.cpp, vLLM, and LM Studio reuse one OpenAI-compatible parser for final response usage and `/v1/models` catalog metadata. The shared layer normalizes Chat Completions-style `prompt_tokens` / `completion_tokens` and Responses-style `input_tokens` / `output_tokens`, while retaining only whitelisted token metadata such as cached-token and reasoning-token counts.
+v0.6.5 stores complete content exposed by the selected model-runtime integration point in a local SHA-256 content-addressed store. `event` preserves the complete supplied final response without claiming request visibility. `exchange` can preserve both the supplied request and response, including messages/prompts, tool definitions/calls/results, generated assistant content, reasoning/thinking fields when explicitly present, request-generation configuration, and provider response values supported by the runtime payload.
 
-Runtime-specific evidence stays outside the common parser. llama.cpp still owns its timing fields and Prometheus metrics adapter instead of forcing those semantics onto vLLM or LM Studio.
+The semantic JSONL sidecar contains content references rather than large inline copies. Compact usage/timing/model metadata remains available for graph/query use.
 
-## Graph model
+`content_complete_from_source: true` means ExecWeave stored the complete value supplied to the CLI/integration point. It does **not** mean the runtime exposed hidden model state, that the request is necessarily the provider's final post-rewrite wire request, or that ExecWeave intercepted bytes it was not given.
 
-The runtime layer can produce:
+Application-level secret values inside request/response content are preserved. Endpoint/path sanitization and provider-metadata filtering do not constitute general content redaction.
 
-```text
-model_runtime --SERVED_INFERENCE--> inference_request
-inference_request --USED_MODEL--> model
-model_runtime --LOADED_MODEL--> model
-model_runtime --SERVES_MODEL--> model
-model_runtime --ADVERTISES_MODEL--> model
-model_runtime --REPORTED_METRICS--> model_runtime_snapshot
-```
+## Runtime-specific evidence
 
-These relations intentionally have different meanings.
+Ollama can additionally report loaded-model state through `/api/ps`. llama.cpp can expose timing/throughput, `/v1/models`, and optional aggregate `/metrics`; labeled Prometheus lines that may carry sensitive local identifiers remain restricted by the metadata adapter. vLLM and LM Studio share OpenAI-compatible response/model-catalog parsing while retaining runtime-specific relation semantics.
 
-## Ollama
+Catalog relations remain deliberately distinct: a runtime may `LOADED_MODEL`, `SERVES_MODEL`, or `ADVERTISES_MODEL` depending on what the source endpoint actually proves. LM Studio catalog visibility remains `ADVERTISES_MODEL`; a catalog item is not automatically proof of resident weights.
 
-Final response metadata can include prompt/completion token counts, load duration, prompt-evaluation duration, generation duration, and finish reason.
+## Privacy and evidence boundary
 
-`/api/ps` snapshots can expose loaded-model metadata such as VRAM size, context length, format, family, parameter size, and quantization. This is represented as `LOADED_MODEL` because the endpoint reports currently loaded models.
+Model-runtime content can contain complete prompts/messages, tool data, generated responses, reasoning/thinking text, model parameters, configuration values, paths, identifiers, and application-level secrets. Treat the entire run directory as sensitive and review it before sharing.
 
-## llama.cpp
-
-OpenAI-compatible responses contribute normalized usage plus llama.cpp timing/throughput metadata. `/v1/models` is represented as `SERVES_MODEL`, and optional `/metrics` contributes aggregate runtime metrics.
-
-Prometheus lines with labels are skipped because labels can contain sensitive local model paths or other identifiers.
-
-llama.cpp model IDs that look like local paths or GGUF filenames are redacted: the full native identifier is hashed for entity identity while only the basename is shown.
-
-## vLLM
-
-vLLM reuses the OpenAI-compatible response and model-catalog layer. `/v1/models` is represented as `SERVES_MODEL` because it describes models exposed by that serving endpoint.
-
-No prompt, response, reasoning text, choices, logprobs, or generated token text is copied into ExecWeave events.
-
-## LM Studio
-
-<!-- lmstudio-auto-live-v064 -->
-For automatic Live Viewer ingestion, launch LM Studio through ExecWeave with an explicit local port, for example `execweave live --open -- lms server start --port 1234`. ExecWeave checks that the endpoint was not already serving a compatible API before launch, and only probes `/v1/models` after the launcher exits successfully. The resulting relation remains `ADVERTISES_MODEL`; a catalog entry is never upgraded to `LOADED_MODEL`.
-
-LM Studio reuses the same OpenAI-compatible response parser, but its `/v1/models` result is represented as `ADVERTISES_MODEL`, not `LOADED_MODEL`.
-
-This distinction is deliberate: LM Studio can make downloaded models visible to the server, including configurations where a model may be loaded on demand. A catalog entry therefore does not by itself prove that model weights were resident in memory at observation time.
-
-## Privacy boundary
-
-ExecWeave intentionally excludes prompt text, response content, thinking/reasoning text, choices, logprobs, and raw generated tokens from this layer.
-
-Whitelisted metadata can include model identity, request identity, prompt/input token counts, completion/output token counts, total tokens, cached-token counts, reasoning-token counts, and runtime-specific timing metadata. Absolute local model paths are redacted for supported OpenAI-compatible local runtimes; llama.cpp retains stricter GGUF-path redaction.
-
-Aggregate runtime metrics are not automatically attributed to a specific Agent or inference request.
-
-## Evidence boundary
-
-A runtime API proves only what that inference server reported. It does not by itself prove which Agent initiated the request, which gateway routed it, or which OS process caused the request.
-
-Cross-layer identity requires explicit shared identifiers or a separately defined conservative correlation mechanism. Derived correlation must remain marked as inference rather than causal evidence.
+A runtime response or exchange proves only what that integration point supplied. It does not by itself prove which Agent initiated the request, which gateway routed it, which OS process caused it, or that file bytes flowed to a model/network endpoint. Cross-layer identity requires explicit shared identifiers or separately marked conservative correlation.
