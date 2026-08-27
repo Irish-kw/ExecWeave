@@ -7,6 +7,7 @@ on:
     branches: [main]
     paths:
       - ".release-v069"
+      - ".github/workflows/publish.yml"
 
 permissions:
   contents: read
@@ -22,22 +23,30 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Create v0.6.9 draft release at approved SHA
+      - uses: actions/checkout@v4
+        if: github.event_name == 'push'
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Create v0.6.9 tag and draft release at approved SHA
         if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if gh release view "$V069_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "$V069_TAG already exists; refusing to overwrite" >&2
-            exit 1
+          if ! git ls-remote --exit-code --tags origin "refs/tags/$V069_TAG" >/dev/null 2>&1; then
+            git tag "$V069_TAG" "$V069_SHA"
+            git push origin "refs/tags/$V069_TAG"
           fi
-          gh release create "$V069_TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --target "$V069_SHA" \
-            --title "ExecWeave v0.6.9" \
-            --draft \
-            --notes $'ExecWeave v0.6.9\n\n- Final Graph now opens separately from the Live Dashboard.\n- Final Graph controls no longer overlap the fixed Light/Dark control.\n- Replay GIF export uses a standards-safe encoder.\n- README uses the real dashboard codex.gif and current v0.6.9 documentation.\n- Antigravity and Cursor desktop launch support are included.\n- ExecWeave is source-available under PolyForm Noncommercial License 1.0.0; commercial use requires a separate written license.'
+          test "$(git rev-parse "$V069_TAG^{commit}")" = "$V069_SHA"
+          if ! gh release view "$V069_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$V069_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --verify-tag \
+              --title "ExecWeave v0.6.9" \
+              --draft \
+              --notes $'ExecWeave v0.6.9\n\n- Final Graph now opens separately from the Live Dashboard.\n- Final Graph controls no longer overlap the fixed Light/Dark control.\n- Replay GIF export uses a standards-safe encoder.\n- README uses the real dashboard codex.gif and current v0.6.9 documentation.\n- Antigravity and Cursor desktop launch support are included.\n- ExecWeave is source-available under PolyForm Noncommercial License 1.0.0; commercial use requires a separate written license.'
+          fi
       - name: Use existing published release event
         if: github.event_name == 'release'
         run: echo "Using release ${{ github.event.release.tag_name }}"
@@ -60,13 +69,10 @@ jobs:
           import os
           import tomllib
           from pathlib import Path
-
           package_version = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
           tag_version = os.environ["RELEASE_TAG"].removeprefix("v")
           if tag_version != package_version:
-              raise SystemExit(
-                  f"release tag {tag_version!r} does not match package version {package_version!r}"
-              )
+              raise SystemExit(f"release tag {tag_version!r} does not match package version {package_version!r}")
           print(f"Publishing ExecWeave {package_version}")
           PY
       - name: Verify special release source SHA
@@ -150,7 +156,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: main
-          fetch-depth: 2
+          fetch-depth: 0
       - name: Restore normal release workflow and remove marker
         run: |
           set -euo pipefail
@@ -161,7 +167,7 @@ jobs:
             echo "main moved during release transaction; refusing automatic cleanup" >&2
             exit 1
           fi
-          git checkout "$GITHUB_SHA^" -- .github/workflows/publish.yml
+          git checkout "$V069_SHA" -- .github/workflows/publish.yml
           git rm .release-v069
           git commit -m "chore: restore release workflow [skip ci]"
           git push origin HEAD:main
