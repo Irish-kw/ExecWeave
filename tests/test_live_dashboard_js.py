@@ -27,6 +27,7 @@ def _inline_script(html: str) -> str:
         ("dashboard", LIVE_HTML),
         ("authenticated-dashboard", _AUTHENTICATED_LIVE_HTML),
     ],
+    ids=("dashboard", "authenticated-dashboard"),
 )
 def test_live_dashboard_inline_javascript_syntax(
     name: str,
