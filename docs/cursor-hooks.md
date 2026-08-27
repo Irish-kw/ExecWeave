@@ -22,6 +22,10 @@ execweave-cursor-hook --print-config
 execweave-cursor-record --open -- cursor
 ```
 
+`cursor` does not have to be a shell-installed CLI launcher. ExecWeave first uses a normal PATH launcher when one exists; if it does not, macOS and Windows fall back to the standard Cursor desktop application binary. This also applies to `execweave live --open -- cursor`.
+
+If Cursor asks whether to allow the ExecWeave hook integration, choose **Allow / Yes** to enable provider-level tool/content evidence. OS-runtime observation can still operate without provider hook approval, but specialized evidence will be reduced or unavailable.
+
 The run-bound recorder keeps runtime, semantic, and correlated artifacts separate.
 
 ## Observation surface

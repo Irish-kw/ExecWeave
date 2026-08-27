@@ -10,7 +10,16 @@ from typing import Any, Mapping
 
 _AUTO_FLAG = "--auto"
 _CONFIG_RETRIES = 3
-_SUPPORTED_AGENTS = {"claude", "codex", "gemini", "cursor", "opencode"}
+_SUPPORTED_AGENTS = {
+    "claude": "claude",
+    "codex": "codex",
+    "agy": "antigravity",
+    "antigravity": "antigravity",
+    "cursor": "cursor",
+    "opencode": "opencode",
+    # Legacy compatibility only. Gemini CLI is no longer advertised as current.
+    "gemini": "gemini",
+}
 
 
 @dataclass(frozen=True)
@@ -36,8 +45,7 @@ def _command_name(value: str) -> str:
 def supported_agent(command: list[str]) -> str | None:
     if not command:
         return None
-    name = _command_name(command[0])
-    return name if name in _SUPPORTED_AGENTS else None
+    return _SUPPORTED_AGENTS.get(_command_name(command[0]))
 
 
 def _bounded_detail(value: object, limit: int = 240) -> str:
@@ -121,6 +129,25 @@ def _merge_hook_fragment(
     return merged, changed
 
 
+def _merge_named_hook_fragment(
+    current: dict[str, Any],
+    fragment: dict[str, Any],
+    *,
+    marker: str,
+) -> tuple[dict[str, Any], bool]:
+    """Merge Antigravity's named-hook ``hooks.json`` schema conservatively."""
+    merged = deepcopy(current)
+    if _contains_execweave_command(merged, marker):
+        return merged, False
+    for name, definition in fragment.items():
+        if name in merged:
+            raise FileExistsError(
+                f"refusing to replace existing Antigravity hook definition: {name}"
+            )
+        merged[name] = deepcopy(definition)
+    return merged, bool(fragment)
+
+
 def _write_bytes_optimistic(path: Path, original: bytes | None, payload: bytes) -> bool:
     path.parent.mkdir(parents=True, exist_ok=True)
     current = _read_bytes(path)
@@ -166,6 +193,21 @@ def _merge_json_file(path: Path, fragment: dict[str, Any], *, marker: str) -> bo
     raise RuntimeError(f"configuration changed concurrently while updating {path}")
 
 
+def _merge_named_hook_file(path: Path, fragment: dict[str, Any], *, marker: str) -> bool:
+    for _ in range(_CONFIG_RETRIES):
+        original = _read_bytes(path)
+        current = _load_json_object(original or b"", path=path)
+        merged, changed = _merge_named_hook_fragment(current, fragment, marker=marker)
+        if not changed:
+            return False
+        encoded = (
+            json.dumps(merged, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+        ).encode("utf-8")
+        if _write_bytes_optimistic(path, original, encoded):
+            return True
+    raise RuntimeError(f"configuration changed concurrently while updating {path}")
+
+
 def _write_plugin_file(path: Path, content: str, *, marker: str) -> bool:
     encoded = content.encode("utf-8")
     for _ in range(_CONFIG_RETRIES):
@@ -200,6 +242,8 @@ def _provider_target(
     if provider == "codex":
         root = _config_dir_from_env(environment, "CODEX_HOME") or home / ".codex"
         return root / "hooks.json"
+    if provider == "antigravity":
+        return home / ".gemini" / "config" / "hooks.json"
     if provider == "gemini":
         return home / ".gemini" / "settings.json"
     if provider == "cursor":
@@ -219,6 +263,10 @@ def _provider_fragment(provider: str) -> tuple[dict[str, Any], str]:
         from .codex_hook_cli import codex_hook_config
 
         return codex_hook_config(f"execweave-codex-hook {_AUTO_FLAG}"), "execweave-codex-hook"
+    if provider == "antigravity":
+        from .antigravity_hook_cli import antigravity_hook_config
+
+        return antigravity_hook_config(), "execweave-antigravity-hook"
     if provider == "gemini":
         from .gemini_hook_cli import gemini_hook_config
 
@@ -257,7 +305,11 @@ def bootstrap_supported_agent(
             changed = _write_plugin_file(target, content, marker="execweave-opencode-hook")
         else:
             fragment, marker = _provider_fragment(provider)
-            changed = _merge_json_file(target, fragment, marker=marker)
+            changed = (
+                _merge_named_hook_file(target, fragment, marker=marker)
+                if provider == "antigravity"
+                else _merge_json_file(target, fragment, marker=marker)
+            )
 
         if provider == "claude":
             raw = _read_bytes(target)

@@ -31,7 +31,7 @@ Install the latest published wheel/sdist from PyPI:
 python -m pip install -U execweave
 ```
 
-The package version on `main` is currently **v0.6.5**. The published release may lag main; test the exact mainline build with:
+The package version on `main` is currently **v0.6.6**. The published release may lag main; test the exact mainline build with:
 
 ```bash
 python -m pip install --upgrade --force-reinstall "execweave @ git+https://github.com/Irish-kw/ExecWeave.git@main"
@@ -52,12 +52,16 @@ Live OS-runtime telemetry works with **any local command**. Agent/runtime names 
 ```bash
 execweave live --open -- claude
 execweave live --open -- codex
-execweave live --open -- gemini
+execweave live --open -- antigravity
 execweave live --open -- cursor
 execweave live --open -- opencode
 execweave live --open -- ollama serve
 execweave live --open -- python my_agent.py
 ```
+
+> **Approve the hook when prompted.** On the first provider-integrated run, the Agent/IDE may ask whether ExecWeave is allowed to enable its local hook integration. Choose **Allow / Yes**. If the hook is not approved, OS-runtime telemetry can still work, but provider-level tool, model, and supplied-content observability will be reduced or unavailable.
+
+Google Antigravity uses the current `agy` CLI command; ExecWeave also accepts `antigravity` as a friendly alias and resolves it to `agy`. For Cursor, `execweave live --open -- cursor` first uses a normal PATH launcher when one exists, then falls back to the standard Cursor desktop application binary on macOS and Windows.
 
 Or build the finalized artifact pipeline:
 
@@ -87,7 +91,7 @@ Full fidelity also changes the privacy boundary: application-level secrets embed
 | --- | --- | --- |
 | Claude Code | Yes | native hooks + full-fidelity supplied hook content |
 | OpenAI Codex | Yes | lifecycle hooks + full-fidelity supplied hook content |
-| Gemini CLI | Yes | native hooks + full-fidelity supplied hook content |
+| Google Antigravity / Antigravity CLI | Yes | passive native hooks for invocation/tool evidence + full-fidelity values explicitly supplied to those hooks |
 | Cursor | Yes | native hooks + full-fidelity supplied hook content |
 | OpenCode | Yes | project plugin + full-fidelity supplied plugin content |
 | Ollama | Yes | `execweave-model-runtime event/exchange/probe --runtime ollama` |
@@ -137,8 +141,8 @@ execweave-claude-record --open -- claude
 execweave-codex-hook --print-config
 execweave-codex-record --open -- codex
 
-execweave-gemini-hook --print-config
-execweave-gemini-record --open -- gemini
+execweave-antigravity-hook --print-config
+execweave-antigravity-record --open -- antigravity
 
 execweave-cursor-hook --print-config
 execweave-cursor-record --open -- cursor
@@ -147,7 +151,7 @@ execweave-opencode-plugin --install
 execweave-opencode-record --open -- opencode
 ```
 
-Provider-integrated recorders keep raw runtime, semantic, and correlated artifacts separate. Stable provider identifiers such as Cursor `tool_use_id` or OpenCode `sessionID + callID` prove logical provider identity; they are not OS PIDs.
+Provider-integrated recorders keep raw runtime, semantic, and correlated artifacts separate. Stable provider identifiers such as Cursor `tool_use_id` or OpenCode `sessionID + callID` prove logical provider identity; they are not OS PIDs. Legacy Gemini CLI hook entry points remain packaged for existing installations, but Gemini CLI is no longer advertised as a current integration; new Google CLI usage should use Antigravity (`agy`).
 
 ## Inference gateways and model runtimes
 
@@ -218,6 +222,7 @@ execweave doctor
 execweave run --backend portable -- your-command
 execweave run --backend strace -- your-command
 execweave graph-summary run.graph.json
+execweave graph-filter run.graph.json --causal-only --output causal.graph.json
 execweave graph-focus run.graph.json NODE_ID --hops 2 --output focused.graph.json
 execweave path run.graph.json SOURCE TARGET --causal-only
 ```
@@ -269,7 +274,7 @@ Do not assume content has been secret-redacted. Commands, paths, endpoint metada
 
 ## Current status
 
-ExecWeave `main` is currently **v0.6.5** and under active release hardening. The latest published package/release can lag main until a GitHub Release is explicitly published; the publish workflow verifies that the release tag exactly matches the package version before PyPI upload.
+ExecWeave `main` is currently **v0.6.6** and under active release hardening. The latest published package/release can lag main until a GitHub Release is explicitly published; the publish workflow verifies that the release tag exactly matches the package version before PyPI upload.
 
 v0.6.5 combines cross-platform runtime collection, materialized execution graphs, standalone/live viewing, conservative provider↔runtime correlation, full-fidelity content-addressed provider evidence, evidence grades, bounded rule packs, an explicit runtime threat/fidelity contract, and honest local run-integrity sealing. Observed evidence and inference remain separate by design.
 
@@ -281,7 +286,7 @@ v0.6.5 combines cross-platform runtime collection, materialized execution graphs
 - [`Semantic Telemetry`](docs/semantic-telemetry.md)
 - [`Claude Code Hooks`](docs/claude-code-hooks.md)
 - [`OpenAI Codex Hooks`](docs/codex-hooks.md)
-- [`Gemini CLI Hooks`](docs/gemini-hooks.md)
+- [`Google Antigravity Hooks`](docs/antigravity-hooks.md)
 - [`Cursor Hooks`](docs/cursor-hooks.md)
 - [`OpenCode Plugin`](docs/opencode-plugin.md)
 - [`Inference Gateway / OpenRouter / LiteLLM`](docs/inference-gateway.md)

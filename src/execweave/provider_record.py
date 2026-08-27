@@ -11,7 +11,7 @@ from .backends import BackendName
 from .correlation import CorrelationResult, correlate_tool_process
 from .graph import build_execution_graph, write_execution_graph
 from .semantic import SemanticMergeResult, merge_semantic_sidecar
-from .viewer_projection import write_graph_html
+from .viewer_projection import strip_internal_hook_execution_graph, write_graph_html
 from .workflow import RecordResult, record_to_viewer
 
 _SEMANTIC_ENV = "EXECWEAVE_SEMANTIC_SIDECAR"
@@ -176,7 +176,9 @@ def record_provider_to_viewer(
         semantic_sidecar,
         merged_event_stream,
     )
-    execution_graph = build_execution_graph(merged_event_stream)
+    execution_graph = strip_internal_hook_execution_graph(
+        build_execution_graph(merged_event_stream)
+    )
     write_execution_graph(execution_graph, semantic_graph)
     write_graph_html(execution_graph.to_dict(), semantic_viewer, open_browser=False)
 
@@ -185,7 +187,9 @@ def record_provider_to_viewer(
         correlated_event_stream,
         max_window_ms=correlation_window_ms,
     )
-    correlated_execution_graph = build_execution_graph(correlated_event_stream)
+    correlated_execution_graph = strip_internal_hook_execution_graph(
+        build_execution_graph(correlated_event_stream)
+    )
     correlation_metadata = {"correlation": correlation_result.to_dict()}
     write_execution_graph(
         correlated_execution_graph,

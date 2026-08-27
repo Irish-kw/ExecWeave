@@ -10,7 +10,7 @@ from .graph import build_execution_graph, write_execution_graph
 from .sink import JsonlSink
 from .theme import ensure_viewer_theme
 from .validate import validate_event_stream
-from .viewer_projection import write_graph_html
+from .viewer_projection import strip_internal_hook_execution_graph, write_graph_html
 
 
 @dataclass(frozen=True)
@@ -101,7 +101,7 @@ def record_to_viewer(
         details = "; ".join(validation.errors)
         raise RuntimeError(f"recorded event stream failed validation: {details}")
 
-    execution_graph = build_execution_graph(event_path)
+    execution_graph = strip_internal_hook_execution_graph(build_execution_graph(event_path))
     write_fidelity_report(execution_graph.fidelity, fidelity_path)
     write_execution_graph(execution_graph, graph_path)
     write_graph_html(execution_graph.to_dict(), viewer_path, open_browser=False)

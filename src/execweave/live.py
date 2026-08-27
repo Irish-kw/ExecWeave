@@ -4,7 +4,9 @@ from collections import deque
 
 from . import live_core as _core
 from .viewer_projection import (
+    internal_hook_process_ids_in_event,
     project_viewer_graph,
+    strip_internal_hook_execution_graph,
     render_graph_html as _projected_render_graph_html,
     write_graph_html as _projected_write_graph_html,
 )
@@ -30,6 +32,8 @@ write_graph_html = _projected_write_graph_html
 LIVE_RAW_EVENT_HISTORY = 320
 _BaseLiveState = _core._LiveState
 _base_inject_live_auth = _core._inject_live_auth
+_base_inject_final_theme = _core._inject_final_theme
+_base_build_execution_graph = _core.build_execution_graph
 
 
 def _within_live_payload_budget(node_count: int, edge_count: int) -> bool:
@@ -60,6 +64,19 @@ def _inject_live_auth(html: str) -> str:
     return authenticated
 
 
+def _inject_final_theme(html: str) -> str:
+    themed = _base_inject_final_theme(html)
+    return themed.replace(
+        "#execweave-theme-toggle{position:fixed;right:14px;bottom:14px;",
+        "#execweave-theme-toggle{position:fixed;right:14px;top:14px;",
+        1,
+    )
+
+
+def _build_execution_graph_without_internal_hooks(*args, **kwargs):
+    return strip_internal_hook_execution_graph(_base_build_execution_graph(*args, **kwargs))
+
+
 class _LiveState(_BaseLiveState):
     def __init__(
         self,
@@ -70,12 +87,44 @@ class _LiveState(_BaseLiveState):
         super().__init__(session_id, event_path, semantic_path)
         self._raw_events: deque[dict[str, object]] = deque(maxlen=LIVE_RAW_EVENT_HISTORY)
         self._pending_raw_events: list[dict[str, object]] = []
+        self._internal_hook_process_ids: set[str] = set()
         self._viewer_projection_ever_active = False
 
     def _reset_incremental_state_locked(self) -> None:
         super()._reset_incremental_state_locked()
         self._raw_events.clear()
         self._pending_raw_events.clear()
+        self._internal_hook_process_ids.clear()
+
+    @staticmethod
+    def _event_entity_id(event: dict[str, object], key: str) -> str | None:
+        entity = event.get(key)
+        if not isinstance(entity, dict):
+            return None
+        value = entity.get("id")
+        return value if isinstance(value, str) and value else None
+
+    def _event_uses_internal_hook_process_locked(self, event: dict[str, object]) -> bool:
+        direct_ids = internal_hook_process_ids_in_event(event)
+        if direct_ids:
+            self._internal_hook_process_ids.update(direct_ids)
+        source_id = self._event_entity_id(event, "source")
+        target_id = self._event_entity_id(event, "target")
+        target = event.get("target")
+        if (
+            event.get("relation") == "SPAWNED"
+            and isinstance(source_id, str)
+            and source_id in self._internal_hook_process_ids
+            and isinstance(target, dict)
+            and target.get("type") == "process"
+            and isinstance(target_id, str)
+        ):
+            self._internal_hook_process_ids.add(target_id)
+        return bool(
+            direct_ids
+            or (isinstance(source_id, str) and source_id in self._internal_hook_process_ids)
+            or (isinstance(target_id, str) and target_id in self._internal_hook_process_ids)
+        )
 
     def _read_tail_records_locked(
         self,
@@ -84,10 +133,31 @@ class _LiveState(_BaseLiveState):
         records = super()._read_tail_records_locked(tail)
         if tail is self._runtime_tail:
             for line_number, event in records:
+                if self._event_uses_internal_hook_process_locked(event):
+                    continue
                 entry: dict[str, object] = {"line": line_number, "event": event}
                 self._raw_events.append(entry)
                 self._pending_raw_events.append(entry)
         return records
+
+    def _apply_live_event_locked(
+        self,
+        event: dict[str, object],
+        *,
+        added_nodes: set[str],
+        updated_nodes: set[str],
+        added_edges: set[tuple[str, str, str]],
+        updated_edges: set[tuple[str, str, str]],
+    ) -> bool:
+        if self._event_uses_internal_hook_process_locked(event):
+            return False
+        return super()._apply_live_event_locked(
+            event,
+            added_nodes=added_nodes,
+            updated_nodes=updated_nodes,
+            added_edges=added_edges,
+            updated_edges=updated_edges,
+        )
 
     def _projected_graph_locked(self) -> dict[str, object]:
         raw_graph = (
@@ -181,6 +251,8 @@ class _LiveState(_BaseLiveState):
 _core.render_graph_html = _projected_render_graph_html
 _core.write_graph_html = _projected_write_graph_html
 _core._inject_live_auth = _inject_live_auth
+_core._inject_final_theme = _inject_final_theme
+_core.build_execution_graph = _build_execution_graph_without_internal_hooks
 _core._LiveState = _LiveState
 _AUTHENTICATED_LIVE_HTML = _inject_live_auth(_LIVE_HTML)
 _core._AUTHENTICATED_LIVE_HTML = _AUTHENTICATED_LIVE_HTML
