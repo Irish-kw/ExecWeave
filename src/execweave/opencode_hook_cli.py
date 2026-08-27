@@ -32,11 +32,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--sidecar", type=Path, default=None)
     parser.add_argument("--strict", action="store_true")
+    parser.add_argument("--auto", action="store_true", help=argparse.SUPPRESS)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.auto and not os.environ.get("EXECWEAVE_SEMANTIC_SIDECAR"):
+        print("{}")
+        return 0
     try:
         payload = read_plugin_payload()
         sidecar = args.sidecar

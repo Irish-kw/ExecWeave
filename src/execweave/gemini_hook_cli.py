@@ -67,6 +67,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Return non-zero on telemetry errors. Default is fail-open.",
     )
+    parser.add_argument("--auto", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument(
         "--print-config",
         action="store_true",
@@ -80,6 +81,9 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.print_config:
         print(json.dumps(gemini_hook_config(args.command), indent=2, sort_keys=True))
+        return 0
+    if args.auto and not os.environ.get("EXECWEAVE_SEMANTIC_SIDECAR"):
+        print("{}")
         return 0
 
     try:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 _PLUGIN = r'''const sessionIDFrom = (value, depth = 0) => {
@@ -102,8 +103,10 @@ export const ExecWeavePlugin = async ({ directory }) => {
 '''
 
 
-def plugin_text() -> str:
-    return _PLUGIN
+def plugin_text(command: tuple[str, ...] = ("execweave-opencode-hook",)) -> str:
+    rendered_command = json.dumps(list(command))
+    marker = 'Bun.spawn(["execweave-opencode-hook"], {'
+    return _PLUGIN.replace(marker, f"Bun.spawn({rendered_command}, {{", 1)
 
 
 def install_plugin(root: str | Path, *, force: bool = False) -> Path:

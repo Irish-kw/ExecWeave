@@ -25,9 +25,9 @@ def record_codex_to_viewer(
 ) -> CodexRecordResult:
     """Record one Codex run using the shared provider-record pipeline.
 
-    Codex must already be configured to invoke ``execweave-codex-hook``. This
-    wrapper never edits Codex settings; it only binds the child process to the
-    run-specific semantic sidecar managed by the shared core.
+    When the launched command is Codex, the shared core automatically bootstraps
+    ExecWeave's fail-open hook integration before launch and binds it to the
+    run-specific semantic sidecar.
     """
     return record_provider_to_viewer(
         command,

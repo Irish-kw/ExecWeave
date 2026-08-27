@@ -76,6 +76,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Return non-zero on telemetry errors. Default is fail-open so tracing cannot block Claude.",
     )
     parser.add_argument(
+        "--auto",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
         "--print-config",
         action="store_true",
         help="Print a Claude Code settings fragment for the supported ExecWeave hooks and exit.",
@@ -93,6 +98,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.print_config:
         print(json.dumps(claude_hook_config(args.command), indent=2, sort_keys=True))
+        return 0
+    if args.auto and not os.environ.get("EXECWEAVE_SEMANTIC_SIDECAR"):
         return 0
 
     try:

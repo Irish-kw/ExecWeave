@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
 
+from .agent_bootstrap import AgentBootstrapResult, bootstrap_supported_agent
 from .backends import BackendName
 from .correlation import CorrelationResult, correlate_tool_process
 from .graph import build_execution_graph, write_execution_graph
@@ -19,6 +20,7 @@ _SEMANTIC_ENV = "EXECWEAVE_SEMANTIC_SIDECAR"
 @dataclass(frozen=True)
 class ProviderRecordResult:
     runtime: RecordResult
+    specialized_observability: AgentBootstrapResult
     semantic_status: str
     semantic_sidecar: Path
     merged_event_stream: Path | None
@@ -34,6 +36,7 @@ class ProviderRecordResult:
     def to_dict(self) -> dict[str, object]:
         return {
             "runtime": self.runtime.to_dict(),
+            "specialized_observability": self.specialized_observability.to_dict(),
             "semantic_status": self.semantic_status,
             "semantic_sidecar": str(self.semantic_sidecar),
             "merged_event_stream": (
@@ -97,10 +100,11 @@ def record_provider_to_viewer(
 ) -> ProviderRecordResult:
     """Record runtime + provider semantic evidence into layered local artifacts.
 
-    Provider-specific hooks must already be configured to write to the inherited
-    ``EXECWEAVE_SEMANTIC_SIDECAR`` path. This core never edits provider settings.
-    Raw runtime and semantic evidence remain separate; correlation always derives a
-    new stream and stays explicitly inferred/non-causal.
+    Known supported Agent commands are bootstrapped before launch. Bootstrap is
+    fail-open: runtime collection still proceeds when specialized integration is
+    unavailable or cannot be configured. Raw runtime and semantic evidence remain
+    separate; correlation always derives a new stream and stays explicitly
+    inferred/non-causal.
     """
     if not command:
         raise ValueError("command must not be empty")
@@ -118,6 +122,7 @@ def record_provider_to_viewer(
     run_dir.mkdir(parents=True, exist_ok=True)
     paths = _artifact_paths(run_dir)
     _preflight(list(paths.values()), provider_name=provider_name)
+    specialized_observability = bootstrap_supported_agent(command)
 
     semantic_sidecar = paths["semantic_sidecar"]
     previous = os.environ.get(_SEMANTIC_ENV)
@@ -145,6 +150,7 @@ def record_provider_to_viewer(
             webbrowser.open(runtime.viewer.resolve().as_uri())
         return ProviderRecordResult(
             runtime=runtime,
+            specialized_observability=specialized_observability,
             semantic_status="no_events",
             semantic_sidecar=semantic_sidecar.resolve(),
             merged_event_stream=None,
@@ -201,6 +207,7 @@ def record_provider_to_viewer(
     )
     return ProviderRecordResult(
         runtime=runtime,
+        specialized_observability=specialized_observability,
         semantic_status="merged",
         semantic_sidecar=semantic_sidecar.resolve(),
         merged_event_stream=merged_event_stream.resolve(),
