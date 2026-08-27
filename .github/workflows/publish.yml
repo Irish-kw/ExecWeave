@@ -3,21 +3,58 @@ name: Publish to PyPI
 on:
   release:
     types: [published]
+  push:
+    branches: [main]
+    paths:
+      - ".release-v069"
 
 permissions:
   contents: read
 
+env:
+  V069_TAG: v0.6.9
+  V069_SHA: 2f9cbdae31ac82b6efd6976f636a1e32474b6da8
+
 jobs:
+  prepare-release:
+    if: github.event_name == 'push' || github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Create v0.6.9 draft release at approved SHA
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$V069_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "$V069_TAG already exists; refusing to overwrite" >&2
+            exit 1
+          fi
+          gh release create "$V069_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$V069_SHA" \
+            --title "ExecWeave v0.6.9" \
+            --draft \
+            --notes $'ExecWeave v0.6.9\n\n- Final Graph now opens separately from the Live Dashboard.\n- Final Graph controls no longer overlap the fixed Light/Dark control.\n- Replay GIF export uses a standards-safe encoder.\n- README uses the real dashboard codex.gif and current v0.6.9 documentation.\n- Antigravity and Cursor desktop launch support are included.\n- ExecWeave is source-available under PolyForm Noncommercial License 1.0.0; commercial use requires a separate written license.'
+      - name: Use existing published release event
+        if: github.event_name == 'release'
+        run: echo "Using release ${{ github.event.release.tag_name }}"
+
   build:
+    needs: prepare-release
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'push' && '2f9cbdae31ac82b6efd6976f636a1e32474b6da8' || github.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - name: Verify release tag matches package version
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TAG: ${{ github.event_name == 'push' && 'v0.6.9' || github.event.release.tag_name }}
         run: |
           python - <<'PY'
           import os
@@ -32,6 +69,9 @@ jobs:
               )
           print(f"Publishing ExecWeave {package_version}")
           PY
+      - name: Verify special release source SHA
+        if: github.event_name == 'push'
+        run: test "$(git rev-parse HEAD)" = "$V069_SHA"
       - name: Build and validate distributions
         run: |
           python -m pip install --upgrade pip
@@ -75,5 +115,53 @@ jobs:
       - name: Attach distributions to GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TAG: ${{ github.event_name == 'push' && 'v0.6.9' || github.event.release.tag_name }}
         run: gh release upload "$RELEASE_TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
+      - name: Publish v0.6.9 GitHub Release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$V069_TAG" --repo "$GITHUB_REPOSITORY" --draft=false
+      - name: Remove old official GitHub releases and tags
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for tag in v0.6.0 v0.6.1 v0.6.2 v0.6.3 v0.6.4 v0.6.5 v0.6.6 v0.6.7; do
+            release_id="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" --jq .id 2>/dev/null || true)"
+            if [ -n "$release_id" ]; then
+              echo "Deleting GitHub Release $tag ($release_id)"
+              gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/$release_id"
+            fi
+            if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" >/dev/null 2>&1; then
+              echo "Deleting tag $tag"
+              gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$tag"
+            fi
+          done
+
+  restore-workflow:
+    if: github.event_name == 'push' && success()
+    needs: release-assets
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 2
+      - name: Restore normal release workflow and remove marker
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          if [ "$(git rev-parse origin/main)" != "$GITHUB_SHA" ]; then
+            echo "main moved during release transaction; refusing automatic cleanup" >&2
+            exit 1
+          fi
+          git checkout "$GITHUB_SHA^" -- .github/workflows/publish.yml
+          git rm .release-v069
+          git commit -m "chore: restore release workflow [skip ci]"
+          git push origin HEAD:main
