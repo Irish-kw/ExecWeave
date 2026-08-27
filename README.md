@@ -15,12 +15,12 @@
 
 **See what AI agents actually do on your machine.**
 
-ExecWeave is an open-source, local-first observability project that turns AI-agent activity into an interactive execution graph while keeping observed evidence, provider content, and derived inference explicitly separated.
+ExecWeave is a source-available, local-first observability project that turns AI-agent activity into an interactive execution graph while keeping observed evidence, provider content, and derived inference explicitly separated. Starting with v0.6.8, the project is licensed for noncommercial use under PolyForm Noncommercial 1.0.0.
 
 > **Event is ground truth. The graph is a materialized view.**
 
 <p align="center">
-  <img src="docs/assets/execweave-launch-demo-v5-x.gif" alt="ExecWeave animated live demo" width="100%">
+  <img src="docs/assets/codex.gif" alt="ExecWeave animated live demo" width="100%">
 </p>
 
 ## Install
@@ -31,7 +31,7 @@ Install the latest published wheel/sdist from PyPI:
 python -m pip install -U execweave
 ```
 
-The package version on `main` is currently **v0.6.6**. The published release may lag main; test the exact mainline build with:
+The package version on `main` is currently **v0.6.8**. The published release may lag main; test the exact mainline build with:
 
 ```bash
 python -m pip install --upgrade --force-reinstall "execweave @ git+https://github.com/Irish-kw/ExecWeave.git@main"
@@ -71,9 +71,9 @@ execweave record --open -- python my_agent.py
 
 `execweave top -- codex` keeps the Agent interactive in the launch terminal while opening/attaching the detached Top dashboard according to the host environment.
 
-## v0.6.5: full-fidelity observability with explicit evidence boundaries
+## v0.6.8: full-fidelity observability with explicit evidence boundaries
 
-v0.6.5 extends provider/runtime observability beyond compact metadata. When a supported integration point explicitly supplies content, ExecWeave can preserve the **complete supplied value** in a local SHA-256 content-addressed store while keeping only a reference in the semantic event stream.
+v0.6.8 extends provider/runtime observability beyond compact metadata. When a supported integration point explicitly supplies content, ExecWeave can preserve the **complete supplied value** in a local SHA-256 content-addressed store while keeping only a reference in the semantic event stream.
 
 ```text
 <run-root>/content/sha256/<sha256>.<json|txt|bin>
@@ -231,7 +231,7 @@ Portable filesystem observation is session-correlated rather than process-causal
 
 ## Performance and large-run safety
 
-v0.6.3 added bounded filesystem/viewer protections, incremental Live JSONL tailing, and large-graph safety guards. v0.6.4 added detached Top and unified provisional live sidecars for configured provider integrations. These remain in v0.6.5; the project has **not** migrated Live to SSE, artifact storage to SQLite, the renderer to Canvas/WebGL, or collectors to Rust solely for this release.
+v0.6.3 added bounded filesystem/viewer protections, incremental Live JSONL tailing, and large-graph safety guards. v0.6.4 added detached Top and unified provisional live sidecars for configured provider integrations. These remain in v0.6.8; the project has **not** migrated Live to SSE, artifact storage to SQLite, the renderer to Canvas/WebGL, or collectors to Rust solely for this release.
 
 The reproducible incremental `GraphAccumulator` reference result reaches **164,273 ev/s** at 1M synthetic events on the documented GitHub Actions workload. This is a graph-accumulation benchmark, not end-to-end collector/browser throughput.
 
@@ -268,15 +268,15 @@ Derived correlation never rewrites the raw runtime or provider sidecar evidence.
 
 ## Privacy
 
-ExecWeave is local-first: captures, content blobs, graphs, reports, and viewers remain local by default. The **OS runtime collector** does not intentionally capture file contents or raw read/write byte buffers. That boundary must not be confused with the v0.6.5 **provider full-fidelity content store**: supported hooks/APIs can explicitly supply prompts, tool arguments/results, model responses, reasoning/thinking text, shell output, file content, or other sensitive values, and ExecWeave can preserve those values completely.
+ExecWeave is local-first: captures, content blobs, graphs, reports, and viewers remain local by default. The **OS runtime collector** does not intentionally capture file contents or raw read/write byte buffers. That boundary must not be confused with the v0.6.8 **provider full-fidelity content store**: supported hooks/APIs can explicitly supply prompts, tool arguments/results, model responses, reasoning/thinking text, shell output, file content, or other sensitive values, and ExecWeave can preserve those values completely.
 
 Do not assume content has been secret-redacted. Commands, paths, endpoint metadata, identifiers, model metadata, prompts, tool values, and content blobs can all be sensitive. Review the entire run directory before sharing it.
 
 ## Current status
 
-ExecWeave `main` is currently **v0.6.6** and under active release hardening. The latest published package/release can lag main until a GitHub Release is explicitly published; the publish workflow verifies that the release tag exactly matches the package version before PyPI upload.
+ExecWeave `main` is currently **v0.6.8** and under active release hardening. The latest published package/release can lag main until a GitHub Release is explicitly published; the publish workflow verifies that the release tag exactly matches the package version before PyPI upload.
 
-v0.6.5 combines cross-platform runtime collection, materialized execution graphs, standalone/live viewing, conservative provider↔runtime correlation, full-fidelity content-addressed provider evidence, evidence grades, bounded rule packs, an explicit runtime threat/fidelity contract, and honest local run-integrity sealing. Observed evidence and inference remain separate by design.
+v0.6.8 combines cross-platform runtime collection, materialized execution graphs, standalone/live viewing, conservative provider↔runtime correlation, full-fidelity content-addressed provider evidence, evidence grades, bounded rule packs, an explicit runtime threat/fidelity contract, and honest local run-integrity sealing. Observed evidence and inference remain separate by design.
 
 ## Documentation
 
@@ -304,4 +304,4 @@ Contributions are welcome, especially around native OS collectors, Agent/IDE ada
 
 ## License
 
-See [`LICENSE`](LICENSE).
+ExecWeave v0.6.8 and later are licensed under the **PolyForm Noncommercial License 1.0.0**. Noncommercial use, modification, and redistribution are permitted under those terms. Commercial use requires a separate written commercial license from the licensor. Earlier versions already released under MIT remain under the terms that accompanied those versions. See [`LICENSE`](LICENSE).

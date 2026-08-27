@@ -15,12 +15,12 @@
 
 **Посмотрите, что ИИ-агенты действительно делают на вашей машине.**
 
-ExecWeave — это open-source, local-first проект observability, который преобразует активность ИИ-агентов в интерактивный execution graph и при этом явно разделяет observed evidence, provider content и derived inference.
+ExecWeave — source-available, local-first проект observability, который преобразует активность ИИ-агентов в интерактивный execution graph и при этом явно разделяет observed evidence, provider content и derived inference. Начиная с v0.6.8 проект распространяется по PolyForm Noncommercial 1.0.0; коммерческое использование не разрешено.
 
 > **Event — это ground truth. Graph — materialized view.**
 
 <p align="center">
-  <img src="docs/assets/execweave-launch-demo-v5-x.gif" alt="ExecWeave animated live demo" width="100%">
+  <img src="docs/assets/codex.gif" alt="ExecWeave animated live demo" width="100%">
 </p>
 
 ## Установка
@@ -31,7 +31,7 @@ ExecWeave — это open-source, local-first проект observability, кот
 python -m pip install -U execweave
 ```
 
-Версия package в `main` сейчас **v0.6.5**. Опубликованный release может отставать от main; чтобы протестировать текущий mainline напрямую:
+Версия package в `main` сейчас **v0.6.8**. Опубликованный release может отставать от main; чтобы протестировать текущий mainline напрямую:
 
 ```bash
 python -m pip install --upgrade --force-reinstall "execweave @ git+https://github.com/Irish-kw/ExecWeave.git@main"
@@ -52,12 +52,16 @@ Live OS-runtime telemetry работает с **любой локальной к
 ```bash
 execweave live --open -- claude
 execweave live --open -- codex
-execweave live --open -- gemini
+execweave live --open -- antigravity
 execweave live --open -- cursor
 execweave live --open -- opencode
 execweave live --open -- ollama serve
 execweave live --open -- python my_agent.py
 ```
+
+> **Разрешите Hook, когда появится запрос.** При первом provider-integrated run Agent/IDE может спросить, разрешено ли ExecWeave включить локальную Hook integration. Выберите **Allow / Yes**. Без разрешения OS-runtime telemetry может продолжить работать, но provider-level observability tools, models и supplied content будет ограничена или недоступна.
+
+Google Antigravity сейчас использует CLI `agy`; ExecWeave также принимает `antigravity` как friendly alias и разрешает его в `agy`. Для Cursor команда `execweave live --open -- cursor` сначала использует PATH launcher, а при его отсутствии на macOS/Windows переходит к стандартному binary Cursor desktop application.
 
 Или создайте finalized artifact pipeline:
 
@@ -67,9 +71,9 @@ execweave record --open -- python my_agent.py
 
 `execweave top -- codex` оставляет Agent интерактивным в терминале запуска и открывает либо подключает detached Top dashboard в зависимости от среды хоста.
 
-## v0.6.5: full-fidelity observability с явными evidence boundaries
+## v0.6.8: full-fidelity observability с явными evidence boundaries
 
-v0.6.5 расширяет observability за пределы компактных metadata. Если поддерживаемая integration point явно предоставляет content, ExecWeave может сохранить **полное значение, предоставленное этим источником**, в локальном SHA-256 content-addressed store, оставляя в semantic event stream только reference.
+v0.6.8 расширяет observability за пределы компактных metadata. Если поддерживаемая integration point явно предоставляет content, ExecWeave может сохранить **полное значение, предоставленное этим источником**, в локальном SHA-256 content-addressed store, оставляя в semantic event stream только reference.
 
 ```text
 <run-root>/content/sha256/<sha256>.<json|txt|bin>
@@ -87,7 +91,7 @@ Full fidelity также меняет privacy boundary: application-level secret
 | --- | --- | --- |
 | Claude Code | Yes | native hooks + full-fidelity content, предоставленный hook |
 | OpenAI Codex | Yes | lifecycle hooks + full-fidelity content, предоставленный hook |
-| Gemini CLI | Yes | native hooks + full-fidelity content, предоставленный hook |
+| Google Antigravity / Antigravity CLI | Yes | passive native hooks for invocation/tool evidence + full-fidelity values explicitly supplied to those hooks |
 | Cursor | Yes | native hooks + full-fidelity content, предоставленный hook |
 | OpenCode | Yes | project plugin + full-fidelity content, предоставленный plugin |
 | Ollama | Yes | `execweave-model-runtime event/exchange/probe --runtime ollama` |
@@ -137,8 +141,8 @@ execweave-claude-record --open -- claude
 execweave-codex-hook --print-config
 execweave-codex-record --open -- codex
 
-execweave-gemini-hook --print-config
-execweave-gemini-record --open -- gemini
+execweave-antigravity-hook --print-config
+execweave-antigravity-record --open -- antigravity
 
 execweave-cursor-hook --print-config
 execweave-cursor-record --open -- cursor
@@ -147,7 +151,7 @@ execweave-opencode-plugin --install
 execweave-opencode-record --open -- opencode
 ```
 
-Provider-integrated recorders сохраняют raw runtime, semantic и correlated artifacts отдельно. Stable provider identifiers вроде Cursor `tool_use_id` или OpenCode `sessionID + callID` подтверждают logical identity внутри provider, но не являются OS PID.
+Provider-integrated recorders сохраняют raw runtime, semantic и correlated artifacts отдельно. Stable provider identifiers вроде Cursor `tool_use_id` или OpenCode `sessionID + callID` подтверждают logical identity внутри provider, но не являются OS PID. Legacy Gemini CLI hook entry points остаются для совместимости существующих установок; новое использование Google CLI должно переходить на Antigravity (`agy`).
 
 ## Inference gateways и model runtimes
 
@@ -224,7 +228,7 @@ Portable filesystem observation является session-correlated, а не pro
 
 ## Performance и large-run safety
 
-v0.6.3 добавил bounded filesystem/viewer protections, incremental Live JSONL tailing и large-graph safety guards. v0.6.4 добавил detached Top и общий provisional live sidecar для настроенных provider integrations. Эти возможности остаются в v0.6.5. Ради этой release проект **не** мигрировал Live на SSE, artifact storage на SQLite, renderer на Canvas/WebGL или collectors на Rust только ради смены архитектуры.
+v0.6.3 добавил bounded filesystem/viewer protections, incremental Live JSONL tailing и large-graph safety guards. v0.6.4 добавил detached Top и общий provisional live sidecar для настроенных provider integrations. Эти возможности остаются в v0.6.8. Ради этой release проект **не** мигрировал Live на SSE, artifact storage на SQLite, renderer на Canvas/WebGL или collectors на Rust только ради смены архитектуры.
 
 Воспроизводимый reference result incremental `GraphAccumulator` достигает **164,273 ev/s** на 1M synthetic events в документированном GitHub Actions workload. Это benchmark накопления graph, а не end-to-end collector/browser throughput.
 
@@ -259,15 +263,15 @@ Derived correlation никогда не переписывает raw runtime и�
 
 ## Privacy
 
-ExecWeave — local-first: captures, content blobs, graphs, reports и viewers по умолчанию остаются локальными. **OS runtime collector** намеренно не захватывает file content или raw read/write byte buffers. Эту boundary нельзя путать с **provider full-fidelity content store** v0.6.5: если поддерживаемый hook/API явно предоставляет prompt, tool argument/result, model response, reasoning/thinking text, shell output, file content или другую sensitive value, ExecWeave может сохранить её полностью.
+ExecWeave — local-first: captures, content blobs, graphs, reports и viewers по умолчанию остаются локальными. **OS runtime collector** намеренно не захватывает file content или raw read/write byte buffers. Эту boundary нельзя путать с **provider full-fidelity content store** v0.6.8: если поддерживаемый hook/API явно предоставляет prompt, tool argument/result, model response, reasoning/thinking text, shell output, file content или другую sensitive value, ExecWeave может сохранить её полностью.
 
 Не предполагайте, что content уже secret-redacted. Commands, paths, endpoint metadata, identifiers, model metadata, prompts, tool values и content blobs могут быть sensitive. Проверяйте весь run directory перед публикацией.
 
 ## Текущий статус
 
-ExecWeave `main` сейчас **v0.6.5** и проходит release hardening. Последний публичный package/release может отставать от main до явной публикации GitHub Release; publish workflow проверяет точное совпадение release tag и package version до загрузки в PyPI.
+ExecWeave `main` сейчас **v0.6.8** и проходит release hardening. Последний публичный package/release может отставать от main до явной публикации GitHub Release; publish workflow проверяет точное совпадение release tag и package version до загрузки в PyPI.
 
-v0.6.5 объединяет cross-platform runtime collection, materialized execution graphs, standalone/live viewing, консервативную provider↔runtime correlation, content-addressed full-fidelity provider evidence, evidence grades, bounded rule packs, явный runtime threat/fidelity contract и честный local run-integrity seal. Observed evidence и inference остаются разделёнными по дизайну.
+v0.6.8 объединяет cross-platform runtime collection, materialized execution graphs, standalone/live viewing, консервативную provider↔runtime correlation, content-addressed full-fidelity provider evidence, evidence grades, bounded rule packs, явный runtime threat/fidelity contract и честный local run-integrity seal. Observed evidence и inference остаются разделёнными по дизайну.
 
 ## Документация
 
@@ -277,7 +281,7 @@ v0.6.5 объединяет cross-platform runtime collection, materialized exec
 - [`Semantic Telemetry`](docs/semantic-telemetry.ru.md)
 - [`Claude Code Hooks`](docs/claude-code-hooks.ru.md)
 - [`OpenAI Codex Hooks`](docs/codex-hooks.ru.md)
-- [`Gemini CLI Hooks`](docs/gemini-hooks.ru.md)
+- [`Google Antigravity Hooks`](docs/antigravity-hooks.md)
 - [`Cursor Hooks`](docs/cursor-hooks.ru.md)
 - [`OpenCode Plugin`](docs/opencode-plugin.ru.md)
 - [`Inference Gateway / OpenRouter / LiteLLM`](docs/inference-gateway.ru.md)
@@ -295,4 +299,4 @@ v0.6.5 объединяет cross-platform runtime collection, materialized exec
 
 ## License
 
-См. [`LICENSE`](LICENSE).
+ExecWeave v0.6.8 и более поздние версии распространяются по **PolyForm Noncommercial License 1.0.0**. Некоммерческие использование, изменение и распространение разрешены в соответствии с этими условиями; любое коммерческое использование требует отдельной письменной коммерческой лицензии. Ранее выпущенные под MIT версии сохраняют условия лицензии, сопровождавшие их на момент выпуска. См. [`LICENSE`](LICENSE).

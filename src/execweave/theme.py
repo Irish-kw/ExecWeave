@@ -6,6 +6,7 @@ _THEME_CSS = """
 :root[data-theme="light"]{color-scheme:light;--bg:#f7f9fc;--panel:#ffffff;--panel2:#eef3f8;--text:#172033;--muted:#617083;--border:#cbd5e1;--edge:#64748b;--causal:#15803d;--noncausal:#b45309;--inferred:#7e22ce;--identity:#0369a1;--selected:#2563eb;--accent:#2563eb}
 #execweave-theme-toggle{position:fixed;right:14px;bottom:14px;z-index:9999;border:1px solid var(--border);background:var(--panel);color:var(--text);border-radius:8px;padding:7px 10px;cursor:pointer;box-shadow:0 4px 18px rgba(15,23,42,.12)}
 #execweave-theme-toggle:hover{border-color:var(--selected,var(--accent))}
+#save-preset{position:fixed;right:14px;top:58px;z-index:9998;box-shadow:0 4px 18px rgba(15,23,42,.12)}
 :root[data-theme="light"] .node text{fill:#f8fafc}:root[data-theme="light"] .node .node-type{fill:#cbd5e1}
 """.strip()
 

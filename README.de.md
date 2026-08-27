@@ -15,12 +15,12 @@
 
 **Sehen Sie, was KI-Agenten auf Ihrem Rechner tatsächlich tun.**
 
-ExecWeave ist ein Open-Source-, local-first-Observability-Projekt, das Aktivitäten von KI-Agenten in einen interaktiven Execution Graph überführt und dabei observed evidence, provider content und derived inference ausdrücklich getrennt hält.
+ExecWeave ist ein source-available, local-first Observability-Projekt, das Aktivitäten von KI-Agenten in einen interaktiven Execution Graph überführt und dabei observed evidence, provider content und derived inference ausdrücklich getrennt hält. Ab v0.6.8 gilt die PolyForm Noncommercial License 1.0.0; kommerzielle Nutzung ist nicht erlaubt.
 
 > **Das Event ist die Ground Truth. Der Graph ist eine materialized view.**
 
 <p align="center">
-  <img src="docs/assets/execweave-launch-demo-v5-x.gif" alt="ExecWeave animated live demo" width="100%">
+  <img src="docs/assets/codex.gif" alt="ExecWeave animated live demo" width="100%">
 </p>
 
 ## Installation
@@ -31,7 +31,7 @@ Installieren Sie das neueste veröffentlichte wheel/sdist von PyPI:
 python -m pip install -U execweave
 ```
 
-Die Package-Version auf `main` ist derzeit **v0.6.5**. Die veröffentlichte Release kann hinter main zurückliegen. Um exakt den aktuellen Mainline-Build zu testen:
+Die Package-Version auf `main` ist derzeit **v0.6.8**. Die veröffentlichte Release kann hinter main zurückliegen. Um exakt den aktuellen Mainline-Build zu testen:
 
 ```bash
 python -m pip install --upgrade --force-reinstall "execweave @ git+https://github.com/Irish-kw/ExecWeave.git@main"
@@ -52,12 +52,16 @@ Live OS-runtime telemetry funktioniert mit **jedem lokalen Befehl**. Die unten g
 ```bash
 execweave live --open -- claude
 execweave live --open -- codex
-execweave live --open -- gemini
+execweave live --open -- antigravity
 execweave live --open -- cursor
 execweave live --open -- opencode
 execweave live --open -- ollama serve
 execweave live --open -- python my_agent.py
 ```
+
+> **Bestätigen Sie den Hook, wenn Sie dazu aufgefordert werden.** Beim ersten provider-integrierten Lauf kann der Agent/die IDE fragen, ob ExecWeave die lokale Hook-Integration aktivieren darf. Wählen Sie **Allow / Yes**. Ohne Zustimmung kann OS-runtime telemetry weiterhin funktionieren, aber provider-level Tool-, Model- und supplied-content observability wird eingeschränkt oder nicht verfügbar sein.
+
+Google Antigravity verwendet aktuell den `agy`-CLI-Befehl; ExecWeave akzeptiert auch `antigravity` als Alias und löst ihn zu `agy` auf. Für Cursor verwendet `execweave live --open -- cursor` zuerst einen PATH-Launcher und fällt unter macOS/Windows bei Bedarf auf das standardmäßige Cursor-Desktop-Binary zurück.
 
 Oder erstellen Sie die finalisierte Artifact-Pipeline:
 
@@ -67,15 +71,15 @@ execweave record --open -- python my_agent.py
 
 `execweave top -- codex` hält den Agent im Startterminal interaktiv und öffnet beziehungsweise verbindet das detached Top dashboard entsprechend der Host-Umgebung.
 
-## v0.6.5: Full-fidelity observability mit expliziten Evidence Boundaries
+## v0.6.8: Full-fidelity observability mit expliziten Evidence Boundaries
 
-v0.6.5 erweitert die Observability über kompakte Metadaten hinaus. Wenn ein unterstützter Integration Point Inhalte ausdrücklich liefert, kann ExecWeave **den vollständigen von dieser Quelle gelieferten Wert** in einem lokalen SHA-256 content-addressed store bewahren und im semantic event stream nur eine Referenz ablegen.
+v0.6.8 erweitert die Observability über kompakte Metadaten hinaus. Wenn ein unterstützter Integration Point Inhalte ausdrücklich liefert, kann ExecWeave **den vollständigen von dieser Quelle gelieferten Wert** in einem lokalen SHA-256 content-addressed store bewahren und im semantic event stream nur eine Referenz ablegen.
 
 ```text
 <run-root>/content/sha256/<sha256>.<json|txt|bin>
 ```
 
-Je nach Adapter und Upstream-Hook/API-Surface können unter anderem Prompts/ messages, Model-request/response-Objekte, Tool-input/result, explizit exponierter reasoning/thinking text, Shell/MCP-output sowie durch Provider-Hooks gelieferter File Content erhalten bleiben.
+Je nach Adapter und Upstream-Hook/API-Surface können unter anderem Prompts/messages, Model-request/response-Objekte, Tool-input/result, explizit exponierter reasoning/thinking text, Shell/MCP-output sowie durch Provider-Hooks gelieferter File Content erhalten bleiben.
 
 `complete_from_source: true` bedeutet nur, dass ExecWeave den vollständigen Wert gespeichert hat, den dieser Integration Point geliefert hat. Es bedeutet **nicht**, dass ExecWeave hidden model state, nie exponierte Provider-Stufen, einen ungesehenen finalen Wire Request oder Bytes beobachtet hat, die nicht interceptet wurden.
 
@@ -87,7 +91,7 @@ Full fidelity verändert auch die Privacy Boundary: Application-level secrets, d
 | --- | --- | --- |
 | Claude Code | Yes | native hooks + vom Hook gelieferter full-fidelity content |
 | OpenAI Codex | Yes | lifecycle hooks + vom Hook gelieferter full-fidelity content |
-| Gemini CLI | Yes | native hooks + vom Hook gelieferter full-fidelity content |
+| Google Antigravity / Antigravity CLI | Yes | passive native hooks for invocation/tool evidence + full-fidelity values explicitly supplied to those hooks |
 | Cursor | Yes | native hooks + vom Hook gelieferter full-fidelity content |
 | OpenCode | Yes | project plugin + vom Plugin gelieferter full-fidelity content |
 | Ollama | Yes | `execweave-model-runtime event/exchange/probe --runtime ollama` |
@@ -137,8 +141,8 @@ execweave-claude-record --open -- claude
 execweave-codex-hook --print-config
 execweave-codex-record --open -- codex
 
-execweave-gemini-hook --print-config
-execweave-gemini-record --open -- gemini
+execweave-antigravity-hook --print-config
+execweave-antigravity-record --open -- antigravity
 
 execweave-cursor-hook --print-config
 execweave-cursor-record --open -- cursor
@@ -147,7 +151,7 @@ execweave-opencode-plugin --install
 execweave-opencode-record --open -- opencode
 ```
 
-Provider-integrierte Recorder halten raw runtime, semantic und correlated artifacts getrennt. Stabile Provider-Identifier wie Cursor `tool_use_id` oder OpenCode `sessionID + callID` belegen logische Identität innerhalb des Providers, sind aber keine OS-PIDs.
+Provider-integrierte Recorder halten raw runtime, semantic und correlated artifacts getrennt. Stabile Provider-Identifier wie Cursor `tool_use_id` oder OpenCode `sessionID + callID` belegen logische Identität innerhalb des Providers, sind aber keine OS-PIDs. Legacy Gemini CLI Hook Entry Points bleiben für bestehende Installationen erhalten; neue Google-CLI-Nutzung sollte Antigravity (`agy`) verwenden.
 
 ## Inference Gateways und Model Runtimes
 
@@ -224,7 +228,7 @@ Portable Filesystem Observation ist session-correlated und nicht process-causal;
 
 ## Performance und Large-run Safety
 
-v0.6.3 brachte begrenzte Filesystem-/Viewer-Schutzmaßnahmen, inkrementelles Live-JSONL-Tailing und Large-graph Safety Guards. v0.6.4 ergänzte detached Top sowie einen gemeinsamen provisional live sidecar für konfigurierte Provider-Integrationen. Diese Fähigkeiten bleiben in v0.6.5 erhalten. Für diese Release wurde Live **nicht** allein aus Architekturgründen auf SSE, Artifact Storage auf SQLite, der Renderer auf Canvas/WebGL oder die Collectors auf Rust migriert.
+v0.6.3 brachte begrenzte Filesystem-/Viewer-Schutzmaßnahmen, inkrementelles Live-JSONL-Tailing und Large-graph Safety Guards. v0.6.4 ergänzte detached Top sowie einen gemeinsamen provisional live sidecar für konfigurierte Provider-Integrationen. Diese Fähigkeiten bleiben in v0.6.8 erhalten. Für diese Release wurde Live **nicht** allein aus Architekturgründen auf SSE, Artifact Storage auf SQLite, der Renderer auf Canvas/WebGL oder die Collectors auf Rust migriert.
 
 Das reproduzierbare inkrementelle `GraphAccumulator`-Referenzergebnis erreicht bei 1M synthetischen Events auf dem dokumentierten GitHub-Actions-Workload **164,273 ev/s**. Dies ist ein Graph-Accumulation-Benchmark und kein End-to-end Collector-/Browser-Throughput.
 
@@ -259,15 +263,15 @@ Derived correlation schreibt die rohe Runtime- oder Provider-Sidecar-Evidence ni
 
 ## Privacy
 
-ExecWeave ist local-first: Captures, Content Blobs, Graphen, Reports und Viewer bleiben standardmäßig lokal. Der **OS runtime collector** erfasst File Content oder rohe Read/write Byte Buffers nicht absichtlich. Diese Boundary darf nicht mit dem **provider full-fidelity content store** aus v0.6.5 verwechselt werden: Wenn ein unterstützter Hook/API ausdrücklich Prompt, Tool-Argumente/-Ergebnisse, Model Response, reasoning/thinking text, Shell Output, File Content oder andere sensitive Werte liefert, kann ExecWeave diese vollständig bewahren.
+ExecWeave ist local-first: Captures, Content Blobs, Graphen, Reports und Viewer bleiben standardmäßig lokal. Der **OS runtime collector** erfasst File Content oder rohe Read/write Byte Buffers nicht absichtlich. Diese Boundary darf nicht mit dem **provider full-fidelity content store** aus v0.6.8 verwechselt werden: Wenn ein unterstützter Hook/API ausdrücklich Prompt, Tool-Argumente/-Ergebnisse, Model Response, reasoning/thinking text, Shell Output, File Content oder andere sensitive Werte liefert, kann ExecWeave diese vollständig bewahren.
 
 Gehen Sie nicht davon aus, dass Content secret-redacted ist. Commands, Paths, Endpoint Metadata, Identifier, Model Metadata, Prompts, Tool Values und Content Blobs können alle sensitiv sein. Prüfen Sie das gesamte Run Directory vor dem Teilen.
 
 ## Aktueller Status
 
-ExecWeave `main` ist derzeit **v0.6.5** und befindet sich im Release Hardening. Das neueste öffentliche Package/Release kann hinter main liegen, bis eine GitHub Release ausdrücklich veröffentlicht wird. Der Publish Workflow prüft vor dem PyPI Upload, dass Release Tag und Package Version exakt übereinstimmen.
+ExecWeave `main` ist derzeit **v0.6.8** und befindet sich im Release Hardening. Das neueste öffentliche Package/Release kann hinter main liegen, bis eine GitHub Release ausdrücklich veröffentlicht wird. Der Publish Workflow prüft vor dem PyPI Upload, dass Release Tag und Package Version exakt übereinstimmen.
 
-v0.6.5 kombiniert cross-platform runtime collection, materialisierte Execution Graphs, standalone/live Viewing, konservative Provider↔Runtime-Korrelation, content-addressed full-fidelity Provider Evidence, Evidence Grades, begrenzte Rule Packs, einen expliziten Runtime Threat/Fidelity Contract und ehrliches lokales Run-integrity Sealing. Observed evidence und inference bleiben per Design getrennt.
+v0.6.8 kombiniert cross-platform runtime collection, materialisierte Execution Graphs, standalone/live Viewing, konservative Provider↔Runtime-Korrelation, content-addressed full-fidelity Provider Evidence, Evidence Grades, begrenzte Rule Packs, einen expliziten Runtime Threat/Fidelity Contract und ehrliches lokales Run-integrity Sealing. Observed evidence und inference bleiben per Design getrennt.
 
 ## Dokumentation
 
@@ -277,7 +281,7 @@ v0.6.5 kombiniert cross-platform runtime collection, materialisierte Execution G
 - [`Semantic Telemetry`](docs/semantic-telemetry.de.md)
 - [`Claude Code Hooks`](docs/claude-code-hooks.de.md)
 - [`OpenAI Codex Hooks`](docs/codex-hooks.de.md)
-- [`Gemini CLI Hooks`](docs/gemini-hooks.de.md)
+- [`Google Antigravity Hooks`](docs/antigravity-hooks.md)
 - [`Cursor Hooks`](docs/cursor-hooks.de.md)
 - [`OpenCode Plugin`](docs/opencode-plugin.de.md)
 - [`Inference Gateway / OpenRouter / LiteLLM`](docs/inference-gateway.de.md)
@@ -295,4 +299,4 @@ Beiträge sind willkommen, besonders zu nativen OS Collectors, Agent-/IDE-Adapte
 
 ## License
 
-Siehe [`LICENSE`](LICENSE).
+ExecWeave v0.6.8 und spätere Versionen stehen unter der **PolyForm Noncommercial License 1.0.0**. Nichtkommerzielle Nutzung, Änderung und Weitergabe sind unter diesen Bedingungen erlaubt; jede kommerzielle Nutzung erfordert eine separate schriftliche kommerzielle Lizenz. Bereits zuvor unter MIT veröffentlichte Versionen behalten ihre damaligen Lizenzbedingungen. Siehe [`LICENSE`](LICENSE).

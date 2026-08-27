@@ -15,12 +15,12 @@
 
 **看見 AI Agent 在你的電腦上實際做了什麼。**
 
-ExecWeave 是一個開源、local-first 的可觀測性專案，會把 AI Agent 活動轉成互動式 execution graph，並明確區分 observed evidence、provider content 與 derived inference。
+ExecWeave 是一個 source-available、local-first 的可觀測性專案，會把 AI Agent 活動轉成互動式 execution graph，並明確區分 observed evidence、provider content 與 derived inference。自 v0.6.8 起採用 PolyForm Noncommercial 1.0.0，僅允許非商業用途。
 
 > **Event 是 ground truth；Graph 是 materialized view。**
 
 <p align="center">
-  <img src="docs/assets/execweave-launch-demo-v5-x.gif" alt="ExecWeave animated live demo" width="100%">
+  <img src="docs/assets/codex.gif" alt="ExecWeave animated live demo" width="100%">
 </p>
 
 ## 安裝
@@ -31,7 +31,7 @@ ExecWeave 是一個開源、local-first 的可觀測性專案，會把 AI Agent 
 python -m pip install -U execweave
 ```
 
-目前 `main` 的套件版本是 **v0.6.5**。正式 release 可能晚於 main；若要測試目前 mainline：
+目前 `main` 的套件版本是 **v0.6.8**。正式 release 可能晚於 main；若要測試目前 mainline：
 
 ```bash
 python -m pip install --upgrade --force-reinstall "execweave @ git+https://github.com/Irish-kw/ExecWeave.git@main"
@@ -52,12 +52,16 @@ Live OS-runtime telemetry 可用於**任何本機命令**。下列 Agent/runtime
 ```bash
 execweave live --open -- claude
 execweave live --open -- codex
-execweave live --open -- gemini
+execweave live --open -- antigravity
 execweave live --open -- cursor
 execweave live --open -- opencode
 execweave live --open -- ollama serve
 execweave live --open -- python my_agent.py
 ```
+
+> **首次出現 Hook 權限提示時請同意。** 第一次使用 provider integration 時，Agent/IDE 可能會詢問是否允許 ExecWeave 啟用本機 Hook；請選 **Allow / Yes**。若不同意，OS-runtime telemetry 仍可能運作，但 provider-level 的 tool、model 與 supplied-content observability 會降低或不可用。
+
+Google Antigravity 目前使用 `agy` CLI；ExecWeave 也接受 `antigravity` 作為友善 alias 並自動解析到 `agy`。Cursor 的 `execweave live --open -- cursor` 會先找 PATH launcher，找不到時在 macOS/Windows 自動嘗試標準 Cursor desktop application binary。
 
 或建立完整 finalized artifact pipeline：
 
@@ -67,9 +71,9 @@ execweave record --open -- python my_agent.py
 
 `execweave top -- codex` 會讓 Agent 保持在啟動 terminal 中互動，並依主機環境開啟或附加 detached Top dashboard。
 
-## v0.6.5：full-fidelity observability 與明確 evidence boundary
+## v0.6.8：full-fidelity observability 與明確 evidence boundary
 
-v0.6.5 不再只保留精簡 metadata。當受支援的 integration point 明確提供內容時，ExecWeave 可以把**來源實際提供的完整值**存進本機 SHA-256 content-addressed store，而 semantic event stream 只保留 reference。
+v0.6.8 不再只保留精簡 metadata。當受支援的 integration point 明確提供內容時，ExecWeave 可以把**來源實際提供的完整值**存進本機 SHA-256 content-addressed store，而 semantic event stream 只保留 reference。
 
 ```text
 <run-root>/content/sha256/<sha256>.<json|txt|bin>
@@ -87,7 +91,7 @@ Full fidelity 同時改變 privacy boundary：如果 application-level secret �
 | --- | --- | --- |
 | Claude Code | Yes | native hooks + hook 明確提供的 full-fidelity content |
 | OpenAI Codex | Yes | lifecycle hooks + hook 明確提供的 full-fidelity content |
-| Gemini CLI | Yes | native hooks + hook 明確提供的 full-fidelity content |
+| Google Antigravity / Antigravity CLI | Yes | passive native hooks for invocation/tool evidence + full-fidelity values explicitly supplied to those hooks |
 | Cursor | Yes | native hooks + hook 明確提供的 full-fidelity content |
 | OpenCode | Yes | project plugin + plugin 明確提供的 full-fidelity content |
 | Ollama | Yes | `execweave-model-runtime event/exchange/probe --runtime ollama` |
@@ -137,8 +141,8 @@ execweave-claude-record --open -- claude
 execweave-codex-hook --print-config
 execweave-codex-record --open -- codex
 
-execweave-gemini-hook --print-config
-execweave-gemini-record --open -- gemini
+execweave-antigravity-hook --print-config
+execweave-antigravity-record --open -- antigravity
 
 execweave-cursor-hook --print-config
 execweave-cursor-record --open -- cursor
@@ -147,7 +151,7 @@ execweave-opencode-plugin --install
 execweave-opencode-record --open -- opencode
 ```
 
-Provider-integrated recorder 會把 raw runtime、semantic 與 correlated artifacts 分開保存。Cursor `tool_use_id` 或 OpenCode `sessionID + callID` 這類 provider stable identifier 可以證明 provider 內部的 logical identity，但它們不是 OS PID。
+Provider-integrated recorder 會把 raw runtime、semantic 與 correlated artifacts 分開保存。Cursor `tool_use_id` 或 OpenCode `sessionID + callID` 這類 provider stable identifier 可以證明 provider 內部的 logical identity，但它們不是 OS PID。Legacy Gemini CLI hook entry points 仍保留給既有安裝相容使用；新的 Google CLI 使用方式請改用 Antigravity (`agy`)。
 
 ## Inference gateway 與 model runtime
 
@@ -226,7 +230,7 @@ Portable filesystem observation 是 session-correlated，不是 process-causal�
 
 ## Performance 與 large-run safety
 
-v0.6.3 加入 bounded filesystem/viewer protection、incremental Live JSONL tailing 與 large-graph safety guard；v0.6.4 加入 detached Top，以及 configured provider integration 共用的 provisional live sidecar。這些能力都保留在 v0.6.5。這次 release **沒有**僅為架構替換而把 Live 遷移到 SSE、artifact storage 改成 SQLite、renderer 改成 Canvas/WebGL，或把 collector 改寫成 Rust。
+v0.6.3 加入 bounded filesystem/viewer protection、incremental Live JSONL tailing 與 large-graph safety guard；v0.6.4 加入 detached Top，以及 configured provider integration 共用的 provisional live sidecar。這些能力都保留在 v0.6.8。這次 release **沒有**僅為架構替換而把 Live 遷移到 SSE、artifact storage 改成 SQLite、renderer 改成 Canvas/WebGL，或把 collector 改寫成 Rust。
 
 可重現的 incremental `GraphAccumulator` reference result 在文件化的 GitHub Actions workload 上，1M synthetic events 達到 **164,273 ev/s**。這是 graph accumulation benchmark，不是 end-to-end collector/browser throughput。
 
@@ -263,15 +267,15 @@ Derived correlation 不會重寫 raw runtime 或 provider sidecar evidence。
 
 ## Privacy
 
-ExecWeave 是 local-first：capture、content blob、graph、report、viewer 預設留在本機。**OS runtime collector** 不會刻意擷取 file content 或 raw read/write byte buffer；但這個邊界不能和 v0.6.5 的 **provider full-fidelity content store** 混為一談。受支援 hook/API 若明確提供 prompt、tool argument/result、model response、reasoning/thinking text、shell output、file content 或其他敏感值，ExecWeave 可以完整保存。
+ExecWeave 是 local-first：capture、content blob、graph、report、viewer 預設留在本機。**OS runtime collector** 不會刻意擷取 file content 或 raw read/write byte buffer；但這個邊界不能和 v0.6.8 的 **provider full-fidelity content store** 混為一談。受支援 hook/API 若明確提供 prompt、tool argument/result、model response、reasoning/thinking text、shell output、file content 或其他敏感值，ExecWeave 可以完整保存。
 
 不要假設 content 已經過 secret redaction。Command、path、endpoint metadata、identifier、model metadata、prompt、tool value、content blob 都可能敏感；分享前請檢查整個 run directory。
 
 ## 目前狀態
 
-ExecWeave `main` 目前是 **v0.6.5**，正在進行 release hardening。最新公開 package/release 可能會晚於 main；只有明確發布 GitHub Release 才會觸發 publish workflow，而且 workflow 會先驗證 release tag 與 package version 完全一致再上傳 PyPI。
+ExecWeave `main` 目前是 **v0.6.8**，正在進行 release hardening。最新公開 package/release 可能會晚於 main；只有明確發布 GitHub Release 才會觸發 publish workflow，而且 workflow 會先驗證 release tag 與 package version 完全一致再上傳 PyPI。
 
-v0.6.5 整合 cross-platform runtime collection、materialized execution graph、standalone/live viewer、保守的 provider↔runtime correlation、content-addressed full-fidelity provider evidence、evidence grades、bounded rule packs、明確的 runtime threat/fidelity contract，以及誠實定義信任邊界的 local run-integrity sealing。Observed evidence 與 inference 仍從設計上分離。
+v0.6.8 整合 cross-platform runtime collection、materialized execution graph、standalone/live viewer、保守的 provider↔runtime correlation、content-addressed full-fidelity provider evidence、evidence grades、bounded rule packs、明確的 runtime threat/fidelity contract，以及誠實定義信任邊界的 local run-integrity sealing。Observed evidence 與 inference 仍從設計上分離。
 
 ## 文件
 
@@ -281,7 +285,7 @@ v0.6.5 整合 cross-platform runtime collection、materialized execution graph�
 - [`Semantic Telemetry`](docs/semantic-telemetry.zh-TW.md)
 - [`Claude Code Hooks`](docs/claude-code-hooks.zh-TW.md)
 - [`OpenAI Codex Hooks`](docs/codex-hooks.zh-TW.md)
-- [`Gemini CLI Hooks`](docs/gemini-hooks.zh-TW.md)
+- [`Google Antigravity Hooks`](docs/antigravity-hooks.md)
 - [`Cursor Hooks`](docs/cursor-hooks.zh-TW.md)
 - [`OpenCode Plugin`](docs/opencode-plugin.zh-TW.md)
 - [`Inference Gateway / OpenRouter / LiteLLM`](docs/inference-gateway.zh-TW.md)
@@ -299,4 +303,4 @@ v0.6.5 整合 cross-platform runtime collection、materialized execution graph�
 
 ## License
 
-請見 [`LICENSE`](LICENSE)。
+ExecWeave v0.6.8 起採用 **PolyForm Noncommercial License 1.0.0**。依該授權可作非商業使用、修改與散布；任何商業用途都需要另外取得書面商業授權。先前已依 MIT 發布的舊版本仍維持當時隨附的授權條款。詳見 [`LICENSE`](LICENSE)。

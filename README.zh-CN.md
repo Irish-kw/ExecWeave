@@ -15,12 +15,12 @@
 
 **看清 AI Agent 在你的机器上究竟做了什么。**
 
-ExecWeave 是一个开源、local-first 的可观测性项目，把 AI Agent 活动转换为交互式 execution graph，并明确区分 observed evidence、provider content 与 derived inference。
+ExecWeave 是一个 source-available、local-first 的可观测性项目，把 AI Agent 活动转换为交互式 execution graph，并明确区分 observed evidence、provider content 与 derived inference。自 v0.6.8 起采用 PolyForm Noncommercial 1.0.0，仅允许非商业用途。
 
 > **Event 是 ground truth；Graph 是 materialized view。**
 
 <p align="center">
-  <img src="docs/assets/execweave-launch-demo-v5-x.gif" alt="ExecWeave animated live demo" width="100%">
+  <img src="docs/assets/codex.gif" alt="ExecWeave animated live demo" width="100%">
 </p>
 
 ## 安装
@@ -31,7 +31,7 @@ ExecWeave 是一个开源、local-first 的可观测性项目，把 AI Agent 活
 python -m pip install -U execweave
 ```
 
-当前 `main` 的包版本是 **v0.6.5**。正式 release 可能晚于 main；要测试当前 mainline：
+当前 `main` 的包版本是 **v0.6.8**。正式 release 可能晚于 main；要测试当前 mainline：
 
 ```bash
 python -m pip install --upgrade --force-reinstall "execweave @ git+https://github.com/Irish-kw/ExecWeave.git@main"
@@ -52,12 +52,16 @@ Live OS-runtime telemetry 可用于**任何本地命令**。下面的 Agent/runt
 ```bash
 execweave live --open -- claude
 execweave live --open -- codex
-execweave live --open -- gemini
+execweave live --open -- antigravity
 execweave live --open -- cursor
 execweave live --open -- opencode
 execweave live --open -- ollama serve
 execweave live --open -- python my_agent.py
 ```
+
+> **第一次出现 Hook 权限提示时请同意。** 首次使用 provider integration 时，Agent/IDE 可能会询问是否允许 ExecWeave 启用本地 Hook；请选择 **Allow / Yes**。如果不同意，OS-runtime telemetry 仍可能工作，但 provider-level 的 tool、model 与 supplied-content observability 会降低或不可用。
+
+Google Antigravity 当前使用 `agy` CLI；ExecWeave 也接受 `antigravity` 作为友好 alias 并自动解析为 `agy`。Cursor 的 `execweave live --open -- cursor` 会先查找 PATH launcher，找不到时在 macOS/Windows 自动尝试标准 Cursor desktop application binary。
 
 或构建 finalized artifact pipeline：
 
@@ -67,9 +71,9 @@ execweave record --open -- python my_agent.py
 
 `execweave top -- codex` 会让 Agent 保持在启动 terminal 中交互，并根据主机环境打开或附加 detached Top dashboard。
 
-## v0.6.5：full-fidelity observability 与明确的 evidence boundary
+## v0.6.8：full-fidelity observability 与明确的 evidence boundary
 
-v0.6.5 不再只保留精简 metadata。当受支持的 integration point 明确提供内容时，ExecWeave 可以把**来源实际提供的完整值**保存到本地 SHA-256 content-addressed store，而 semantic event stream 只保留 reference。
+v0.6.8 不再只保留精简 metadata。当受支持的 integration point 明确提供内容时，ExecWeave 可以把**来源实际提供的完整值**保存到本地 SHA-256 content-addressed store，而 semantic event stream 只保留 reference。
 
 ```text
 <run-root>/content/sha256/<sha256>.<json|txt|bin>
@@ -87,7 +91,7 @@ Full fidelity 同时改变 privacy boundary：如果 application-level secret �
 | --- | --- | --- |
 | Claude Code | Yes | native hooks + hook 明确提供的 full-fidelity content |
 | OpenAI Codex | Yes | lifecycle hooks + hook 明确提供的 full-fidelity content |
-| Gemini CLI | Yes | native hooks + hook 明确提供的 full-fidelity content |
+| Google Antigravity / Antigravity CLI | Yes | passive native hooks for invocation/tool evidence + full-fidelity values explicitly supplied to those hooks |
 | Cursor | Yes | native hooks + hook 明确提供的 full-fidelity content |
 | OpenCode | Yes | project plugin + plugin 明确提供的 full-fidelity content |
 | Ollama | Yes | `execweave-model-runtime event/exchange/probe --runtime ollama` |
@@ -137,8 +141,8 @@ execweave-claude-record --open -- claude
 execweave-codex-hook --print-config
 execweave-codex-record --open -- codex
 
-execweave-gemini-hook --print-config
-execweave-gemini-record --open -- gemini
+execweave-antigravity-hook --print-config
+execweave-antigravity-record --open -- antigravity
 
 execweave-cursor-hook --print-config
 execweave-cursor-record --open -- cursor
@@ -147,7 +151,7 @@ execweave-opencode-plugin --install
 execweave-opencode-record --open -- opencode
 ```
 
-Provider-integrated recorder 会把 raw runtime、semantic 与 correlated artifacts 分开保存。Cursor `tool_use_id` 或 OpenCode `sessionID + callID` 这类稳定 provider identifier 可以证明 provider 内部的 logical identity，但它们不是 OS PID。
+Provider-integrated recorder 会把 raw runtime、semantic 与 correlated artifacts 分开保存。Cursor `tool_use_id` 或 OpenCode `sessionID + callID` 这类稳定 provider identifier 可以证明 provider 内部的 logical identity，但它们不是 OS PID。Legacy Gemini CLI hook entry points 仍保留给现有安装兼容使用；新的 Google CLI 使用方式请改用 Antigravity (`agy`)。
 
 ## Inference gateway 与 model runtime
 
@@ -226,7 +230,7 @@ Portable filesystem observation 是 session-correlated，而不是 process-causa
 
 ## Performance 与 large-run safety
 
-v0.6.3 加入 bounded filesystem/viewer protection、incremental Live JSONL tailing 与 large-graph safety guard；v0.6.4 加入 detached Top，以及 configured provider integration 共用的 provisional live sidecar。这些能力继续保留在 v0.6.5。本次 release **没有**仅为架构替换而把 Live 迁移到 SSE、artifact storage 改成 SQLite、renderer 改成 Canvas/WebGL，或把 collector 改写成 Rust。
+v0.6.3 加入 bounded filesystem/viewer protection、incremental Live JSONL tailing 与 large-graph safety guard；v0.6.4 加入 detached Top，以及 configured provider integration 共用的 provisional live sidecar。这些能力继续保留在 v0.6.8。本次 release **没有**仅为架构替换而把 Live 迁移到 SSE、artifact storage 改成 SQLite、renderer 改成 Canvas/WebGL，或把 collector 改写成 Rust。
 
 可复现的 incremental `GraphAccumulator` reference result 在文档化 GitHub Actions workload 上，1M synthetic events 达到 **164,273 ev/s**。这是 graph accumulation benchmark，而不是 end-to-end collector/browser throughput。
 
@@ -263,15 +267,15 @@ Derived correlation 不会重写 raw runtime 或 provider sidecar evidence。
 
 ## Privacy
 
-ExecWeave 是 local-first：capture、content blob、graph、report、viewer 默认留在本地。**OS runtime collector** 不会有意捕获 file content 或 raw read/write byte buffer；但这个边界不能与 v0.6.5 的 **provider full-fidelity content store** 混为一谈。受支持 hook/API 如果明确提供 prompt、tool argument/result、model response、reasoning/thinking text、shell output、file content 或其他敏感值，ExecWeave 可以完整保存。
+ExecWeave 是 local-first：capture、content blob、graph、report、viewer 默认留在本地。**OS runtime collector** 不会有意捕获 file content 或 raw read/write byte buffer；但这个边界不能与 v0.6.8 的 **provider full-fidelity content store** 混为一谈。受支持 hook/API 如果明确提供 prompt、tool argument/result、model response、reasoning/thinking text、shell output、file content 或其他敏感值，ExecWeave 可以完整保存。
 
 不要假设 content 已经过 secret redaction。Command、path、endpoint metadata、identifier、model metadata、prompt、tool value、content blob 都可能敏感；分享前请检查整个 run directory。
 
 ## 当前状态
 
-ExecWeave `main` 当前是 **v0.6.5**，正在进行 release hardening。最新公开 package/release 可能晚于 main；只有明确发布 GitHub Release 才会触发 publish workflow，且 workflow 会先验证 release tag 与 package version 完全一致，再上传 PyPI。
+ExecWeave `main` 当前是 **v0.6.8**，正在进行 release hardening。最新公开 package/release 可能晚于 main；只有明确发布 GitHub Release 才会触发 publish workflow，且 workflow 会先验证 release tag 与 package version 完全一致，再上传 PyPI。
 
-v0.6.5 组合 cross-platform runtime collection、materialized execution graph、standalone/live viewer、保守的 provider↔runtime correlation、content-addressed full-fidelity provider evidence、evidence grades、bounded rule packs、明确的 runtime threat/fidelity contract，以及诚实描述信任边界的 local run-integrity sealing。Observed evidence 与 inference 从设计上保持分离。
+v0.6.8 组合 cross-platform runtime collection、materialized execution graph、standalone/live viewer、保守的 provider↔runtime correlation、content-addressed full-fidelity provider evidence、evidence grades、bounded rule packs、明确的 runtime threat/fidelity contract，以及诚实描述信任边界的 local run-integrity sealing。Observed evidence 与 inference 从设计上保持分离。
 
 ## 文档
 
@@ -281,7 +285,7 @@ v0.6.5 组合 cross-platform runtime collection、materialized execution graph�
 - [`Semantic Telemetry`](docs/semantic-telemetry.zh-CN.md)
 - [`Claude Code Hooks`](docs/claude-code-hooks.zh-CN.md)
 - [`OpenAI Codex Hooks`](docs/codex-hooks.zh-CN.md)
-- [`Gemini CLI Hooks`](docs/gemini-hooks.zh-CN.md)
+- [`Google Antigravity Hooks`](docs/antigravity-hooks.md)
 - [`Cursor Hooks`](docs/cursor-hooks.zh-CN.md)
 - [`OpenCode Plugin`](docs/opencode-plugin.zh-CN.md)
 - [`Inference Gateway / OpenRouter / LiteLLM`](docs/inference-gateway.zh-CN.md)
@@ -299,4 +303,4 @@ v0.6.5 组合 cross-platform runtime collection、materialized execution graph�
 
 ## License
 
-参见 [`LICENSE`](LICENSE)。
+ExecWeave 自 v0.6.8 起采用 **PolyForm Noncommercial License 1.0.0**。依该许可可进行非商业使用、修改和分发；任何商业用途都需要另行取得书面商业许可。此前已按 MIT 发布的旧版本仍维持当时随附的许可条款。详见 [`LICENSE`](LICENSE)。

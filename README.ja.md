@@ -15,12 +15,12 @@
 
 **AI Agent があなたのマシン上で実際に何をしているかを可視化します。**
 
-ExecWeave は、AI Agent の活動をインタラクティブな execution graph に変換し、observed evidence、provider content、derived inference を明確に分離するオープンソースの local-first observability プロジェクトです。
+ExecWeave は source-available、local-first の observability プロジェクトで、AI Agent の活動をインタラクティブな execution graph に変換し、observed evidence、provider content、derived inference を明確に分離します。v0.6.8 以降は PolyForm Noncommercial 1.0.0 の下で提供され、商用利用は許可されません。
 
 > **Event が ground truth であり、Graph は materialized view です。**
 
 <p align="center">
-  <img src="docs/assets/execweave-launch-demo-v5-x.gif" alt="ExecWeave animated live demo" width="100%">
+  <img src="docs/assets/codex.gif" alt="ExecWeave animated live demo" width="100%">
 </p>
 
 ## インストール
@@ -31,7 +31,7 @@ PyPI から最新の公開 wheel/sdist をインストールします。
 python -m pip install -U execweave
 ```
 
-現在の `main` の package version は **v0.6.5** です。公開 release が main より遅れる場合があります。現在の mainline を直接試すには：
+現在の `main` の package version は **v0.6.8** です。公開 release が main より遅れる場合があります。現在の mainline を直接試すには：
 
 ```bash
 python -m pip install --upgrade --force-reinstall "execweave @ git+https://github.com/Irish-kw/ExecWeave.git@main"
@@ -52,12 +52,16 @@ Live OS-runtime telemetry は**任意のローカルコマンド**で利用で�
 ```bash
 execweave live --open -- claude
 execweave live --open -- codex
-execweave live --open -- gemini
+execweave live --open -- antigravity
 execweave live --open -- cursor
 execweave live --open -- opencode
 execweave live --open -- ollama serve
 execweave live --open -- python my_agent.py
 ```
+
+> **Hook の許可を求められたら承認してください。** 初回の provider-integrated run では、Agent/IDE が ExecWeave のローカル Hook integration を許可するか確認する場合があります。**Allow / Yes** を選択してください。許可しなくても OS-runtime telemetry は動作する場合がありますが、provider-level の tool、model、supplied-content observability は制限または利用不可になります。
+
+Google Antigravity は現在 `agy` CLI を使用します。ExecWeave は `antigravity` を friendly alias として受け付け、`agy` に解決します。Cursor の `execweave live --open -- cursor` はまず PATH launcher を使用し、見つからない場合は macOS/Windows の標準 Cursor desktop application binary にフォールバックします。
 
 または finalized artifact pipeline を作成します。
 
@@ -67,9 +71,9 @@ execweave record --open -- python my_agent.py
 
 `execweave top -- codex` は Agent を起動 terminal で対話可能なまま保持し、ホスト環境に応じて detached Top dashboard を開くか attach します。
 
-## v0.6.5：明示的な evidence boundary を持つ full-fidelity observability
+## v0.6.8：明示的な evidence boundary を持つ full-fidelity observability
 
-v0.6.5 は compact metadata だけでなく、対応 integration point が明示的に提供した content を保存できます。ExecWeave は**その source から提供された完全な値**をローカル SHA-256 content-addressed store に保存し、semantic event stream には reference のみを残します。
+v0.6.8 は compact metadata だけでなく、対応 integration point が明示的に提供した content を保存できます。ExecWeave は**その source から提供された完全な値**をローカル SHA-256 content-addressed store に保存し、semantic event stream には reference のみを残します。
 
 ```text
 <run-root>/content/sha256/<sha256>.<json|txt|bin>
@@ -87,7 +91,7 @@ Full fidelity は privacy boundary も変えます。Application-level secret �
 | --- | --- | --- |
 | Claude Code | Yes | native hooks + hook が提供する full-fidelity content |
 | OpenAI Codex | Yes | lifecycle hooks + hook が提供する full-fidelity content |
-| Gemini CLI | Yes | native hooks + hook が提供する full-fidelity content |
+| Google Antigravity / Antigravity CLI | Yes | passive native hooks for invocation/tool evidence + full-fidelity values explicitly supplied to those hooks |
 | Cursor | Yes | native hooks + hook が提供する full-fidelity content |
 | OpenCode | Yes | project plugin + plugin が提供する full-fidelity content |
 | Ollama | Yes | `execweave-model-runtime event/exchange/probe --runtime ollama` |
@@ -137,8 +141,8 @@ execweave-claude-record --open -- claude
 execweave-codex-hook --print-config
 execweave-codex-record --open -- codex
 
-execweave-gemini-hook --print-config
-execweave-gemini-record --open -- gemini
+execweave-antigravity-hook --print-config
+execweave-antigravity-record --open -- antigravity
 
 execweave-cursor-hook --print-config
 execweave-cursor-record --open -- cursor
@@ -147,7 +151,7 @@ execweave-opencode-plugin --install
 execweave-opencode-record --open -- opencode
 ```
 
-Provider-integrated recorder は raw runtime、semantic、correlated artifact を別々に保持します。Cursor `tool_use_id` や OpenCode `sessionID + callID` のような stable provider identifier は provider 内部の logical identity を示しますが、OS PID ではありません。
+Provider-integrated recorder は raw runtime、semantic、correlated artifact を別々に保持します。Cursor `tool_use_id` や OpenCode `sessionID + callID` のような stable provider identifier は provider 内部の logical identity を示しますが、OS PID ではありません。Legacy Gemini CLI hook entry points は既存インストールとの互換性のため残りますが、新しい Google CLI 利用では Antigravity (`agy`) を使用してください。
 
 ## Inference gateway と model runtime
 
@@ -224,7 +228,7 @@ Portable filesystem observation は session-correlated であり process-causal 
 
 ## Performance と large-run safety
 
-v0.6.3 では bounded filesystem/viewer protection、incremental Live JSONL tailing、large-graph safety guard を追加し、v0.6.4 では detached Top と configured provider integration 用 provisional live sidecar を追加しました。これらは v0.6.5 にも残っています。本 release だけを理由に Live を SSE、artifact storage を SQLite、renderer を Canvas/WebGL、collector を Rust へ移行してはいません。
+v0.6.3 では bounded filesystem/viewer protection、incremental Live JSONL tailing、large-graph safety guard を追加し、v0.6.4 では detached Top と configured provider integration 用 provisional live sidecar を追加しました。これらは v0.6.8 にも残っています。本 release だけを理由に Live を SSE、artifact storage を SQLite、renderer を Canvas/WebGL、collector を Rust へ移行してはいません。
 
 再現可能な incremental `GraphAccumulator` reference result は、文書化された GitHub Actions workload の 1M synthetic events で **164,273 ev/s** です。これは graph accumulation benchmark であり、end-to-end collector/browser throughput ではありません。
 
@@ -259,15 +263,15 @@ Derived correlation は raw runtime / provider sidecar evidence を書き換え�
 
 ## Privacy
 
-ExecWeave は local-first であり、capture、content blob、graph、report、viewer はデフォルトでローカルに残ります。**OS runtime collector** は file content や raw read/write byte buffer を意図的に取得しません。ただし、この境界を v0.6.5 の **provider full-fidelity content store** と混同してはいけません。対応 hook/API が prompt、tool argument/result、model response、reasoning/thinking text、shell output、file content などを明示的に提供した場合、それらは完全に保存される可能性があります。
+ExecWeave は local-first であり、capture、content blob、graph、report、viewer はデフォルトでローカルに残ります。**OS runtime collector** は file content や raw read/write byte buffer を意図的に取得しません。ただし、この境界を v0.6.8 の **provider full-fidelity content store** と混同してはいけません。対応 hook/API が prompt、tool argument/result、model response、reasoning/thinking text、shell output、file content などを明示的に提供した場合、それらは完全に保存される可能性があります。
 
 Content が secret-redacted 済みだと仮定しないでください。Command、path、endpoint metadata、identifier、model metadata、prompt、tool value、content blob はすべて sensitive になり得ます。共有前に run directory 全体を確認してください。
 
 ## 現在の状態
 
-ExecWeave `main` は現在 **v0.6.5** で release hardening 中です。公開 package/release は main より遅れる場合があります。GitHub Release を明示的に publish した場合のみ publish workflow が動作し、PyPI upload 前に release tag と package version が完全一致することを検証します。
+ExecWeave `main` は現在 **v0.6.8** で release hardening 中です。公開 package/release は main より遅れる場合があります。GitHub Release を明示的に publish した場合のみ publish workflow が動作し、PyPI upload 前に release tag と package version が完全一致することを検証します。
 
-v0.6.5 は cross-platform runtime collection、materialized execution graph、standalone/live viewer、保守的 provider↔runtime correlation、content-addressed full-fidelity provider evidence、evidence grades、bounded rule packs、明示的 runtime threat/fidelity contract、honest local run-integrity sealing を組み合わせています。Observed evidence と inference は設計上分離されています。
+v0.6.8 は cross-platform runtime collection、materialized execution graph、standalone/live viewer、保守的 provider↔runtime correlation、content-addressed full-fidelity provider evidence、evidence grades、bounded rule packs、明示的 runtime threat/fidelity contract、honest local run-integrity sealing を組み合わせています。Observed evidence と inference は設計上分離されています。
 
 ## ドキュメント
 
@@ -277,7 +281,7 @@ v0.6.5 は cross-platform runtime collection、materialized execution graph、st
 - [`Semantic Telemetry`](docs/semantic-telemetry.ja.md)
 - [`Claude Code Hooks`](docs/claude-code-hooks.ja.md)
 - [`OpenAI Codex Hooks`](docs/codex-hooks.ja.md)
-- [`Gemini CLI Hooks`](docs/gemini-hooks.ja.md)
+- [`Google Antigravity Hooks`](docs/antigravity-hooks.md)
 - [`Cursor Hooks`](docs/cursor-hooks.ja.md)
 - [`OpenCode Plugin`](docs/opencode-plugin.ja.md)
 - [`Inference Gateway / OpenRouter / LiteLLM`](docs/inference-gateway.ja.md)
@@ -295,4 +299,4 @@ v0.6.5 は cross-platform runtime collection、materialized execution graph、st
 
 ## License
 
-[`LICENSE`](LICENSE) を参照してください。
+ExecWeave v0.6.8 以降は **PolyForm Noncommercial License 1.0.0** の下で提供されます。非商用の利用・変更・再配布はその条件に従って許可されますが、商用利用には別途書面による商用ライセンスが必要です。以前に MIT で公開済みの旧バージョンは当時のライセンス条件のままです。詳しくは [`LICENSE`](LICENSE) を参照してください。
