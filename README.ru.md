@@ -1,11 +1,5 @@
 # ExecWeave
 
-[![PyPI](https://img.shields.io/pypi/v/execweave?label=PyPI)](https://pypi.org/project/execweave/)
-[![Python](https://img.shields.io/pypi/pyversions/execweave?label=Python)](https://pypi.org/project/execweave/)
-[![CI](https://github.com/Irish-kw/ExecWeave/actions/workflows/ci.yml/badge.svg)](https://github.com/Irish-kw/ExecWeave/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![GitHub stars](https://img.shields.io/github/stars/Irish-kw/ExecWeave?style=flat&label=Stars)](https://github.com/Irish-kw/ExecWeave/stargazers)
-
 <!-- i18n-nav:start -->
 <p align="center">
   <a href="README.md">English</a> |
@@ -19,47 +13,25 @@
 </p>
 <!-- i18n-nav:end -->
 
-**Посмотрите, что ИИ-агенты на самом деле делают на вашем компьютере.**
+**Посмотрите, что ИИ-агенты действительно делают на вашей машине.**
 
-ExecWeave — это open-source, local-first проект наблюдаемости, который превращает активность ИИ-агентов в интерактивный execution graph, явно отделяя observed evidence от inference.
+ExecWeave — это open-source, local-first проект observability, который преобразует активность ИИ-агентов в интерактивный execution graph и при этом явно разделяет observed evidence, provider content и derived inference.
 
-> **Event — это ground truth; Graph — materialized view.**
+> **Event — это ground truth. Graph — materialized view.**
 
 <p align="center">
-  <img src="docs/assets/execweave-launch-demo-v5-x.gif" alt="ExecWeave Live execution graph" width="100%">
+  <img src="docs/assets/execweave-launch-demo-v5-x.gif" alt="ExecWeave animated live demo" width="100%">
 </p>
-
-<!-- execweave-demo:start -->
-## Воспроизвести этот demo
-
-Скриншот выше получен в реальной live session ExecWeave v0.6.3. Этот workload намеренно создаёт достаточно разнообразную активность, чтобы execution graph был наглядным: несколько Python modules, JSON/CSV files, tests, проверка файлов и исходящие HTTP requests.
-
-Запустите локальный Agent CLI под ExecWeave, например:
-
-```bash
-execweave live --open -- claude
-```
-
-Затем вставьте в Agent следующий workload prompt:
-
-```text
-Create a small Python project in ./execweave-demo with 8 modules,
-generate sample JSON and CSV data, run the program and tests,
-inspect the generated files, and fetch example.com plus the GitHub API.
-```
-
-Тот же workload работает с `codex`, `gemini`, `cursor` и `opencode`. Точное число nodes, edges, events, processes и endpoints зависит от OS, версии Agent и environment. ExecWeave записывает реально наблюдаемое runtime evidence; скриншот показывает один конкретный запуск, а не фиксированный ожидаемый graph.
-<!-- execweave-demo:end -->
 
 ## Установка
 
-ExecWeave опубликован в PyPI как стандартный Python wheel/sdist. Установите последнюю release:
+Установите последний опубликованный wheel/sdist из PyPI:
 
 ```bash
 python -m pip install -U execweave
 ```
 
-Ветка `main` может содержать более новый патч, чем текущий релиз PyPI. Чтобы протестировать последний mainline build напрямую:
+Версия package в `main` сейчас **v0.6.5**. Опубликованный release может отставать от main; чтобы протестировать текущий mainline напрямую:
 
 ```bash
 python -m pip install --upgrade --force-reinstall "execweave @ git+https://github.com/Irish-kw/ExecWeave.git@main"
@@ -73,116 +45,66 @@ cd ExecWeave
 python -m pip install -e ".[dev]"
 ```
 
-Live-телеметрия уровня OS runtime работает с **любой локальной командой**. Имена ниже — примеры, а не whitelist:
+## Быстрый старт
+
+Live OS-runtime telemetry работает с **любой локальной командой**. Имена Agent/runtime ниже — лишь примеры, а не whitelist.
 
 ```bash
-# Agent / IDE CLIs
 execweave live --open -- claude
 execweave live --open -- codex
 execweave live --open -- gemini
 execweave live --open -- cursor
 execweave live --open -- opencode
-
-# Any local program
-execweave live --open -- python my_agent.py
-
-# A local model runtime launched under ExecWeave
 execweave live --open -- ollama serve
+execweave live --open -- python my_agent.py
 ```
 
-`execweave live` передаёт process-, file- и network-evidence для запущенного command tree. Начиная с v0.6.4, настроенные Claude/Codex/Gemini/Cursor hooks и OpenCode plugin автоматически пишут в live sidecar текущего run; для Ollama, llama.cpp и vLLM server, запущенных под ExecWeave, также выполняется автоматический локальный probe каталога моделей.
-
-#### Матрица возможностей Live
-
-| Integration | Direct OS-runtime live | Specialized metadata | Автоматически в Live Viewer |
-| --- | --- | --- | --- |
-| Claude Code | Да | `execweave-claude-record` / hooks | Да (настроенный hook/plugin) |
-| OpenAI Codex | Да | `execweave-codex-record` / hooks | Да (настроенный hook/plugin) |
-| Gemini CLI | Да | `execweave-gemini-record` / hooks | Да (настроенный hook/plugin) |
-| Cursor | Да | `execweave-cursor-record` / hooks | Да (настроенный hook/plugin) |
-| OpenCode | Да | `execweave-opencode-record` / plugin | Да (настроенный hook/plugin) |
-| Ollama | Да, если запущен под ExecWeave, например `ollama serve` | `execweave-model-runtime event/probe --runtime ollama` | Да (автоматический локальный probe) |
-| llama.cpp | Да, если локальный сервер запущен под ExecWeave | `execweave-model-runtime event/probe --runtime llamacpp` | Да (автоматический локальный probe) |
-| vLLM | Да, если локальный сервер запущен под ExecWeave | `execweave-model-runtime event/probe --runtime vllm` | Да (автоматический локальный probe) |
-| LM Studio | Только для локального процесса, запущенного под ExecWeave; уже работающий сервер автоматически не attached | `execweave-model-runtime event/probe --runtime lmstudio` | Да (автоматический probe после успешного запуска с `--port`) |
-| LiteLLM Proxy | Да, если локальный proxy запущен под ExecWeave | `execweave-inference-gateway event --gateway litellm` / configured callback | Да (настроенный callback) |
-| OpenRouter | Нет локального процесса удалённого сервиса для прямого запуска; вместо этого запускайте локальный client/Agent под `live` | `execweave-inference-gateway event/generation --gateway openrouter` | Нет |
-
-Для уже работающего сервера Ollama используйте `execweave-model-runtime probe --runtime ollama`, чтобы получить snapshot состояния загруженных моделей. Для OpenRouter `live` может наблюдать локальный client и его network activity, а gateway routing/usage metadata остаются отдельным evidence layer.
-
-<!-- v0.6.4-live -->
-### Live-наблюдаемость v0.6.4
-
-`top` оставляет Agent интерактивным в исходном Terminal и открывает dashboard в отдельном окне Terminal:
-
-```bash
-execweave top -- codex
-execweave top --open -- codex
-```
-
-Live-обновления используют инкрементальные snapshots/deltas с ограниченной историей. Live и standalone Viewer сохраняют выбор Dark/Light. В Linux очень большие recursive filesystem scopes проходят предварительную проверку и при необходимости автоматически переключаются с inotify на polling.
-
-v0.6.4 создаёт общий specialized-evidence sidecar для каждого live run. Настроенные Claude/Codex/Gemini/Cursor hooks и OpenCode plugin автоматически попадают в тот же Live Graph; Ollama, llama.cpp и vLLM server, запущенные под ExecWeave, автоматически опрашиваются через loopback API для получения model catalog. Эти specialized live events являются provisional; после завершения команды финальный graph заново строится из canonical runtime + semantic merge. Отсутствующие evidence не выдумываются.
-
-`execweave-scalability` воспроизводит benchmark масштабируемости graph; CI покрывает 10k, 100k и 1M synthetic events.
-
-#### Benchmark масштабируемости
-
-Референсный результат GitHub Actions для синтетического workload инкрементального `GraphAccumulator` (`retain_event_ids=False`):
-
-| Events | Apply time | Throughput | Nodes | Edges | Apply RSS Δ | Snapshot |
-| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 10k | 0.114 s | 87,681 ev/s | 10,001 | 10,000 | 35.9 MiB | 8.5 MiB |
-| 100k | 0.654 s | 152,816 ev/s | 10,001 | 10,000 | 25.8 MiB | 8.6 MiB |
-| **1M** | **6.087 s** | **164,273 ev/s** | **10,001** | **10,000** | **23.5 MiB** | **8.6 MiB** |
-
-При **1 000 000 событий** инкрементальный in-memory graph не дублировал raw event IDs; raw evidence остаётся отделённым от materialized graph. Этот benchmark измеряет накопление графа и материализацию snapshot, а не end-to-end throughput collector или браузера.
-
-Или соберите полный artifact pipeline:
+Или создайте finalized artifact pipeline:
 
 ```bash
 execweave record --open -- python my_agent.py
 ```
 
-## Производительность и footprint
+`execweave top -- codex` оставляет Agent интерактивным в терминале запуска и открывает либо подключает detached Top dashboard в зависимости от среды хоста.
 
-ExecWeave включает воспроизводимый package-level overhead benchmark, который запускается из реально установленного wheel. Референсный график использует тот же тип trade-off, который часто применяется для сравнений quality/cost моделей:
+## v0.6.5: full-fidelity observability с явными evidence boundaries
 
-- **Ось X:** дополнительный peak process-tree RSS, низкий → высокий.
-- **Ось Y:** runtime overhead, низкий → высокий.
-- **Площадь пузыря:** median artifact size на один run.
-- **Предпочтительная область:** нижний левый угол.
+v0.6.5 расширяет observability за пределы компактных metadata. Если поддерживаемая integration point явно предоставляет content, ExecWeave может сохранить **полное значение, предоставленное этим источником**, в локальном SHA-256 content-addressed store, оставляя в semantic event stream только reference.
 
-![ExecWeave overhead trade-off](docs/benchmarks/v0.6.0-github-actions.svg)
-
-Референсная среда: GitHub Actions Ubuntu runner, Intel Xeon Platinum 8573C, 4 logical CPUs, Python 3.12.14, `n=7`.
-
-| Profile | Median wall time | Runtime overhead | Additional peak RSS | Median artifacts/run |
-| --- | ---: | ---: | ---: | ---: |
-| ExecWeave OFF | 236.221 ms | 0.0% | 0.0 MB | 0 KB |
-| Portable ON | 391.580 ms | 65.768% | 27.852 MB | 741.355 KB |
-| Strace ON | 1226.076 ms | 419.038% | 37.653 MB | 572.838 KB |
-
-Тот же build создал wheel размером около **113 KB** и sdist около **198 KB**. Установленная distribution ExecWeave занимала примерно **849 KB**, без учета Python и dependency footprint.
-
-Это намеренно короткий, file/process-heavy **reference microbenchmark**, а не универсальное заявление о производительности для всех workload. Неинструментированный baseline длится всего несколько сотен миллисекунд, поэтому процентный overhead выглядит увеличенным. Перед планированием емкости повторно запустите `execweave-overhead` на целевой машине и репрезентативном workload.
-
-```bash
-execweave-overhead \
-  --iterations 7 \
-  --strace auto \
-  --output-json benchmark-results.json \
-  --output-svg benchmark-overhead.svg
+```text
+<run-root>/content/sha256/<sha256>.<json|txt|bin>
 ```
 
-Необработанные референсные данные и методика: [`docs/benchmarks/`](docs/benchmarks/).
+В зависимости от adapter и upstream hook/API surface могут сохраняться prompts/messages, model request/response objects, tool input/results, явно раскрытый reasoning/thinking text, shell/MCP output и file content, предоставленный provider hooks.
+
+`complete_from_source: true` означает только то, что ExecWeave сохранил полное значение, переданное этой integration point. Это **не означает**, что ExecWeave наблюдал hidden model state, нераскрытые provider stages, невидимый финальный wire request или байты, которые не были перехвачены.
+
+Full fidelity также меняет privacy boundary: application-level secrets, встроенные в content, сохраняются. Известные transport credentials фильтруются только в отдельных provider-metadata projections, где adapter явно задаёт такое поведение. ExecWeave **не является** универсальным secret scanner или content redactor.
+
+### Поддерживаемые semantic / inference surfaces
+
+| Integration | OS-runtime observation при запуске под ExecWeave | Specialized evidence |
+| --- | --- | --- |
+| Claude Code | Yes | native hooks + full-fidelity content, предоставленный hook |
+| OpenAI Codex | Yes | lifecycle hooks + full-fidelity content, предоставленный hook |
+| Gemini CLI | Yes | native hooks + full-fidelity content, предоставленный hook |
+| Cursor | Yes | native hooks + full-fidelity content, предоставленный hook |
+| OpenCode | Yes | project plugin + full-fidelity content, предоставленный plugin |
+| Ollama | Yes | `execweave-model-runtime event/exchange/probe --runtime ollama` |
+| llama.cpp | Yes | `execweave-model-runtime event/exchange/probe --runtime llamacpp` |
+| vLLM | Yes | `execweave-model-runtime event/exchange/probe --runtime vllm` |
+| LM Studio | только если локальный process запущен ExecWeave | `execweave-model-runtime event/exchange/probe --runtime lmstudio` |
+| LiteLLM Proxy | Yes, если настроенный proxy запущен под ExecWeave | текущая metadata-oriented gateway callback/event integration |
+| OpenRouter | наблюдается локальный client, а не process удалённого сервиса | `execweave-inference-gateway event/exchange/generation --gateway openrouter` |
+
+OpenRouter `exchange` — это caller-supplied request+response evidence, а не transparent wire interception. LiteLLM Proxy в текущей baseline остаётся более узкой metadata-oriented integration.
 
 ## Evidence layers
 
-ExecWeave намеренно моделирует четыре разные evidence layer вместо объединения их в один trace:
+ExecWeave сохраняет evidence layers раздельно, а не сводит все сигналы в одну trace:
 
 ```text
-Agent / IDE semantic evidence
+Agent / IDE semantic + supplied content evidence
           ↓
 Inference gateway / routing evidence
           ↓
@@ -191,87 +113,14 @@ Model runtime / inference-server evidence
 OS runtime evidence: process / file / network
 ```
 
-Relationship помечается как causal только тогда, когда это утверждение поддерживается исходной телеметрией.
-
-## Интеграции Agent / IDE
-
-### Claude Code
-
-```bash
-execweave-claude-hook --print-config
-execweave-claude-record --open -- claude
-```
-
-### OpenAI Codex
-
-```bash
-execweave-codex-hook --print-config
-execweave-codex-record --open -- codex
-```
-
-### Gemini CLI
-
-```bash
-execweave-gemini-hook --print-config
-execweave-gemini-record --open -- gemini
-```
-
-### Cursor
-
-```bash
-execweave-cursor-hook --print-config
-execweave-cursor-record --open -- cursor
-```
-
-Cursor предоставляет стабильный `tool_use_id`, позволяя установить exact logical tool-call identity между pre/post hooks.
-
-### OpenCode
-
-```bash
-execweave-opencode-plugin --install
-execweave-opencode-record --open -- opencode
-```
-
-Project-local плагин OpenCode использует точную идентичность `sessionID + callID` и намеренно не пересылает tool output.
-
-Provider-integrated runs сохраняют runtime, semantic и correlated artifacts отдельно. Bridges Tool → Process остаются консервативными derived evidence:
+Relationship считается causal только если underlying telemetry действительно поддерживает такой claim. Tool → Process bridges остаются консервативными derived evidence:
 
 ```text
 inferred: true
 causal: false
 ```
 
-При неоднозначности edge не создается.
-
-## Интеграции Inference gateway
-
-OpenRouter и LiteLLM Proxy моделируются как `inference_gateway`, а не как локальные model runtimes.
-
-```bash
-execweave-inference-gateway event \
-  --gateway litellm \
-  --requested-model assistant \
-  --resolved-model azure/gpt-5 \
-  --provider-name Azure \
-  --deployment-id deployment-west \
-  --sidecar gateway.jsonl
-```
-
-ExecWeave хранит requested model, resolved model, routed provider и deployment identity как отдельные факты. Provider/deployment edges создаются только при наличии authoritative metadata и никогда не выводятся из префикса имени модели.
-
-Если caller располагает явной shared identity между наблюдениями Gateway и Model Runtime, два request node можно связать, не объединяя слои:
-
-```bash
-execweave-inference-link \
-  --gateway litellm \
-  --gateway-request-id gw-123 \
-  --runtime vllm \
-  --runtime-request-id rt-456 \
-  --shared-request-id trace-789 \
-  --sidecar inference.jsonl
-```
-
-`SAME_INFERENCE_REQUEST` — это evidence точной идентичности, а не causal evidence:
+При неоднозначности edge не создаётся. Exact shared request identity между Gateway и Model Runtime остаётся identity evidence, а не causal evidence:
 
 ```text
 identity_exact: true
@@ -279,92 +128,64 @@ inferred: false
 causal: false
 ```
 
-Raw shared request ID не сохраняется; записывается только identity hash, производный от SHA-256.
+## Интеграции Agent / IDE
 
-## Интеграции Model runtime
+```bash
+execweave-claude-hook --print-config
+execweave-claude-record --open -- claude
 
-Текущие model-runtime integrations: **Ollama**, **llama.cpp**, **vLLM** и **LM Studio**.
+execweave-codex-hook --print-config
+execweave-codex-record --open -- codex
+
+execweave-gemini-hook --print-config
+execweave-gemini-record --open -- gemini
+
+execweave-cursor-hook --print-config
+execweave-cursor-record --open -- cursor
+
+execweave-opencode-plugin --install
+execweave-opencode-record --open -- opencode
+```
+
+Provider-integrated recorders сохраняют raw runtime, semantic и correlated artifacts отдельно. Stable provider identifiers вроде Cursor `tool_use_id` или OpenCode `sessionID + callID` подтверждают logical identity внутри provider, но не являются OS PID.
+
+## Inference gateways и model runtimes
+
+Соберите OpenRouter или LiteLLM gateway evidence:
+
+```bash
+execweave-inference-gateway event --gateway openrouter --sidecar gateway.jsonl
+execweave-inference-gateway event --gateway litellm --sidecar gateway.jsonl
+execweave-inference-gateway exchange --gateway openrouter --sidecar gateway.jsonl
+```
+
+Соберите model-runtime evidence для Ollama, llama.cpp, vLLM или LM Studio:
 
 ```bash
 execweave-model-runtime event --runtime ollama --sidecar model-runtime.jsonl
-execweave-model-runtime event --runtime llamacpp --sidecar model-runtime.jsonl
-execweave-model-runtime event --runtime vllm --sidecar model-runtime.jsonl
-execweave-model-runtime event --runtime lmstudio --sidecar model-runtime.jsonl
+execweave-model-runtime exchange --runtime ollama --sidecar model-runtime.jsonl
+execweave-model-runtime probe --runtime ollama --sidecar model-runtime.jsonl
 ```
 
-OpenAI-compatible runtimes используют общий parser response/usage и model-catalog, сохраняя при этом runtime-specific evidence semantics. Prompt, generated content и reasoning content не сохраняются. Чувствительные локальные пути моделей редактируются; для GGUF-путей llama.cpp применяется более строгая redaction.
+`event` — response-only evidence. `exchange` сохраняет caller-supplied request+response object и не заявляет transparent interception. Runtime catalog relations сохраняют source-specific semantics: `LOADED_MODEL`, `SERVES_MODEL` и `ADVERTISES_MODEL` не взаимозаменяемы. Catalog visibility LM Studio остаётся `ADVERTISES_MODEL` и не доказывает, что weights находятся resident in memory.
 
-Видимость модели в каталоге LM Studio представляется как `ADVERTISES_MODEL` и не считается доказательством того, что model weights загружены в память.
+## Security analysis, evidence grades и bounded rule packs
 
-## Runtime evidence
-
-Portable collector работает в Linux, macOS и Windows. В Linux также доступен syscall-backed reference backend `strace`.
-
-```bash
-execweave doctor
-execweave run --backend portable -- your-command
-execweave run --backend strace -- your-command
-```
-
-Начиная с v0.6.1, child commands разрешаются общим cross-platform launcher resolver до запуска. Linux и macOS сохраняют обычное поведение PATH. Windows разрешает `.exe`, `.cmd` и `.bat` через PATH/PATHEXT, а явно указанный `.ps1` launcher запускается через PowerShell. Отдельный Windows CI фактически запускает Codex и Cursor recorders как из `cmd.exe`, так и из Windows PowerShell; полная интеграция Cursor semantic/correlation также продолжает проверяться обычной матрицей Windows, macOS и Ubuntu.
-
-Portable filesystem watching является session-correlated, а не process-causal, поэтому очень короткоживущие процессы могут быть пропущены между интервалами polling. Linux-путь `strace` предоставляет process-attributed syscall evidence после завершения команды.
-
-В будущем планируются native collectors для Linux eBPF, Windows ETW и macOS Endpoint Security.
-
-## Safety patch v0.6.2
-
-v0.6.2 усиливает безопасность ресурсов для long-running и high-cardinality sessions без изменения evidence semantics или graph schema 0.1:
-
-- Слишком широкие recursive filesystem scopes, например корень файловой системы, user home или родитель каталогов home, больше не наблюдаются рекурсивно как есть; process, network и semantic collection могут продолжаться.
-- Standalone и Live Viewer прекращают SVG materialization после превышения safety budget (1 500 nodes, 4 000 edges или примерно 5 000 SVG elements), предотвращая исчерпание памяти браузера. Канонический evidence artifact `graph.json` остается полным.
-- Viewer layout/fit больше не передает произвольно большие массивы через spread в `Math.min` / `Math.max`, а перерисовка edges при перетаскивании node ограничивается animation frame.
-- Live server tail-ит только новые bytes, добавленные в `events.jsonl`, начиная с byte offset, и инкрементально обновляет in-memory `GraphAccumulator`. Polling `/graph.json` больше не проигрывает всю историю событий; неполная последняя JSONL-строка буферизуется до появления newline.
-- Изменения только event-count или aggregate-count обновляют Live stats/edge labels без full topology redraw. После превышения Viewer budget live `/graph.json` переключается на compact counts-only payload, в то время как collection и финальная canonical validation/full `graph.json` продолжаются без изменений.
-
-Это safety patch на базе polling + incremental-ingestion, а не миграция архитектуры на SSE, SQLite, Rust или Canvas.
-
-## Многоуровневые artifacts
-
-Provider-integrated run может создать:
-
-```text
-.execweave/runs/<run-id>/
-├── events.jsonl
-├── graph.json
-├── viewer.html
-├── semantic.jsonl
-├── events.semantic.jsonl
-├── graph.semantic.json
-├── viewer.semantic.html
-├── events.correlated.jsonl
-├── graph.correlated.json
-└── viewer.correlated.html
-```
-
-Derived correlation layer никогда не переписывает raw evidence.
-
-## Interactive Viewer
-
-Standalone Viewer локален и self-contained. Текущий baseline включает pan/zoom, draggable nodes, node/edge inspection, фильтры node-type/relation/causal, **observed only**, search, evidence-sequence replay, progressive cluster expansion, focused neighborhoods, Saved Views, явную edge semantics и Correlation Summary.
-
-## Операции с графом
-
-```bash
-execweave graph-summary run.graph.json
-execweave graph-filter run.graph.json --output causal.graph.json --causal-only
-execweave graph-focus run.graph.json NODE_ID --hops 2 --output focused.graph.json
-execweave path run.graph.json SOURCE TARGET --causal-only
-execweave graph-condense run.graph.json --output compact.graph.json --threshold 8 --keep-expansion
-```
-
-## Анализ безопасности
+Запустите встроенный analysis:
 
 ```bash
 execweave analyze run.graph.json --output analysis.json
 ```
 
-Security findings явно сохраняют границы доказательств. Возможный путь sensitive-file → network не означает, что byte-level exfiltration доказана:
+Findings показывают evidence grade независимо от severity. Текущие grades — `A`, `B`, `C`, `D`, `U`, от direct syscall attribution до inferred/unknown provenance. Это категории силы evidence, **а не probabilities или trust scores**.
+
+Локальные rule packs добавляют bounded, объяснимые **single-edge observation** policies без выполнения third-party code:
+
+```bash
+execweave-rule-pack graph.json --rule-pack local-policy.json --output report.json
+```
+
+Rule pack не может выполнять code, задавать regex/path programs или утверждать byte-level data flow/exfiltration. Findings rule pack остаются observation-only.
 
 ```json
 {
@@ -373,17 +194,80 @@ Security findings явно сохраняют границы доказател�
 }
 ```
 
-## Текущее состояние
+## Run integrity
 
-ExecWeave `main` сейчас находится на версии **v0.6.4** и активно развивается.
+Seal завершённый run и затем проверьте, что его regular-file inventory не изменился относительно seal:
 
-Baseline включает runtime collection, graph materialization/querying, standalone/live Viewer, semantic integrations Claude/Codex/Gemini/Cursor/OpenCode, консервативную Tool → Process correlation, OpenRouter/LiteLLM gateway metadata, Ollama/llama.cpp/vLLM/LM Studio runtime metadata, exact Gateway ↔ Model Runtime request identity, опубликованные PyPI wheel/sdist packages, воспроизводимый overhead benchmark, cross-platform command-launcher compatibility, large-graph browser safety guards, incremental Live JSONL tail/cache и cross-platform CI для Python 3.10/3.12.
+```text
+execweave-integrity seal .execweave/runs/<run-id>
+execweave-integrity verify .execweave/runs/<run-id>
+```
 
-## Конфиденциальность
+Детерминированный manifest записывает file size/SHA-256 и отвергает symbolic links. Missing, modified, replaced или newly added regular files после seal приводят к failure verification.
 
-ExecWeave — local-first. Runtime events, semantic sidecars, graphs, reports и Viewers по умолчанию остаются локальными. File contents и raw read/write byte buffers намеренно не собираются. Native adapters также по умолчанию избегают prompts/transcripts/tool output, однако commands, paths, endpoint metadata, identifiers и model metadata все равно могут быть чувствительными.
+Этот локальный seal намеренно **не** описывается как adversary-resistant tamper evidence, если evidence и manifest находятся внутри одной writable trust boundary. Manifest содержит `malicious_writer_resistance: false` и `external_trust_anchor: false`. Для более сильной гарантии скопируйте/защитите manifest digest за пределами этой boundary.
 
-Проверяйте artifacts перед публикацией.
+## Runtime evidence и graph operations
+
+Portable collector работает на Linux, macOS и Windows. Linux также имеет syscall-backed `strace` reference backend.
+
+```bash
+execweave doctor
+execweave run --backend portable -- your-command
+execweave run --backend strace -- your-command
+execweave graph-summary run.graph.json
+execweave graph-focus run.graph.json NODE_ID --hops 2 --output focused.graph.json
+execweave path run.graph.json SOURCE TARGET --causal-only
+```
+
+Portable filesystem observation является session-correlated, а не process-causal; polling может пропускать достаточно короткую activity. Linux `strace` даёт более сильную process-attributed syscall evidence для поддерживаемых executions. Native collectors для Linux eBPF, Windows ETW и macOS Endpoint Security остаются в планах.
+
+## Performance и large-run safety
+
+v0.6.3 добавил bounded filesystem/viewer protections, incremental Live JSONL tailing и large-graph safety guards. v0.6.4 добавил detached Top и общий provisional live sidecar для настроенных provider integrations. Эти возможности остаются в v0.6.5. Ради этой release проект **не** мигрировал Live на SSE, artifact storage на SQLite, renderer на Canvas/WebGL или collectors на Rust только ради смены архитектуры.
+
+Воспроизводимый reference result incremental `GraphAccumulator` достигает **164,273 ev/s** на 1M synthetic events в документированном GitHub Actions workload. Это benchmark накопления graph, а не end-to-end collector/browser throughput.
+
+```bash
+execweave-overhead --iterations 7 --strace auto --output-json benchmark-results.json
+execweave-scalability
+```
+
+Reference data и methodology: [`docs/benchmarks/`](docs/benchmarks/).
+
+## Layered artifacts
+
+Provider-integrated run может содержать:
+
+```text
+.execweave/runs/<run-id>/
+├── events.jsonl
+├── graph.json
+├── viewer.html
+├── semantic.jsonl
+├── content/sha256/...
+├── events.semantic.jsonl
+├── graph.semantic.json
+├── viewer.semantic.html
+├── events.correlated.jsonl
+├── graph.correlated.json
+├── viewer.correlated.html
+└── integrity.json            # после explicit seal
+```
+
+Derived correlation никогда не переписывает raw runtime или provider sidecar evidence.
+
+## Privacy
+
+ExecWeave — local-first: captures, content blobs, graphs, reports и viewers по умолчанию остаются локальными. **OS runtime collector** намеренно не захватывает file content или raw read/write byte buffers. Эту boundary нельзя путать с **provider full-fidelity content store** v0.6.5: если поддерживаемый hook/API явно предоставляет prompt, tool argument/result, model response, reasoning/thinking text, shell output, file content или другую sensitive value, ExecWeave может сохранить её полностью.
+
+Не предполагайте, что content уже secret-redacted. Commands, paths, endpoint metadata, identifiers, model metadata, prompts, tool values и content blobs могут быть sensitive. Проверяйте весь run directory перед публикацией.
+
+## Текущий статус
+
+ExecWeave `main` сейчас **v0.6.5** и проходит release hardening. Последний публичный package/release может отставать от main до явной публикации GitHub Release; publish workflow проверяет точное совпадение release tag и package version до загрузки в PyPI.
+
+v0.6.5 объединяет cross-platform runtime collection, materialized execution graphs, standalone/live viewing, консервативную provider↔runtime correlation, content-addressed full-fidelity provider evidence, evidence grades, bounded rule packs, явный runtime threat/fidelity contract и честный local run-integrity seal. Observed evidence и inference остаются разделёнными по дизайну.
 
 ## Документация
 
@@ -398,13 +282,17 @@ ExecWeave — local-first. Runtime events, semantic sidecars, graphs, reports и
 - [`OpenCode Plugin`](docs/opencode-plugin.ru.md)
 - [`Inference Gateway / OpenRouter / LiteLLM`](docs/inference-gateway.ru.md)
 - [`Model Runtime / Ollama / llama.cpp / vLLM / LM Studio`](docs/model-runtime.ru.md)
-- [`Performance Benchmarks`](docs/benchmarks/README.md)
+- [`Runtime Threat Model`](docs/runtime-threat-model.ru.md)
+- [`Evidence Grades`](docs/evidence-grades.ru.md)
+- [`Rule Packs`](docs/rule-packs.ru.md)
+- [`Run Integrity`](docs/run-integrity.ru.md)
 - [`Security Analysis`](docs/security-analysis.ru.md)
+- [`Performance Benchmarks`](docs/benchmarks/README.md)
 
-## Вклад в проект
+## Участие
 
-Приветствуются contributions, особенно в native OS collectors, дополнительные Agent/IDE adapters, inference gateways, model runtimes, entity/correlation methods, privacy/redaction, graph UX и performance evaluation.
+Приветствуются contributions, особенно по native OS collectors, Agent/IDE adapters, inference gateways, model runtimes, evidence/correlation methods, privacy/redaction, graph UX и performance evaluation.
 
-## Лицензия
+## License
 
 См. [`LICENSE`](LICENSE).

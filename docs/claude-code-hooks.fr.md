@@ -11,265 +11,147 @@
 </p>
 <!-- i18n-nav:end -->
 
-# Hooks Claude Code
+# Claude Code Hooks
 
-ExecWeave inclut un adaptateur natif de hooks de commande Claude Code qui enregistre la télémétrie sémantique du fournisseur dans un sidecar JSONL local distinct.
+ExecWeave inclut un adapter command-hook natif pour Claude Code. Il enregistre les preuves semantic/content fournies par le provider dans un sidecar local tout en les gardant distinctes des preuves OS runtime indépendantes. Les hooks provider expliquent ce que Claude Code a effectivement exposé ; ils ne remplacent pas le collector portable ou Linux `strace` et n’établissent pas, à eux seuls, une causalité vers un process OS.
 
-L’adaptateur complète la collecte runtime OS. Il ne remplace **pas** le collecteur portable ni le collecteur Linux `strace`.
-
-## Ce qui est enregistré
-
-L’adaptateur actuel consomme les événements de hook Claude Code suivants :
+**Surface de hooks actuelle.** `execweave-claude-hook --print-config` enregistre actuellement :
 
 - `SessionStart`
+- `UserPromptSubmit`
+- `MessageDisplay`
 - `PreToolUse`
 - `PostToolUse`
 - `PostToolUseFailure`
+- `PostToolBatch`
 - `SubagentStart`
 - `SubagentStop`
+- `Stop`
+- `StopFailure`
 
-Il peut matérialiser des entités sémantiques telles que :
+La configuration est fail-open par défaut : les erreurs de télémétrie ou de stockage sont signalées sans bloquer intentionnellement une opération de l’Agent. Utilisez `--strict` en mode debug si vous voulez un code non-zero en cas d’erreur de télémétrie.
 
-```text
-Claude Code
-  |
-  +--REQUESTED_TOOL_CALL--> tool_call
-  |                           |
-  |                           +--USES_TOOL-------> Bash / Read / Edit / Write / ...
-  |                           +--DECLARED_COMMAND-> command
-  |                           +--DECLARED_TARGET--> file metadata
-  |                           +--VIA_MCP----------> MCP server
-  |
-  +--SPAWNED_SUBAGENT-------> subagent
-  +--USED_MODEL-------------> model        when SessionStart exposes one
-```
+## Configuration et enregistrement
 
-Les noms d’outils MCP suivant la convention Claude Code `mcp__<server>__<tool>` sont normalisés en nœuds `mcp_server` et `tool` séparés.
-
-## Installer la configuration des hooks
-
-Installez d’abord ExecWeave afin que les scripts console soient disponibles :
-
-```bash
-python -m pip install -e ".[dev]"
-```
-
-Générez le fragment de configuration :
+Installez ExecWeave, générez le fragment de settings pris en charge, fusionnez-le dans les settings Claude Code, puis utilisez le recorder lié au run :
 
 ```bash
 execweave-claude-hook --print-config
-```
-
-Fusionnez l’objet `hooks` généré dans l’un des fichiers de paramètres JSON pris en charge par Claude Code :
-
-- `~/.claude/settings.json` pour les hooks utilisateur globaux
-- `.claude/settings.json` pour une configuration de projet partageable
-- `.claude/settings.local.json` pour une configuration locale au projet qui ne doit pas être commitée
-
-N’écrasez pas les paramètres Claude Code sans rapport lors de l’ajout du fragment.
-
-Le menu `/hooks` de Claude Code permet d’inspecter les hooks actuellement configurés.
-
-L’adaptateur utilise des hooks de commande et est fail-open par défaut : une erreur d’analyse de télémétrie ou de système de fichiers est écrite sur stderr mais renvoie un succès, afin que l’observabilité ExecWeave ne bloque pas un appel d’outil de l’Agent. `--strict` est disponible pour déboguer le hook lui-même, et non comme politique de sécurité runtime.
-
-## Recommandé : enregistrement runtime + sémantique + corrélation en une commande
-
-Une fois les hooks installés, utilisez le workflow lié à l’exécution :
-
-```bash
 execweave-claude-record --open -- claude
 ```
 
-Sous Linux, `--backend auto` continue de préférer le backend `strace` plus fort lorsqu’il est disponible. Sous macOS et Windows, il utilise le backend portable.
-
-`execweave-claude-record` associe un chemin sidecar unique à cette exécution ExecWeave **dans le processus CLI dédié**. Claude et ses commandes de hook héritent de ce chemin ; deux processus ExecWeave Claude-record lancés indépendamment n’ont donc pas besoin de deviner quel sidecar sémantique appartient à quelle capture runtime.
-
-Si Claude émet des événements de hook sémantiques, l’enregistreur exécute trois étapes de preuve explicites :
+`execweave-claude-record` lie un sidecar semantic unique au run via l’environnement du child process. Les preuves runtime, semantic et correlated restent dans des artefacts séparés.
 
 ```text
-preuve runtime
-    ↓ fusion sémantique
-preuve runtime + sémantique
-    ↓ corrélation conservatrice
-runtime + sémantique + corrélation inférée
+runtime evidence
+    ↓ semantic merge
+runtime + semantic evidence
+    ↓ conservative correlation
+runtime + semantic + inferred correlation
 ```
 
-Le répertoire d’exécution garde chaque étape séparée :
+Si aucun hook Claude pris en charge n’arrive, le recorder retombe sur les artefacts runtime-only. Si des preuves semantic existent mais qu’aucun candidat Tool → Process unique et suffisamment supporté ne subsiste, aucun bridge n’est fabriqué.
+
+## Contenu full-fidelity en v0.6.5
+
+L’adapter Claude n’est plus limité à des résumés de metadata bornés. Lorsqu’un hook fournit explicitement du contenu, v0.6.5 stocke la valeur complète fournie par la source dans le store local SHA-256 content-addressed et ne met qu’une référence dans le sidecar semantic.
+
+Les régressions couvertes incluent :
+
+- le `UserPromptSubmit.prompt` complet, y compris de grandes valeurs ;
+- l’entrée tool complète, y compris le contenu `Write`/`Edit` et les valeurs applicatives présentes dans l’objet d’entrée ;
+- le `PostToolUse.tool_response` structuré complet lorsqu’il est fourni ;
+- la sérialisation du résultat tool visible par le modèle fournie par `PostToolBatch` ;
+- le texte/delta assistant de `MessageDisplay` avec les metadata d’ordre disponibles ;
+- les messages assistant finaux du main Agent et des subagents fournis par les événements stop.
+
+Les transport credentials connus sont filtrés uniquement dans la projection provider-metadata séparée lorsque l’adapter les reconnaît. Ce filtrage **ne nettoie pas** la valeur full content elle-même. Un secret intégré dans un prompt, une entrée tool, un body de fichier, un résultat tool ou un message assistant reste dans la preuve full-fidelity conservée.
+
+`content_complete_from_source: true` signifie qu’ExecWeave a stocké la valeur complète fournie par le hook Claude. Cela n’affirme pas qu’ExecWeave a lu un transcript non fourni, observé un hidden model state ou capturé une étape provider absente du hook payload.
+
+## Entités logiques et identité des tools
+
+Les événements hook Claude peuvent matérialiser des relations provider-level telles que :
 
 ```text
-.execweave/runs/<run-id>/
-├── events.jsonl              # preuve runtime uniquement
-├── graph.json                # graphe runtime uniquement
-├── viewer.html               # visualiseur runtime uniquement
-├── semantic.jsonl            # preuve sémantique des hooks Claude uniquement
-├── events.semantic.jsonl     # flux runtime + sémantique validé
-├── graph.semantic.json       # graphe runtime + sémantique
-├── viewer.semantic.html      # visualiseur runtime + sémantique
-├── events.correlated.jsonl   # runtime + sémantique + ponts inférés
-├── graph.correlated.json     # graphe incluant ponts inférés
-└── viewer.correlated.html    # visualiseur avec arêtes inférées stylées séparément
+Claude Code --REQUESTED_TOOL_CALL--> tool_call
+tool_call --USES_TOOL-------------> tool
+tool_call --DECLARED_COMMAND------> command
+tool_call --DECLARED_TARGET-------> file metadata
+tool_call --VIA_MCP---------------> mcp_server
+Claude Code --SPAWNED_SUBAGENT----> subagent
 ```
 
-`--open` ouvre `viewer.correlated.html` lorsqu’une preuve sémantique a été observée. Si les hooks ne sont pas installés ou si aucun événement pris en charge ne se déclenche, ExecWeave indique `semantic_status: "no_events"`, `correlation_status: "not_run_no_semantic_events"` et revient au visualiseur runtime uniquement.
+L’entrée hook peut identifier une invocation logique avec `tool_use_id`, mais cet identifiant n’est pas un PID OS. Les noms MCP suivant la convention provider `mcp__<server>__<tool>` sont normalisés, lorsqu’ils sont présents, en entités MCP-server/tool distinctes.
 
-Si des preuves sémantiques existent mais qu’aucun candidat Tool → Process unique et sûr ne subsiste, ExecWeave produit quand même les artefacts corrélés avec `correlation_status: "completed_no_matches"`. Aucune arête inférée n’est fabriquée.
+## Frontière de corrélation Tool → Process
 
-La fenêtre de corrélation maximale par défaut est de 3000 ms. Elle peut être modifiée explicitement :
+Le command-hook Claude ne fournit pas le PID réel du child process créé par une invocation Bash/PowerShell. ExecWeave ne crée donc pas d’edge process causal observé à partir des seules données du hook provider.
 
-```bash
-execweave-claude-record \
-  --correlation-window-ms 1500 \
-  --open \
-  -- claude
-```
-
-Choisissez explicitement un répertoire si nécessaire :
-
-```bash
-execweave-claude-record \
-  --output-dir my-claude-run \
-  --open \
-  -- claude
-```
-
-Le workflow lié à l’exécution préserve `events.jsonl`, `semantic.jsonl` et `events.semantic.jsonl`. La corrélation est écrite uniquement dans le flux distinct `events.correlated.jsonl`.
-
-## Emplacement du sidecar pour un hook autonome
-
-Lorsque `execweave-claude-hook` est utilisé hors de l’enregistreur lié à l’exécution, chaque session Claude écrit par défaut dans :
-
-```text
-<cwd>/.execweave/semantic/claude/<Claude-session-id>.jsonl
-```
-
-L’identifiant de session est nettoyé avant utilisation comme nom de fichier.
-
-Vous pouvez remplacer ce comportement via :
-
-```text
-EXECWEAVE_SEMANTIC_SIDECAR
-```
-
-ou une commande de hook explicite telle que :
-
-```bash
-execweave-claude-hook --sidecar /path/to/semantic.jsonl
-```
-
-Pour des sessions autonomes parallèles, préférez le chemin automatique limité à la session plutôt que de faire pointer plusieurs sessions Claude vers un sidecar fixe.
-
-## Avancé : fusion et corrélation manuelles
-
-La chaîne générique sémantique et de corrélation reste disponible si vous disposez déjà d’une capture runtime et d’un sidecar sémantique :
-
-```bash
-execweave semantic-merge \
-  run.jsonl \
-  semantic.jsonl \
-  --output run.semantic.jsonl
-
-execweave validate run.semantic.jsonl
-
-execweave correlate run.semantic.jsonl \
-  --output run.correlated.jsonl
-
-execweave validate run.correlated.jsonl
-execweave graph run.correlated.jsonl \
-  --output run.correlated.graph.json
-execweave view run.correlated.graph.json \
-  --output run.correlated.html \
-  --open
-```
-
-Le flux runtime original et le sidecar sémantique restent inchangés.
-
-## Limite Tool → Process et corrélation v0.1
-
-L’entrée de hook de commande Claude Code identifie l’invocation logique de l’outil (`tool_name`, `tool_use_id` et l’entrée outil), mais ne fournit pas le PID réel du processus enfant créé par un appel Bash.
-
-L’adaptateur natif n’émet donc volontairement **pas** une relation observée telle que :
-
-```text
-Bash tool_call --SPAWNED_PROCESS--> process:1234
-```
-
-sans preuve supplémentaire.
-
-Vous pouvez néanmoins voir à la fois les preuves sémantiques et OS dans le même graphe fusionné :
-
-```text
-Claude Code --REQUESTED_TOOL_CALL--> Bash call --DECLARED_COMMAND--> "npm test"
-
-session --LAUNCHED--> Claude process --SPAWNED--> shell/process ...
-```
-
-ExecWeave n’affirme pas que ces chemins appartiennent à la même chaîne causale simplement parce que leurs horodatages ou chaînes de commande se ressemblent.
-
-L’étape de corrélation v0.1 est volontairement conservatrice :
-
-- la fenêtre de recherche est bornée et tronquée par le résultat de l’outil ou le prochain appel d’outil déclaré lorsqu’ils sont disponibles
-- l’identité de l’exécutable peut être soutenue par des preuves exactes d’exécutable/processus/cmdline
-- les chemins d’exécutable canoniques peuvent résoudre des chemins équivalents sans appariement flou du nom
-- les processus lanceurs peuvent utiliser en repli un appariement `argv[1:]` exact, non vide et préservant la longueur
-- un pont n’est émis que lorsqu’exactement un candidat de processus subsiste
-- des candidats ambigus n’émettent aucun pont
-- les commandes shell composées non prises en charge et les builtins shell n’émettent aucun pont
-- aucun appariement flou de version/nom n’est utilisé
-- la proximité temporelle seule n’est jamais suffisante
-
-Un pont dérivé est représenté comme :
+Un bridge dérivé ne peut être émis que si le matcher runtime borné trouve exactement un candidat process supporté :
 
 ```text
 tool_call --CORRELATED_WITH_PROCESS--> process
 ```
 
-et porte toujours une sémantique équivalente à :
+Chaque bridge reste :
 
 ```json
 {
-  "backend": "inference",
   "causal": false,
   "inferred": true,
-  "inference_method": "...",
-  "confidence": 0.8,
-  "confidence_semantics": "heuristic_score_not_probability",
-  "supporting_event_ids": ["..."]
+  "confidence_semantics": "heuristic_score_not_probability"
 }
 ```
 
-La méthode et le score exacts dépendent des preuves de support. Le champ de confiance est un score heuristique destiné à communiquer la force des preuves ; il n’est explicitement **pas une probabilité calibrée**.
+La proximité temporelle seule est insuffisante. Les candidats ambigus, commandes composées non prises en charge, shell builtins ou déclarations sans correspondance ne produisent aucun bridge. Une inference n’est jamais promue en attribution process observée.
 
-Le Viewer autonome rend les relations inférées séparément des arêtes observées causales et non causales, les étiquette `· inferred` et expose leurs métadonnées de preuve lorsqu’elles sont sélectionnées. Un pont inféré n’est jamais promu en attribution de processus observée.
+## Artefacts en couches
 
-## Comportement de confidentialité
+Une capture Claude liée au run peut produire :
 
-L’adaptateur natif évite volontairement plusieurs payloads à haut risque :
-
-- le contenu de fichier `Write`/`Edit` n’est pas persisté par l’adaptateur
-- `PostToolUse.tool_response` n’est pas persisté
-- seuls les noms de clés d’entrée sont conservés pour les métadonnées génériques d’appel d’outil
-- les outils orientés fichier conservent le chemin déclaré, pas son contenu
-- les commandes Bash/PowerShell sont conservées car elles sont nécessaires pour expliquer l’exécution, mais le texte de commande est limité à 4096 caractères
-- le texte d’échec est limité à un résumé d’erreur court
-
-Les chemins et commandes peuvent toujours contenir credentials, tokens, noms de clients, noms d’hôtes internes ou autres informations sensibles. Traitez les sidecars sémantiques comme des métadonnées runtime sensibles et examinez-les avant de les partager.
-
-## Sémantique des preuves
-
-Les arêtes produites directement par l’adaptateur Claude incluent :
-
-```json
-{
-  "backend": "semantic",
-  "attribution": "claude_hook",
-  "evidence_source": "provider_hook",
-  "provider": "claude",
-  "causal": false
-}
+```text
+.execweave/runs/<run-id>/
+├── events.jsonl
+├── graph.json
+├── viewer.html
+├── semantic.jsonl
+├── content/sha256/...
+├── events.semantic.jsonl
+├── graph.semantic.json
+├── viewer.semantic.html
+├── events.correlated.jsonl
+├── graph.correlated.json
+└── viewer.correlated.html
 ```
 
-`causal: false` ne signifie pas que le hook Claude a été fabriqué. Cela signifie qu’une relation logique au niveau fournisseur n’est pas promue au niveau d’affirmation plus fort d’attribution d’exécution OS d’ExecWeave.
+La corrélation ne réécrit pas les preuves runtime ou provider originales.
 
-Les événements de corrélation sont des preuves dérivées distinctes avec `backend: "inference"`, `inferred: true` et `causal: false`. Ils ne modifient pas les preuves runtime brutes ni celles du hook Claude.
+## Sidecar standalone
 
-Voir [`Télémétrie sémantique`](semantic-telemetry.fr.md) pour le contrat générique de fusion et les règles de référence de processus.
+En dehors du recorder lié au run, le sidecar Claude par défaut est scoped par session :
+
+```text
+<cwd>/.execweave/semantic/claude/<Claude-session-id>.jsonl
+```
+
+`EXECWEAVE_SEMANTIC_SIDECAR` ou `--sidecar` peuvent remplacer cet emplacement. Pour des captures parallèles, préférez un chemin propre à la session ou au run.
+
+## Confidentialité et frontière de preuve
+
+Les artefacts Claude full-fidelity peuvent contenir prompts, commandes, chemins de fichiers, bodies `Write`/`Edit`, arguments/résultats d’outils, texte assistant, réponses de subagents, identifiants et secrets applicatifs. Considérez tout le run directory comme sensible et vérifiez-le avant partage.
+
+Le contenu provider reste une preuve provider. Une entrée tool stockée ne prouve pas que le tool a été exécuté ; un body de fichier stocké ne prouve pas qu’un process OS particulier l’a lu ou écrit ; un résultat tool stocké ne prouve pas un data flow au niveau byte. Les claims plus forts exigent les collectors OS et les preuves de corrélation explicitement marquées.
+
+## Merge et corrélation manuels
+
+Le pipeline générique reste disponible si vous avez déjà des fichiers runtime et semantic :
+
+```bash
+execweave semantic-merge run.jsonl semantic.jsonl --output run.semantic.jsonl
+execweave validate run.semantic.jsonl
+execweave correlate run.semantic.jsonl --output run.correlated.jsonl
+execweave validate run.correlated.jsonl
+```
+
+Voir [`Semantic Telemetry`](semantic-telemetry.fr.md) pour le contrat générique evidence/content et les règles de process-reference.
