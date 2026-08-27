@@ -31,6 +31,7 @@ DOC_BASE_NAMES = [
     "security-analysis.md",
     "evidence-grades.md",
     "rule-packs.md",
+    "run-integrity.md",
 ]
 
 START = "<!-- i18n-nav:start -->"

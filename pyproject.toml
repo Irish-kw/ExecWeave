@@ -78,6 +78,7 @@ execweave-inference-gateway = "execweave.inference_gateway_cli:main"
 execweave-inference-link = "execweave.inference_identity_cli:main"
 execweave-litellm-callback = "execweave.litellm_callback_cli:main"
 execweave-rule-pack = "execweave.rule_pack_cli:main"
+execweave-integrity = "execweave.integrity_cli:main"
 execweave-overhead = "execweave.overhead_benchmark:main"
 execweave-scalability = "execweave.scalability_benchmark:main"
 
