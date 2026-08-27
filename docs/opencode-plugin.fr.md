@@ -1,4 +1,4 @@
-# Plugin OpenCode
+# OpenCode Plugin
 
 <!-- i18n-nav:start -->
 <p align="center">
@@ -13,69 +13,42 @@
 </p>
 <!-- i18n-nav:end -->
 
-ExecWeave s’intègre à OpenCode via un plugin local au projet. OpenCode expose des valeurs exactes `sessionID + callID` sur `tool.execute.before` et `tool.execute.after`, ce qui permet d’identifier un appel d’outil logique sans apparier heuristiquement les événements de cycle de vie.
+ExecWeave s'intègre à OpenCode via un plugin local au projet. OpenCode expose des valeurs exactes `sessionID + callID` sur les hooks tool before/after, ce qui permet d'identifier un appel logique sans appariement heuristique. Cette identité reste une preuve fournisseur et n'est pas un PID OS.
 
-## Installation
-
-Installez le plugin généré dans le projet courant :
+## Installation et enregistrement
 
 ```bash
 execweave-opencode-plugin --install
-```
-
-Il crée :
-
-```text
-.opencode/plugins/execweave.ts
-```
-
-OpenCode charge automatiquement les plugins de projet depuis ce répertoire. ExecWeave refuse d’écraser un plugin existant sauf si `--force` est fourni.
-
-Puis enregistrez une exécution :
-
-```bash
 execweave-opencode-record --open -- opencode
 ```
 
-## Preuves sémantiques capturées
+Le plugin généré est installé dans `.opencode/plugins/execweave.ts`. ExecWeave refuse d'écraser un plugin existant sauf si `--force` est explicitement fourni.
 
-Le plugin baseline émet des métadonnées minimales pour :
+## Surface d'observation complète
 
-- `chat.message`
-- `tool.execute.before`
-- `tool.execute.after`
+v0.6.5 n'est plus limité à l'ancien contrat minimal-metadata de trois événements. Le chemin plugin/hook peut préserver le contenu exposé par OpenCode via les messages de chat, l'exécution d'outils avant/après, les transformations model-context/system, le texte assistant terminé, les événements provider bus, les headers de requête après filtrage des credentials, les définitions d'outils, les commandes, demandes d'autorisation et contexte de compaction lorsque ces hooks sont déclenchés.
 
-Les relations typiques du graphe sont :
+Les relations logiques typiques restent Agent → tool call, tool call → tool, commande/cible déclarée et observations de résultat. Le stockage du contenu ne change pas leur sémantique de preuve.
+
+## Contenu full-fidelity
+
+Les valeurs complètes fournies par le plugin OpenCode sont stockées dans le store local adressé par contenu et référencées depuis le sidecar sémantique JSONL. Les régressions couvrent messages/parts complets, args/résultats d'outils, contexte modèle, prompts système, texte assistant, événements fournisseur, définitions d'outils, arguments/parts de commande, données de permission et prompts/contexte de compaction.
+
+Les credentials de transport connus comme authorization/cookie sont filtrés des headers/projections provider-metadata concernés. Les valeurs applicatives sensibles intégrées aux args, messages, résultats ou autres contenus sont conservées. Ne supposez pas que le full-fidelity a été expurgé.
+
+## Corrélation Tool vers Process
+
+`sessionID + callID` prouve l'identité logique exacte d'un appel dans OpenCode. Il ne prouve pas quel processus OS l'a exécuté. Tool → Process reste un pont dérivé séparé et conservateur, émis uniquement lorsqu'une preuve runtime indépendante soutient un seul processus.
 
 ```text
-agent --USED_MODEL--> model
-agent --REQUESTED_TOOL_CALL--> tool_call
-tool_call --USES_TOOL--> tool
-tool_call --DECLARED_COMMAND--> command
-tool_call --DECLARED_TARGET--> file
-tool_call --TOOL_CALL_RETURNED--> tool
+inferred: true
+causal: false
 ```
 
-Le `callID` OpenCode est utilisé directement dans l’identité `tool_call`.
+Les appels ambigus ou non pris en charge ne produisent aucun pont.
 
-## Limite de confidentialité
+## Confidentialité et frontière des preuves
 
-Le hook after d’OpenCode peut voir la sortie de l’outil, mais le plugin ExecWeave généré ne transmet volontairement ni `output.output` ni `output.metadata`.
+Les preuves d'un run OpenCode peuvent contenir prompts/messages, données system/context, arguments/sorties d'outils, commandes, motifs de permission, contenu d'événements fournisseur, chemins, identifiants et valeurs applicatives sensibles. Examinez le répertoire avant partage.
 
-Les arguments sont réduits avant de quitter le plugin :
-
-- `bash` : `command` déclarée
-- outils orientés fichier : champs ressemblant à des chemins comme `filePath`, `file_path` ou `path`
-- métadonnées facultatives du répertoire de travail
-
-Le contenu brut des écritures, les parties des messages de chat et les sorties d’outil ne sont pas envoyés au hook ExecWeave.
-
-## Corrélation outil-vers-processus
-
-`callID` prouve l’identité logique de l’appel dans OpenCode ; ce n’est pas un PID OS. Tool → Process reste un pont conservateur dérivé, créé uniquement lorsque les preuves runtime produisent un seul processus soutenu de manière unique.
-
-Les ponts dérivés restent `inferred: true` et `causal: false`.
-
-## Limite de preuve
-
-Le plugin rapporte l’intention sémantique d’OpenCode. Les collecteurs runtime établissent indépendamment les observations processus/fichier/réseau. ExecWeave ne traite jamais le plugin fournisseur comme preuve qu’une commande déclarée ou une action fichier a réellement eu lieu.
+Le plugin prouve ce qu'OpenCode a exposé au niveau semantic/provider. Les collecteurs runtime établissent indépendamment les observations process/file/network. Le contenu full-fidelity fournisseur ne prouve pas à lui seul l'exécution d'une commande, un accès fichier terminé ou un flux de données au niveau des octets.

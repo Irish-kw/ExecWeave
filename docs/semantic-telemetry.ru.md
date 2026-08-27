@@ -13,148 +13,51 @@
 
 # Семантическая телеметрия
 
-ExecWeave может объединять семантические события провайдеров/фреймворков с доказательствами времени выполнения ОС, не переписывая исходный runtime-capture.
-
-Цель — разместить логические доказательства Agent/Tool/MCP и машинные доказательства process/file/network в одном графе, сохраняя информацию о том, какой источник подтверждает каждое отношение.
-
-```text
-agent --REQUESTED_TOOL_CALL--> tool_call --USES_TOOL--> tool
-                                                     |
-                                                     +--DECLARED_COMMAND--> command
-
-process --OPENED_READ--> file
-process --CONNECTED_TO--> network_endpoint
-```
-
-Hook провайдера может объяснить, *какое логическое действие было запрошено*. Сборщик времени выполнения объясняет, *что машина действительно сделала*. ExecWeave не превращает временную близость этих наблюдений в доказательство причинности.
+ExecWeave объединяет семантические наблюдения провайдеров и фреймворков с независимо собранными доказательствами работы ОС, не переписывая исходный runtime-capture. Доказательства провайдера описывают, что показал Agent, инструмент, gateway или интеграция model runtime; доказательства ОС описывают, что наблюдал системный collector. Корреляция остаётся отдельным производным слоем и никогда молча не повышается до причинного доказательства.
 
 ## Workflow
 
-Сначала выполните обычный capture ExecWeave:
+Provider-adapter пишет семантический sidecar, привязанный к run, после чего ExecWeave валидирует новый объединённый поток:
 
 ```bash
-execweave run --output run.jsonl -- claude
-```
-
-Адаптер или hook провайдера записывает отдельный семантический sidecar, например `semantic.jsonl`.
-
-Объедините sidecar в **новый** валидированный поток событий:
-
-```bash
-execweave semantic-merge run.jsonl semantic.jsonl \
-  --output run.semantic.jsonl
-
+execweave semantic-merge run.jsonl semantic.jsonl --output run.semantic.jsonl
 execweave validate run.semantic.jsonl
-execweave graph run.semantic.jsonl \
-  --output run.semantic.graph.json
-execweave view run.semantic.graph.json \
-  --output run.semantic.html \
-  --open
+execweave graph run.semantic.jsonl --output run.semantic.graph.json
 ```
 
-`semantic-merge` никогда не изменяет `run.jsonl`.
+`run.jsonl` никогда не изменяется командой `semantic-merge`. Run-bound recorder сохраняет runtime, semantic и correlated artifacts в отдельных файлах.
 
-## Контракт записей sidecar
+## Full-fidelity content в v0.6.5
 
-Одна семантическая запись sidecar — один JSON-объект на строку. Адаптер предоставляет только семантическое наблюдение:
-
-```json
-{
-  "timestamp": "2026-08-25T10:00:02.123Z",
-  "event_type": "semantic.tool.called",
-  "relation": "REQUESTED_TOOL_CALL",
-  "source": {
-    "type": "agent",
-    "id": "agent:Claude Code",
-    "name": "Claude Code",
-    "attributes": {}
-  },
-  "target": {
-    "type": "tool_call",
-    "id": "tool-call:provider:session:call-id",
-    "name": "Bash",
-    "attributes": {}
-  },
-  "attributes": {
-    "attribution": "provider_hook",
-    "evidence_source": "provider_hook",
-    "causal": false
-  }
-}
-```
-
-Sidecar **не обязан** предоставлять:
-
-- ExecWeave `session_id`
-- ExecWeave `schema_version`
-- непрерывный `sequence`
-- `event_id` (необязательно; ExecWeave создаёт его, если поле отсутствует)
-
-`semantic-merge` добавляет идентификатор runtime-сессии, использует текущую схему событий ExecWeave, сортирует семантические и runtime body-события по временной метке, заново назначает одну непрерывную последовательность, сохраняет `session.started` первым и `session.finished` последним и валидирует объединённый результат до записи выходного файла.
-
-## Рекомендуемые семантические сущности
-
-Универсальная схема сущностей ExecWeave уже поддерживает дополнительные типы узлов.
-
-| Тип | Пример ID | Значение |
-| --- | --- | --- |
-| `agent` | `agent:Claude Code` | Логический агент/клиент |
-| `tool_call` | `tool-call:claude:session:tool-use-id` | Один конкретный логический вызов инструмента |
-| `tool` | `tool:claude:Bash` | Инструмент, видимый агенту |
-| `mcp_server` | `mcp-server:claude:github` | MCP-сервер/интеграция |
-| `model` | `model:claude:claude-sonnet` | Идентичность модели, если провайдер её предоставляет |
-| `command` | `command:sha256:...` | Метаданные объявленной команды из семантического hook |
-| `process_reference` | `process-pid:1234` | Необязательный мост, когда upstream-источник действительно предоставляет PID |
-
-Идентификаторы сущностей должны быть достаточно стабильными, чтобы дедуплицировать повторные семантические наблюдения внутри одного запуска.
-
-## Необязательный мост ссылки на процесс
-
-Некоторые адаптеры провайдера/фреймворка могут знать PID дочернего процесса, но не полный идентификатор процессной сущности ExecWeave. В таком случае они могут создать `process_reference` с наблюдаемым PID.
-
-При слиянии ExecWeave разрешает такие ссылки относительно сущностей процессов, реально наблюдавшихся в runtime-потоке. Разрешение выполняется консервативно:
-
-1. Явный `create_time` может однозначно определить процесс.
-2. PID с одним runtime-кандидатом разрешается напрямую.
-3. При повторном использовании PID ExecWeave может выбрать единственное наиболее позднее время создания процесса, не превышающее семантическую временную метку.
-4. В противном случае узел остаётся `process_reference` с `unresolved: true`, вместо догадки.
-
-Разрешённое событие записывает исходное-to-runtime сопоставление процесса в `attributes.resolved_process_references`.
-
-**Не создавайте `process_reference`, если провайдер не предоставил PID.** Строка команды и близкая временная метка процесса недостаточны, чтобы утверждать точное отношение Tool → Process.
-
-Текущий нативный адаптер Claude Code следует этому правилу: вход hook Claude идентифицирует вызовы инструментов, но не предоставляет PID дочернего процесса, поэтому адаптер не выдумывает рёбра `tool_call --SPAWNED_PROCESS--> process`.
-
-## Граница доказательств и причинности
-
-Текущие адаптеры провайдеров помечают семантические рёбра как `causal: false`, даже когда hook провайдера достоверно сообщает о состоявшемся логическом событии инструмента. В ExecWeave `causal: true` зарезервировано для более сильной атрибуции на уровне выполнения, а не просто для утверждения, что два логических объекта связаны.
-
-Это сохраняет разделение между утверждениями вроде:
+Семантическая телеметрия больше не ограничивается небольшими metadata-summary. Если поддерживаемая точка интеграции явно предоставляет content, v0.6.5 может сохранить полное предоставленное значение в локальном content-addressed store и поместить в JSONL-event только ссылку.
 
 ```text
-Claude Code --REQUESTED_TOOL_CALL--> Bash call       семантическое доказательство провайдера
-process     --OPENED_READ---------> ~/.ssh/id_ed25519 runtime-доказательство ОС
+<run-root>/content/sha256/<sha256>.<json|txt|bin>
 ```
 
-Сами по себе эти два наблюдения **не доказывают**:
+Content reference хранит SHA-256, относительный путь, media type, размер, тип content, representation и признак полноты относительно точки интеграции. `complete_from_source: true` означает, что ExecWeave сохранил всё значение, которое получил; это **не** означает, что провайдер раскрыл скрытое состояние модели, невидимый финальный wire request или поле, которого не было в источнике.
+
+Поддерживаемые native adapters используют этот механизм для content, реально предоставленного hook/API surface: prompts, tool inputs/results, assistant/model responses, reasoning/thinking text при явном предоставлении, file content из provider hook и request/response objects там, где это разрешено контрактом adapter.
+
+Компактный semantic summary остаётся пригодным для graph materialization даже при сбое content store. Native hook adapters по умолчанию fail-open, поэтому ошибка хранения не должна намеренно блокировать операцию Agent.
+
+## Граница доказательств
+
+Semantic content — это наблюдаемое provider/integration evidence, а не OS causality. Сохранённый tool input не доказывает, что процесс его выполнил; file body из hook не доказывает завершённое чтение ОС; request/response pair, переданная CLI, не означает прозрачного сетевого перехвата.
+
+Tool → Process bridges создаются только отдельным консервативным correlation layer и остаются:
 
 ```text
-Bash call --caused--> that exact process
-file bytes --flowed to--> a network endpoint
+inferred: true
+causal: false
 ```
 
-Любой будущий слой корреляции semantic/runtime должен явно указывать свой метод и уверенность и оставаться отличимым от наблюдаемой OS-атрибуции.
-
-## Граница сессии
-
-Каждая семантическая временная метка должна находиться внутри интервала захваченной runtime-сессии. События вне этого интервала отклоняются. Это не позволяет незаметно прикрепить несвязанную телеметрию провайдера к неправильному запуску.
+Неизвестная или неоднозначная attribution не создаёт bridge. Byte-level data flow и exfiltration не выводятся лишь из одновременного наличия file и network observations.
 
 ## Конфиденциальность
 
-Семантические sidecar могут содержать чувствительные метаданные, даже если сам ExecWeave не собирает содержимое файлов. Авторам адаптеров следует предпочитать идентификаторы и ограниченные метаданные полным prompt, аргументам инструментов, выводам инструментов, credentials или секретным значениям.
+Full-fidelity content намеренно чувствителен. Не следует считать, что prompt text, tool arguments, tool output, model responses, file content или чувствительные application-level значения были удалены. Content store сохраняет полное значение, предоставленное поддерживаемой точкой интеграции.
 
-Адаптер Claude Code намеренно не сохраняет содержимое `Write` или `tool_response`. Объявленные shell-команды сохраняются, поскольку они важны для объяснения выполнения, но их размер ограничен, и их всё равно следует считать потенциально чувствительными метаданными.
+ExecWeave фильтрует известные transport credentials из некоторых provider-metadata projections, когда это определено контрактом adapter, но это не общий secret scanner и не удаляет чувствительные значения, встроенные в content payload. Content blobs по умолчанию остаются локальными и не вставляются напрямую в graph events, однако всё равно являются частью evidence run и должны быть проверены перед публикацией.
 
-Универсальный слой semantic merge не зависит от провайдера. Адаптеры конкретных провайдеров являются отдельными интеграциями и должны точно документировать, какие upstream-поля они используют и какие утверждения эти поля позволяют делать.
-
-См. [`Hooks Claude Code`](claude-code-hooks.ru.md) — первый нативный адаптер провайдера.
+Документация конкретных провайдеров точно определяет наблюдаемые поля. См. документы Claude Code, Codex, Gemini, Cursor, OpenCode, Inference Gateway и Model Runtime.

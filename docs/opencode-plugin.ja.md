@@ -13,69 +13,42 @@
 </p>
 <!-- i18n-nav:end -->
 
-ExecWeave は project-local plugin を通じて OpenCode と統合します。OpenCode は `tool.execute.before` と `tool.execute.after` の両方で正確な `sessionID + callID` を提供するため、同一の logical tool call を heuristic でペアリングする必要がありません。
+ExecWeave は project-local plugin を通じて OpenCode と統合します。OpenCode は tool before/after hook で正確な `sessionID + callID` を公開するため、heuristic pairing なしで一つの logical tool call を識別できます。この identity は provider-level evidence であり OS PID ではありません。
 
-## インストール
-
-現在のプロジェクトへ生成済み plugin をインストールします。
+## インストールと記録
 
 ```bash
 execweave-opencode-plugin --install
-```
-
-次のファイルが作成されます。
-
-```text
-.opencode/plugins/execweave.ts
-```
-
-OpenCode はこのディレクトリの project plugin を自動ロードします。既存ファイルがある場合、ExecWeave は `--force` が明示されない限り上書きしません。
-
-次に実行を記録します。
-
-```bash
 execweave-opencode-record --open -- opencode
 ```
 
-## 取得する semantic evidence
+生成された plugin は `.opencode/plugins/execweave.ts` に配置されます。`--force` を明示しない限り ExecWeave は既存 plugin を上書きしません。
 
-現在の baseline が送信する metadata は最小限です。
+## Full observation surface
 
-- `chat.message`
-- `tool.execute.before`
-- `tool.execute.after`
+v0.6.5 は旧 three-event minimal-metadata contract に限定されません。Hook が発火した場合、generated plugin/hook path は chat messages、tool execution before/after、model-context/system transforms、completed assistant text、provider bus events、credential filtering 後の request headers、tool definitions、commands、permission requests、compaction context など OpenCode が公開する content を保存できます。
 
-代表的な Graph relationship：
+典型的な logical graph relationship は Agent → tool call、tool call → tool、declared command/target、returned-result observation を引き続き含みます。Content storage は evidence semantics を変更しません。
+
+## Full-fidelity content
+
+OpenCode plugin が提供する完全な値はローカル content-addressed store に保存され、semantic JSONL sidecar から reference されます。Regression coverage には complete chat message/parts、tool args/results、model context、system prompt values、assistant text、provider events、tool definitions、command arguments/parts、permission data、compaction prompts/context が含まれます。
+
+Authorization/cookie など既知の transport credentials は関連 headers/provider-metadata projection から除外されます。一方、tool args、messages、results、その他 content values に埋め込まれた application-level secrets は保存されます。Full-fidelity content が secret-redacted 済みだと仮定しないでください。
+
+## Tool to process correlation
+
+`sessionID + callID` は OpenCode 内部の exact logical call identity を証明しますが、どの OS process が call を実行したかは証明しません。Tool → Process は別途導出される conservative bridge であり、独立 runtime evidence が唯一の supported process を示す場合だけ生成されます。
 
 ```text
-agent --USED_MODEL--> model
-agent --REQUESTED_TOOL_CALL--> tool_call
-tool_call --USES_TOOL--> tool
-tool_call --DECLARED_COMMAND--> command
-tool_call --DECLARED_TARGET--> file
-tool_call --TOOL_CALL_RETURNED--> tool
+inferred: true
+causal: false
 ```
 
-OpenCode の `callID` を `tool_call` identity に直接使用します。
+Ambiguous / unsupported call では bridge を作りません。
 
-## プライバシー境界
+## Privacy と evidence boundary
 
-OpenCode の after-hook は tool output を参照できますが、ExecWeave が生成する plugin は `output.output` や `output.metadata` を転送しません。
+OpenCode run evidence には prompts/messages、system/context data、tool arguments/output、commands、permission patterns、provider event content、paths、identifiers、application secrets が含まれる可能性があります。Run directory を sensitive として扱い、共有前に確認してください。
 
-Plugin は arguments を送信前に縮小します。
-
-- `bash`: declared `command` のみ
-- file-oriented tools: `filePath`、`file_path`、`path` などの path field のみ
-- 必要に応じて working-directory metadata
-
-Raw write content、chat message parts、tool output は ExecWeave hook に送信されません。
-
-## Tool → Process correlation
-
-`callID` は OpenCode 内部の logical call identity を証明しますが、OS PID ではありません。Tool → Process は引き続き保守的な derived bridge であり、runtime evidence が一意に支持する process を示す場合のみ作成されます。
-
-Derived bridge は常に `inferred: true`、`causal: false` です。
-
-## Evidence boundary
-
-Plugin が報告するのは OpenCode semantic intent です。Process/file/network の runtime observation は OS collector が独立して確立します。Provider plugin を declared command や file action が実際に発生した証拠として扱いません。
+Plugin は semantic/provider layer で OpenCode が公開した内容だけを証明します。Runtime collectors が process/file/network observation を独立して確立します。Full-fidelity provider content だけでは command execution、completed file access、byte-level data flow は証明されません。

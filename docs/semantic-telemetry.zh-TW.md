@@ -13,165 +13,51 @@
 
 # Semantic Telemetry
 
-ExecWeave 可以把 provider/framework 的 semantic events 與 OS runtime evidence 放進同一個 execution graph，同時保留「是哪一個 evidence source 證明了這條關係」。原始 runtime capture 不會被覆寫。
-
-```text
-agent --REQUESTED_TOOL_CALL--> tool_call --USES_TOOL--> tool
-                                                     |
-                                                     +--DECLARED_COMMAND--> command
-
-process --OPENED_READ--> file
-process --CONNECTED_TO--> network_endpoint
-```
-
-Provider hook 說明的是「logical action 被要求執行什麼」；runtime collector 說明的是「機器實際觀察到什麼」。ExecWeave 不會把時間接近直接變成 causal proof。
+ExecWeave 會把 provider/framework semantic observation 與獨立 OS runtime evidence 結合，但不會改寫原始 runtime capture。Provider evidence 說明 Agent、tool、gateway 或 model-runtime integration point 明確曝露了什麼；OS evidence 說明 machine collector 實際觀察到什麼。Correlation 永遠是獨立 derived layer，不會被默默升級成 causal proof。
 
 ## Workflow
 
-先收一般 runtime：
+Provider adapter 先寫入 run-bound semantic sidecar，再由 ExecWeave 驗證新的 merged stream：
 
 ```bash
-execweave run --output run.jsonl -- claude
-```
-
-Provider adapter/hook 寫到獨立 `semantic.jsonl` sidecar，再 merge 成**新的** event stream：
-
-```bash
-execweave semantic-merge run.jsonl semantic.jsonl \
-  --output run.semantic.jsonl
-
+execweave semantic-merge run.jsonl semantic.jsonl --output run.semantic.jsonl
 execweave validate run.semantic.jsonl
-execweave graph run.semantic.jsonl \
-  --output run.semantic.graph.json
-execweave view run.semantic.graph.json \
-  --output run.semantic.html \
-  --open
+execweave graph run.semantic.jsonl --output run.semantic.graph.json
 ```
 
-`run.jsonl` 永遠不會被 `semantic-merge` 修改。
+`semantic-merge` 永遠不修改 `run.jsonl`。Run-bound recorder 會把 runtime、semantic、correlated artifacts 分開保存。
 
-Claude Code / OpenAI Codex 的 run-bound recorder 已經把這個流程自動化：
+## v0.6.5 full-fidelity content
 
-```bash
-execweave-claude-record --open -- claude
-execweave-codex-record --open -- codex
-```
-
-## Sidecar record contract
-
-一筆 semantic sidecar record 是一行 JSON：
-
-```json
-{
-  "timestamp": "2026-08-25T10:00:02.123Z",
-  "event_type": "semantic.tool.called",
-  "relation": "REQUESTED_TOOL_CALL",
-  "source": {
-    "type": "agent",
-    "id": "agent:Claude Code",
-    "name": "Claude Code",
-    "attributes": {}
-  },
-  "target": {
-    "type": "tool_call",
-    "id": "tool-call:provider:session:call-id",
-    "name": "Bash",
-    "attributes": {}
-  },
-  "attributes": {
-    "attribution": "provider_hook",
-    "evidence_source": "provider_hook",
-    "causal": false
-  }
-}
-```
-
-Adapter 不必提供 ExecWeave `session_id`、`schema_version`、contiguous `sequence`；`event_id` 也可省略。`semantic-merge` 會注入 runtime session、使用目前 schema、依時間重排 body events、重新配置連續 sequence，保持 `session.started` 第一、`session.finished` 最後，並在 commit output 前驗證整條 stream。
-
-## 建議 semantic entities
-
-| Type | Example ID | 意義 |
-| --- | --- | --- |
-| `agent` | `agent:Claude Code` | logical agent/client |
-| `tool_call` | `tool-call:claude:session:tool-use-id` | 一次具體 tool invocation |
-| `tool` | `tool:claude:Bash` | Agent 可見的 tool |
-| `mcp_server` | `mcp-server:claude:github` | MCP server/integration |
-| `model` | `model:claude:claude-sonnet` | provider 有提供時的 model identity |
-| `command` | `command:sha256:...` | semantic hook 宣告的 command metadata |
-| `process_reference` | `process-pid:1234` | 上游真的提供 PID 時才可使用的 bridge |
-
-Entity ID 應足以在同一 run 內穩定 deduplicate semantic observations。
-
-## Optional process-reference bridge
-
-只有 provider/framework **真的知道 child PID** 時，才可產生 `process_reference`。
-
-Merge 時 ExecWeave 會保守解析：
-
-1. explicit `create_time` 可唯一識別 process；
-2. PID 只有一個 runtime candidate 時直接解析；
-3. PID reuse 時，可選出 semantic timestamp 之前唯一且最近的 creation time；
-4. 否則保留 `process_reference` 並標記 `unresolved: true`，不硬猜。
-
-**Provider 沒有提供 PID 時，不要建立 `process_reference`。** Command string + nearby timestamp 不足以證明 exact Tool → Process relationship。
-
-目前 Claude Code 與 Codex native hook 都遵守這個規則。
-
-## Tool → Process conservative correlation
-
-對沒有 child PID、但 provider 有宣告 shell command 的情況，ExecWeave 可額外建立獨立 derived stream：
-
-```bash
-execweave correlate run.semantic.jsonl \
-  --output run.correlated.jsonl
-```
-
-只在 bounded window 內有**唯一且有明確 executable / argv evidence 支援**的 process candidate 時，才產生：
+Semantic telemetry 已不再侷限於小型 metadata summary。當受支援 integration point 明確提供 content 時，v0.6.5 可以把來源提供的完整值存入本機 content-addressed store，而 JSONL event 只放 reference。
 
 ```text
-tool_call --CORRELATED_WITH_PROCESS--> process
+<run-root>/content/sha256/<sha256>.<json|txt|bin>
 ```
 
-任何這類 edge 都是：
+Content reference 會記錄 SHA-256、relative path、media type、byte size、content kind、representation，以及該值是否對該 integration point 而言 complete from source。`complete_from_source: true` 表示 ExecWeave 完整保存收到的值；**不代表** provider 曝露了 hidden model state、未觀察到的 final wire request，或任何 integration point 根本沒提供的欄位。
+
+Native adapters 會對 hook/API surface 明確提供的內容使用此機制，包括 prompts、tool inputs/results、assistant/model responses、明確曝露的 reasoning/thinking text、provider hook 明確提供的 file content，以及 adapter contract 支援的 provider request/response objects。
+
+即使 content store 失敗，compact semantic summary 仍可供 graph materialization 使用。Native hook adapters 預設 fail-open，因此 content-storage failure 不會刻意阻擋 Agent operation。
+
+## Evidence boundary
+
+Semantic content 是 observed provider/integration evidence，不是 OS causality。保存 tool input 不代表某個 process 執行了它；hook 提供的 file body 不代表 OS read 已完成；CLI 提供的 request/response pair 也不代表 transparent network interception。
+
+Tool → Process bridge 只能由另外定義的 conservative correlation layer 建立，而且仍維持：
 
 ```text
 inferred: true
 causal: false
 ```
 
-Ambiguous、no-match、shell builtin、compound command 或 unsupported call 都不產生 bridge。Heuristic confidence 不是 calibrated probability。
-
-## Evidence / causality boundary
-
-Provider adapter 直接產生的 semantic edge 即使可靠地表示 logical relationship，仍標 `causal: false`。在 ExecWeave 中，`causal: true` 保留給更強的 execution-level attribution。
-
-因此：
-
-```text
-Claude Code --REQUESTED_TOOL_CALL--> Bash call       provider semantic evidence
-process     --OPENED_READ---------> ~/.ssh/id_ed25519 OS runtime evidence
-```
-
-不能直接推導：
-
-```text
-Bash call --caused--> that exact process
-file bytes --flowed to--> a network endpoint
-```
-
-Derived correlation 也必須清楚標示 method/confidence，並與 observed OS evidence 分開。
-
-## Session boundary
-
-每個 semantic timestamp 都必須落在 captured runtime session interval 內。超出 interval 的 event 會被拒絕，避免不同 run 的 provider telemetry 被錯誤合併。
+未知或 ambiguous attribution 不會建立 bridge。File 與 network observation 同時存在，也不能直接推論 byte-level data flow 或 exfiltration。
 
 ## Privacy
 
-Semantic sidecar 也可能包含敏感 metadata。Adapter 應優先保存 identifier 與 bounded metadata，而不是完整 prompt、tool argument、tool output、credential 或 secret。
+Full-fidelity content 本來就屬於敏感資料。**不要假設** prompt text、tool argument、tool output、model response、file content 或 application-level secret value 已被 redacted。Content store 會保留受支援 integration point 提供的完整值。
 
-Claude adapter 不保存 `Write/Edit` content 或 raw `tool_response`；Codex adapter 也不保存 prompt/transcript/raw response content。Shell command 因為是 execution explanation 的核心 evidence 會保留，但仍可能含 secret，分享前必須檢查。
+ExecWeave 只會在 adapter contract 明確定義時，從 provider-metadata projection 過濾已知 transport credentials；這不是通用 secret scanner，也不會移除 content payload 內嵌的 secret。Content blobs 預設留在本機，且不 inline 到 graph events，但仍是 run evidence 的一部分，分享前必須檢查。
 
-Provider-specific contract：
-
-- [`Claude Code Hooks`](claude-code-hooks.zh-TW.md)
-- [`OpenAI Codex Hooks`](codex-hooks.zh-TW.md)
+每個 provider-specific 文件會定義該 integration 能觀察哪些欄位。Claude Code、Codex、Gemini、Cursor、OpenCode、Inference Gateway 與 Model Runtime 的精確邊界請參考各自文件。

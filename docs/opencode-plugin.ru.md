@@ -1,4 +1,4 @@
-# Плагин OpenCode
+# OpenCode Plugin
 
 <!-- i18n-nav:start -->
 <p align="center">
@@ -13,69 +13,42 @@
 </p>
 <!-- i18n-nav:end -->
 
-ExecWeave интегрируется с OpenCode через локальный для проекта плагин. OpenCode предоставляет точные значения `sessionID + callID` в `tool.execute.before` и `tool.execute.after`, поэтому один логический вызов инструмента можно идентифицировать без эвристического сопоставления lifecycle-событий.
+ExecWeave интегрируется с OpenCode через project-local plugin. OpenCode предоставляет точные `sessionID + callID` на tool before/after hooks, поэтому один логический tool call можно идентифицировать без heuristic pairing. Эта identity остаётся provider-level evidence и не является OS PID.
 
-## Установка
-
-Установите сгенерированный плагин в текущий проект:
+## Установка и запись
 
 ```bash
 execweave-opencode-plugin --install
-```
-
-Он создаёт:
-
-```text
-.opencode/plugins/execweave.ts
-```
-
-OpenCode автоматически загружает плагины проекта из этого каталога. ExecWeave отказывается перезаписывать существующий плагин, если не указан `--force`.
-
-Затем запишите запуск:
-
-```bash
 execweave-opencode-record --open -- opencode
 ```
 
-## Захватываемые семантические доказательства
+Сгенерированный plugin устанавливается в `.opencode/plugins/execweave.ts`. ExecWeave не перезаписывает существующий plugin, если явно не указан `--force`.
 
-Базовый плагин создаёт минимальные метаданные для:
+## Полная поверхность наблюдения
 
-- `chat.message`
-- `tool.execute.before`
-- `tool.execute.after`
+v0.6.5 не ограничивается старым трёхсобытийным minimal-metadata contract. Сгенерированный plugin/hook path может сохранять content, который OpenCode предоставляет через chat messages, tool execution before/after, model-context/system transforms, завершённый assistant text, provider bus events, request headers после credential filtering, tool definitions, commands, permission requests и compaction context, когда соответствующие hooks срабатывают.
 
-Типичные отношения графа:
+Типичные логические graph relationships по-прежнему включают Agent → tool call, tool call → tool, declared command/target и returned-result observations. Content storage не изменяет их evidence semantics.
+
+## Full-fidelity content
+
+Полные значения, предоставленные OpenCode plugin, сохраняются в локальном content-addressed store и referenced из semantic JSONL sidecar. Regression coverage включает полные chat message/parts, tool args/results, model context, system prompt values, assistant text, provider events, tool definitions, command arguments/parts, permission data и compaction prompts/context.
+
+Из соответствующих headers/provider-metadata projections фильтруются известные transport credentials, например authorization/cookie. Чувствительные application-level значения внутри tool args, messages, results или других content values сохраняются. Не следует считать full-fidelity content автоматически redacted.
+
+## Корреляция Tool к Process
+
+`sessionID + callID` доказывает точную логическую call identity внутри OpenCode. Это не доказывает, какой OS process выполнил call. Tool → Process остаётся отдельно выведенным консервативным bridge и создаётся только когда независимое runtime evidence однозначно поддерживает один process.
 
 ```text
-agent --USED_MODEL--> model
-agent --REQUESTED_TOOL_CALL--> tool_call
-tool_call --USES_TOOL--> tool
-tool_call --DECLARED_COMMAND--> command
-tool_call --DECLARED_TARGET--> file
-tool_call --TOOL_CALL_RETURNED--> tool
+inferred: true
+causal: false
 ```
 
-`callID` OpenCode используется напрямую в идентичности `tool_call`.
+Неоднозначные или unsupported calls не создают bridge.
 
-## Граница конфиденциальности
+## Конфиденциальность и граница доказательств
 
-After-hook OpenCode может видеть вывод инструмента, но сгенерированный плагин ExecWeave намеренно не передаёт `output.output` или `output.metadata`.
+OpenCode run evidence может содержать prompts/messages, system/context data, tool arguments/output, commands, permission patterns, provider event content, paths, identifiers и чувствительные application-level values. Проверяйте run directory перед публикацией.
 
-Аргументы сокращаются до того, как покинуть плагин:
-
-- `bash`: объявленный `command`
-- файловые инструменты: path-like поля, например `filePath`, `file_path` или `path`
-- необязательные метаданные рабочего каталога
-
-Сырое содержимое записи, части chat message и вывод инструмента не отправляются в hook ExecWeave.
-
-## Корреляция Tool → Process
-
-`callID` доказывает логическую идентичность вызова внутри OpenCode; это не PID ОС. Tool → Process остаётся производным консервативным мостом и создаётся только когда runtime-доказательства дают ровно один однозначно подтверждённый процесс.
-
-Производные мосты остаются `inferred: true` и `causal: false`.
-
-## Граница доказательств
-
-Плагин сообщает семантическое намерение OpenCode. Runtime-сборщики независимо устанавливают наблюдения process/file/network. ExecWeave никогда не считает плагин провайдера доказательством того, что объявленная команда или файловое действие действительно произошли.
+Plugin доказывает то, что OpenCode раскрыл на semantic/provider layer. Runtime collectors независимо устанавливают process/file/network observations. Full-fidelity provider content сам по себе не доказывает command execution, завершённый file access или byte-level data flow.

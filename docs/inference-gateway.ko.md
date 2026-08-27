@@ -13,119 +13,51 @@
 </p>
 <!-- i18n-nav:end -->
 
-Inference Gateway는 Agent/client와 model provider/runtime 사이의 독립 계층입니다. 현재 baseline은 **OpenRouter**와 **LiteLLM Proxy**를 지원합니다.
-
-ExecWeave는 requested model, resolved model, routed provider, deployment identity를 서로 다른 evidence로 보존하며 하나의 model field로 합치지 않습니다.
+Inference gateway는 Agent/client와 model provider/runtime 사이의 별도 evidence layer입니다. ExecWeave는 현재 **OpenRouter**와 **LiteLLM Proxy**를 모델링하며 requested model, resolved model, routed provider, deployment identity를 구분해서 유지합니다.
 
 ## CLI
 
-OpenRouter final response를 변환합니다.
+stdin에서 하나의 최종 gateway response를 캡처합니다.
 
 ```bash
-execweave-inference-gateway event \
-  --gateway openrouter \
-  --requested-model openrouter/auto \
-  --provider-name OpenAI \
-  --sidecar gateway.jsonl
+execweave-inference-gateway event --gateway openrouter --sidecar gateway.jsonl
+execweave-inference-gateway event --gateway litellm --sidecar gateway.jsonl
 ```
 
-LiteLLM Proxy final response를 변환합니다.
+OpenRouter에서만 caller-supplied request+response object를 캡처할 수 있습니다.
 
 ```bash
-execweave-inference-gateway event \
-  --gateway litellm \
-  --requested-model assistant \
-  --resolved-model azure/gpt-5 \
-  --provider-name Azure \
-  --deployment-id deployment-west \
-  --sidecar gateway.jsonl
+execweave-inference-gateway exchange --gateway openrouter --sidecar gateway.jsonl
 ```
 
-OpenRouter generation metadata를 변환합니다.
+`exchange`는 stdin에 JSON object인 `request`와 `response`가 필요합니다. 이는 명시적인 caller-supplied evidence이며 **transparent wire interception이 아닙니다**.
 
-```bash
-execweave-inference-gateway generation \
-  --gateway openrouter \
-  --sidecar gateway.jsonl
-```
+OpenRouter generation metadata는 `generation`을 통해 계속 사용할 수 있습니다.
 
-Caller가 Gateway observation과 Model Runtime observation 양쪽에 대응하는 명시적 shared request identity를 가지고 있다면 기존 request node 둘을 연결할 수 있습니다.
+## OpenRouter full-fidelity boundary
 
-```bash
-execweave-inference-link \
-  --gateway litellm \
-  --gateway-request-id gw-123 \
-  --runtime vllm \
-  --runtime-request-id rt-456 \
-  --shared-request-id trace-789 \
-  --sidecar inference.jsonl
-```
+`event --gateway openrouter`에서 v0.6.5는 compact routing/usage summary와 함께 supplied final response 전체를 로컬 content-addressed store에 저장합니다. `exchange --gateway openrouter`는 caller가 제공한 request와 response 전체 값을 보존할 수 있습니다.
 
-Gateway response JSON은 stdin에서 읽습니다. 기본 endpoint identity:
+`content_complete_from_source: true`는 이 integration point에 제공된 전체 값을 저장했다는 뜻입니다. Provider-side rewriting 전 request, hidden routing stage, model internals 또는 ExecWeave가 직접 보지 못한 network byte를 관측했다는 뜻은 아닙니다.
 
-- OpenRouter: `https://openrouter.ai/api/v1`
-- LiteLLM Proxy: `http://localhost:4000`
+Supplied request/response content 안의 민감한 application-level 값은 보존됩니다. Endpoint identity는 별도로 sanitize되며 query parameter/fragment 또는 알려진 transport credential filtering은 content redaction을 대신하지 않습니다.
 
-## Graph model
+## LiteLLM boundary
 
-```text
-inference_gateway --SERVED_INFERENCE--> inference_request
-inference_request --REQUESTED_MODEL--> model
-inference_request --ROUTED_TO_MODEL--> model
-inference_request --ROUTED_TO_PROVIDER--> inference_provider
-inference_request --ROUTED_TO_DEPLOYMENT--> inference_deployment
-inference_gateway --REPORTED_GENERATION_METADATA--> inference_request
-inference_request --SAME_INFERENCE_REQUEST--> inference_request
-```
+LiteLLM은 현재 v0.6.5 baseline에서 metadata-oriented integration으로 유지됩니다. Response parser와 optional custom callback은 strict contract를 통해 routing/usage field를 보존하며, OpenRouter가 content storage를 지원한다고 해서 callback이 full-fidelity가 되는 것은 아닙니다.
 
-LiteLLM request에서는 예를 들어 다음을 별도의 evidence로 보존할 수 있습니다.
-
-```text
-requested_model = assistant
-resolved_model  = azure/gpt-5
-provider        = Azure
-deployment      = deployment-west
-```
-
-이 값들은 서로 대체 가능한 사실이 아닙니다.
-
-## OpenRouter
-
-OpenRouter response metadata는 requested model과 response model을 분리하고 명시적으로 관측된 routed provider만 보존합니다. OpenRouter-specific generation metadata에서는 latency, generation time, cost, native token counts, streaming state, cancellation state도 기록할 수 있습니다.
-
-## LiteLLM Proxy
-
-<!-- litellm-auto-live-v064 -->
-### Live Viewer 자동 callback
-
-LiteLLM Proxy에 ExecWeave custom callback을 한 번 설정하면 현재 `execweave live` session의 run-specific sidecar로 routing/usage metadata를 자동 전송할 수 있습니다. 설정 조각은 다음으로 출력합니다:
+다음처럼 callback 설정을 출력하고 설정된 proxy를 현재 ExecWeave run 안에서 실행합니다.
 
 ```bash
 execweave-litellm-callback --print-config
-```
-
-출력된 callback을 기존 `litellm_settings.callbacks`에 병합하고 다른 callbacks를 덮어쓰지 마십시오. import path는 `execweave.litellm_callback.execweave_litellm_callback`이므로 LiteLLM Proxy를 실행하는 Python environment에서 ExecWeave를 import할 수 있어야 합니다.
-
-설정된 로컬 proxy를 ExecWeave 아래에서 실행합니다:
-
-```bash
 execweave live --open -- litellm --config config.yaml
 ```
 
-`execweave live`는 `EXECWEAVE_SEMANTIC_SIDECAR`를 proxy process에 전달합니다. 이 run-specific variable이 없으면 callback은 no-op입니다. `EXECWEAVE_LITELLM_ENDPOINT`로 endpoint identity를 재정의할 수 있고, 없으면 `PROXY_BASE_URL`, 마지막으로 `http://localhost:4000`을 사용합니다.
+`EXECWEAVE_SEMANTIC_SIDECAR`가 없으면 callback은 no-op입니다. Provider/deployment identity는 authoritative evidence가 있을 때만 방출되며 model-name prefix나 provider URL에서 추론하지 않습니다.
 
-callback은 LiteLLM `standard_logging_object`에서 call ID, model group, resolved model, deployment model ID, token counts, reported cost, response time, cache-hit, call type만 whitelist로 추출합니다. messages, response content, model parameters, 임의 metadata, API-key metadata, provider `api_base`는 저장하지 않습니다. `model_group`은 requested model, `model`은 resolved model, `model_id`는 deployment identity로 보존하며 권위 있는 provider evidence가 없으면 provider를 추론하지 않습니다.
+## Exact gateway ↔ model-runtime identity
 
-
-LiteLLM은 `model_runtime`이 아니라 `inference_gateway`로 모델링합니다. OpenAI-compatible response는 동일한 gateway evidence layer를 통해 request/model usage metadata를 제공합니다.
-
-`--provider-name`과 `--deployment-id`는 caller / adapter가 authoritative routing metadata를 가지고 있을 때만 edge를 생성합니다. ExecWeave는 `azure/...` 같은 model string에서 provider / deployment를 **추측하지 않습니다**. routing facts가 없으면 해당 edge를 만들지 않습니다.
-
-## Exact Gateway ↔ Model Runtime identity
-
-`execweave-inference-link`는 temporal correlation보다 의도적으로 더 엄격합니다. Caller가 Gateway와 Runtime observation 양쪽에 대응하는 명시적 shared identifier를 이미 가지고 있을 때만 `SAME_INFERENCE_REQUEST`를 생성합니다. Timestamp, model name, token counts, latency 또는 다른 유사도 신호로 identity를 추측하지 않습니다.
-
-Gateway request와 Runtime request는 별도 node로 유지되므로 layer-specific metadata가 서로 덮어쓰이지 않습니다. Identity edge는 다음과 같이 고정됩니다.
+Caller가 명시적인 shared request identifier를 이미 가지고 있으면 `execweave-inference-link`가 layer를 합치지 않고 gateway와 runtime request node를 연결할 수 있습니다. Raw shared identifier는 저장하지 않고 SHA-256-derived identity hash를 사용합니다.
 
 ```text
 identity_exact: true
@@ -133,20 +65,10 @@ inferred: false
 causal: false
 ```
 
-이는 supplied shared identity에 따라 두 observation이 동일한 logical inference request를 가리킨다는 것만 의미합니다. 특정 Agent나 OS process가 request를 발생시켰다는 causal proof가 아닙니다. Explicit shared identity가 없으면 이 edge를 만들지 않습니다.
+이는 정확한 logical request identity이지 특정 Agent나 OS process가 inference를 일으켰다는 증명은 아닙니다.
 
-## Usage metadata
+## Privacy와 evidence boundary
 
-Response parser는 prompt/input tokens, completion/output tokens, total tokens, cached prompt tokens, cache-write tokens, reasoning-token counts, reported cost만 whitelist로 유지합니다.
+OpenRouter full-fidelity artifact에는 complete request/response content와 민감한 application-level 값이 포함될 수 있습니다. LiteLLM artifact는 더 좁은 metadata/callback contract를 따릅니다. Gateway evidence를 민감한 자료로 취급하고 공유 전에 검토하십시오.
 
-## 프라이버시 경계
-
-ExecWeave는 prompt text, response/completion content, reasoning text, choices, 임의의 provider payload field를 저장하지 않습니다. Gateway endpoint의 credentials, query parameters, fragment는 stored endpoint identity에서 제거합니다.
-
-원래 requested model을 response에서 추측하지 않습니다. Caller가 명시적으로 제공할 때만 evidence로 저장합니다. Exact cross-layer identity에 사용하는 raw `--shared-request-id`도 저장하지 않고 link event에는 SHA-256에서 파생한 identity hash만 저장합니다.
-
-## Evidence boundary
-
-Gateway response metadata가 증명하는 것은 gateway 자체가 보고한 정보 또는 response와 함께 제공된 authoritative routing metadata뿐입니다. 어떤 local Agent가 request를 시작했는지, 어떤 model-runtime process가 실제 serving했는지, 어떤 OS process가 원인인지는 단독으로 증명할 수 없습니다.
-
-Gateway events는 non-causal(`causal: false`)로 유지하고 Agent/IDE semantic evidence, Model Runtime evidence, OS Runtime evidence와 분리합니다. 명시적 shared request identity는 Gateway와 Model Runtime observation을 연결할 수 있지만 layer를 합치지는 않습니다. 별도로 추론된 correlation은 계속 inferred로 명시해야 하며 causal evidence로 표현해서는 안 됩니다.
+Gateway observation은 integration point가 보고한 내용 또는 함께 제공된 authoritative routing data만 증명합니다. 그 자체로 어느 local Agent가 request를 시작했는지, 어느 model-runtime process가 처리했는지, 어느 OS process가 원인이었는지 증명하지 않습니다. Shared identity가 없을 때 timestamp/model-name guessing으로 대체해서는 안 됩니다.

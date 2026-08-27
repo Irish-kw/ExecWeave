@@ -13,13 +13,13 @@
 </p>
 <!-- i18n-nav:end -->
 
-Model Runtime は Agent/IDE semantic adapter や Inference Gateway とは別の層です。local / self-hosted inference server 自身が報告する情報を表し、どの Agent が request を開始したかを単独では証明しません。
+Model runtime は Agent/IDE semantic adapter や inference gateway とは別の evidence layer です。Local/self-hosted inference integration point が報告した内容を示しますが、どの Agent が request を開始したかは証明しません。
 
 現在の baseline は **Ollama**、**llama.cpp**、**vLLM**、**LM Studio** をサポートします。
 
 ## CLI
 
-Final response metadata を inference events に変換します。
+stdin から一つの supplied final runtime response を取得します。
 
 ```bash
 execweave-model-runtime event --runtime ollama --sidecar model-runtime.jsonl
@@ -28,78 +28,34 @@ execweave-model-runtime event --runtime vllm --sidecar model-runtime.jsonl
 execweave-model-runtime event --runtime lmstudio --sidecar model-runtime.jsonl
 ```
 
-Runtime state / model catalog を probe します。
+Caller-supplied request+response exchange を取得します。
 
 ```bash
-execweave-model-runtime probe --runtime ollama --sidecar model-runtime.jsonl
-execweave-model-runtime probe --runtime llamacpp --metrics --sidecar model-runtime.jsonl
-execweave-model-runtime probe --runtime vllm --sidecar model-runtime.jsonl
-execweave-model-runtime probe --runtime lmstudio --sidecar model-runtime.jsonl
+execweave-model-runtime exchange --runtime ollama --sidecar model-runtime.jsonl
 ```
 
-既定 endpoint：
+`exchange` は同じ4 runtime をサポートし、stdin に JSON-object `request` と `response` を要求します。これは caller-supplied evidence を明示的に記録するもので transparent network interception ではありません。
 
-- Ollama: `http://localhost:11434`
-- llama.cpp: `http://localhost:8080`
-- vLLM: `http://localhost:8000`
-- LM Studio: `http://localhost:1234`
+Runtime state/model catalog は `probe` から利用できます。Default localhost endpoints は Ollama `11434`、llama.cpp `8080`、vLLM `8000`、LM Studio `1234` です。
 
-## OpenAI-compatible shared layer
+## Full-fidelity content
 
-llama.cpp、vLLM、LM Studio は final response usage と `/v1/models` catalog metadata のために同じ OpenAI-compatible parser を再利用します。Chat Completions の `prompt_tokens` / `completion_tokens` と Responses の `input_tokens` / `output_tokens` を正規化し、cached-token や reasoning-token count など whitelist metadata のみ保持します。
+v0.6.5 は selected model-runtime integration point が公開する完全な content をローカル SHA-256 content-addressed store に保存します。`event` は完全な supplied final response を保存しますが request visibility は主張しません。`exchange` は supplied request と response の両方を保存でき、messages/prompts、tool definitions/calls/results、generated assistant content、明示的な reasoning/thinking fields、request-generation configuration、runtime payload が対応する provider response values を含められます。
 
-Runtime-specific evidence は shared parser に押し込みません。llama.cpp は独自の timing fields と Prometheus metrics adapter を保持します。
+Semantic JSONL sidecar は大きな inline copy ではなく content reference を保持します。Compact usage/timing/model metadata は graph/query 用に残ります。
 
-## Graph model
+`content_complete_from_source: true` は CLI/integration point に渡された完全な値を保存したことを意味します。Runtime が hidden model state を公開した、request が provider の final post-rewrite wire request である、または ExecWeave が与えられていない bytes を intercept したという意味ではありません。
 
-```text
-model_runtime --SERVED_INFERENCE--> inference_request
-inference_request --USED_MODEL--> model
-model_runtime --LOADED_MODEL--> model
-model_runtime --SERVES_MODEL--> model
-model_runtime --ADVERTISES_MODEL--> model
-model_runtime --REPORTED_METRICS--> model_runtime_snapshot
-```
+Request/response content 内の application-level secret values は保存されます。Endpoint/path sanitization と provider-metadata filtering は汎用 content redaction ではありません。
 
-これらの relation は意図的に異なる evidence semantics を持ちます。
+## Runtime-specific evidence
 
-## Ollama
+Ollama は `/api/ps` から loaded-model state を追加で報告できます。llama.cpp は timing/throughput、`/v1/models`、optional aggregate `/metrics` を公開できます。Sensitive local identifier を含み得る labeled Prometheus lines は metadata adapter により制限されます。vLLM と LM Studio は OpenAI-compatible response/model-catalog parsing を共有しつつ runtime-specific relation semantics を保持します。
 
-Final response metadata から prompt/completion token counts、load duration、prompt-evaluation duration、generation duration、finish reason を取得できます。
+Catalog relation は意図的に区別されます。Source endpoint が実際に証明する内容に応じて runtime は `LOADED_MODEL`、`SERVES_MODEL`、`ADVERTISES_MODEL` を持ちます。LM Studio catalog visibility は `ADVERTISES_MODEL` のままで、catalog item は resident weights の証明ではありません。
 
-`/api/ps` は現在 loaded な model を報告するため、VRAM size、context length、format、family、parameter size、quantization などを `LOADED_MODEL` として表します。
+## Privacy と evidence boundary
 
-## llama.cpp
+Model-runtime content には完全な prompts/messages、tool data、generated responses、reasoning/thinking text、model parameters、configuration values、paths、identifiers、application-level secrets が含まれる可能性があります。Run directory 全体を sensitive として扱い、共有前に確認してください。
 
-OpenAI-compatible response から normalized usage と llama.cpp 固有 timing/throughput metadata を記録します。`/v1/models` は `SERVES_MODEL`、optional `/metrics` は aggregate runtime metrics を提供します。
-
-Prometheus label には sensitive local model path 等が含まれる可能性があるため、label 付き metric line はスキップします。local path / GGUF filename に見える model ID は、安全な表示名だけを残し、完全な identifier は hash-based entity identity にのみ利用します。
-
-## vLLM
-
-vLLM は OpenAI-compatible response / model-catalog layer を再利用します。`/v1/models` はその serving endpoint が公開する model を示す `SERVES_MODEL` として扱います。
-
-Prompt、response、reasoning text、choices、logprobs、generated token text は保存しません。
-
-## LM Studio
-
-<!-- lmstudio-auto-live-v064 -->
-LM Studio を Live Viewer に自動取り込みするには、明示的なローカル port を指定して ExecWeave 配下で起動します。例: `execweave live --open -- lms server start --port 1234`。ExecWeave は起動前に その endpoint で互換 API が既に動作していないことを確認し、launcher が成功終了した場合にだけ `/v1/models` を probe します。relation は `ADVERTISES_MODEL` のままで、catalog entry を `LOADED_MODEL` に昇格させません。
-
-LM Studio も同じ OpenAI-compatible response parser を使いますが、`/v1/models` は `LOADED_MODEL` ではなく `ADVERTISES_MODEL` として扱います。
-
-これは意図的な区別です。LM Studio は downloaded model を server catalog に表示でき、設定によっては on-demand load も可能です。そのため catalog entry だけでは observation 時点で model weights が memory resident だったとは証明できません。
-
-## プライバシー境界
-
-Prompt text、response content、thinking/reasoning text、choices、logprobs、raw generated tokens は保存しません。
-
-Whitelist metadata には model/request identity、prompt/input token counts、completion/output token counts、total tokens、cached-token counts、reasoning-token counts、runtime-specific timing metadata を含められます。supported local OpenAI-compatible runtime の absolute model path は redact し、llama.cpp の GGUF path はより厳格に処理します。
-
-Aggregate runtime metrics を特定の Agent / inference request に自動帰属させません。
-
-## Evidence boundary
-
-Runtime API が証明するのは inference server 自身が報告した情報だけです。どの Agent が request を開始したか、どの gateway が routing したか、どの OS process が原因かは単独では証明できません。
-
-Cross-layer identity には明示的 shared identifier または別途定義された conservative correlation が必要です。Derived correlation は inference として表示し、causal evidence として表現してはいけません。
+Runtime response/exchange は integration point が提供した内容だけを証明します。どの Agent が request を開始したか、どの gateway が route したか、どの OS process が caused したか、file bytes が model/network endpoint に流れたかは単独では証明しません。Cross-layer identity には explicit shared identifier または明示的にマークされた conservative correlation が必要です。

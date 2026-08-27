@@ -13,73 +13,46 @@
 </p>
 <!-- i18n-nav:end -->
 
-ExecWeave 使用 Cursor 原生 Hook，把 Agent / Tool / Command 的邏輯語意證據加入執行圖，同時不把 provider metadata 誤當成 OS 因果證據。
+ExecWeave 使用 Cursor 的 native hook surface，把 provider semantic/content evidence 加入 run，同時不把這些 evidence 當成 OS causality。
 
 ## 快速開始
 
-產生 Hook 設定並加入 Cursor 的 hook settings：
-
 ```bash
 execweave-cursor-hook --print-config
-```
-
-接著記錄一次 Cursor 執行：
-
-```bash
 execweave-cursor-record --open -- cursor
 ```
 
-run-bound recorder 會分開保存 runtime、semantic 與 correlated artifacts。
+Run-bound recorder 會把 runtime、semantic、correlated artifacts 分開保存。
 
-## 事件
+## Observation surface
 
-目前 baseline 使用：
+v0.6.5 hook configuration 涵蓋更完整的 Cursor lifecycle surface，包括 session start/end、tool before/after/failure、subagents、shell 與 MCP execution、file read/edit、prompt submission、compaction/stop、Agent response/thought，以及 Cursor 有曝露時的 tab file read/edit events。
 
-- `sessionStart`
-- `preToolUse`
-- `postToolUse`
-- `postToolUseFailure`
+Cursor 對 tool hooks 提供穩定 logical tool-call identity；但該 identity 不是 OS PID。
 
-Cursor 提供穩定的 `tool_use_id`，因此 `preToolUse` 與對應 post hook 可以共享精確的 logical `tool_call` identity。
+## Full-fidelity content
 
-典型語意邊如下：
+Cursor 明確提供 content value 時，v0.6.5 會把完整值存入本機 content-addressed store，semantic JSONL event 只保留 reference。
 
-```text
-agent --USED_MODEL--> model
-agent --REQUESTED_TOOL_CALL--> tool_call
-tool_call --USES_TOOL--> tool
-tool_call --DECLARED_COMMAND--> command
-tool_call --DECLARED_TARGET--> file
-tool_call --TOOL_CALL_RETURNED--> tool
-```
+Regression coverage 包含完整 prompt text、tool input/output 與 failure text、shell command/output、MCP command/input/result、read hook 提供的 file content、edit structure、final Agent response、provider-labeled thought text 與 subagent summary。
 
-`postToolUseFailure` 會另外表示為 `TOOL_CALL_FAILED`。
+這些欄位仍以 provider observation 保存，並保留 evidence limitation。例如 `beforeReadFile` 提供的 content 不代表 OS read 已完成；edit structure 也不代表完整 post-edit file snapshot，除非 provider 真的提供該 snapshot。
 
-## Tool → Process correlation
+已知 transport credentials 會在有定義的 provider-metadata projection 中過濾。Content value 內嵌的 secret 仍會被保存；full-fidelity content 不是通用 secret-redaction layer。
 
-Cursor Hook 不提供 OS child PID，因此 Shell call 不會直接變成 process edge。
+## Tool to process correlation
 
-只有當 runtime evidence 能獨立找到唯一且足夠支持的 process 時，ExecWeave 才可能衍生：
-
-```text
-tool_call --CORRELATED_WITH_PROCESS--> process
-```
-
-此 bridge 永遠是：
+Cursor hook evidence 不提供 child OS PID。因此 Shell call 只有在獨立 runtime evidence 找到唯一受支持 candidate 時才會變成 process bridge：
 
 ```text
 inferred: true
 causal: false
 ```
 
-候選模糊或不支援時不建立 edge。
+Ambiguous 或 unsupported call 不會建立 bridge。Stable provider tool-call identity 只證明 Cursor 內部 logical identity，不等於 machine-level process attribution。
 
-## 隱私邊界
+## Privacy 與 evidence boundary
 
-Adapter 預設不保存 prompt、transcript path、使用者 email、agent message 或 tool output。只保留 observability 必要的 identifiers 與 declared metadata，例如 model identity、conversation/generation IDs、tool name/use ID、command 與 declared file path。
+Cursor run evidence 可能包含 prompt、tool argument/result、shell output、file content、edit data、assistant response、provider-labeled thought text、command、path、identifier、MCP values 與 embedded application secrets。分享前請檢查完整 run directory。
 
-Command 與 path 本身仍可能敏感，分享 artifacts 前請先檢查。
-
-## Evidence boundary
-
-Cursor Hook 只能證明 Cursor 在 semantic layer 回報了什麼。它不能證明 declared command 一定執行、declared file 一定被存取，也不能證明資料在資源之間流動。實際 runtime 行為仍以 OS collector evidence 為準。
+Cursor hook 只證明 Cursor 在 provider layer 回報或提供了什麼；它不能單獨證明 declared command 確實執行、特定 process 存取某檔案，或 bytes 在 resources 間流動。

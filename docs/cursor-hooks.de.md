@@ -13,73 +13,46 @@
 </p>
 <!-- i18n-nav:end -->
 
-ExecWeave nutzt Cursors native Hook-Oberfläche, um logische Agent-/Tool-/Command-Belege zum Laufzeitgraphen hinzuzufügen, ohne Provider-Metadaten als OS-Kausalität zu behandeln.
+ExecWeave nutzt Cursors native Hook-Oberfläche, um einem Run semantische Provider-/Content-Evidenz hinzuzufügen, ohne diese Evidenz als OS-Kausalität zu behandeln.
 
 ## Schnellstart
 
-Erzeugen Sie eine Hook-Konfiguration und fügen Sie sie zu Ihren Cursor-Hook-Einstellungen hinzu:
-
 ```bash
 execweave-cursor-hook --print-config
-```
-
-Zeichnen Sie anschließend einen Cursor-Lauf auf:
-
-```bash
 execweave-cursor-record --open -- cursor
 ```
 
-Der laufgebundene Recorder bewahrt Laufzeit-, semantische und korrelierte Artefakte getrennt auf.
+Der run-gebundene Recorder hält Runtime-, Semantic- und Correlated-Artefakte getrennt.
 
-## Ereignisse
+## Beobachtungsoberfläche
 
-Die Basisimplementierung verarbeitet:
+Die v0.6.5-Hook-Konfiguration deckt eine breitere Cursor-Lifecycle-Oberfläche ab, sofern Cursor sie bereitstellt: Session Start/End, Tool Before/After/Failure, Subagents, Shell- und MCP-Ausführung, File Read/Edit, Prompt Submission, Compaction/Stop, Agent Response/Thought sowie Tab File Read/Edit.
 
-- `sessionStart`
-- `preToolUse`
-- `postToolUse`
-- `postToolUseFailure`
+Cursor liefert für seine Tool-Hooks eine stabile logische Tool-Call-Identität. Diese Identität ist keine OS-PID.
 
-Cursor stellt eine stabile `tool_use_id` bereit, sodass `preToolUse` und der zugehörige Post-Hook dieselbe exakte logische `tool_call`-Identität verwenden können.
+## Full-Fidelity-Inhalt
 
-Typische semantische Kanten sind:
+Wenn Cursor einen Inhaltswert ausdrücklich liefert, speichert v0.6.5 den vollständigen gelieferten Wert im lokalen content-addressed Store und legt im semantischen JSONL nur dessen Referenz ab.
 
-```text
-agent --USED_MODEL--> model
-agent --REQUESTED_TOOL_CALL--> tool_call
-tool_call --USES_TOOL--> tool
-tool_call --DECLARED_COMMAND--> command
-tool_call --DECLARED_TARGET--> file
-tool_call --TOOL_CALL_RETURNED--> tool
-```
+Die Regressionen decken vollständigen Prompt-Text, Tool-Eingabe/-Ausgabe und Failure-Text, Shell-Command/-Output, MCP-Command/-Input/-Result, von Read-Hooks gelieferten Dateicontent, Edit-Strukturen, finale Agent-Antworten, vom Provider als Thought markierten Text und Subagent-Zusammenfassungen ab.
 
-`postToolUseFailure` wird separat als `TOOL_CALL_FAILED` dargestellt.
+Diese Felder bleiben Provider-Beobachtungen mit ihren Evidenzgrenzen. Content aus `beforeReadFile` beweist beispielsweise keinen abgeschlossenen OS-Lesevorgang, und eine Edit-Struktur beweist keinen vollständigen Post-Edit-Snapshot, sofern der Provider diesen nicht tatsächlich geliefert hat.
 
-## Tool-zu-Prozess-Korrelation
+Bekannte Transport-Credentials werden dort aus der Provider-Metadatenprojektion gefiltert, wo dies definiert ist. Sensible Werte innerhalb des Contents bleiben erhalten. Full-Fidelity-Content ist keine allgemeine Secret-Redaction-Schicht.
 
-Cursor-Hook-Belege liefern keine OS-Kindprozess-PID. Ein Shell-Aufruf wird daher nicht direkt zu einer Prozesskante.
+## Tool-to-Process-Korrelation
 
-Wenn Laufzeitbelege unabhängig genau einen eindeutig gestützten Prozess zeigen, kann ExecWeave ableiten:
-
-```text
-tool_call --CORRELATED_WITH_PROCESS--> process
-```
-
-Die Brücke ist immer:
+Cursor-Hook-Evidenz liefert keine OS-Kind-PID. Ein Shell-Call wird daher nur dann zu einer Process-Brücke, wenn unabhängige Runtime-Evidenz genau einen Kandidaten eindeutig unterstützt:
 
 ```text
 inferred: true
 causal: false
 ```
 
-Mehrdeutige oder nicht unterstützte Aufrufe erzeugen keine Brücke.
+Mehrdeutige oder nicht unterstützte Calls erzeugen keine Brücke. Stabile Provider-Tool-Call-Identität beweist logische Identität innerhalb Cursor, nicht machine-level Prozessattribution.
 
-## Datenschutzgrenze
+## Datenschutz und Evidenzgrenze
 
-Der Adapter speichert absichtlich weder Prompt-Text noch Transcript-Pfade, Benutzer-E-Mail, Agent-Nachrichten oder Tool-Ausgaben. Er behält nur die Identifikatoren und deklarierten Metadaten, die für Observability benötigt werden, darunter Modellidentität, Conversation-/Generation-IDs, Toolname/-Use-ID, Befehl und deklarierter Dateipfad.
+Cursor-Run-Evidenz kann Prompts, Tool-Argumente/-Ergebnisse, Shell-Ausgabe, Dateicontent, Edit-Daten, Assistant-Antworten, Provider-labeled Thought-Text, Commands, Pfade, Identifikatoren, MCP-Werte und sensible Anwendungswerte enthalten. Prüfen Sie das vollständige Run-Verzeichnis vor dem Teilen.
 
-Befehle und Pfade können weiterhin sensibel sein. Prüfen Sie Artefakte vor der Weitergabe.
-
-## Beleggrenze
-
-Ein Cursor-Hook beweist, was Cursor auf der semantischen Ebene gemeldet hat. Er beweist nicht, dass ein deklarierter Befehl ausgeführt, eine deklarierte Datei tatsächlich geöffnet oder Daten zwischen Ressourcen übertragen wurden. OS-Collector bleiben die Quelle für Laufzeitbelege.
+Ein Cursor-Hook beweist nur, was Cursor auf Provider-Ebene gemeldet oder geliefert hat. Er beweist nicht für sich allein, dass ein deklarierter Command ausgeführt, eine Datei von einem bestimmten Prozess gelesen oder Bytes zwischen Ressourcen übertragen wurden.

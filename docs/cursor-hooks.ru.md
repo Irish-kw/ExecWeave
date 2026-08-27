@@ -1,4 +1,4 @@
-# Hooks Cursor
+# Cursor Hooks
 
 <!-- i18n-nav:start -->
 <p align="center">
@@ -13,73 +13,46 @@
 </p>
 <!-- i18n-nav:end -->
 
-ExecWeave использует нативную hook-поверхность Cursor для добавления логических доказательств Agent / Tool / Command в runtime-граф, не считая метаданные провайдера доказательством причинности ОС.
+ExecWeave использует native hook surface Cursor, чтобы добавлять provider semantic/content evidence в run, не трактуя это evidence как OS causality.
 
 ## Быстрый старт
 
-Сгенерируйте конфигурацию hook и добавьте её в настройки hooks Cursor:
-
 ```bash
 execweave-cursor-hook --print-config
-```
-
-Затем запишите запуск Cursor:
-
-```bash
 execweave-cursor-record --open -- cursor
 ```
 
-Recorder, привязанный к запуску, сохраняет runtime-, semantic- и correlated-артефакты отдельно.
+Run-bound recorder сохраняет runtime, semantic и correlated artifacts раздельно.
 
-## События
+## Поверхность наблюдения
 
-Базовая реализация обрабатывает:
+Конфигурация hooks v0.6.5 охватывает более широкую lifecycle surface Cursor, когда Cursor её предоставляет: session start/end, tool before/after/failure, subagents, shell и MCP execution, file reads/edits, prompt submission, compaction/stop, Agent response/thought events и tab file read/edit events.
 
-- `sessionStart`
-- `preToolUse`
-- `postToolUse`
-- `postToolUseFailure`
+Cursor предоставляет стабильную логическую tool-call identity для своих tool hooks. Эта identity не является OS PID.
 
-Cursor предоставляет стабильный `tool_use_id`, поэтому `preToolUse` и соответствующий post hook могут использовать одну и ту же точную логическую идентичность `tool_call`.
+## Full-fidelity content
 
-Типичные семантические рёбра:
+Когда Cursor явно предоставляет content value, v0.6.5 сохраняет полное предоставленное значение в локальном content-addressed store и помещает в semantic JSONL event только ссылку.
 
-```text
-agent --USED_MODEL--> model
-agent --REQUESTED_TOOL_CALL--> tool_call
-tool_call --USES_TOOL--> tool
-tool_call --DECLARED_COMMAND--> command
-tool_call --DECLARED_TARGET--> file
-tool_call --TOOL_CALL_RETURNED--> tool
-```
+Regression coverage включает полный prompt text, tool input/output и failure text, shell command/output, MCP command/input/result, file content из read hooks, edit structures, финальные Agent responses, provider-labeled thought text и subagent summaries.
 
-`postToolUseFailure` представляется отдельно как `TOOL_CALL_FAILED`.
+Эти поля сохраняются как provider observations вместе с их ограничениями. Например, content из `beforeReadFile` не доказывает завершённое OS read, а edit structure не доказывает полный post-edit snapshot, если provider его фактически не предоставил.
 
-## Корреляция Tool → Process
+Из provider-metadata projection фильтруются известные transport credentials там, где это определено контрактом. Чувствительные значения внутри content сохраняются. Full-fidelity content не является общим слоем secret redaction.
 
-Hook-доказательства Cursor не предоставляют PID дочернего процесса ОС. Поэтому вызов Shell не превращается напрямую в процессное ребро.
+## Корреляция Tool к Process
 
-Когда runtime-доказательства независимо показывают ровно один однозначно подтверждённый процесс, ExecWeave может вывести:
-
-```text
-tool_call --CORRELATED_WITH_PROCESS--> process
-```
-
-Мост всегда остаётся:
+Cursor hook evidence не предоставляет child OS PID. Поэтому Shell call становится process bridge только тогда, когда независимое runtime evidence однозначно поддерживает одного кандидата:
 
 ```text
 inferred: true
 causal: false
 ```
 
-Неоднозначные или неподдерживаемые вызовы не создают мост.
+Неоднозначные или unsupported calls не создают bridge. Стабильная provider tool-call identity доказывает логическую identity внутри Cursor, а не machine-level process attribution.
 
-## Граница конфиденциальности
+## Конфиденциальность и граница доказательств
 
-Адаптер намеренно не сохраняет текст prompt, пути transcript, email пользователя, сообщения агента или вывод инструмента. Он сохраняет только идентификаторы и объявленные метаданные, необходимые для наблюдаемости: идентичность модели, ID conversation/generation, имя/ID использования инструмента, команду и объявленный путь файла.
+Cursor run evidence может содержать prompts, tool arguments/results, shell output, file content, edit data, assistant responses, provider-labeled thought text, commands, paths, identifiers, MCP values и чувствительные application-level values. Проверяйте весь run directory перед публикацией.
 
-Команды и пути всё ещё могут быть чувствительными. Проверяйте артефакты перед распространением.
-
-## Граница доказательств
-
-Hook Cursor доказывает, что Cursor сообщил на семантическом уровне. Он не доказывает, что объявленная команда была выполнена, что к объявленному файлу действительно обращались или что данные перемещались между ресурсами. Источником runtime-доказательств остаются сборщики ОС.
+Cursor hook доказывает только то, что Cursor сообщил или предоставил на provider layer. Сам по себе он не доказывает выполнение объявленной команды, доступ к файлу конкретным процессом или передачу bytes между resources.

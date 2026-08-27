@@ -1,4 +1,4 @@
-# Интеграции шлюзов инференса
+# Inference Gateway Integrations
 
 <!-- i18n-nav:start -->
 <p align="center">
@@ -13,119 +13,51 @@
 </p>
 <!-- i18n-nav:end -->
 
-Шлюзы инференса — отдельный слой между Agent/client и провайдером/runtime модели. Текущая базовая реализация поддерживает **OpenRouter** и **LiteLLM Proxy**.
-
-ExecWeave сохраняет запрошенную модель, разрешённую модель, выбранного маршрутизацией провайдера и идентичность deployment как отдельные доказательства вместо объединения их в одно поле модели.
+Inference gateways — отдельный слой evidence между Agent/client и model provider/runtime. ExecWeave сейчас моделирует **OpenRouter** и **LiteLLM Proxy**, сохраняя requested model, resolved model, routed provider и deployment identity раздельно.
 
 ## CLI
 
-Преобразовать один финальный ответ OpenRouter:
+Захватить одну финальную gateway response из stdin:
 
 ```bash
-execweave-inference-gateway event \
-  --gateway openrouter \
-  --requested-model openrouter/auto \
-  --provider-name OpenAI \
-  --sidecar gateway.jsonl
+execweave-inference-gateway event --gateway openrouter --sidecar gateway.jsonl
+execweave-inference-gateway event --gateway litellm --sidecar gateway.jsonl
 ```
 
-Преобразовать один финальный ответ LiteLLM Proxy:
+Только для OpenRouter можно захватить caller-supplied request+response object:
 
 ```bash
-execweave-inference-gateway event \
-  --gateway litellm \
-  --requested-model assistant \
-  --resolved-model azure/gpt-5 \
-  --provider-name Azure \
-  --deployment-id deployment-west \
-  --sidecar gateway.jsonl
+execweave-inference-gateway exchange --gateway openrouter --sidecar gateway.jsonl
 ```
 
-Преобразовать метаданные генерации OpenRouter:
+`exchange` требует JSON-object поля `request` и `response` на stdin. Это явно caller-supplied evidence, а **не** прозрачная wire interception.
 
-```bash
-execweave-inference-gateway generation \
-  --gateway openrouter \
-  --sidecar gateway.jsonl
-```
+OpenRouter generation metadata остаётся доступной через `generation`.
 
-Если вызывающая сторона имеет явную общую идентичность запроса для наблюдения gateway и наблюдения model-runtime, свяжите два существующих узла запросов:
+## Граница full-fidelity OpenRouter
 
-```bash
-execweave-inference-link \
-  --gateway litellm \
-  --gateway-request-id gw-123 \
-  --runtime vllm \
-  --runtime-request-id rt-456 \
-  --shared-request-id trace-789 \
-  --sidecar inference.jsonl
-```
+Для `event --gateway openrouter` v0.6.5 сохраняет полный supplied final response в локальном content-addressed store и одновременно создаёт компактный routing/usage summary. Для `exchange --gateway openrouter` можно сохранить полный caller-supplied request и response.
 
-JSON ответа gateway читается из stdin. Идентичности endpoints по умолчанию:
+`content_complete_from_source: true` означает, что сохранено полное значение, переданное этой точке интеграции. Это не утверждает видимость request до provider-side rewriting, hidden routing stages, model internals или network bytes, которых ExecWeave не наблюдал.
 
-- OpenRouter: `https://openrouter.ai/api/v1`
-- LiteLLM Proxy: `http://localhost:4000`
+Чувствительные application-level values внутри supplied request/response content сохраняются. Endpoint identity sanitizes отдельно; удаление query parameters/fragments и фильтрация известных transport credentials не заменяют content redaction.
 
-## Модель графа
+## Граница LiteLLM
 
-```text
-inference_gateway --SERVED_INFERENCE--> inference_request
-inference_request --REQUESTED_MODEL--> model
-inference_request --ROUTED_TO_MODEL--> model
-inference_request --ROUTED_TO_PROVIDER--> inference_provider
-inference_request --ROUTED_TO_DEPLOYMENT--> inference_deployment
-inference_gateway --REPORTED_GENERATION_METADATA--> inference_request
-inference_request --SAME_INFERENCE_REQUEST--> inference_request
-```
+LiteLLM остаётся metadata-oriented integration в текущем baseline v0.6.5. Response parser и optional custom callback сохраняют routing/usage fields по строгому контракту; поддержка content storage в OpenRouter не превращает LiteLLM callback автоматически в full-fidelity capture.
 
-Например, запрос LiteLLM может сохранить:
-
-```text
-requested_model = assistant
-resolved_model  = azure/gpt-5
-provider        = Azure
-deployment      = deployment-west
-```
-
-Эти факты не взаимозаменяемы.
-
-## OpenRouter
-
-Метаданные ответа OpenRouter сохраняют запрошенную модель отдельно от модели ответа и от явно наблюдаемого маршрутизированного провайдера. Специфические метаданные генерации OpenRouter также могут сообщать latency, время генерации, стоимость, нативные количества tokens, состояние streaming и состояние отмены.
-
-## LiteLLM Proxy
-
-<!-- litellm-auto-live-v064 -->
-### Автоматический callback для Live Viewer
-
-LiteLLM Proxy можно один раз настроить на custom callback ExecWeave, после чего routing/usage metadata автоматически попадают в run-specific sidecar текущей сессии `execweave live`. Фрагмент конфигурации выводится командой:
+Callback включается выводом его конфигурации и запуском настроенного proxy внутри текущего ExecWeave run:
 
 ```bash
 execweave-litellm-callback --print-config
-```
-
-Добавьте выведенный callback в существующий `litellm_settings.callbacks`, не заменяя другие callbacks. Import path: `execweave.litellm_callback.execweave_litellm_callback`, поэтому ExecWeave должен быть доступен для import в Python environment, где работает LiteLLM Proxy.
-
-После настройки запускайте локальный proxy под ExecWeave:
-
-```bash
 execweave live --open -- litellm --config config.yaml
 ```
 
-`execweave live` передаёт `EXECWEAVE_SEMANTIC_SIDECAR` процессу proxy. Без этой run-specific variable callback работает как no-op. `EXECWEAVE_LITELLM_ENDPOINT` может переопределить endpoint identity; иначе используется `PROXY_BASE_URL`, затем `http://localhost:4000`.
+Если `EXECWEAVE_SEMANTIC_SIDECAR` отсутствует, callback — no-op. Provider/deployment identity создаётся только при наличии authoritative evidence; ExecWeave не выводит её из model-name prefix или provider URL.
 
-Callback извлекает из LiteLLM `standard_logging_object` только whitelist: call ID, model group, resolved model, deployment model ID, token counts, reported cost, response time, cache-hit и call type. Messages, response content, model parameters, произвольная metadata, API-key metadata и provider `api_base` не сохраняются. `model_group` сохраняется как requested model, `model` как resolved model, `model_id` как deployment identity; provider не выводится без авторитетного provider evidence.
+## Точная identity gateway ↔ model-runtime
 
-
-LiteLLM моделируется как `inference_gateway`, а не как `model_runtime`. Его OpenAI-совместимый ответ добавляет метаданные запроса/модели/usage через тот же слой gateway-доказательств.
-
-`--provider-name` и `--deployment-id` создаются только когда вызывающей стороне или адаптеру доступны авторитетные routing-метаданные. ExecWeave **не выводит** провайдера или deployment из строки модели вроде `azure/...`. Когда эти routing-факты недоступны, соответствующие рёбра не создаются.
-
-## Точная идентичность Gateway ↔ Model Runtime
-
-`execweave-inference-link` намеренно строже временной корреляции. Он создаёт `SAME_INFERENCE_REQUEST` только когда вызывающая сторона уже имеет явный идентификатор, общий для gateway- и runtime-наблюдений. Он никогда не угадывает идентичность по временным меткам, именам моделей, количествам tokens, latency или другим сигналам сходства.
-
-Запросы gateway и runtime остаются отдельными узлами, сохраняя метаданные своих слоёв. Ребро идентичности помечается:
+Если caller уже имеет явный shared request identifier, `execweave-inference-link` может связать gateway и runtime request nodes, не объединяя слои. Raw shared identifier не сохраняется; link использует SHA-256-derived identity hash.
 
 ```text
 identity_exact: true
@@ -133,20 +65,10 @@ inferred: false
 causal: false
 ```
 
-Это означает, что два наблюдения относятся к одному логическому запросу инференса согласно предоставленной общей идентичности. Это **не доказывает**, что конкретный Agent или процесс ОС вызвал запрос. Если явной общей идентичности нет, ExecWeave не создаёт это ребро.
+Это точная logical request identity, а не доказательство того, что конкретный Agent или OS process вызвал inference.
 
-## Метаданные usage
+## Конфиденциальность и граница доказательств
 
-Парсер ответа включает в whitelist метаданные вроде tokens prompt/input, completion/output, общего количества tokens, кэшированных prompt tokens, cache-write tokens, количества reasoning tokens и сообщённой стоимости.
+OpenRouter full-fidelity artifacts могут содержать полный request/response content и чувствительные application-level values. LiteLLM artifacts следуют более узкому metadata/callback contract. Рассматривайте gateway evidence как чувствительное и проверяйте перед публикацией.
 
-## Граница конфиденциальности
-
-ExecWeave не сохраняет текст prompt, содержимое response/completion, текст reasoning, choices или произвольные поля payload провайдера. Credentials endpoints gateway, query parameters и fragments удаляются из сохраняемой идентичности endpoint.
-
-Исходная запрошенная модель никогда не угадывается из ответа; она должна быть явно предоставлена вызывающей стороной, когда такое доказательство доступно. Сырой `--shared-request-id`, используемый для точной межслойной идентичности, не сохраняется; ExecWeave хранит только производный SHA-256 hash идентичности в событии связи.
-
-## Граница доказательств
-
-Метаданные ответа gateway доказывают только то, что сообщил этот gateway, или то, какие авторитетные routing-метаданные были предоставлены вместе с ответом. Они не доказывают, какой локальный Agent инициировал запрос, какой процесс model-runtime его обслужил или какой процесс ОС его вызвал.
-
-Поэтому события gateway остаются некаузальными (`causal: false`) и отделены от семантических доказательств Agent/IDE, доказательств Model Runtime и доказательств OS Runtime. Точная общая идентичность запроса может связать наблюдения Gateway и Model Runtime, не сливая их слои. Отдельно выведенная корреляция должна оставаться явно помеченной как inference и никогда не представляться как каузальное доказательство.
+Gateway observations доказывают только то, что integration point сообщил или какие authoritative routing data были предоставлены вместе с ним. Они не доказывают сами по себе, какой local Agent инициировал request, какой model-runtime process обслужил его или какой OS process его вызвал. При отсутствии shared identity нельзя подменять её угадыванием по timestamp/model name.

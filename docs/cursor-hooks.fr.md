@@ -1,4 +1,4 @@
-# Hooks Cursor
+# Cursor Hooks
 
 <!-- i18n-nav:start -->
 <p align="center">
@@ -13,73 +13,46 @@
 </p>
 <!-- i18n-nav:end -->
 
-ExecWeave utilise la surface de hooks native de Cursor pour ajouter des preuves logiques Agent / Tool / Command au graphe runtime sans traiter les métadonnées fournisseur comme une causalité OS.
+ExecWeave utilise la surface de hooks native de Cursor pour ajouter des preuves semantic/content fournisseur à un run sans les traiter comme causalité OS.
 
 ## Démarrage rapide
 
-Générez une configuration de hook et ajoutez-la aux paramètres de hooks Cursor :
-
 ```bash
 execweave-cursor-hook --print-config
-```
-
-Puis enregistrez une exécution Cursor :
-
-```bash
 execweave-cursor-record --open -- cursor
 ```
 
-L’enregistreur lié à l’exécution conserve séparément les artefacts runtime, sémantiques et corrélés.
+Le recorder lié au run conserve séparément les artefacts runtime, semantic et correlated.
 
-## Événements
+## Surface d'observation
 
-Le baseline consomme :
+La configuration v0.6.5 couvre une surface de cycle de vie Cursor plus large lorsque Cursor l'expose : session start/end, tool before/after/failure, subagents, exécution shell et MCP, lectures/éditions de fichiers, soumission de prompt, compaction/stop, événements Agent response/thought et événements tab file read/edit.
 
-- `sessionStart`
-- `preToolUse`
-- `postToolUse`
-- `postToolUseFailure`
+Cursor fournit une identité logique stable pour ses appels d'outils. Cette identité n'est pas un PID OS.
 
-Cursor expose un `tool_use_id` stable ; `preToolUse` et le hook post correspondant peuvent donc partager une identité logique exacte de `tool_call`.
+## Contenu full-fidelity
 
-Les arêtes sémantiques typiques sont :
+Quand Cursor fournit explicitement une valeur de contenu, v0.6.5 stocke la valeur complète dans le store local adressé par contenu et n'inscrit qu'une référence dans le JSONL sémantique.
 
-```text
-agent --USED_MODEL--> model
-agent --REQUESTED_TOOL_CALL--> tool_call
-tool_call --USES_TOOL--> tool
-tool_call --DECLARED_COMMAND--> command
-tool_call --DECLARED_TARGET--> file
-tool_call --TOOL_CALL_RETURNED--> tool
-```
+Les régressions couvrent notamment le prompt complet, les entrées/sorties d'outils et textes d'échec, commandes/sorties shell, commandes/entrées/résultats MCP, contenu de fichier fourni par les hooks de lecture, structures d'édition, réponses finales de l'Agent, texte étiqueté thought par le fournisseur et résumés de subagents.
 
-`postToolUseFailure` est représenté séparément comme `TOOL_CALL_FAILED`.
+Ces champs restent des observations fournisseur avec leurs limites. Par exemple, un contenu fourni par `beforeReadFile` ne prouve pas qu'une lecture OS a été menée à terme, et une structure d'édition ne prouve pas un snapshot complet post-édition si le fournisseur ne l'a pas fourni.
 
-## Corrélation outil-vers-processus
+Les identifiants de transport connus sont filtrés de la projection provider-metadata là où le contrat le prévoit. Les valeurs sensibles intégrées au contenu sont conservées. Le full-fidelity n'est pas une couche générale de redaction.
 
-Les preuves de hook Cursor ne fournissent pas le PID enfant OS. Un appel Shell ne devient donc pas directement une arête de processus.
+## Corrélation Tool vers Process
 
-Lorsque des preuves runtime exposent indépendamment un seul processus soutenu de manière unique, ExecWeave peut dériver :
-
-```text
-tool_call --CORRELATED_WITH_PROCESS--> process
-```
-
-Le pont est toujours :
+Les hooks Cursor ne fournissent pas le PID enfant OS. Un appel Shell ne devient donc un pont vers un processus que lorsqu'une preuve runtime indépendante soutient un seul candidat :
 
 ```text
 inferred: true
 causal: false
 ```
 
-Les appels ambigus ou non pris en charge ne produisent aucun pont.
+Les appels ambigus ou non pris en charge ne produisent aucun pont. L'identité stable d'un tool call dans Cursor prouve seulement une identité logique côté fournisseur, pas une attribution machine-level.
 
-## Limite de confidentialité
+## Confidentialité et frontière des preuves
 
-L’adaptateur ne persiste volontairement ni le texte des prompts, ni les chemins de transcript, ni l’adresse e-mail utilisateur, ni les messages de l’agent, ni la sortie des outils. Il ne conserve que les identifiants et métadonnées déclarées nécessaires à l’observabilité, comme l’identité du modèle, les identifiants de conversation/génération, le nom/ID d’utilisation de l’outil, la commande et le chemin de fichier déclaré.
+Les preuves d'un run Cursor peuvent contenir prompts, arguments/résultats d'outils, sorties shell, contenu de fichiers, données d'édition, réponses assistant, texte thought étiqueté par le fournisseur, commandes, chemins, identifiants, valeurs MCP et valeurs applicatives sensibles. Examinez le run complet avant partage.
 
-Les commandes et chemins peuvent toujours être sensibles. Examinez les artefacts avant de les partager.
-
-## Limite de preuve
-
-Un hook Cursor prouve ce que Cursor a signalé au niveau sémantique. Il ne prouve pas qu’une commande déclarée a été exécutée, qu’un fichier déclaré a réellement été accédé, ni que des données se sont déplacées entre des ressources. Les collecteurs OS restent la source des preuves runtime.
+Un hook Cursor prouve uniquement ce que Cursor a rapporté ou fourni au niveau fournisseur. Il ne prouve pas à lui seul qu'une commande déclarée a été exécutée, qu'un fichier a été accédé par un processus précis ou que des octets ont circulé entre ressources.

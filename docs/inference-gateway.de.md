@@ -1,4 +1,4 @@
-# Inference-Gateway-Integrationen
+# Inference Gateway Integrations
 
 <!-- i18n-nav:start -->
 <p align="center">
@@ -13,119 +13,51 @@
 </p>
 <!-- i18n-nav:end -->
 
-Inference-Gateways bilden eine separate Schicht zwischen Agent/Client und Modell-Provider/-Runtime. Die aktuelle Basisimplementierung unterstützt **OpenRouter** und **LiteLLM Proxy**.
-
-ExecWeave bewahrt angefordertes Modell, aufgelöstes Modell, gerouteten Provider und Deployment-Identität als getrennte Belege, statt sie in einem einzigen Modellfeld zusammenzufassen.
+Inference Gateways bilden eine eigene Evidenzebene zwischen Agent/Client und Model-Provider/-Runtime. ExecWeave modelliert derzeit **OpenRouter** und **LiteLLM Proxy** und hält Requested Model, Resolved Model, Routed Provider und Deployment Identity getrennt.
 
 ## CLI
 
-Eine finale OpenRouter-Antwort konvertieren:
+Eine finale Gateway-Antwort von stdin erfassen:
 
 ```bash
-execweave-inference-gateway event \
-  --gateway openrouter \
-  --requested-model openrouter/auto \
-  --provider-name OpenAI \
-  --sidecar gateway.jsonl
+execweave-inference-gateway event --gateway openrouter --sidecar gateway.jsonl
+execweave-inference-gateway event --gateway litellm --sidecar gateway.jsonl
 ```
 
-Eine finale LiteLLM-Proxy-Antwort konvertieren:
+Nur für OpenRouter kann ein vom Aufrufer geliefertes Request+Response-Objekt erfasst werden:
 
 ```bash
-execweave-inference-gateway event \
-  --gateway litellm \
-  --requested-model assistant \
-  --resolved-model azure/gpt-5 \
-  --provider-name Azure \
-  --deployment-id deployment-west \
-  --sidecar gateway.jsonl
+execweave-inference-gateway exchange --gateway openrouter --sidecar gateway.jsonl
 ```
 
-OpenRouter-Generierungsmetadaten konvertieren:
+`exchange` erwartet JSON-Objekte `request` und `response` auf stdin. Dies ist ausdrücklich caller-supplied evidence und **keine** transparente Wire-Interzeption.
 
-```bash
-execweave-inference-gateway generation \
-  --gateway openrouter \
-  --sidecar gateway.jsonl
-```
+OpenRouter-Generation-Metadaten bleiben über `generation` verfügbar.
 
-Wenn ein Aufrufer über eine explizite gemeinsame Request-Identität zwischen einer Gateway-Beobachtung und einer Model-Runtime-Beobachtung verfügt, können die beiden bestehenden Request-Knoten verbunden werden:
+## OpenRouter-Full-Fidelity-Grenze
 
-```bash
-execweave-inference-link \
-  --gateway litellm \
-  --gateway-request-id gw-123 \
-  --runtime vllm \
-  --runtime-request-id rt-456 \
-  --shared-request-id trace-789 \
-  --sidecar inference.jsonl
-```
+Bei `event --gateway openrouter` speichert v0.6.5 die vollständige gelieferte finale Antwort im lokalen content-addressed Store und emittiert zusätzlich die kompakte Routing-/Usage-Zusammenfassung. Bei `exchange --gateway openrouter` können der vollständige vom Aufrufer gelieferte Request und die Response gespeichert werden.
 
-Gateway-Antwort-JSON wird von stdin gelesen. Standard-Endpunktidentitäten sind:
+`content_complete_from_source: true` bedeutet, dass der vollständige an diesen Integrationspunkt gelieferte Wert gespeichert wurde. Es behauptet keine Sicht auf Requests vor Provider-seitiger Umschreibung, verborgene Routing-Stufen, Modellinternas oder Netzwerkbytes, die ExecWeave nicht beobachtet hat.
 
-- OpenRouter: `https://openrouter.ai/api/v1`
-- LiteLLM Proxy: `http://localhost:4000`
+Sensible anwendungsbezogene Werte im gelieferten Request/Response-Content bleiben erhalten. Endpoint-Identität wird separat bereinigt; Query-Parameter/Fragmente und das Filtern erkannter Transport-Credentials ersetzen keine Content-Redaction.
 
-## Graphmodell
+## LiteLLM-Grenze
 
-```text
-inference_gateway --SERVED_INFERENCE--> inference_request
-inference_request --REQUESTED_MODEL--> model
-inference_request --ROUTED_TO_MODEL--> model
-inference_request --ROUTED_TO_PROVIDER--> inference_provider
-inference_request --ROUTED_TO_DEPLOYMENT--> inference_deployment
-inference_gateway --REPORTED_GENERATION_METADATA--> inference_request
-inference_request --SAME_INFERENCE_REQUEST--> inference_request
-```
+LiteLLM bleibt im aktuellen v0.6.5-Baseline eine metadatenorientierte Integration. Response-Parser und optionaler Custom Callback erhalten Routing-/Usage-Felder über einen strikten Vertrag; OpenRouter-Full-Fidelity macht den LiteLLM-Callback nicht automatisch zu einer vollständigen Inhaltsaufzeichnung.
 
-Eine LiteLLM-Anfrage kann beispielsweise bewahren:
-
-```text
-requested_model = assistant
-resolved_model  = azure/gpt-5
-provider        = Azure
-deployment      = deployment-west
-```
-
-Diese Fakten sind nicht austauschbar.
-
-## OpenRouter
-
-OpenRouter-Antwortmetadaten halten das angeforderte Modell getrennt vom Antwortmodell und einem explizit beobachteten gerouteten Provider. OpenRouter-spezifische Generierungsmetadaten können zusätzlich Latenz, Generierungszeit, Kosten, native Token-Anzahlen, Streaming-Status und Abbruchstatus melden.
-
-## LiteLLM Proxy
-
-<!-- litellm-auto-live-v064 -->
-### Automatischer Live-Viewer-Callback
-
-LiteLLM Proxy kann den ExecWeave Custom Callback einmal konfigurieren und danach Routing-/Usage-Metadaten automatisch in den run-spezifischen Sidecar der aktuellen `execweave live`-Session schreiben. Das Konfigurationsfragment erhalten Sie mit:
+Callback-Konfiguration ausgeben und den konfigurierten Proxy im aktuellen ExecWeave-Run starten:
 
 ```bash
 execweave-litellm-callback --print-config
-```
-
-Fügen Sie den ausgegebenen Callback zu `litellm_settings.callbacks` hinzu, ohne bestehende Callbacks zu überschreiben. Der Import-Pfad lautet `execweave.litellm_callback.execweave_litellm_callback`; ExecWeave muss daher in der Python-Umgebung des LiteLLM Proxy importierbar sein.
-
-Starten Sie den konfigurierten lokalen Proxy unter ExecWeave:
-
-```bash
 execweave live --open -- litellm --config config.yaml
 ```
 
-`execweave live` vererbt `EXECWEAVE_SEMANTIC_SIDECAR` an den Proxy-Prozess. Fehlt diese run-spezifische Variable, ist der Callback ein no-op. `EXECWEAVE_LITELLM_ENDPOINT` kann die Endpoint-Identität überschreiben; sonst werden `PROXY_BASE_URL` und anschließend `http://localhost:4000` verwendet.
+Ohne `EXECWEAVE_SEMANTIC_SIDECAR` ist der Callback ein No-op. Provider-/Deployment-Identität wird nur bei autoritativer Evidenz ausgegeben; ExecWeave leitet sie nicht aus Modellnamen-Präfixen oder Provider-URLs ab.
 
-Der Callback liest aus LiteLLM `standard_logging_object` ausschließlich eine Whitelist: Call ID, Model Group, resolved model, Deployment Model ID, Token Counts, reported cost, response time, cache-hit und call type. Messages, Response-Inhalt, Model Parameters, beliebige Metadata, API-Key-Metadata und Provider-`api_base` werden nicht gespeichert. `model_group` bleibt requested model, `model` resolved model und `model_id` Deployment-Identität; ohne autoritative Provider-Evidence wird kein Provider abgeleitet.
+## Exakte Gateway ↔ Model-Runtime-Identität
 
-
-LiteLLM wird als `inference_gateway` modelliert, nicht als `model_runtime`. Seine OpenAI-kompatible Antwort liefert Request-/Modell-/Usage-Metadaten über dieselbe Gateway-Belegschicht.
-
-`--provider-name` und `--deployment-id` werden nur ausgegeben, wenn autoritative Routing-Metadaten dem Aufrufer oder Adapter vorliegen. ExecWeave **leitet keinen** Provider oder kein Deployment aus einer Modellzeichenfolge wie `azure/...` ab. Wenn diese Routing-Fakten nicht verfügbar sind, werden die entsprechenden Kanten ausgelassen.
-
-## Exakte Gateway ↔ Model Runtime-Identität
-
-`execweave-inference-link` ist absichtlich strenger als zeitliche Korrelation. Es erzeugt `SAME_INFERENCE_REQUEST` nur, wenn der Aufrufer bereits einen expliziten Identifikator besitzt, der zwischen Gateway- und Runtime-Beobachtung geteilt wird. Identität wird niemals aus Zeitstempeln, Modellnamen, Token-Anzahlen, Latenz oder anderen Ähnlichkeitssignalen geraten.
-
-Gateway- und Runtime-Requests bleiben getrennte Knoten und behalten ihre schichtspezifischen Metadaten. Die Identitätskante ist markiert als:
+Wenn der Aufrufer bereits einen ausdrücklich geteilten Request-Identifier hat, kann `execweave-inference-link` Gateway- und Runtime-Request-Nodes verbinden, ohne die Ebenen zusammenzuführen. Der rohe Identifier wird nicht persistiert; der Link verwendet einen SHA-256-abgeleiteten Identity-Hash.
 
 ```text
 identity_exact: true
@@ -133,20 +65,10 @@ inferred: false
 causal: false
 ```
 
-Das bedeutet, dass beide Beobachtungen laut der bereitgestellten gemeinsamen Identität dieselbe logische Inferenzanfrage betreffen. Es beweist **nicht**, dass ein bestimmter Agent oder OS-Prozess die Anfrage verursacht hat. Ohne explizite gemeinsame Identität erzeugt ExecWeave diese Kante nicht.
+Dies ist exakte logische Request-Identität, kein Beweis dafür, dass ein bestimmter Agent oder OS-Prozess die Inferenz verursacht hat.
 
-## Usage-Metadaten
+## Datenschutz und Evidenzgrenze
 
-Der Antwortparser erlaubt gezielt Metadaten wie Prompt-/Input-Tokens, Completion-/Output-Tokens, Gesamt-Tokens, gecachte Prompt-Tokens, Cache-Write-Tokens, Reasoning-Token-Anzahlen und gemeldete Kosten.
+OpenRouter-Full-Fidelity-Artefakte können vollständigen Request/Response-Content und sensible anwendungsbezogene Werte enthalten. LiteLLM-Artefakte folgen ihrem engeren Metadata-/Callback-Vertrag. Behandeln Sie Gateway-Evidenz als sensibel und prüfen Sie sie vor dem Teilen.
 
-## Datenschutzgrenze
-
-ExecWeave speichert weder Prompt-Text noch Antwort-/Completion-Inhalte, Reasoning-Text, Choices oder beliebige Provider-Payload-Felder. Zugangsdaten, Query-Parameter und Fragmente von Gateway-Endpunkten werden aus der gespeicherten Endpunktidentität entfernt.
-
-Das ursprünglich angeforderte Modell wird niemals aus der Antwort geraten; es muss vom Aufrufer explizit bereitgestellt werden, sofern dieser Beleg verfügbar ist. Die rohe `--shared-request-id`, die für exakte schichtübergreifende Identität verwendet wird, wird nicht gespeichert; ExecWeave legt nur einen SHA-256-abgeleiteten Identitätshash am Link-Ereignis ab.
-
-## Beleggrenze
-
-Gateway-Antwortmetadaten beweisen nur, was das Gateway gemeldet hat oder welche autoritativen Routing-Metadaten zusammen mit der Antwort bereitgestellt wurden. Sie beweisen nicht, welcher lokale Agent die Anfrage initiiert, welcher Model-Runtime-Prozess sie bedient oder welcher OS-Prozess sie verursacht hat.
-
-Gateway-Ereignisse bleiben deshalb nicht kausal (`causal: false`) und getrennt von semantischen Agent-/IDE-Belegen, Model-Runtime-Belegen und OS-Runtime-Belegen. Eine exakte gemeinsame Request-Identität kann Gateway- und Model-Runtime-Beobachtungen verbinden, ohne ihre Schichten zusammenzuführen. Separat inferierte Korrelation muss ausdrücklich als Inferenz markiert bleiben und darf niemals als kausaler Beleg dargestellt werden.
+Gateway-Beobachtungen beweisen nur, was der Integrationspunkt gemeldet hat oder welche autoritativen Routing-Daten zusammen mit ihm geliefert wurden. Sie beweisen nicht für sich allein, welcher lokale Agent einen Request gestartet, welcher Runtime-Prozess ihn bedient oder welcher OS-Prozess ihn verursacht hat. Fehlende Shared Identity darf nicht durch Timestamp-/Modellnamen-Raten ersetzt werden.

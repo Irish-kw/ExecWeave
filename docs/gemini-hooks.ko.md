@@ -13,152 +13,56 @@
 
 # Gemini CLI Hooks
 
-ExecWeave는 Gemini CLI lifecycle/tool hooks를 provider semantic evidence로 수집하고, 독립적으로 수집한 OS runtime evidence와 같은 execution graph에 결합할 수 있습니다.
+ExecWeave는 Gemini CLI 훅을 provider semantic/content evidence로 수집하고, 이 계층을 독립적으로 수집한 OS runtime evidence와 분리해서 유지합니다. Gemini 훅은 provider가 무엇을 노출했는지를 설명하지만, 그 자체로 어떤 OS process가 동작을 수행했는지를 증명하지는 않습니다.
 
-이 adapter는 의도적으로 보수적입니다. Gemini hook은 Agent / Tool layer가 보고한 semantic evidence이며, 그 자체만으로 특정 OS process가 실제 작업을 수행했다고 증명하지 않습니다.
+## 현재 훅 범위
 
-## 지원 hook events
-
-현재 지원:
+`execweave-gemini-hook --print-config`는 현재 다음 이벤트를 등록합니다.
 
 - `SessionStart`
+- `SessionEnd`
+- `BeforeAgent`
+- `AfterAgent`
+- `BeforeModel`
+- `AfterModel`
+- `BeforeToolSelection`
 - `BeforeTool`
 - `AfterTool`
+- `PreCompress`
+- `Notification`
 
-Gemini CLI는 JSON hook input을 `stdin`으로 전달합니다. 성공한 command hook의 `stdout`은 valid JSON이어야 하므로 `execweave-gemini-hook`은 성공 시 `{}`만 출력하고 warning은 `stderr`로 보냅니다.
-
-설정 fragment 생성:
+Tool 훅은 provider matcher surface를 사용하며 생성된 command hook은 기본적으로 fail-open입니다. 다음처럼 구성하고 기록할 수 있습니다.
 
 ```bash
 execweave-gemini-hook --print-config
-```
-
-출력된 `hooks` object를 Gemini CLI `settings.json`에 merge합니다. 생성된 hook은 telemetry만 수행하며 tool call을 block하거나 rewrite하지 않습니다.
-
-## One-command recording
-
-```bash
 execweave-gemini-record --open -- gemini
 ```
 
-Recorder는 `EXECWEAVE_SEMANTIC_SIDECAR`를 사용해 이번 Gemini child process를 run-specific sidecar에 bind하고 공통 provider-record pipeline을 사용합니다.
+## Full-fidelity 콘텐츠
 
-```text
-runtime evidence
-      +
-Gemini hook evidence
-      ↓
-validated semantic merge
-      ↓
-conservative correlation
-      ↓
-graph + viewer
-```
+v0.6.5는 Gemini 훅이 명시적으로 제공한 완전한 값을 로컬 content-addressed store에 저장합니다. 이벤트에 따라 user prompt, 전체 model request object, model response/chunk object, tool input, `llmContent` / `returnDisplay` / provider error field를 포함한 tool response, 최종 Agent response 및 훅이 제공한 기타 provider payload가 포함될 수 있습니다.
 
-Provider-integrated run은 다음 artifacts를 생성할 수 있습니다.
+JSONL semantic sidecar에는 큰 값을 직접 넣는 대신 content reference를 기록합니다. 동일한 값은 SHA-256 기준으로 deduplicate됩니다.
 
-```text
-.execweave/runs/<run-id>/
-├── events.jsonl
-├── graph.json
-├── viewer.html
-├── semantic.jsonl
-├── events.semantic.jsonl
-├── graph.semantic.json
-├── viewer.semantic.html
-├── events.correlated.jsonl
-├── graph.correlated.json
-└── viewer.correlated.html
-```
+Provider-metadata projection은 authorization header 같은 인식 가능한 transport-credential field를 제외합니다. 하지만 이 필터링은 full content 안의 application-level 값을 정제하지 않습니다. 예를 들어 tool input이나 model request 안에 secret이 들어 있으면 full fidelity의 일부로 그대로 보존됩니다.
 
-Raw runtime과 provider sidecar evidence는 분리된 상태를 유지합니다. Correlation은 observed input evidence를 다시 쓰지 않고 derived stream을 생성합니다.
+`content_complete_from_source: true`는 ExecWeave가 전달받은 전체 field/value를 저장했다는 뜻입니다. Gemini가 hidden final wire request, internal model state 또는 훅 payload에 없던 단계를 노출했다는 뜻은 아닙니다.
 
-## Event mapping
+## Tool identity와 correlation
 
-### SessionStart
+Gemini는 `BeforeTool`과 `AfterTool` 사이에 공유되는 하나의 unique tool-call ID를 제공하지 않습니다. ExecWeave는 따라서 직접적인 before/after identity edge를 만들어내지 않습니다. Deterministic tool fingerprint는 진단 hint로 남을 수 있지만 반복된 동일 호출은 별개의 observation입니다.
 
-```text
-Gemini CLI --STARTED_PROVIDER_SESSION--> provider_session
-```
-
-입력에 `transcript_path`가 있어도 ExecWeave는 transcript를 읽거나 복사하지 않습니다.
-
-### BeforeTool
-
-```text
-Gemini CLI --REQUESTED_TOOL_CALL--> tool_call
-tool_call --USES_TOOL--> tool
-```
-
-`run_shell_command`의 `tool_input.command`는:
-
-```text
-tool_call --DECLARED_COMMAND--> command
-```
-
-으로 기록되어 conservative Tool → Process correlation에 참여할 수 있습니다.
-
-`read_file`, `write_file`, `replace` 등 일부 file tool은 declared target path를 semantic metadata로 기록할 수 있지만 file content는 수집하지 않습니다.
-
-### MCP
-
-`mcp_context`가 있으면 provider가 명시적으로 보고한 server/tool identity를 사용합니다.
-
-```text
-tool_call --VIA_MCP--> mcp_server
-mcp_server --EXPOSES_TOOL--> tool
-```
-
-MCP launch command, arguments, URL은 sensitive connection metadata나 credential을 포함할 수 있으므로 artifact에 저장하지 않습니다.
-
-### AfterTool
-
-`AfterTool`은 별도의 `tool_result` observation으로 기록합니다. `tool_response.error`가 non-empty일 때만 provider-reported error를 기록하며, 그 외에는 neutral returned-result signal을 기록합니다.
-
-Raw `llmContent`, `returnDisplay`, error body는 저장하지 않습니다.
-
-## Unique tool-call ID가 없음
-
-현재 Gemini CLI hook schema에는 `BeforeTool`과 `AfterTool`이 공유하는 unique tool-call ID가 없습니다.
-
-따라서 ExecWeave는 direct BeforeTool → AfterTool identity edge를 만들지 않습니다.
-
-`BeforeTool`은 timestamp-scoped local identity를 사용하고 `AfterTool`은 별도 result node를 만듭니다. `tool_fingerprint`는 진단 hint일 뿐 call identity로 사용하지 않습니다. 동일 command가 반복되어도 잘못 하나의 call로 합치지 않기 위해서입니다.
-
-## Tool → Process correlation
-
-Gemini hook은 child OS PID를 제공하지 않습니다. 독립 runtime evidence에서 bounded matcher가 유일하게 지지되는 process candidate를 찾을 때만:
-
-```text
-tool_call --CORRELATED_WITH_PROCESS--> process
-```
-
-를 derived edge로 만들 수 있습니다.
-
-항상:
+Gemini 훅은 자식 OS PID도 제공하지 않습니다. 따라서 Tool → Process bridge는 독립적인 runtime evidence가 하나의 후보만 유일하게 지지할 때만 파생됩니다.
 
 ```text
 inferred: true
 causal: false
 ```
 
-를 유지합니다. Ambiguous / no-match / compound / shell builtin / unsupported call은 edge를 생성하지 않습니다.
+모호하거나, 매칭되지 않거나, compound/shell-builtin/unsupported command인 경우 bridge를 생성하지 않습니다.
 
-Correlated Viewer는 matched / ambiguous / no-match / unsupported count를 표시하므로 missing edge가 조용히 “아무 일도 일어나지 않았다”로 해석되지 않습니다.
+## Privacy와 evidence boundary
 
-## Privacy
+Gemini content artifact에는 prompt, 전체 model request/response 값, tool input/result, tool이 반환한 file content, MCP/application field, 최종 response, identifier, command, path, embedded secret가 포함될 수 있습니다. 공유 전에 run directory 전체를 민감한 자료로 취급하고 검토하십시오.
 
-Prompt, transcript, raw tool result, raw error body, MCP command/args/URL, file content는 기본적으로 수집하지 않습니다. 하지만 command, path, tool name, session identifier, MCP server/tool name 등의 metadata는 민감할 수 있으므로 artifact 공유 전에 확인하세요.
-
-## Failure behavior
-
-`execweave-gemini-hook`은 기본적으로 fail-open입니다. Telemetry error는 `stderr`로 보내며 Gemini tool call을 의도적으로 차단하지 않습니다. Non-zero telemetry failure가 필요할 때만 `--strict`를 사용합니다.
-
-## Upstream contract
-
-- https://github.com/google-gemini/gemini-cli/blob/main/docs/hooks/reference.md
-- https://github.com/google-gemini/gemini-cli/blob/main/docs/hooks/index.md
-
-Provider hook schema는 바뀔 수 있습니다. ExecWeave는 provider가 실제로 전달한 field만 기록하며 semantic hook을 사용할 수 없는 경우에도 독립적인 OS runtime collection을 계속 유용하게 유지합니다.
-
-[`Semantic Telemetry`](semantic-telemetry.ko.md)도 참고하세요.
+훅이 `transcript_path`를 보고했다는 이유만으로 ExecWeave가 이를 자동으로 읽지는 않습니다. 저장된 provider value 역시 OS 실행, 완료된 file access 또는 byte-level data flow를 증명하지 않습니다. 독립 runtime evidence와 명시적으로 표시된 correlation은 별도 계층으로 유지됩니다.

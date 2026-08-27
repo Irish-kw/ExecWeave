@@ -13,13 +13,13 @@
 </p>
 <!-- i18n-nav:end -->
 
-Model Runtime 與 Agent/IDE semantic adapter、Inference Gateway 是不同層。它描述 local 或 self-hosted inference server 自己回報的資訊，不能單獨證明是哪個 Agent 發起 request。
+Model runtime 與 Agent/IDE semantic adapter、inference gateway 是不同 evidence layer。它描述 local/self-hosted inference integration point 明確回報的內容；不能證明是哪個 Agent 發起 request。
 
-目前 baseline 支援 **Ollama**、**llama.cpp**、**vLLM** 與 **LM Studio**。
+目前 baseline 支援 **Ollama**、**llama.cpp**、**vLLM**、**LM Studio**。
 
 ## CLI
 
-把 final response metadata 轉成 inference events：
+從 stdin 擷取單一 supplied final runtime response：
 
 ```bash
 execweave-model-runtime event --runtime ollama --sidecar model-runtime.jsonl
@@ -28,78 +28,34 @@ execweave-model-runtime event --runtime vllm --sidecar model-runtime.jsonl
 execweave-model-runtime event --runtime lmstudio --sidecar model-runtime.jsonl
 ```
 
-取得 runtime state 或 model catalog：
+擷取 caller-supplied request+response exchange：
 
 ```bash
-execweave-model-runtime probe --runtime ollama --sidecar model-runtime.jsonl
-execweave-model-runtime probe --runtime llamacpp --metrics --sidecar model-runtime.jsonl
-execweave-model-runtime probe --runtime vllm --sidecar model-runtime.jsonl
-execweave-model-runtime probe --runtime lmstudio --sidecar model-runtime.jsonl
+execweave-model-runtime exchange --runtime ollama --sidecar model-runtime.jsonl
 ```
 
-預設 endpoint：
+`exchange` 支援相同四種 runtime，且 stdin 必須具有 JSON-object `request` 與 `response` 欄位。這記錄的是明確 caller-supplied evidence，不是 transparent network interception。
 
-- Ollama：`http://localhost:11434`
-- llama.cpp：`http://localhost:8080`
-- vLLM：`http://localhost:8000`
-- LM Studio：`http://localhost:1234`
+Runtime state/model catalog 仍可透過 `probe` 取得。預設 localhost endpoint 仍為 Ollama `11434`、llama.cpp `8080`、vLLM `8000`、LM Studio `1234`。
 
-## OpenAI-compatible 共用層
+## Full-fidelity content
 
-llama.cpp、vLLM、LM Studio 共用同一個 OpenAI-compatible parser，處理 final response usage 與 `/v1/models` catalog metadata。共用層會統一 Chat Completions 的 `prompt_tokens` / `completion_tokens` 與 Responses 的 `input_tokens` / `output_tokens`，只保留白名單 token metadata，例如 cached-token 與 reasoning-token counts。
+v0.6.5 會把 selected model-runtime integration point 明確曝露的完整 content 存入本機 SHA-256 content-addressed store。`event` 保存完整 supplied final response，但不宣稱 request visibility；`exchange` 可保存 supplied request 與 response，包括 messages/prompts、tool definitions/calls/results、generated assistant content、明確存在的 reasoning/thinking fields、request-generation configuration，以及 runtime payload 支援的 provider response values。
 
-Runtime-specific evidence 不會硬塞進共用 parser。llama.cpp 仍保留自己的 timing fields 與 Prometheus metrics adapter。
+Semantic JSONL sidecar 只保存 content reference，不 inline 大型值。Compact usage/timing/model metadata 仍可供 graph/query 使用。
 
-## Graph model
+`content_complete_from_source: true` 表示 ExecWeave 完整保存送進 CLI/integration point 的值；**不代表** runtime 曝露 hidden model state、request 一定就是 provider post-rewrite 的 final wire request，或 ExecWeave intercept 了未提供的 bytes。
 
-```text
-model_runtime --SERVED_INFERENCE--> inference_request
-inference_request --USED_MODEL--> model
-model_runtime --LOADED_MODEL--> model
-model_runtime --SERVES_MODEL--> model
-model_runtime --ADVERTISES_MODEL--> model
-model_runtime --REPORTED_METRICS--> model_runtime_snapshot
-```
+Request/response content 內的 application-level secret value 會被保存。Endpoint/path sanitization 與 provider-metadata filtering 不構成通用 content redaction。
 
-這些 relation 的 evidence semantics 不相同。
+## Runtime-specific evidence
 
-## Ollama
+Ollama 可透過 `/api/ps` 額外回報 loaded-model state。llama.cpp 可曝露 timing/throughput、`/v1/models` 與 optional aggregate `/metrics`；可能攜帶敏感 local identifier 的 labeled Prometheus lines 仍受 metadata adapter 限制。vLLM 與 LM Studio 共用 OpenAI-compatible response/model-catalog parsing，同時保留 runtime-specific relation semantics。
 
-Final response metadata 可包含 prompt/completion token counts、load duration、prompt-evaluation duration、generation duration 與 finish reason。
+Catalog relations 刻意區分：依 source endpoint 實際證明的內容，runtime 可能 `LOADED_MODEL`、`SERVES_MODEL` 或 `ADVERTISES_MODEL`。LM Studio catalog visibility 仍是 `ADVERTISES_MODEL`；catalog item 不會自動變成 resident weights 的證明。
 
-`/api/ps` snapshot 可提供目前 loaded model 的 VRAM size、context length、format、family、parameter size、quantization 等 metadata，因此使用 `LOADED_MODEL`。
+## Privacy 與 evidence boundary
 
-## llama.cpp
+Model-runtime content 可能包含完整 prompt/message、tool data、generated response、reasoning/thinking text、model parameter、configuration value、path、identifier 與 application-level secrets。整個 run directory 都應視為敏感資料，分享前請檢查。
 
-OpenAI-compatible response 提供 normalized usage，加上 llama.cpp 專屬 timing/throughput metadata。`/v1/models` 使用 `SERVES_MODEL`；可選的 `/metrics` 提供 aggregate runtime metrics。
-
-含 Prometheus labels 的 metrics 會跳過，避免 labels 洩漏敏感本機 model path 或 identifiers。若 model ID 看起來是本機 path 或 GGUF filename，完整 identifier 只用於 hash-based entity identity，Graph 顯示只保留安全名稱。
-
-## vLLM
-
-vLLM 重用 OpenAI-compatible response 與 model-catalog 共用層。`/v1/models` 使用 `SERVES_MODEL`，表示該 serving endpoint 對外提供的 model。
-
-不保存 prompt、response、reasoning text、choices、logprobs 或 generated token text。
-
-## LM Studio
-
-<!-- lmstudio-auto-live-v064 -->
-若要讓 LM Studio 自動進入 Live Viewer，請由 ExecWeave 以明確的本機 port 啟動，例如 `execweave live --open -- lms server start --port 1234`。ExecWeave 會先確認 launch 前該 endpoint 尚未提供相容 API，且只有 launcher 成功結束後才 probe `/v1/models`。產生的 relation 仍是 `ADVERTISES_MODEL`；catalog entry 不會被提升成 `LOADED_MODEL`。
-
-LM Studio 重用相同 OpenAI-compatible response parser，但 `/v1/models` 使用 `ADVERTISES_MODEL`，而不是 `LOADED_MODEL`。
-
-這個區分是刻意的：LM Studio 可以讓已下載 model 出現在 server catalog，且某些設定可以 on-demand load；因此 catalog entry 本身不能證明 observation 當下 model weights 已 resident in memory。
-
-## 隱私邊界
-
-此 layer 排除 prompt text、response content、thinking/reasoning text、choices、logprobs 與 raw generated tokens。
-
-白名單 metadata 可包含 model/request identity、prompt/input token counts、completion/output token counts、total tokens、cached-token counts、reasoning-token counts 與 runtime-specific timing metadata。支援的本機 OpenAI-compatible runtime 會 redaction absolute local model path；llama.cpp GGUF path 採更嚴格 redaction。
-
-Aggregate runtime metrics 不會自動歸因到特定 Agent 或 inference request。
-
-## Evidence boundary
-
-Runtime API 只能證明 inference server 自己回報的資訊，不能單獨證明是哪個 Agent 發起 request、哪個 gateway routing，或哪個 OS process 造成 request。
-
-跨層 identity 必須有明確 shared identifier，或另外定義的保守 correlation。Derived correlation 必須維持 inference 標記，不能改寫成 causal evidence。
+Runtime response 或 exchange 只證明該 integration point 提供了什麼；不能單獨證明哪個 Agent 發起 request、哪個 gateway 路由、哪個 OS process 造成它，或 file bytes 流向 model/network endpoint。Cross-layer identity 需要 explicit shared identifier，或另外明確標示的 conservative correlation。

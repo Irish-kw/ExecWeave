@@ -13,73 +13,46 @@
 </p>
 <!-- i18n-nav:end -->
 
-ExecWeave는 Cursor의 네이티브 Hook을 사용해 Agent / Tool / Command의 논리적 semantic evidence를 실행 그래프에 추가합니다. Provider metadata를 OS 수준의 인과 증거로 취급하지 않습니다.
+ExecWeave는 Cursor의 native hook surface를 사용해 provider semantic/content evidence를 run에 추가하지만, 이 evidence를 OS causality로 취급하지 않습니다.
 
 ## 빠른 시작
 
-Hook 설정을 생성해 Cursor hook settings에 추가합니다.
-
 ```bash
 execweave-cursor-hook --print-config
-```
-
-그다음 Cursor 실행을 기록합니다.
-
-```bash
 execweave-cursor-record --open -- cursor
 ```
 
-run-bound recorder는 runtime, semantic, correlated artifacts를 서로 분리해 저장합니다.
+Run-bound recorder는 runtime, semantic, correlated artifact를 서로 분리해서 유지합니다.
 
-## 이벤트
+## Observation surface
 
-현재 baseline은 다음을 사용합니다.
+v0.6.5 훅 설정은 Cursor가 노출하는 경우 session start/end, tool before/after/failure, subagent, shell 및 MCP 실행, file read/edit, prompt submission, compaction/stop, Agent response/thought 이벤트, tab file read/edit 이벤트를 포함한 더 넓은 lifecycle surface를 다룹니다.
 
-- `sessionStart`
-- `preToolUse`
-- `postToolUse`
-- `postToolUseFailure`
+Cursor는 tool hook에 안정적인 논리 tool-call identity를 제공합니다. 이 identity는 OS PID가 아닙니다.
 
-Cursor는 안정적인 `tool_use_id`를 제공하므로 `preToolUse`와 대응하는 post hook이 동일한 logical `tool_call` identity를 정확히 공유할 수 있습니다.
+## Full-fidelity 콘텐츠
 
-대표적인 semantic edge:
+Cursor가 콘텐츠 값을 명시적으로 제공하면 v0.6.5는 그 전체 값을 로컬 content-addressed store에 저장하고 semantic JSONL에는 참조만 기록합니다.
 
-```text
-agent --USED_MODEL--> model
-agent --REQUESTED_TOOL_CALL--> tool_call
-tool_call --USES_TOOL--> tool
-tool_call --DECLARED_COMMAND--> command
-tool_call --DECLARED_TARGET--> file
-tool_call --TOOL_CALL_RETURNED--> tool
-```
+Regression coverage에는 완전한 prompt text, tool input/output 및 failure text, shell command/output, MCP command/input/result, read hook이 제공한 file content, edit structure, 최종 Agent response, provider가 thought로 표시한 text, subagent summary가 포함됩니다.
 
-`postToolUseFailure`는 `TOOL_CALL_FAILED`로 별도 표현합니다.
+이 값들은 provider observation으로 보존되며 evidence limitation도 그대로 유지됩니다. 예를 들어 `beforeReadFile`이 제공한 content는 OS read가 완료되었다는 뜻이 아니고, edit structure 역시 provider가 실제 complete post-edit snapshot을 제공하지 않았다면 전체 수정 후 파일을 증명하지 않습니다.
 
-## Tool → Process correlation
+정의된 곳에서는 알려진 transport credential을 provider-metadata projection에서 필터링합니다. Content value 안에 포함된 secret은 보존됩니다. Full-fidelity content는 일반적인 secret-redaction layer가 아닙니다.
 
-Cursor Hook은 OS child PID를 제공하지 않습니다. 따라서 Shell call을 직접 process edge로 만들지 않습니다.
+## Tool to process correlation
 
-Runtime evidence에서 유일하게 지지되는 process가 독립적으로 확인될 때만 ExecWeave가 다음 bridge를 파생할 수 있습니다.
-
-```text
-tool_call --CORRELATED_WITH_PROCESS--> process
-```
-
-이 bridge는 항상:
+Cursor 훅 evidence는 자식 OS PID를 제공하지 않습니다. 따라서 Shell 호출은 독립 runtime evidence가 하나의 후보를 유일하게 지지할 때만 process bridge가 됩니다.
 
 ```text
 inferred: true
 causal: false
 ```
 
-후보가 모호하거나 지원되지 않으면 edge를 만들지 않습니다.
+모호하거나 지원되지 않는 호출에는 bridge를 만들지 않습니다. 안정적인 provider tool-call identity는 Cursor 내부의 논리 identity를 증명할 뿐 machine-level process attribution을 증명하지 않습니다.
 
-## 프라이버시 경계
+## Privacy와 evidence boundary
 
-Adapter는 prompt, transcript path, user email, agent message, tool output을 저장하지 않습니다. Model identity, conversation/generation IDs, tool name/use ID, command, declared file path처럼 observability에 필요한 metadata만 유지합니다.
+Cursor run evidence에는 prompt, tool argument/result, shell output, file content, edit data, assistant response, provider-labeled thought text, command, path, identifier, MCP value, embedded application secret가 포함될 수 있습니다. 공유 전에 전체 run directory를 검토하십시오.
 
-Command와 path 자체는 민감할 수 있으므로 artifact를 공유하기 전에 검토해야 합니다.
-
-## Evidence boundary
-
-Cursor Hook이 증명하는 것은 Cursor가 semantic layer에서 보고한 내용뿐입니다. Declared command의 실제 실행, declared file의 실제 접근, resource 간 data flow는 증명하지 않습니다. 실제 runtime behavior의 기준은 OS collector evidence입니다.
+Cursor 훅은 Cursor가 provider layer에서 보고하거나 제공한 내용만 증명합니다. 그 자체로 선언된 command가 실행되었거나 특정 process가 file에 접근했거나 resource 사이에 byte가 흘렀음을 증명하지 않습니다.

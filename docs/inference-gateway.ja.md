@@ -13,119 +13,51 @@
 </p>
 <!-- i18n-nav:end -->
 
-Inference Gateway は Agent/client と model provider/runtime の間にある独立レイヤーです。現在の baseline は **OpenRouter** と **LiteLLM Proxy** をサポートします。
-
-ExecWeave は requested model、resolved model、routed provider、deployment identity を別々の evidence として保持し、単一の model field に潰しません。
+Inference gateway は Agent/client と model provider/runtime の間にある独立した evidence layer です。ExecWeave は現在 **OpenRouter** と **LiteLLM Proxy** をモデル化し、requested model、resolved model、routed provider、deployment identity を分離します。
 
 ## CLI
 
-OpenRouter final response を変換します。
+stdin から一つの final gateway response を取得します。
 
 ```bash
-execweave-inference-gateway event \
-  --gateway openrouter \
-  --requested-model openrouter/auto \
-  --provider-name OpenAI \
-  --sidecar gateway.jsonl
+execweave-inference-gateway event --gateway openrouter --sidecar gateway.jsonl
+execweave-inference-gateway event --gateway litellm --sidecar gateway.jsonl
 ```
 
-LiteLLM Proxy final response を変換します。
+OpenRouter のみ caller-supplied request+response object を取得できます。
 
 ```bash
-execweave-inference-gateway event \
-  --gateway litellm \
-  --requested-model assistant \
-  --resolved-model azure/gpt-5 \
-  --provider-name Azure \
-  --deployment-id deployment-west \
-  --sidecar gateway.jsonl
+execweave-inference-gateway exchange --gateway openrouter --sidecar gateway.jsonl
 ```
 
-OpenRouter generation metadata を変換します。
+`exchange` は stdin に JSON-object `request` と `response` を要求します。これは明示的な caller-supplied evidence であり、**transparent wire interception ではありません**。
 
-```bash
-execweave-inference-gateway generation \
-  --gateway openrouter \
-  --sidecar gateway.jsonl
-```
+OpenRouter generation metadata は `generation` から引き続き利用できます。
 
-Caller が Gateway observation と Model Runtime observation の両方に対応する明示的な shared request identity を持つ場合、既存の request node 同士を接続できます。
+## OpenRouter full-fidelity boundary
 
-```bash
-execweave-inference-link \
-  --gateway litellm \
-  --gateway-request-id gw-123 \
-  --runtime vllm \
-  --runtime-request-id rt-456 \
-  --shared-request-id trace-789 \
-  --sidecar inference.jsonl
-```
+`event --gateway openrouter` では v0.6.5 が完全な supplied final response をローカル content-addressed store に保存し、compact routing/usage summary も出力します。`exchange --gateway openrouter` では完全な caller-supplied request と response を保存できます。
 
-Gateway response JSON は stdin から読み取ります。既定 endpoint identity：
+`content_complete_from_source: true` はこの integration point に渡された完全な値を保存したという意味です。Provider-side rewriting 前の request、hidden routing stages、model internals、ExecWeave が intercept していない network bytes を観測したという意味ではありません。
 
-- OpenRouter: `https://openrouter.ai/api/v1`
-- LiteLLM Proxy: `http://localhost:4000`
+Supplied request/response content 内の application-level secrets は保存されます。Endpoint identity は別途 sanitize されますが、query parameters/fragments や認識済み transport credentials の除外は content redaction の代替ではありません。
 
-## Graph model
+## LiteLLM boundary
 
-```text
-inference_gateway --SERVED_INFERENCE--> inference_request
-inference_request --REQUESTED_MODEL--> model
-inference_request --ROUTED_TO_MODEL--> model
-inference_request --ROUTED_TO_PROVIDER--> inference_provider
-inference_request --ROUTED_TO_DEPLOYMENT--> inference_deployment
-inference_gateway --REPORTED_GENERATION_METADATA--> inference_request
-inference_request --SAME_INFERENCE_REQUEST--> inference_request
-```
+LiteLLM は現在の v0.6.5 baseline でも metadata-oriented integration のままです。Response parser と optional custom callback は strict contract で routing/usage fields を保存します。OpenRouter が content storage をサポートするからといって LiteLLM callback が full-fidelity になるわけではありません。
 
-LiteLLM request では、たとえば次を別々に保持できます。
-
-```text
-requested_model = assistant
-resolved_model  = azure/gpt-5
-provider        = Azure
-deployment      = deployment-west
-```
-
-これらは置き換え可能な事実ではありません。
-
-## OpenRouter
-
-OpenRouter response metadata では requested model と response model を分離し、明示的に観測された routed provider だけを保持します。OpenRouter-specific generation metadata では latency、generation time、cost、native token counts、streaming state、cancellation state も記録できます。
-
-## LiteLLM Proxy
-
-<!-- litellm-auto-live-v064 -->
-### Live Viewer への自動 callback
-
-LiteLLM Proxy に ExecWeave custom callback を一度設定すると、現在の `execweave live` session の run-specific sidecar へ routing/usage metadata を自動送信できます。設定断片は次で表示できます：
+Callback 設定を出力し、configured proxy を現在の ExecWeave run 内で起動します。
 
 ```bash
 execweave-litellm-callback --print-config
-```
-
-表示された callback は既存の `litellm_settings.callbacks` に追加し、他の callbacks を上書きしないでください。import path は `execweave.litellm_callback.execweave_litellm_callback` なので、LiteLLM Proxy を実行する Python environment から ExecWeave を import できる必要があります。
-
-設定後のローカル proxy を ExecWeave 配下で起動します：
-
-```bash
 execweave live --open -- litellm --config config.yaml
 ```
 
-`execweave live` は `EXECWEAVE_SEMANTIC_SIDECAR` を proxy process に渡します。この run-specific variable が無ければ callback は no-op です。endpoint identity は `EXECWEAVE_LITELLM_ENDPOINT` で上書きでき、未設定なら `PROXY_BASE_URL`、最後に `http://localhost:4000` を使います。
+`EXECWEAVE_SEMANTIC_SIDECAR` がなければ callback は no-op です。Provider/deployment identity は authoritative evidence がある場合のみ出力され、model-name prefix や provider URL から推測しません。
 
-callback は LiteLLM `standard_logging_object` から call ID、model group、resolved model、deployment model ID、token counts、reported cost、response time、cache-hit、call type だけを whitelist で取得します。messages、response content、model parameters、任意 metadata、API-key metadata、provider `api_base` は保存しません。`model_group` は requested model、`model` は resolved model、`model_id` は deployment identity として保持し、権威ある provider evidence が無ければ provider を推測しません。
+## Exact gateway ↔ model-runtime identity
 
-
-LiteLLM は `model_runtime` ではなく `inference_gateway` としてモデル化します。OpenAI-compatible response は同じ gateway evidence layer を通じて request/model usage metadata を提供します。
-
-`--provider-name` と `--deployment-id` は caller / adapter が authoritative routing metadata を持つ場合だけ edge を生成します。ExecWeave は `azure/...` のような model string から provider / deployment を**推測しません**。routing facts がない場合は対応する edge を作りません。
-
-## Exact Gateway ↔ Model Runtime identity
-
-`execweave-inference-link` は temporal correlation より意図的に厳格です。Caller が Gateway と Runtime の両 observation に対応する明示的 shared identifier をすでに持つ場合にだけ `SAME_INFERENCE_REQUEST` を作成します。Timestamp、model name、token counts、latency、その他の類似度から identity を推測しません。
-
-Gateway request と Runtime request は別 node のままなので、layer-specific metadata が互いに上書きされることはありません。Identity edge は次のように固定されます。
+Caller が明示的な shared request identifier を持つ場合、`execweave-inference-link` は layer を統合せず gateway/runtime request nodes を接続できます。Raw shared identifier は保存せず、SHA-256-derived identity hash を使用します。
 
 ```text
 identity_exact: true
@@ -133,20 +65,10 @@ inferred: false
 causal: false
 ```
 
-これは supplied shared identity に基づいて二つの observation が同じ logical inference request を指すことだけを表します。特定の Agent や OS process が request を発生させたという causal proof ではありません。Explicit shared identity がなければ edge は作りません。
+これは exact logical request identity であり、特定 Agent/OS process が inference を caused した証明ではありません。
 
-## Usage metadata
+## Privacy と evidence boundary
 
-Response parser は prompt/input tokens、completion/output tokens、total tokens、cached prompt tokens、cache-write tokens、reasoning-token counts、reported cost のみを whitelist で保持します。
+OpenRouter full-fidelity artifact には完全な request/response content と embedded application secrets が含まれる可能性があります。LiteLLM artifact はより狭い metadata/callback contract に従います。Gateway evidence を sensitive として扱い、共有前に確認してください。
 
-## プライバシー境界
-
-ExecWeave は prompt text、response/completion content、reasoning text、choices、任意の provider payload field を保存しません。Gateway endpoint の credentials、query parameters、fragment は stored endpoint identity から除去します。
-
-元の requested model を response から推測しません。Caller が明示した場合だけ evidence として保存します。Exact cross-layer identity に使う raw `--shared-request-id` も保存せず、link event には SHA-256 由来の identity hash だけを保存します。
-
-## Evidence boundary
-
-Gateway response metadata が証明するのは gateway 自身が報告した情報、または response とともに与えられた authoritative routing metadata だけです。どの local Agent が request を開始したか、どの model-runtime process が実際に serving したか、どの OS process が原因かは単独では証明できません。
-
-Gateway events は non-causal（`causal: false`）のまま Agent/IDE semantic evidence、Model Runtime evidence、OS Runtime evidence と分離します。明示的 shared request identity は Gateway と Model Runtime observation を接続できますが layer を統合しません。別途推論された correlation は inferred として明示し続け、causal evidence として表現してはいけません。
+Gateway observation は integration point が報告した内容、または併記された authoritative routing data だけを証明します。どの local Agent が request を開始したか、どの model-runtime process が処理したか、どの OS process が caused したかは単独では証明しません。Shared identity がない場合、timestamp/model-name guessing で補ってはいけません。

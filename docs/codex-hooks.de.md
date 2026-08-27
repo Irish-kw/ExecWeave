@@ -13,170 +13,59 @@
 
 # OpenAI-Codex-Lifecycle-Hooks
 
-ExecWeave bietet einen nativen Adapter für OpenAI-Codex-Lifecycle-Hooks, um semantische Belege auf Provider-Ebene derselben lokalen Ausführung hinzuzufügen wie die OS-Laufzeittelemetrie.
+ExecWeave zeichnet Evidenz aus Codex-Lifecycle-Hooks neben unabhängig erfasster OS-Laufzeit-Telemetrie auf. Provider-Hooks beschreiben logische Agent-/Tool-Aktivität; sie liefern nicht die OS-Kind-PID, die für direkte Tool → Process-Kausalität nötig wäre.
 
-Diese Integration ist bewusst konservativ. Codex-Lifecycle-Hooks können ExecWeave mitteilen, welcher logische Tool-Aufruf angefordert wurde und – bei Shell-Ausführung – welcher Befehl deklariert wurde. Sie liefern **keine** OS-Kindprozess-PID. Daher stellt ExecWeave Tool → Process-Zuordnung aus dem Provider-Hook niemals als direkt beobachteten oder kausalen Beleg dar.
+## Aktuelle Hook-Oberfläche
 
-## Aktuelle Unterstützung
+`execweave-codex-hook --print-config` registriert derzeit:
 
-ExecWeave verarbeitet derzeit folgende Codex-Lifecycle-Ereignisse:
-
-- `SessionStart`
 - `PreToolUse`
+- `PermissionRequest`
 - `PostToolUse`
+- `PreCompact`
+- `PostCompact`
+- `SessionStart`
+- `SessionEnd`
+- `UserPromptSubmit`
+- `SubagentStart`
+- `SubagentStop`
+- `Stop`
+- `Interrupt`
 
-Der Adapter zeichnet nur Hooks auf, die Codex tatsächlich liefert. Unbekannte Lifecycle-Ereignisse werden ignoriert statt geraten.
+Unbekannte oder upstream nicht verfügbare Ereignisse werden nicht erfunden. Hook-Schemata und Dispatch-Abdeckung können sich zwischen Codex-Versionen ändern.
 
-### `SessionStart`
-
-Wenn ein Modellname vorhanden ist, zeichnet ExecWeave auf:
-
-```text
-OpenAI Codex --USED_MODEL--> model
-```
-
-Der Adapter liest oder kopiert keine Transcript-Dateiinhalte.
-
-### `PreToolUse`
-
-ExecWeave verwendet die `tool_use_id` des Providers als stabile Identität des logischen Tool-Aufrufs:
-
-```text
-OpenAI Codex --REQUESTED_TOOL_CALL--> tool_call
-tool_call --USES_TOOL--> tool
-```
-
-Für Codex' kanonisches Hook-Tool `Bash` erzeugt ein stringförmiges `tool_input.command` zusätzlich:
-
-```text
-tool_call --DECLARED_COMMAND--> command
-```
-
-Der deklarierte Befehl ist ein semantischer Provider-Beleg. Er ist für spätere konservative Korrelation nützlich, beweist aber nicht, dass ein bestimmter OS-Prozess diesen Befehl ausgeführt hat.
-
-### `PostToolUse`
-
-ExecWeave zeichnet derzeit eine neutrale Abschlussrelation auf:
-
-```text
-tool_call --TOOL_CALL_RETURNED--> tool
-```
-
-`PostToolUse` wird absichtlich **nicht** in `TOOL_CALL_SUCCEEDED` oder `TOOL_CALL_FAILED` übersetzt. Das aktuelle Codex-Hook-Payload liefert keinen ausreichend verlässlichen Erfolgs-/Fehlerindikator, um diese Aussage sicher zu treffen.
-
-ExecWeave speichert `tool_response` nicht roh in der semantischen Telemetrie. Bei String-Antworten werden nur Antworttyp und Zeichenanzahl gespeichert.
-
-## Codex konfigurieren
-
-Nach der Installation von ExecWeave erzeugen Sie das unterstützte Lifecycle-Hook-Konfigurationsfragment:
+Hook konfigurieren und Run aufzeichnen:
 
 ```bash
 execweave-codex-hook --print-config
-```
-
-Fügen Sie das ausgegebene `hooks`-Objekt in Ihre Codex-`hooks.json`-Konfiguration ein.
-
-Die erzeugte Konfiguration registriert `execweave-codex-hook` für `SessionStart`, `PreToolUse` und `PostToolUse`.
-
-Der Hook-Adapter ist standardmäßig fail-open: Telemetrieprobleme geben eine Warnung aus, blockieren Codex aber nicht absichtlich. Zum Debuggen des Adapters selbst verwenden Sie:
-
-```bash
-execweave-codex-hook --strict
-```
-
-## Einen Codex-Lauf aufzeichnen
-
-Nachdem Codex so konfiguriert wurde, dass der Hook aufgerufen wird:
-
-```bash
 execweave-codex-record --open -- codex
 ```
 
-`execweave-codex-record` verändert die Codex-Konfiguration nicht. Es bindet lediglich den Kindprozess von Codex über eine geerbte Umgebungsvariable an einen laufbezogenen semantischen Sidecar.
+Der Recorder bindet einen run-spezifischen semantischen Sidecar und hält Runtime-, Semantic- und Correlated-Artefakte getrennt.
 
-Wenn Lifecycle-Hooks ausgelöst werden, enthält das Laufverzeichnis geschichtete Artefakte:
+## Full-Fidelity-Inhalt
 
-```text
-.execweave/runs/<run-id>/
-├── events.jsonl              # nur Laufzeitbelege
-├── graph.json                # nur Laufzeitgraph
-├── viewer.html               # nur Laufzeit-Viewer
-├── semantic.jsonl            # nur Codex-Lifecycle-Hook-Belege
-├── events.semantic.jsonl     # validierter Laufzeit- + Semantikstrom
-├── graph.semantic.json       # Laufzeit- + Semantikgraph
-├── viewer.semantic.html      # Laufzeit- + Semantik-Viewer
-├── events.correlated.jsonl   # abgeleiteter Strom; beobachtete Belege unverändert
-├── graph.correlated.json     # Graph mit inferierten Brücken + Korrelationsmetadaten
-└── viewer.correlated.html    # Viewer mit Korrelationszusammenfassung
-```
+v0.6.5 speichert vollständige Inhaltswerte, die der Codex-Hook tatsächlich liefert, in einem lokalen content-addressed Store. Der JSONL-Sidecar enthält Referenzen statt großer Inline-Kopien.
 
-Wenn keine Codex-Hook-Ereignisse eintreffen, fällt der Recorder sicher auf reine Laufzeitartefakte zurück.
+Beobachteter Inhalt kann den vollständigen `UserPromptSubmit.prompt`, vollständiges `tool_input`, vollständiges `PostToolUse.tool_response`, Tool-Eingaben aus Permission Requests und finale Assistant-/Subagent-Nachrichten umfassen, sofern diese Felder vom Hook geliefert werden. Anwendungsbezogene Werte in diesen Payloads werden beibehalten; gehen Sie nicht davon aus, dass sie redigiert wurden.
 
-## Tool → Process-Korrelation
+Erkannte Transport-Credentials werden aus der separaten Provider-Metadatenprojektion entfernt, wenn der Adapter sie erkennt. Dieses Filtern verändert oder bereinigt den Content-Payload selbst nicht.
 
-Für eine `Bash`-Deklaration wie:
+`content_complete_from_source: true` bedeutet, dass der vollständige Wert gespeichert wurde, den der Codex-Integrationspunkt geliefert hat. Es bedeutet nicht, dass ExecWeave eine nicht gelieferte Transcript-Datei gelesen, einen unsichtbaren Provider-Request abgefangen oder verborgenen Modellzustand beobachtet hat.
 
-```text
-tool_call --DECLARED_COMMAND--> "python task.py"
-```
+## Tool-Identität und Korrelation
 
-kann ExecWeave diese semantische Deklaration mit begrenzten Laufzeit-Prozessbelegen vergleichen. Es erzeugt:
-
-```text
-tool_call --CORRELATED_WITH_PROCESS--> process
-```
-
-nur dann, wenn genau ein Prozesskandidat durch den bestehenden konservativen Matcher eindeutig gestützt wird.
-
-Jede solche Brücke bleibt:
+Wenn Codex `tool_use_id` liefert, verwendet ExecWeave ihn als logische Tool-Call-Identität. Deklarierte Commands bleiben semantische Provider-Evidenz. Der Hook liefert weiterhin keine OS-Kind-PID; eine Tool → Process-Brücke wird daher nur dann von der konservativen Korrelationsstufe erzeugt, wenn genau ein Runtime-Kandidat eindeutig unterstützt wird.
 
 ```text
 inferred: true
 causal: false
 ```
 
-Mehrdeutige, nicht passende, Shell-Builtin-, zusammengesetzte oder anderweitig nicht unterstützte Aufrufe erzeugen keine Brücke. Der korrelierte Graph speichert eine Korrelationszusammenfassung auf Laufebene, sodass der Viewer `matched`, `ambiguous`, `no match` und `unsupported` unterscheiden kann, statt jede fehlende Kante gleich zu behandeln.
+Mehrdeutige, nicht gematchte, Shell-Builtin-, Compound- oder nicht unterstützte Commands erzeugen keine Brücke. Ähnliche Zeitpunkte oder Command-Strings reichen niemals aus, um Provider-Evidenz in OS-Attribution umzuwandeln.
 
-Der Viewer bietet außerdem **observed only**, wodurch inferierte Kanten vor Fokus-Traversierung und Layout entfernt werden.
+## Datenschutz und Evidenzgrenze
 
-## Beleg- und Datenschutzgrenze
+Codex-Semantic-/Content-Artefakte können Prompts, Commands, Tool-Argumente/-Ergebnisse, finale Antworten, Pfade, Identifikatoren und sensible anwendungsbezogene Werte enthalten. Behandeln Sie das gesamte Run-Verzeichnis als sensibel und prüfen Sie es vor dem Teilen.
 
-Der Codex-Adapter von ExecWeave speichert derzeit semantische Metadaten, die für den Graphaufbau erforderlich sind, darunter:
-
-- Codex-Sitzungs-ID
-- Turn-ID, sofern vorhanden
-- Modellname
-- Toolname
-- Tool-Use-ID
-- Namen der Eingabeschlüssel
-- deklarierter `Bash`-Befehl
-- Antworttyp / Antwortlänge für `PostToolUse`
-
-Er sammelt absichtlich nicht:
-
-- Prompt-Text
-- Inhalte von Transcript-Dateien
-- rohe `tool_response`-Inhalte
-- Dateiinhalte
-- vom Provider abgeleitete Tool → Process-PIDs
-
-Befehle können dennoch Geheimnisse oder sensible Pfade enthalten. Prüfen Sie Artefakte vor der Weitergabe.
-
-## Aktuelle Upstream-Einschränkungen
-
-Codex-Lifecycle-Hooks entwickeln sich weiter. ExecWeave behandelt diese Integration daher als nativen semantischen Adapter, nicht als Beweis, dass jeder Codex-Ausführungsmodus vollständige Lifecycle-Abdeckung bietet.
-
-Bekannte Einschränkungen:
-
-1. `PostToolUse` liefert ExecWeave derzeit kein zuverlässiges Erfolgs-/Fehlersignal; die Relation bleibt daher neutral `TOOL_CALL_RETURNED`.
-2. Bei der Dispatch-Abdeckung von Lifecycle-Hooks gab es zuletzt Lücken in einigen `codex exec`-Pfaden. Die interaktive Codex CLI ist das sicherere erste Ziel für Lifecycle-Hook-Telemetrie.
-3. Bei einigen Windows-Befehlsausführungspfaden wurden Upstream-Lücken in der Hook-Abdeckung gemeldet.
-4. Provider-Hooks liefern nicht die OS-Kindprozess-PID, die für direkt beobachtete Tool → Process-Zuordnung erforderlich wäre.
-
-Diese Einschränkungen betreffen die semantische Abdeckung, nicht den unabhängigen OS-Laufzeit-Collector. Laufzeitbelege bleiben verfügbar, selbst wenn kein Provider-Hook ausgelöst wird.
-
-## Designregel
-
-Die Codex-Integration folgt derselben Belegregel wie der Rest von ExecWeave:
-
-> Provider-Semantik beschreibt, was der Agent nach eigener Angabe tat; OS-Telemetrie beschreibt, was die Maschine tatsächlich beobachtete; Korrelation darf beide nur als explizite, nicht kausale Inferenz verbinden, wenn die Belege eindeutig sind.
+Der Adapter behauptet nicht, dass jeder Codex-Ausführungsmodus vollständige Lifecycle-Abdeckung bietet. Fehlende Hooks reduzieren die semantische Sichtbarkeit, deaktivieren aber nicht den unabhängigen OS-Runtime-Collector. Ein Provider-Hook beweist außerdem nicht, dass ein deklarierter Command ausgeführt wurde, dass eine Dateiaktion stattfand oder dass Bytes zwischen Ressourcen flossen.

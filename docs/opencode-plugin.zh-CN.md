@@ -13,69 +13,42 @@
 </p>
 <!-- i18n-nav:end -->
 
-ExecWeave 通过 project-local plugin 与 OpenCode 集成。OpenCode 在 `tool.execute.before` 与 `tool.execute.after` 中都提供精确的 `sessionID + callID`，因此同一个 logical tool call 不需要依赖 heuristic 来配对 lifecycle events。
+ExecWeave 通过 project-local plugin 集成 OpenCode。OpenCode 在 tool before/after hook 上提供精确 `sessionID + callID`，因此单个 logical tool call 可以直接识别，不需要 heuristic pairing。这仍只是 provider-level identity evidence，不是 OS PID。
 
-## 安装
-
-在当前项目安装生成的 plugin：
+## 安装与记录
 
 ```bash
 execweave-opencode-plugin --install
-```
-
-它会创建：
-
-```text
-.opencode/plugins/execweave.ts
-```
-
-OpenCode 会自动加载该目录下的 project plugin。若文件已存在，ExecWeave 默认拒绝覆盖，除非明确使用 `--force`。
-
-随后记录运行：
-
-```bash
 execweave-opencode-record --open -- opencode
 ```
 
-## 捕获的 semantic evidence
+生成的 plugin 安装在 `.opencode/plugins/execweave.ts`。除非明确提供 `--force`，ExecWeave 不会覆盖已有 plugin。
 
-当前 baseline 只发送最小 metadata：
+## 完整 observation surface
 
-- `chat.message`
-- `tool.execute.before`
-- `tool.execute.after`
+v0.6.5 已不再受限于旧的三-event minimal-metadata contract。当 OpenCode hook 触发时，generated plugin/hook path 可以保存 chat messages、tool execution before/after、model-context/system transforms、completed assistant text、provider bus events、credential filtering 后的 request headers、tool definitions、commands、permission requests 与 compaction context 等 OpenCode 明确暴露的内容。
 
-典型 Graph 关系：
+典型 logical graph relationship 仍包括 Agent → tool call、tool call → tool、declared command/target 与 returned-result observation。Content storage 不会改变其 evidence semantics。
+
+## Full-fidelity content
+
+OpenCode plugin 提供的完整值会存入本地 content-addressed store，再由 semantic JSONL sidecar reference。Regression coverage 包括完整 chat message/parts、tool args/results、model context、system prompt values、assistant text、provider events、tool definitions、command arguments/parts、permission data 与 compaction prompt/context。
+
+Authorization/cookie 等已知 transport credentials 会从相关 headers/provider-metadata projection 过滤；但 tool args、message、result 或其他 content value 中的 application-level secrets 仍会保存。不要假设 full-fidelity content 已完成 secret redaction。
+
+## Tool to process correlation
+
+`sessionID + callID` 只证明 OpenCode 内部 exact logical call identity，不能证明哪个 OS process 执行了该 call。Tool → Process 仍是另外 derivation 的 conservative bridge，且只有独立 runtime evidence 找到唯一受支持 process 时才会建立。
 
 ```text
-agent --USED_MODEL--> model
-agent --REQUESTED_TOOL_CALL--> tool_call
-tool_call --USES_TOOL--> tool
-tool_call --DECLARED_COMMAND--> command
-tool_call --DECLARED_TARGET--> file
-tool_call --TOOL_CALL_RETURNED--> tool
+inferred: true
+causal: false
 ```
 
-OpenCode 的 `callID` 直接用于 `tool_call` identity。
+Ambiguous 或 unsupported call 不会建立 bridge。
 
-## 隐私边界
+## Privacy 与 evidence boundary
 
-OpenCode 的 after-hook 可以看到 tool output，但 ExecWeave 生成的 plugin **不会**转发 `output.output` 或 `output.metadata`。
+OpenCode run evidence 可能包含 prompt/message、system/context data、tool argument/output、command、permission pattern、provider event content、path、identifier 与 application secrets。整个 run directory 都应视为敏感数据，分享前请检查。
 
-Plugin 会先缩减 arguments：
-
-- `bash`：只保留 declared `command`
-- file-oriented tools：只保留 `filePath`、`file_path`、`path` 等 path 字段
-- 可选的 working-directory metadata
-
-Raw write content、chat message parts 和 tool output 都不会发送给 ExecWeave hook。
-
-## Tool → Process correlation
-
-`callID` 能证明 OpenCode 内部的 logical call identity，但它不是 OS PID。Tool → Process 仍是保守的 derived bridge，仅在 runtime evidence 找到唯一且有足够支持的 process 时建立。
-
-Derived bridge 始终保持 `inferred: true`、`causal: false`。
-
-## Evidence boundary
-
-Plugin 报告的是 OpenCode semantic intent。Process/file/network 的实际 runtime observation 仍由 OS collector 独立建立。ExecWeave 不会把 provider plugin 当作 declared command 或 file action 已真正发生的证明。
+Plugin 只证明 OpenCode 在 semantic/provider layer 明确暴露了什么。Runtime collector 会独立建立 process/file/network observation；full-fidelity provider content 不能单独证明 command execution、完成 file access 或 byte-level data flow。

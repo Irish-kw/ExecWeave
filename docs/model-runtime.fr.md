@@ -1,4 +1,4 @@
-# Intégrations de runtime de modèle
+# Model Runtime Integrations
 
 <!-- i18n-nav:start -->
 <p align="center">
@@ -13,13 +13,13 @@
 </p>
 <!-- i18n-nav:end -->
 
-Les runtimes de modèle sont séparés des adaptateurs sémantiques Agent/IDE et des passerelles d’inférence. Ils décrivent ce qu’un serveur d’inférence local ou auto-hébergé rapporte ; ils ne prouvent pas quel Agent a initié une requête.
+Les model runtimes sont séparés des adaptateurs semantic Agent/IDE et des inference gateways. Ils décrivent ce qu'un point d'intégration d'inférence local ou self-hosted rapporte ; ils ne prouvent pas quel Agent a initié une requête.
 
 Le baseline actuel prend en charge **Ollama**, **llama.cpp**, **vLLM** et **LM Studio**.
 
 ## CLI
 
-Convertir les métadonnées de réponse finale en événements d’inférence :
+Capturer une réponse finale runtime fournie sur stdin :
 
 ```bash
 execweave-model-runtime event --runtime ollama --sidecar model-runtime.jsonl
@@ -28,82 +28,34 @@ execweave-model-runtime event --runtime vllm --sidecar model-runtime.jsonl
 execweave-model-runtime event --runtime lmstudio --sidecar model-runtime.jsonl
 ```
 
-Interroger l’état du runtime ou les catalogues de modèles :
+Capturer un échange request+response fourni par l'appelant :
 
 ```bash
-execweave-model-runtime probe --runtime ollama --sidecar model-runtime.jsonl
-execweave-model-runtime probe --runtime llamacpp --metrics --sidecar model-runtime.jsonl
-execweave-model-runtime probe --runtime vllm --sidecar model-runtime.jsonl
-execweave-model-runtime probe --runtime lmstudio --sidecar model-runtime.jsonl
+execweave-model-runtime exchange --runtime ollama --sidecar model-runtime.jsonl
 ```
 
-Les endpoints par défaut sont :
+`exchange` accepte les quatre runtimes et exige des objets JSON `request` et `response`. Il enregistre des preuves explicitement fournies par l'appelant ; ce n'est pas une interception réseau transparente.
 
-- Ollama : `http://localhost:11434`
-- llama.cpp : `http://localhost:8080`
-- vLLM : `http://localhost:8000`
-- LM Studio : `http://localhost:1234`
+L'état runtime et les catalogues de modèles restent disponibles via `probe`. Les endpoints localhost par défaut sont Ollama `11434`, llama.cpp `8080`, vLLM `8000` et LM Studio `1234`.
 
-## Couche partagée compatible OpenAI
+## Contenu full-fidelity
 
-llama.cpp, vLLM et LM Studio réutilisent un analyseur compatible OpenAI pour l’usage des réponses finales et les métadonnées de catalogue `/v1/models`. La couche partagée normalise `prompt_tokens` / `completion_tokens` de style Chat Completions et `input_tokens` / `output_tokens` de style Responses, tout en ne conservant que des métadonnées de tokens sur liste blanche telles que les nombres de tokens en cache et de raisonnement.
+v0.6.5 stocke le contenu complet exposé par le point d'intégration model-runtime sélectionné dans un store local SHA-256 adressé par contenu. `event` conserve la réponse finale complète fournie sans prétendre voir la requête. `exchange` peut conserver requête et réponse fournies, y compris messages/prompts, définitions/appels/résultats d'outils, contenu assistant généré, champs reasoning/thinking lorsqu'ils sont explicitement présents, configuration de génération et autres valeurs de réponse prises en charge par le payload runtime.
 
-Les preuves spécifiques au runtime restent hors de l’analyseur commun. llama.cpp conserve ses champs de timing et son adaptateur de métriques Prometheus au lieu d’imposer cette sémantique à vLLM ou LM Studio.
+Le sidecar sémantique JSONL contient des références plutôt que de grandes copies inline. Les métadonnées compactes de usage/timing/model restent disponibles pour les graphes et requêtes.
 
-## Modèle de graphe
+`content_complete_from_source: true` signifie qu'ExecWeave a stocké toute la valeur fournie à la CLI/au point d'intégration. Cela ne signifie pas que le runtime a exposé un état caché du modèle, que la requête correspond nécessairement à la requête wire finale après réécriture, ni qu'ExecWeave a observé des octets qui ne lui ont pas été fournis.
 
-La couche runtime peut produire :
+Les valeurs applicatives sensibles incluses dans request/response sont conservées. L'assainissement endpoint/path et le filtrage provider-metadata ne constituent pas une redaction générale du contenu.
 
-```text
-model_runtime --SERVED_INFERENCE--> inference_request
-inference_request --USED_MODEL--> model
-model_runtime --LOADED_MODEL--> model
-model_runtime --SERVES_MODEL--> model
-model_runtime --ADVERTISES_MODEL--> model
-model_runtime --REPORTED_METRICS--> model_runtime_snapshot
-```
+## Preuves propres au runtime
 
-Ces relations ont volontairement des significations différentes.
+Ollama peut également rapporter l'état des modèles chargés via `/api/ps`. llama.cpp peut exposer timing/throughput, `/v1/models` et éventuellement des métriques agrégées `/metrics` ; les lignes Prometheus étiquetées susceptibles de contenir des identifiants locaux sensibles restent limitées par l'adaptateur metadata. vLLM et LM Studio partagent le parsing OpenAI-compatible pour responses/catalogues tout en conservant des sémantiques de relation propres au runtime.
 
-## Ollama
+Les relations de catalogue restent volontairement distinctes : selon ce que la source prouve, un runtime peut `LOADED_MODEL`, `SERVES_MODEL` ou `ADVERTISES_MODEL`. La visibilité catalogue LM Studio reste `ADVERTISES_MODEL` ; un élément de catalogue ne prouve pas automatiquement que les poids sont résidents en mémoire.
 
-Les métadonnées de réponse finale peuvent inclure le nombre de tokens de prompt/complétion, la durée de chargement, la durée d’évaluation du prompt, la durée de génération et la raison de fin.
+## Confidentialité et frontière des preuves
 
-Les instantanés `/api/ps` peuvent exposer des métadonnées de modèles chargés telles que la taille VRAM, la longueur de contexte, le format, la famille, le nombre de paramètres et la quantification. Cela est représenté comme `LOADED_MODEL` car l’endpoint rapporte les modèles actuellement chargés.
+Le contenu model-runtime peut contenir prompts/messages complets, données d'outils, réponses générées, texte reasoning/thinking, paramètres de modèle, configuration, chemins, identifiants et valeurs applicatives sensibles. Examinez tout le répertoire du run avant partage.
 
-## llama.cpp
-
-Les réponses compatibles OpenAI contribuent un usage normalisé ainsi que des métadonnées de timing/débit propres à llama.cpp. `/v1/models` est représenté comme `SERVES_MODEL`, et `/metrics` facultatif contribue des métriques runtime agrégées.
-
-Les lignes Prometheus avec labels sont ignorées, car les labels peuvent contenir des chemins de modèles locaux sensibles ou d’autres identifiants.
-
-Les identifiants de modèles llama.cpp ressemblant à des chemins locaux ou fichiers GGUF sont caviardés : l’identifiant natif complet est hashé pour l’identité d’entité, tandis que seul le nom de base est affiché.
-
-## vLLM
-
-vLLM réutilise la couche de réponse compatible OpenAI et de catalogue de modèles. `/v1/models` est représenté comme `SERVES_MODEL` car il décrit les modèles exposés par cet endpoint de service.
-
-Aucun prompt, réponse, texte de raisonnement, choice, logprob ou token généré n’est copié dans les événements ExecWeave.
-
-## LM Studio
-
-<!-- lmstudio-auto-live-v064 -->
-Pour l’ingestion automatique dans Live Viewer, lancez LM Studio sous ExecWeave avec un port local explicite, par exemple `execweave live --open -- lms server start --port 1234`. ExecWeave vérifie qu’aucune API compatible n’était déjà présente sur cet endpoint avant le lancement, puis ne probe `/v1/models` qu’après un démarrage réussi. La relation reste `ADVERTISES_MODEL` et n’est jamais promue en `LOADED_MODEL`.
-
-LM Studio réutilise le même analyseur de réponse compatible OpenAI, mais son résultat `/v1/models` est représenté comme `ADVERTISES_MODEL`, et non `LOADED_MODEL`.
-
-Cette distinction est volontaire : LM Studio peut rendre visibles au serveur des modèles téléchargés, y compris dans des configurations où un modèle est chargé à la demande. Une entrée de catalogue ne prouve donc pas à elle seule que les poids du modèle résidaient en mémoire au moment de l’observation.
-
-## Limite de confidentialité
-
-ExecWeave exclut volontairement de cette couche le texte des prompts, le contenu des réponses, le texte de pensée/raisonnement, les choices, logprobs et tokens générés bruts.
-
-Les métadonnées sur liste blanche peuvent inclure l’identité du modèle, l’identité de la requête, les nombres de tokens prompt/entrée et complétion/sortie, le total de tokens, les nombres de tokens en cache et de raisonnement ainsi que les métadonnées de timing spécifiques au runtime. Les chemins absolus de modèles locaux sont caviardés pour les runtimes locaux compatibles OpenAI pris en charge ; llama.cpp conserve un caviardage plus strict des chemins GGUF.
-
-Les métriques runtime agrégées ne sont pas automatiquement attribuées à un Agent ou à une requête d’inférence spécifique.
-
-## Limite de preuve
-
-Une API runtime prouve seulement ce que ce serveur d’inférence a rapporté. Elle ne prouve pas à elle seule quel Agent a initié la requête, quelle passerelle l’a routée ni quel processus OS l’a causée.
-
-L’identité inter-couches nécessite des identifiants partagés explicites ou un mécanisme de corrélation conservateur défini séparément. Une corrélation dérivée doit rester marquée comme inférence plutôt que preuve causale.
+Une réponse runtime ou un exchange prouve seulement ce que ce point d'intégration a fourni. Il ne prouve pas à lui seul quel Agent a initié la requête, quelle gateway l'a routée, quel processus OS l'a causée ou que des octets de fichier ont circulé vers un endpoint modèle/réseau. L'identité cross-layer nécessite des identifiants partagés explicites ou une corrélation conservatrice explicitement marquée.

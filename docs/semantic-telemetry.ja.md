@@ -13,148 +13,51 @@
 
 # Semantic Telemetry
 
-ExecWeave は、元の runtime capture を書き換えることなく、provider/framework の semantic event と OS runtime evidence を組み合わせられます。
-
-設計上の目標は、logical Agent/Tool/MCP evidence と machine-level の process/file/network evidence を同じ graph に配置しつつ、どの source が各 relationship を証明したのかを保持することです。
-
-```text
-agent --REQUESTED_TOOL_CALL--> tool_call --USES_TOOL--> tool
-                                                     |
-                                                     +--DECLARED_COMMAND--> command
-
-process --OPENED_READ--> file
-process --CONNECTED_TO--> network_endpoint
-```
-
-Provider hook は「どの logical action が要求されたか」を説明できます。Runtime collector は「machine が実際に何を観測したか」を説明します。ExecWeave は両者の temporal proximity を黙って causal proof に変換しません。
+ExecWeave は provider/framework の semantic observation と独立した OS runtime evidence を組み合わせますが、元の runtime capture は書き換えません。Provider evidence は Agent、tool、gateway、model-runtime integration point が明示的に公開した内容を示し、OS evidence は machine collector が実際に観測した内容を示します。Correlation は常に独立した derived layer であり、自動的に causal proof へ昇格しません。
 
 ## Workflow
 
-まず通常の ExecWeave run を capture します。
+Provider adapter が run-bound semantic sidecar を書き、その後 ExecWeave が新しい merged stream を検証します。
 
 ```bash
-execweave run --output run.jsonl -- claude
-```
-
-Provider adapter または hook は、例えば `semantic.jsonl` のような別 semantic sidecar を書きます。
-
-Sidecar を **新しい** validated event stream に merge します。
-
-```bash
-execweave semantic-merge run.jsonl semantic.jsonl \
-  --output run.semantic.jsonl
-
+execweave semantic-merge run.jsonl semantic.jsonl --output run.semantic.jsonl
 execweave validate run.semantic.jsonl
-execweave graph run.semantic.jsonl \
-  --output run.semantic.graph.json
-execweave view run.semantic.graph.json \
-  --output run.semantic.html \
-  --open
+execweave graph run.semantic.jsonl --output run.semantic.graph.json
 ```
 
-`run.jsonl` は `semantic-merge` によって変更されません。
+`semantic-merge` は `run.jsonl` を変更しません。Run-bound recorder は runtime、semantic、correlated artifact を別々に保持します。
 
-## Sidecar record contract
+## v0.6.5 の full-fidelity content
 
-Semantic sidecar record は 1 行 1 JSON object です。Adapter は semantic observation だけを供給します。
-
-```json
-{
-  "timestamp": "2026-08-25T10:00:02.123Z",
-  "event_type": "semantic.tool.called",
-  "relation": "REQUESTED_TOOL_CALL",
-  "source": {
-    "type": "agent",
-    "id": "agent:Claude Code",
-    "name": "Claude Code",
-    "attributes": {}
-  },
-  "target": {
-    "type": "tool_call",
-    "id": "tool-call:provider:session:call-id",
-    "name": "Bash",
-    "attributes": {}
-  },
-  "attributes": {
-    "attribution": "provider_hook",
-    "evidence_source": "provider_hook",
-    "causal": false
-  }
-}
-```
-
-Sidecar は次を提供する必要がありません。
-
-- ExecWeave `session_id`
-- ExecWeave `schema_version`
-- contiguous `sequence`
-- `event_id`（optional。省略時は ExecWeave が生成）
-
-`semantic-merge` は runtime session ID を注入し、現在の ExecWeave event schema を使い、semantic/runtime body event を timestamp 順に sort し、1 本の contiguous sequence を再割り当てし、`session.started` を先頭、`session.finished` を末尾に保ち、output file を commit する前に merged result を validate します。
-
-## Recommended semantic entities
-
-ExecWeave の generic entity schema は追加 node type をすでにサポートしています。
-
-| Type | Example ID | Meaning |
-| --- | --- | --- |
-| `agent` | `agent:Claude Code` | Logical agent/client |
-| `tool_call` | `tool-call:claude:session:tool-use-id` | 1 回の具体的な logical tool invocation |
-| `tool` | `tool:claude:Bash` | Agent から見える tool |
-| `mcp_server` | `mcp-server:claude:github` | MCP server/integration |
-| `model` | `model:claude:claude-sonnet` | Provider が公開した場合の model identity |
-| `command` | `command:sha256:...` | Semantic hook が宣言した command metadata |
-| `process_reference` | `process-pid:1234` | Upstream source が実際に PID を提供した場合の optional bridge |
-
-Entity ID は、1 run 内で repeated semantic observation を deduplicate できる程度に安定している必要があります。
-
-## Optional process-reference bridge
-
-一部の provider/framework adapter は child PID を知っていても、ExecWeave の完全な process entity ID を知らない場合があります。その場合、観測された PID を持つ `process_reference` を emit できます。
-
-Merge 中、ExecWeave はこの reference を runtime stream で実際に観測された process entity に対して resolve します。Resolution は保守的です。
-
-1. 明示的な `create_time` が process を一意に識別できる；
-2. PID に runtime candidate が 1 つだけなら直接 resolve；
-3. PID reuse がある場合、semantic timestamp より後ではない最新の process creation time が一意なら選択可能；
-4. それ以外は推測せず `process_reference` を `unresolved: true` のまま保持。
-
-Resolved event は元の reference から runtime process への mapping を `attributes.resolved_process_references` に記録します。
-
-**Provider が PID を公開していない場合は `process_reference` を emit しないでください。** Command string と近い process timestamp だけでは exact Tool → Process relationship を主張できません。
-
-現在の Claude Code native hook adapter はこのルールに従います。Claude の hook input は tool call を識別しますが child process PID を公開しないため、adapter は `tool_call --SPAWNED_PROCESS--> process` edge を捏造しません。
-
-## Evidence and causality boundary
-
-現在の provider adapter は、provider hook が logical tool event の発生を authoritative に報告した場合でも semantic edge を `causal: false` として mark します。ExecWeave では `causal: true` は、単に 2 つの logical object が関連しているという事実より強い execution-level attribution に予約されています。
-
-そのため次の statement は分離されたままです。
+Semantic telemetry は小さな metadata summary だけに限定されません。対応 integration point が content を明示的に提供した場合、v0.6.5 は source から提供された完全な値をローカル content-addressed store に保存し、JSONL event には reference のみを置けます。
 
 ```text
-Claude Code --REQUESTED_TOOL_CALL--> Bash call       semantic provider evidence
-process     --OPENED_READ---------> ~/.ssh/id_ed25519 OS runtime evidence
+<run-root>/content/sha256/<sha256>.<json|txt|bin>
 ```
 
-この 2 つの observation だけでは次を証明しません。
+Content reference には SHA-256、relative path、media type、byte size、content kind、representation、その integration point から見て complete from source かどうかが記録されます。`complete_from_source: true` は受け取った完全な値を保存したという意味であり、hidden model state、見えていない final wire request、または integration point が提供しなかった field を provider が公開したという意味ではありません。
+
+Native adapters は hook/API surface が明示的に提供する prompts、tool inputs/results、assistant/model responses、明示的な reasoning/thinking text、provider hook が渡す file content、contract が対応する provider request/response objects にこの仕組みを使います。
+
+Content store が失敗しても compact semantic summary は graph materialization に利用できます。Native hook adapter はデフォルト fail-open なので、content-storage failure が Agent operation を意図的に止めることはありません。
+
+## Evidence boundary
+
+Semantic content は observed provider/integration evidence であり OS causality ではありません。保存された tool input は process 実行を証明せず、hook が提供した file body は OS read completion を証明せず、CLI に渡された request/response pair は transparent network interception を意味しません。
+
+Tool → Process bridge は別定義の conservative correlation layer だけが作成でき、常に次を保ちます。
 
 ```text
-Bash call --caused--> that exact process
-file bytes --flowed to--> a network endpoint
+inferred: true
+causal: false
 ```
 
-将来の semantic/runtime correlation layer は method と confidence を明示的に公開し、observed OS attribution と区別可能なままでなければなりません。
-
-## Session boundary
-
-すべての semantic timestamp は captured runtime session interval 内に存在しなければなりません。Interval 外の event は reject されます。これにより無関係な provider telemetry が誤った execution に黙って attach されることを防ぎます。
+Unknown/ambiguous attribution では bridge を作りません。File と network observation が同時に存在しても byte-level data flow や exfiltration は推論しません。
 
 ## Privacy
 
-ExecWeave 自体が file content を収集しなくても、semantic sidecar には sensitive metadata が含まれる可能性があります。Adapter author は full prompt、tool argument、tool output、credential、secret value より identifier と bounded metadata を優先すべきです。
+Full-fidelity content は本質的に sensitive です。Prompt text、tool arguments、tool output、model responses、file content、application-level secret values が redacted 済みだと**仮定しないでください**。Content store は対応 integration point が提供した完全な値を保存します。
 
-Claude Code adapter は `Write` content や `tool_response` を意図的に保存しません。Declared shell command は execution explanation の中心であるため保持されますが、size は bounded であり sensitive metadata として扱う必要があります。
+ExecWeave は adapter contract が定義する場合に限り、provider-metadata projection から既知の transport credentials を除外します。これは汎用 secret scanner ではなく、content payload 内の secret を削除しません。Content blobs はデフォルトでローカルに残り graph events に inline されませんが、run evidence の一部なので共有前に確認が必要です。
 
-Generic semantic merge layer は provider-agnostic です。Provider-specific adapter は別 integration であり、どの upstream field を利用し、どの claim を支持するかを正確に document しなければなりません。
-
-最初の native provider adapter については [`Claude Code Hooks`](claude-code-hooks.ja.md) を参照してください。
+各 provider-specific document が観測可能 field を定義します。Claude Code、Codex、Gemini、Cursor、OpenCode、Inference Gateway、Model Runtime の文書を参照してください。

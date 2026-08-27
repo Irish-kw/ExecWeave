@@ -13,73 +13,46 @@
 </p>
 <!-- i18n-nav:end -->
 
-ExecWeave は Cursor のネイティブ Hook を利用し、Agent / Tool / Command の論理的なセマンティック証拠を実行グラフへ追加します。Provider metadata を OS レベルの因果証拠として扱うことはありません。
+ExecWeave は Cursor の native hook surface を使って provider semantic/content evidence を run に追加し、その evidence を OS causality として扱いません。
 
 ## クイックスタート
 
-Hook 設定を生成して Cursor の hook settings に追加します。
-
 ```bash
 execweave-cursor-hook --print-config
-```
-
-次に Cursor の実行を記録します。
-
-```bash
 execweave-cursor-record --open -- cursor
 ```
 
-run-bound recorder は runtime、semantic、correlated artifacts を分離したまま保存します。
+Run-bound recorder は runtime、semantic、correlated artifact を別々に保持します。
 
-## イベント
+## Observation surface
 
-現在の baseline は次を使用します。
+v0.6.5 hook configuration はより広い Cursor lifecycle surface をカバーします。Session start/end、tool before/after/failure、subagent、shell/MCP execution、file read/edit、prompt submission、compaction/stop、Agent response/thought、Cursor が公開する場合の tab file read/edit events が含まれます。
 
-- `sessionStart`
-- `preToolUse`
-- `postToolUse`
-- `postToolUseFailure`
+Cursor は tool hooks に stable logical tool-call identity を提供しますが、その identity は OS PID ではありません。
 
-Cursor は安定した `tool_use_id` を提供するため、`preToolUse` と対応する post hook は同一の logical `tool_call` identity を正確に共有できます。
+## Full-fidelity content
 
-代表的な semantic edge：
+Cursor が content value を明示的に提供する場合、v0.6.5 は完全な supplied value をローカル content-addressed store に保存し、semantic JSONL event には reference のみを置きます。
 
-```text
-agent --USED_MODEL--> model
-agent --REQUESTED_TOOL_CALL--> tool_call
-tool_call --USES_TOOL--> tool
-tool_call --DECLARED_COMMAND--> command
-tool_call --DECLARED_TARGET--> file
-tool_call --TOOL_CALL_RETURNED--> tool
-```
+Regression coverage には complete prompt text、tool input/output と failure text、shell command/output、MCP command/input/result、read hook が提供する file content、edit structures、final Agent responses、provider-labeled thought text、subagent summaries が含まれます。
 
-`postToolUseFailure` は `TOOL_CALL_FAILED` として別に表現されます。
+これらは provider observation として保存され、evidence limitation も維持されます。たとえば `beforeReadFile` が提供する content は OS read completion を主張せず、edit structure は provider が実際に提供しない限り complete post-edit file snapshot を主張しません。
 
-## Tool → Process correlation
+既知の transport credentials は定義された provider-metadata projection から除外されます。Content value に埋め込まれた secret は保存されます。Full-fidelity content は汎用 secret-redaction layer ではありません。
 
-Cursor Hook は OS child PID を提供しません。そのため Shell call を直接 process edge に変換しません。
+## Tool to process correlation
 
-Runtime evidence から一意に支持される process が独立に確認できた場合のみ、ExecWeave は次を派生できます。
-
-```text
-tool_call --CORRELATED_WITH_PROCESS--> process
-```
-
-この bridge は常に：
+Cursor hook evidence は child OS PID を提供しません。したがって Shell call は独立 runtime evidence が唯一の supported candidate を示す場合だけ process bridge になります。
 
 ```text
 inferred: true
 causal: false
 ```
 
-候補が曖昧、または未対応なら edge は作成しません。
+Ambiguous / unsupported call では bridge を作りません。Stable provider tool-call identity は Cursor 内部の logical identity を証明するだけで、machine-level process attribution ではありません。
 
-## プライバシー境界
+## Privacy と evidence boundary
 
-Adapter は prompt、transcript path、user email、agent message、tool output を保存しません。Model identity、conversation/generation IDs、tool name/use ID、command、declared file path など observability に必要な metadata のみ保持します。
+Cursor run evidence には prompt、tool arguments/results、shell output、file content、edit data、assistant responses、provider-labeled thought text、commands、paths、identifiers、MCP values、embedded application secrets が含まれる可能性があります。共有前に run directory 全体を確認してください。
 
-Command や path 自体は機密情報になり得るため、artifact を共有する前に確認してください。
-
-## Evidence boundary
-
-Cursor Hook が証明するのは Cursor が semantic layer で報告した内容だけです。Declared command の実行、declared file の実アクセス、resource 間の data flow は証明しません。実際の runtime behavior は OS collector evidence が基準です。
+Cursor hook は provider layer で Cursor が報告または提供した内容だけを証明します。それだけで declared command の実行、特定 process による file access、resources 間の byte flow を証明することはできません。

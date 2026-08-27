@@ -13,177 +13,56 @@
 
 # Hooks Gemini CLI
 
-ExecWeave может принимать lifecycle/tool hooks Gemini CLI как семантические доказательства провайдера и объединять их с независимо собранными runtime-доказательствами ОС.
+ExecWeave принимает hooks Gemini CLI как provider semantic/content evidence и сохраняет этот слой отдельно от независимо собранного OS runtime evidence. Hooks Gemini объясняют, что именно раскрыл provider; сами по себе они не доказывают, какой OS process выполнил действие.
 
-Адаптер намеренно консервативен: hook-доказательства Gemini описывают, что провайдер сообщает на уровне Agent / Tool. Сами по себе они не доказывают, какой процесс ОС выполнил работу.
+## Текущая поверхность hooks
 
-## Поддерживаемые hook-события
-
-Текущий адаптер обрабатывает:
+`execweave-gemini-hook --print-config` сейчас регистрирует:
 
 - `SessionStart`
+- `SessionEnd`
+- `BeforeAgent`
+- `AfterAgent`
+- `BeforeModel`
+- `AfterModel`
+- `BeforeToolSelection`
 - `BeforeTool`
 - `AfterTool`
+- `PreCompress`
+- `Notification`
 
-Gemini CLI передаёт вход hook как JSON через `stdin`. Успешный command hook должен вернуть корректный JSON через `stdout`, поэтому ExecWeave при успехе возвращает ровно `{}`, а предупреждения отправляет только в `stderr`.
-
-Сгенерируйте фрагмент настроек:
+Tool hooks используют provider matcher surface, а сгенерированный command hook по умолчанию fail-open. Настройте hooks и запишите run:
 
 ```bash
 execweave-gemini-hook --print-config
-```
-
-Объедините полученный объект `hooks` с `settings.json` Gemini CLI.
-
-Сгенерированная конфигурация наблюдает все инструменты через matchers `BeforeTool` / `AfterTool` и не блокирует и не переписывает вызов инструмента.
-
-## Запись одной командой
-
-После настройки hooks:
-
-```bash
 execweave-gemini-record --open -- gemini
 ```
 
-Recorder привязывает дочерний процесс Gemini к sidecar конкретного запуска через `EXECWEAVE_SEMANTIC_SIDECAR`, затем использует общий provider-record pipeline:
+## Full-fidelity content
 
-```text
-runtime evidence
-      +
-Gemini hook evidence
-      ↓
-validated semantic merge
-      ↓
-conservative correlation
-      ↓
-graph + viewer
-```
+v0.6.5 сохраняет полные значения, явно предоставленные Gemini hook, в локальном content-addressed store. В зависимости от события это может включать user prompt, полный model request object, model response/chunk object, tool input, tool response с `llmContent` / `returnDisplay` / provider error fields, финальный Agent response и другие provider payload values, раскрытые hook.
 
-Интегрированный с провайдером запуск может создать:
+Semantic JSONL sidecar хранит content references вместо больших inline-копий. Повторяющиеся одинаковые значения deduplicate по SHA-256.
 
-```text
-.execweave/runs/<run-id>/
-├── events.jsonl
-├── graph.json
-├── viewer.html
-├── semantic.jsonl
-├── events.semantic.jsonl
-├── graph.semantic.json
-├── viewer.semantic.html
-├── events.correlated.jsonl
-├── graph.correlated.json
-└── viewer.correlated.html
-```
+Provider-metadata projections исключают распознанные transport-credential fields, например authorization headers. Эта фильтрация не очищает application-level values внутри полного content. Например, чувствительное значение внутри tool input или model request остаётся частью сохранённого content.
 
-Сырые runtime-доказательства и sidecar провайдера остаются раздельными. Корреляция создаёт производный поток, а не переписывает наблюдаемые входные доказательства.
+`content_complete_from_source: true` означает, что ExecWeave сохранил полное поле/значение, которое получил. Это не утверждение, что Gemini раскрыл hidden final wire request, internal model state или этап, отсутствовавший в hook payload.
 
-## Отображение событий
+## Tool identity и correlation
 
-### Начало сессии
+Gemini не предоставляет один уникальный tool-call ID, общий между `BeforeTool` и `AfterTool`. Поэтому ExecWeave не создаёт прямой before/after identity edge. Deterministic tool fingerprint может сохраняться как диагностическая подсказка, но повторные одинаковые вызовы остаются отдельными observations.
 
-`SessionStart` становится доказательством сессии провайдера:
-
-```text
-Gemini CLI --STARTED_PROVIDER_SESSION--> provider_session
-```
-
-ExecWeave сохраняет метаданные сессии, необходимые для атрибуции, но не читает и не копирует transcript, на который указывает `transcript_path`.
-
-### BeforeTool
-
-Hook `BeforeTool` создаёт семантические отношения, например:
-
-```text
-Gemini CLI --REQUESTED_TOOL_CALL--> tool_call
-tool_call --USES_TOOL--> tool
-```
-
-Для встроенного инструмента `run_shell_command` поле `tool_input.command` представляется как:
-
-```text
-tool_call --DECLARED_COMMAND--> command
-```
-
-Это доказательство команды может участвовать в той же консервативной корреляции Tool → Process, что и у других адаптеров провайдера.
-
-Для выбранных файловых инструментов, например `read_file`, `write_file` и `replace`, ExecWeave может записать объявленный целевой путь как семантические метаданные. Содержимое файла не захватывается.
-
-### MCP-инструменты
-
-Когда Gemini CLI предоставляет `mcp_context`, ExecWeave использует явно сообщённую провайдером идентичность сервера/инструмента:
-
-```text
-tool_call --VIA_MCP--> mcp_server
-mcp_server --EXPOSES_TOOL--> tool
-```
-
-Адаптер не сохраняет команду запуска MCP, аргументы или URL из `mcp_context`, поскольку эти поля могут содержать чувствительные метаданные соединения или credentials.
-
-### AfterTool
-
-`AfterTool` записывается как отдельное наблюдение `tool_result`.
-
-Если `tool_response.error` непустой, адаптер записывает сообщённый провайдером сигнал ошибки. Иначе записывается нейтральный сигнал возвращённого результата.
-
-ExecWeave **не хранит** сырой `llmContent`, `returnDisplay` или тело ошибки провайдера.
-
-## Нет уникального ID вызова инструмента Gemini
-
-Текущая схема входа hook Gemini CLI предоставляет `tool_name`, `tool_input` и необязательный MCP context, но не предоставляет уникальный ID вызова инструмента, общий для `BeforeTool` и `AfterTool`.
-
-Поэтому ExecWeave **не утверждает** прямое ребро идентичности BeforeTool → AfterTool.
-
-Каждый запрос `BeforeTool` получает локальную идентичность, привязанную к временной метке. `AfterTool` создаёт независимый узел результата. Оба могут содержать детерминированный `tool_fingerprint`, вычисленный из имени инструмента + нормализованного входа, как диагностическую подсказку, но этот fingerprint **не считается идентичностью вызова**. Повторные одинаковые команды должны оставаться различимыми.
-
-## Корреляция Tool → Process
-
-Hooks Gemini не предоставляют PID дочернего процесса ОС, необходимый для доказательства атрибуции Tool → Process.
-
-Коррелированный граф может содержать:
-
-```text
-tool_call --CORRELATED_WITH_PROCESS--> process
-```
-
-только если существующий ограниченный matcher находит ровно один однозначно подтверждённый кандидат процесса из независимых runtime-доказательств.
-
-Каждый такой мост остаётся:
+Hooks Gemini также не предоставляют child OS PID. Поэтому Tool → Process bridges выводятся только тогда, когда независимое runtime evidence однозначно поддерживает одного кандидата:
 
 ```text
 inferred: true
 causal: false
 ```
 
-Неоднозначные, несопоставленные, составные, shell-builtin или неподдерживаемые команды не создают мост.
+Неоднозначные, unmatched, compound, shell-builtin или unsupported commands не создают bridge.
 
-Коррелированный Viewer показывает counts matched / ambiguous / no-match / unsupported, чтобы отсутствующее ребро не интерпретировалось незаметно как «ничего не произошло».
+## Конфиденциальность и граница доказательств
 
-## Граница конфиденциальности
+Gemini content artifacts могут содержать prompts, полные model request/response values, tool inputs/results, file content, возвращённый tools, MCP/application fields, финальные responses, identifiers, commands, paths и встроенные чувствительные значения. Проверяйте run directory перед публикацией.
 
-Нативный адаптер Gemini намеренно избегает:
-
-- содержимого prompt
-- содержимого transcript
-- сырого содержимого результатов инструментов
-- сырых тел ошибок провайдера
-- деталей команд / аргументов / URL MCP
-- содержимого файлов
-
-При этом он может сохранять метаданные вроде текста команды, объявленных путей файлов, имён инструментов, идентификаторов сессий и имён MCP-сервера/инструмента. Проверяйте артефакты перед распространением.
-
-## Поведение при ошибках
-
-`execweave-gemini-hook` по умолчанию fail-open. Ошибки телеметрии записываются в `stderr` и не блокируют вызов инструмента Gemini намеренно.
-
-Используйте `--strict` только когда нужен ненулевой код выхода телеметрии.
-
-## Текущий upstream-контракт
-
-Этот адаптер следует текущей документации hooks Gemini CLI:
-
-- https://github.com/google-gemini/gemini-cli/blob/main/docs/hooks/reference.md
-- https://github.com/google-gemini/gemini-cli/blob/main/docs/hooks/index.md
-
-Схемы hooks провайдера могут развиваться. ExecWeave записывает только поля, реально доставленные провайдером, и сохраняет независимый runtime-сбор ОС полезным даже при недоступности семантических hooks.
-
-См. также [`Семантическая телеметрия`](semantic-telemetry.ru.md).
+ExecWeave не читает `transcript_path` автоматически только потому, что hook его сообщил. Сохранённое provider value также не доказывает OS execution, завершённый file access или byte-level data flow. Независимое runtime evidence и явно отмеченная correlation остаются отдельными слоями.

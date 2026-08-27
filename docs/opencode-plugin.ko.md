@@ -13,69 +13,42 @@
 </p>
 <!-- i18n-nav:end -->
 
-ExecWeave는 project-local plugin을 통해 OpenCode와 통합합니다. OpenCode는 `tool.execute.before`와 `tool.execute.after` 모두에서 정확한 `sessionID + callID`를 제공하므로 동일한 logical tool call을 heuristic으로 짝지을 필요가 없습니다.
+ExecWeave는 project-local plugin을 통해 OpenCode와 통합됩니다. OpenCode는 tool before/after hook에서 정확한 `sessionID + callID` 값을 노출하므로 heuristic pairing 없이 하나의 논리 tool call을 식별할 수 있습니다. 이 identity는 provider-level evidence이며 OS PID가 아닙니다.
 
-## 설치
-
-현재 프로젝트에 생성된 plugin을 설치합니다.
+## 설치와 기록
 
 ```bash
 execweave-opencode-plugin --install
-```
-
-다음 파일이 생성됩니다.
-
-```text
-.opencode/plugins/execweave.ts
-```
-
-OpenCode는 이 디렉터리의 project plugin을 자동 로드합니다. 기존 파일이 있으면 ExecWeave는 `--force`가 명시되지 않는 한 덮어쓰지 않습니다.
-
-그다음 실행을 기록합니다.
-
-```bash
 execweave-opencode-record --open -- opencode
 ```
 
-## 수집하는 semantic evidence
+생성된 plugin은 `.opencode/plugins/execweave.ts`에 설치됩니다. `--force`를 명시하지 않으면 기존 plugin을 덮어쓰지 않습니다.
 
-현재 baseline plugin은 최소 metadata만 전달합니다.
+## 전체 observation surface
 
-- `chat.message`
-- `tool.execute.before`
-- `tool.execute.after`
+v0.6.5는 예전의 세 이벤트 minimal-metadata contract에 제한되지 않습니다. 생성된 plugin/hook 경로는 해당 훅이 실행될 때 chat message, tool execution before/after, model-context/system transform, 완료된 assistant text, provider bus event, credential filtering 후 request header, tool definition, command, permission request, compaction context 등 OpenCode가 노출한 content를 보존할 수 있습니다.
 
-대표적인 Graph 관계:
+논리 graph relation은 계속 Agent → tool call, tool call → tool, declared command/target, returned-result observation 등을 포함합니다. Content storage는 이들의 evidence semantics를 바꾸지 않습니다.
+
+## Full-fidelity 콘텐츠
+
+OpenCode plugin이 제공한 완전한 값은 로컬 content-addressed store에 저장되고 semantic JSONL sidecar에서는 참조됩니다. Regression coverage에는 complete chat message/part, tool args/result, model context, system prompt, assistant text, provider event, tool definition, command argument/part, permission data, compaction prompt/context가 포함됩니다.
+
+Authorization/cookie 같은 알려진 transport credential은 관련 header/provider-metadata projection에서 필터링됩니다. Tool args, message, result 또는 다른 content value 안의 application-level secret은 보존됩니다. Full-fidelity content가 secret-redacted 되었다고 가정하지 마십시오.
+
+## Tool to process correlation
+
+`sessionID + callID`는 OpenCode 내부의 정확한 논리 call identity를 증명하지만 어떤 OS process가 이를 실행했는지는 증명하지 않습니다. Tool → Process는 별도의 보수적 derived bridge이며 독립 runtime evidence가 하나의 process를 유일하게 지지할 때만 생성됩니다.
 
 ```text
-agent --USED_MODEL--> model
-agent --REQUESTED_TOOL_CALL--> tool_call
-tool_call --USES_TOOL--> tool
-tool_call --DECLARED_COMMAND--> command
-tool_call --DECLARED_TARGET--> file
-tool_call --TOOL_CALL_RETURNED--> tool
+inferred: true
+causal: false
 ```
 
-OpenCode의 `callID`를 `tool_call` identity에 직접 사용합니다.
+모호하거나 지원되지 않는 call에는 bridge가 없습니다.
 
-## 프라이버시 경계
+## Privacy와 evidence boundary
 
-OpenCode after-hook은 tool output을 볼 수 있지만 ExecWeave가 생성하는 plugin은 `output.output`이나 `output.metadata`를 전달하지 않습니다.
+OpenCode run evidence에는 prompt/message, system/context data, tool argument/output, command, permission pattern, provider event content, path, identifier, application secret가 포함될 수 있습니다. 공유 전에 run directory를 민감한 자료로 취급하고 검토하십시오.
 
-Plugin은 arguments를 전달하기 전에 축소합니다.
-
-- `bash`: declared `command`만
-- file-oriented tools: `filePath`, `file_path`, `path` 같은 path field만
-- 필요한 경우 working-directory metadata
-
-Raw write content, chat message parts, tool output은 ExecWeave hook으로 전송되지 않습니다.
-
-## Tool → Process correlation
-
-`callID`는 OpenCode 내부의 logical call identity를 증명하지만 OS PID는 아닙니다. Tool → Process는 여전히 보수적인 derived bridge이며 runtime evidence가 유일하게 지지하는 process를 보여줄 때만 생성됩니다.
-
-Derived bridge는 항상 `inferred: true`, `causal: false`입니다.
-
-## Evidence boundary
-
-Plugin이 보고하는 것은 OpenCode semantic intent입니다. Process/file/network runtime observation은 OS collector가 독립적으로 확립합니다. Provider plugin을 declared command나 file action이 실제로 발생했다는 증거로 취급하지 않습니다.
+Plugin은 OpenCode가 semantic/provider layer에서 노출한 내용만 증명합니다. Runtime collector는 process/file/network observation을 독립적으로 확립합니다. Full-fidelity provider content만으로 command execution, completed file access 또는 byte-level data flow를 증명할 수는 없습니다.

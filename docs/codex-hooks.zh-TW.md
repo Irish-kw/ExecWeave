@@ -11,168 +11,61 @@
 </p>
 <!-- i18n-nav:end -->
 
-# OpenAI Codex Lifecycle Hooks
+# OpenAI Codex lifecycle hooks
 
-ExecWeave 提供 OpenAI Codex lifecycle-hook adapter，將 provider-level semantic evidence 加到與 OS runtime telemetry 相同的本機 run 中。
+ExecWeave 會把 Codex lifecycle-hook evidence 與獨立 OS runtime telemetry 並列保存。Provider hook 描述 logical Agent/tool activity，但不會提供建立直接 Tool → Process causality 所需的 OS child PID。
 
-這個 integration 採保守設計。Codex hook 可以告訴 ExecWeave 哪個 logical tool call 被要求，以及 shell execution 宣告了什麼 command；它**不提供 OS child PID**，因此 provider hook 不會被呈現成直接 observed / causal 的 Tool → Process attribution。
+## 目前 hook surface
 
-## 目前支援
+`execweave-codex-hook --print-config` 目前註冊：
 
-ExecWeave 接收：
-
-- `SessionStart`
 - `PreToolUse`
+- `PermissionRequest`
 - `PostToolUse`
+- `PreCompact`
+- `PostCompact`
+- `SessionStart`
+- `SessionEnd`
+- `UserPromptSubmit`
+- `SubagentStart`
+- `SubagentStop`
+- `Stop`
+- `Interrupt`
 
-只記錄 Codex 實際送達的 lifecycle events；未知 event 會被忽略，不猜測。
+ExecWeave 不會捏造 upstream 未知或不可用的 event。Hook schema 與 dispatch coverage 可能隨 Codex 版本改變。
 
-### `SessionStart`
-
-若 payload 有 model：
-
-```text
-OpenAI Codex --USED_MODEL--> model
-```
-
-Adapter 不讀取 transcript file 內容。
-
-### `PreToolUse`
-
-Provider 的 `tool_use_id` 會作為 stable logical tool-call identity：
-
-```text
-OpenAI Codex --REQUESTED_TOOL_CALL--> tool_call
-tool_call --USES_TOOL--> tool
-```
-
-Canonical `Bash` tool 若有 string `tool_input.command`：
-
-```text
-tool_call --DECLARED_COMMAND--> command
-```
-
-這是 semantic evidence，可供 conservative correlation 使用，但不是特定 OS process 執行該 command 的證明。
-
-### `PostToolUse`
-
-目前只記錄中性 relation：
-
-```text
-tool_call --TOOL_CALL_RETURNED--> tool
-```
-
-不轉成 `TOOL_CALL_SUCCEEDED` / `TOOL_CALL_FAILED`，因為目前 payload 沒有足夠可靠的 success/failure discriminator。
-
-Raw `tool_response` 不會存入 semantic telemetry；string response 只保存 type 與 character count。
-
-## 設定 Codex
-
-安裝 ExecWeave 後：
+設定 hook 後記錄 run：
 
 ```bash
 execweave-codex-hook --print-config
-```
-
-把輸出的 `hooks` object 合併到 Codex `hooks.json`。目前 generator 會註冊 `SessionStart`、`PreToolUse`、`PostToolUse`。
-
-Hook adapter 預設 fail-open；telemetry 問題只警告，不刻意阻斷 Codex。Debug adapter 本身時可用：
-
-```bash
-execweave-codex-hook --strict
-```
-
-## 一行記錄 Codex run
-
-設定好 hooks 後：
-
-```bash
 execweave-codex-record --open -- codex
 ```
 
-Recorder 不修改 Codex configuration，只透過 inherited environment variable 將 child Codex process 綁到 run-specific semantic sidecar。
+Recorder 會綁定 run-specific semantic sidecar，並把 runtime、semantic、correlated artifacts 分開保存。
 
-Hook 有觸發時會得到分層 artifacts：
+## Full-fidelity content
 
-```text
-.execweave/runs/<run-id>/
-├── events.jsonl
-├── graph.json
-├── viewer.html
-├── semantic.jsonl
-├── events.semantic.jsonl
-├── graph.semantic.json
-├── viewer.semantic.html
-├── events.correlated.jsonl
-├── graph.correlated.json
-└── viewer.correlated.html
-```
+v0.6.5 會把 Codex hook 實際提供的完整 content value 存入本機 content-addressed store；JSONL sidecar 只留下 reference，不 inline 大型內容。
 
-如果沒有 Codex hook event，recorder 安全退回 runtime-only artifacts。
+可觀察 content 包含完整 `UserPromptSubmit.prompt`、完整 `tool_input`、完整 `PostToolUse.tool_response`、permission-request tool input，以及 hook 有提供時的 final assistant/subagent message。Payload 內 application-level value 會原樣保存；不要假設 secret 已被 redacted。
 
-## Tool → Process correlation
+已知 transport credentials 只會在 adapter 能辨識時從獨立 provider-metadata projection 排除。這項過濾不會改寫或 sanitize content payload 本身。
 
-例如：
+`content_complete_from_source: true` 表示保存了 Codex integration point 提供的完整值；不代表 ExecWeave 讀取 transcript file、intercept 未曝露的 provider request，或看見 hidden model state。
 
-```text
-tool_call --DECLARED_COMMAND--> "python task.py"
-```
+## Tool identity 與 correlation
 
-ExecWeave 會將 semantic declaration 與 bounded runtime process evidence 比對，只有 matcher 找到**唯一且有足夠證據支持的候選**時，才產生：
-
-```text
-tool_call --CORRELATED_WITH_PROCESS--> process
-```
-
-所有 bridge 都保持：
+Codex 提供 `tool_use_id` 時，ExecWeave 會把它當成 logical tool-call identity。Declared command 仍只是 provider semantic evidence。Hook 仍不提供 child OS PID，因此 Tool → Process bridge 只有在 conservative correlation stage 從 runtime evidence 找到唯一受支持 candidate 時才會建立。
 
 ```text
 inferred: true
 causal: false
 ```
 
-Ambiguous、unmatched、shell builtin、compound 或 unsupported call 不會建立 bridge。
+Ambiguous、unmatched、shell-builtin、compound 或 unsupported command 都不會建立 bridge。不能只因 timestamp 或 command string 相似，就把 provider evidence 升級成 OS attribution。
 
-Correlated graph 會保存 run-level Correlation Summary，讓 Viewer 區分 `matched / ambiguous / no match / unsupported`，而不是把所有缺 edge 都當成同一原因。Viewer 的 **observed only** 會在 focus traversal/layout 前移除 inferred edges。
+## Privacy 與 evidence boundary
 
-## Evidence / privacy boundary
+Codex semantic/content artifact 可能包含 prompt、command、tool argument、tool result、final response、path、identifier 與 application-level secrets。整個 run directory 都應視為敏感資料，分享前請檢查。
 
-目前 Codex adapter 只保存建圖需要的 semantic metadata，例如：
-
-- Codex session ID
-- turn ID（若有）
-- model name
-- tool name
-- tool-use ID
-- input key names
-- declared `Bash` command
-- `PostToolUse` response type / length
-
-不主動收集：
-
-- prompt text
-- transcript-file content
-- raw `tool_response`
-- file content
-- provider-derived Tool → Process PID
-
-Command 本身仍可能含 secret/path，分享 artifacts 前請檢查。
-
-## 目前 upstream limitations
-
-Codex lifecycle hooks 仍在演進，因此 ExecWeave 把這項功能定位為 native semantic adapter，而不是宣稱每種 Codex execution mode 都有完整 lifecycle coverage。
-
-目前需要注意：
-
-1. `PostToolUse` 沒有足夠可靠 outcome signal，因此只標 `TOOL_CALL_RETURNED`。
-2. 部分 `codex exec` path 曾有 lifecycle hook dispatch gap；初期 interactive Codex CLI 是較安全的 target。
-3. 部分 Windows command execution path 曾出現 upstream hook-coverage gap。
-4. Provider hook 沒有 OS child PID，因此不能提供直接 observed Tool → Process attribution。
-
-這些限制只影響 semantic coverage；獨立 OS runtime collector 即使 hook 沒觸發仍能工作。
-
-## Design rule
-
-> Provider semantics 描述 Agent 說它要做什麼；OS telemetry 描述機器實際觀察到什麼；只有 evidence 唯一且充分時，correlation 才能以 explicit、non-causal inference 把兩者連起來。
-
-通用 contract 見 [`Semantic Telemetry`](semantic-telemetry.zh-TW.md)。
+Adapter 不宣稱每種 Codex execution mode 都具有完整 lifecycle coverage。Missing hook 只會降低 semantic visibility，不會關閉獨立 OS runtime collector。Provider hook 也不能證明 declared command 確實執行、file action 確實發生，或 bytes 在 resources 間流動。
