@@ -15,9 +15,7 @@
 
 ExecWeave includes a native Claude Code command-hook adapter that records provider semantic/content evidence into a local sidecar while keeping it distinct from independent OS runtime evidence. Provider hooks explain what Claude Code exposed; they do not replace the portable or Linux `strace` collector and do not by themselves establish OS process causality.
 
-## Current hook surface
-
-`execweave-claude-hook --print-config` currently registers:
+**Current hook surface.** `execweave-claude-hook --print-config` currently registers:
 
 - `SessionStart`
 - `UserPromptSubmit`
