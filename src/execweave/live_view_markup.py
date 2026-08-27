@@ -6,6 +6,7 @@ LIVE_MARKUP = r"""<div id="app">
   <span id="status"><span class="status-dot"></span><span id="status-label">LIVE</span></span>
   <div class="header-metrics"><span id="stats" class="metric-pill">Waiting for events…</span><span id="evidence" class="metric-pill optional">OS <strong>0</strong> · specialized <strong>0</strong></span></div>
   <div class="header-spacer"></div>
+  <div id="finished-actions" class="finished-actions" hidden><button id="replay-run" type="button">Replay</button><button id="download-gif" type="button">Download GIF</button><button id="open-final" type="button">Open final graph</button></div>
   <div class="search-wrap"><input id="search" placeholder="Search nodes, types, relations…" aria-label="Search graph"></div>
   <button id="theme-toggle" class="icon-btn" type="button" aria-label="Switch to light theme" title="Switch to light theme">Light</button>
 </header>
@@ -18,10 +19,11 @@ LIVE_MARKUP = r"""<div id="app">
 </section>
 <aside id="inspector">
   <div class="inspector-section"><div class="eyebrow">Current activity</div><div id="current-title" class="current-title">Waiting for events</div><div id="current-sub" class="current-sub">The newest graph transition will appear here.</div><dl id="current-kv" class="kv"></dl></div>
-  <div class="inspector-section"><div class="eyebrow">Selection</div><div id="details-empty">Click a node, edge, or activity row.</div><div id="details"></div></div>
+  <div class="inspector-section"><div class="eyebrow">Selection</div><div id="details-empty">Click a node, edge, or log row.</div><div id="details"></div></div>
 </aside>
 <section id="activity-panel">
-  <div class="activity-toolbar"><span class="panel-title">Live Activity</span><span id="activity-count" class="count">0 transitions</span><div class="filter-group" aria-label="Activity filters"><button type="button" class="active" data-filter="all">All</button><button type="button" data-filter="process">Process</button><button type="button" data-filter="file">File</button><button type="button" data-filter="network">Network</button><button type="button" data-filter="tool">Tool</button><button type="button" data-filter="model">Model</button></div></div>
+  <div class="activity-toolbar"><span class="panel-title">Live Logs</span><span id="activity-count" class="count">0 transitions</span><div class="log-tabs" aria-label="Log mode"><button type="button" class="active" data-log-mode="structured">Structured</button><button type="button" data-log-mode="raw">Raw JSON</button></div><div class="filter-group" aria-label="Activity filters"><button type="button" class="active" data-filter="all">All</button><button type="button" data-filter="process">Process</button><button type="button" data-filter="file">File</button><button type="button" data-filter="network">Network</button><button type="button" data-filter="tool">Tool</button><button type="button" data-filter="model">Model</button></div></div>
   <div id="activity-list"><div class="activity-head"><span>Time</span><span>Kind</span><span>Relation</span><span>Transition</span><span>Evidence</span></div><div id="activity-rows"><div class="empty-activity">Waiting for graph activity…</div></div></div>
+  <div id="raw-log" hidden><div class="raw-head"><span>Line</span><span>Time</span><span>Event</span><span>Relation</span><span>Raw JSON</span></div><div id="raw-rows"><div class="empty-activity">Waiting for raw events.jsonl activity…</div></div></div>
 </section>
 </div>"""
