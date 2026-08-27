@@ -91,10 +91,10 @@ def test_live_gif_export_uses_reset_bounded_lzw_and_emits_a_gif() -> None:
     assert len(gif) > 800
 
 
-def test_release_version_and_noncommercial_license_metadata_are_068() -> None:
+def test_release_version_and_noncommercial_license_metadata_are_069() -> None:
     assert __version__ == "0.6.9"
     pyproject = Path("pyproject.toml").read_text(encoding="utf-8")
-    assert 'version = "0.6.8"' in pyproject
+    assert 'version = "0.6.9"' in pyproject
     assert "License :: Other/Proprietary License" in pyproject
     assert "License :: OSI Approved :: MIT License" not in pyproject
 
@@ -110,7 +110,7 @@ def test_all_readmes_use_real_dashboard_gif_and_current_release() -> None:
         text = path.read_text(encoding="utf-8")
         assert 'src="docs/assets/codex.gif"' in text, path
         assert "execweave-launch-demo-v5-x.gif" not in text, path
-        assert "v0.6.8" in text, path
+        assert "v0.6.9" in text, path
         assert "v0.6.5" not in text, path
         assert "v0.6.6" not in text, path
         assert "v0.6.7" not in text, path
@@ -121,3 +121,4 @@ def test_english_readme_declares_noncommercial_source_available_license() -> Non
     assert "source-available" in readme
     assert "PolyForm Noncommercial License 1.0.0" in readme
     assert "Commercial use requires a separate written commercial license" in readme
+    assert "Starting with v0.6.8" in readme
