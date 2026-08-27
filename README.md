@@ -15,7 +15,7 @@
 
 **See what AI agents actually do on your machine.**
 
-ExecWeave is a source-available, local-first observability project that turns AI-agent activity into an interactive execution graph while keeping observed evidence, provider content, and derived inference explicitly separated. Starting with v0.6.8, the project is licensed for noncommercial use under PolyForm Noncommercial 1.0.0.
+ExecWeave is a source-available, local-first observability project that turns AI-agent activity into an interactive execution graph while keeping observed evidence, provider content, and derived inference explicitly separated.
 
 > **Event is ground truth. The graph is a materialized view.**
 
@@ -31,11 +31,7 @@ Install the latest published wheel/sdist from PyPI:
 python -m pip install -U execweave
 ```
 
-The package version on `main` is currently **v0.6.9**. The published release may lag main; test the exact mainline build with:
-
-```bash
-python -m pip install --upgrade --force-reinstall "execweave @ git+https://github.com/Irish-kw/ExecWeave.git@main"
-```
+The current release is **v0.6.9**.
 
 For development:
 
@@ -231,7 +227,7 @@ Portable filesystem observation is session-correlated rather than process-causal
 
 ## Performance and large-run safety
 
-v0.6.3 added bounded filesystem/viewer protections, incremental Live JSONL tailing, and large-graph safety guards. v0.6.4 added detached Top and unified provisional live sidecars for configured provider integrations. These remain in v0.6.9; the project has **not** migrated Live to SSE, artifact storage to SQLite, the renderer to Canvas/WebGL, or collectors to Rust solely for this release.
+ExecWeave includes bounded filesystem/viewer protections, incremental Live JSONL tailing, large-graph safety guards, detached Top, and provisional live sidecars for configured provider integrations.
 
 The reproducible incremental `GraphAccumulator` reference result reaches **164,273 ev/s** at 1M synthetic events on the documented GitHub Actions workload. This is a graph-accumulation benchmark, not end-to-end collector/browser throughput.
 
@@ -274,8 +270,6 @@ Do not assume content has been secret-redacted. Commands, paths, endpoint metada
 
 ## Current status
 
-ExecWeave `main` is currently **v0.6.9** and under active release hardening. The latest published package/release can lag main until a GitHub Release is explicitly published; the publish workflow verifies that the release tag exactly matches the package version before PyPI upload.
-
 v0.6.9 combines cross-platform runtime collection, materialized execution graphs, standalone/live viewing, conservative provider↔runtime correlation, full-fidelity content-addressed provider evidence, evidence grades, bounded rule packs, an explicit runtime threat/fidelity contract, and honest local run-integrity sealing. Observed evidence and inference remain separate by design.
 
 ## Documentation
@@ -304,4 +298,4 @@ Contributions are welcome, especially around native OS collectors, Agent/IDE ada
 
 ## License
 
-ExecWeave v0.6.8 and later are licensed under the **PolyForm Noncommercial License 1.0.0**. Noncommercial use, modification, and redistribution are permitted under those terms. Commercial use requires a separate written commercial license from the licensor. Earlier versions already released under MIT remain under the terms that accompanied those versions. See [`LICENSE`](LICENSE).
+ExecWeave is licensed under the **PolyForm Noncommercial License 1.0.0**. Noncommercial use, modification, and redistribution are permitted under its terms. Commercial use requires a separate written commercial license from the licensor. See [`LICENSE`](LICENSE).

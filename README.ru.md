@@ -15,7 +15,7 @@
 
 **Посмотрите, что ИИ-агенты действительно делают на вашей машине.**
 
-ExecWeave — source-available, local-first проект observability, который преобразует активность ИИ-агентов в интерактивный execution graph и при этом явно разделяет observed evidence, provider content и derived inference. Начиная с v0.6.8 проект распространяется по PolyForm Noncommercial 1.0.0; коммерческое использование не разрешено.
+ExecWeave — source-available, local-first проект наблюдаемости, который преобразует активность AI Agent в интерактивный execution graph и явно разделяет observed evidence, provider content и derived inference.
 
 > **Event — это ground truth. Graph — materialized view.**
 
@@ -31,11 +31,7 @@ ExecWeave — source-available, local-first проект observability, кото
 python -m pip install -U execweave
 ```
 
-Версия package в `main` сейчас **v0.6.9**. Опубликованный release может отставать от main; чтобы протестировать текущий mainline напрямую:
-
-```bash
-python -m pip install --upgrade --force-reinstall "execweave @ git+https://github.com/Irish-kw/ExecWeave.git@main"
-```
+Текущий стабильный релиз — **v0.6.9**.
 
 Для разработки:
 
@@ -228,7 +224,7 @@ Portable filesystem observation является session-correlated, а не pro
 
 ## Performance и large-run safety
 
-v0.6.3 добавил bounded filesystem/viewer protections, incremental Live JSONL tailing и large-graph safety guards. v0.6.4 добавил detached Top и общий provisional live sidecar для настроенных provider integrations. Эти возможности остаются в v0.6.9. Ради этой release проект **не** мигрировал Live на SSE, artifact storage на SQLite, renderer на Canvas/WebGL или collectors на Rust только ради смены архитектуры.
+ExecWeave включает bounded filesystem/viewer protection, incremental Live JSONL tailing, large-graph safety guards, detached Top и provisional live sidecars для настроенных provider integrations.
 
 Воспроизводимый reference result incremental `GraphAccumulator` достигает **164,273 ev/s** на 1M synthetic events в документированном GitHub Actions workload. Это benchmark накопления graph, а не end-to-end collector/browser throughput.
 
@@ -269,8 +265,6 @@ ExecWeave — local-first: captures, content blobs, graphs, reports и viewers �
 
 ## Текущий статус
 
-ExecWeave `main` сейчас **v0.6.9** и проходит release hardening. Последний публичный package/release может отставать от main до явной публикации GitHub Release; publish workflow проверяет точное совпадение release tag и package version до загрузки в PyPI.
-
 v0.6.9 объединяет cross-platform runtime collection, materialized execution graphs, standalone/live viewing, консервативную provider↔runtime correlation, content-addressed full-fidelity provider evidence, evidence grades, bounded rule packs, явный runtime threat/fidelity contract и честный local run-integrity seal. Observed evidence и inference остаются разделёнными по дизайну.
 
 ## Документация
@@ -299,4 +293,4 @@ v0.6.9 объединяет cross-platform runtime collection, materialized exec
 
 ## License
 
-ExecWeave v0.6.8 и более поздние версии распространяются по **PolyForm Noncommercial License 1.0.0**. Некоммерческие использование, изменение и распространение разрешены в соответствии с этими условиями; любое коммерческое использование требует отдельной письменной коммерческой лицензии. Ранее выпущенные под MIT версии сохраняют условия лицензии, сопровождавшие их на момент выпуска. См. [`LICENSE`](LICENSE).
+ExecWeave распространяется по **PolyForm Noncommercial License 1.0.0**. Некоммерческое использование, изменение и распространение разрешены на условиях лицензии. Для коммерческого использования требуется отдельная письменная коммерческая лицензия от лицензиара. См. [`LICENSE`](LICENSE).

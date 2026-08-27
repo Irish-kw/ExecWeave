@@ -15,7 +15,7 @@
 
 **看清 AI Agent 在你的机器上究竟做了什么。**
 
-ExecWeave 是一个 source-available、local-first 的可观测性项目，把 AI Agent 活动转换为交互式 execution graph，并明确区分 observed evidence、provider content 与 derived inference。自 v0.6.8 起采用 PolyForm Noncommercial 1.0.0，仅允许非商业用途。
+ExecWeave 是一个 source-available、local-first 的可观测性项目，把 AI Agent 活动转换为交互式 execution graph，并明确区分 observed evidence、provider content 与 derived inference。
 
 > **Event 是 ground truth；Graph 是 materialized view。**
 
@@ -31,11 +31,7 @@ ExecWeave 是一个 source-available、local-first 的可观测性项目，把 A
 python -m pip install -U execweave
 ```
 
-当前 `main` 的包版本是 **v0.6.9**。正式 release 可能晚于 main；要测试当前 mainline：
-
-```bash
-python -m pip install --upgrade --force-reinstall "execweave @ git+https://github.com/Irish-kw/ExecWeave.git@main"
-```
+当前正式版本是 **v0.6.9**。
 
 开发安装：
 
@@ -230,7 +226,7 @@ Portable filesystem observation 是 session-correlated，而不是 process-causa
 
 ## Performance 与 large-run safety
 
-v0.6.3 加入 bounded filesystem/viewer protection、incremental Live JSONL tailing 与 large-graph safety guard；v0.6.4 加入 detached Top，以及 configured provider integration 共用的 provisional live sidecar。这些能力继续保留在 v0.6.9。本次 release **没有**仅为架构替换而把 Live 迁移到 SSE、artifact storage 改成 SQLite、renderer 改成 Canvas/WebGL，或把 collector 改写成 Rust。
+ExecWeave 包含 bounded filesystem/viewer protection、incremental Live JSONL tailing、large-graph safety guard、detached Top，以及 configured provider integration 使用的 provisional live sidecar。
 
 可复现的 incremental `GraphAccumulator` reference result 在文档化 GitHub Actions workload 上，1M synthetic events 达到 **164,273 ev/s**。这是 graph accumulation benchmark，而不是 end-to-end collector/browser throughput。
 
@@ -273,8 +269,6 @@ ExecWeave 是 local-first：capture、content blob、graph、report、viewer 默
 
 ## 当前状态
 
-ExecWeave `main` 当前是 **v0.6.9**，正在进行 release hardening。最新公开 package/release 可能晚于 main；只有明确发布 GitHub Release 才会触发 publish workflow，且 workflow 会先验证 release tag 与 package version 完全一致，再上传 PyPI。
-
 v0.6.9 组合 cross-platform runtime collection、materialized execution graph、standalone/live viewer、保守的 provider↔runtime correlation、content-addressed full-fidelity provider evidence、evidence grades、bounded rule packs、明确的 runtime threat/fidelity contract，以及诚实描述信任边界的 local run-integrity sealing。Observed evidence 与 inference 从设计上保持分离。
 
 ## 文档
@@ -303,4 +297,4 @@ v0.6.9 组合 cross-platform runtime collection、materialized execution graph�
 
 ## License
 
-ExecWeave 自 v0.6.8 起采用 **PolyForm Noncommercial License 1.0.0**。依该许可可进行非商业使用、修改和分发；任何商业用途都需要另行取得书面商业许可。此前已按 MIT 发布的旧版本仍维持当时随附的许可条款。详见 [`LICENSE`](LICENSE)。
+ExecWeave 采用 **PolyForm Noncommercial License 1.0.0**。依许可条款可进行非商业使用、修改和分发；商业用途需要另行取得许可方的书面商业许可。详见 [`LICENSE`](LICENSE)。

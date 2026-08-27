@@ -15,7 +15,7 @@
 
 **AI Agent があなたのマシン上で実際に何をしているかを可視化します。**
 
-ExecWeave は source-available、local-first の observability プロジェクトで、AI Agent の活動をインタラクティブな execution graph に変換し、observed evidence、provider content、derived inference を明確に分離します。v0.6.8 以降は PolyForm Noncommercial 1.0.0 の下で提供され、商用利用は許可されません。
+ExecWeave は source-available、local-first の observability プロジェクトで、AI Agent の活動をインタラクティブな execution graph に変換し、observed evidence、provider content、derived inference を明確に分離します。
 
 > **Event が ground truth であり、Graph は materialized view です。**
 
@@ -31,11 +31,7 @@ PyPI から最新の公開 wheel/sdist をインストールします。
 python -m pip install -U execweave
 ```
 
-現在の `main` の package version は **v0.6.9** です。公開 release が main より遅れる場合があります。現在の mainline を直接試すには：
-
-```bash
-python -m pip install --upgrade --force-reinstall "execweave @ git+https://github.com/Irish-kw/ExecWeave.git@main"
-```
+現在の正式リリースは **v0.6.9** です。
 
 開発用：
 
@@ -228,7 +224,7 @@ Portable filesystem observation は session-correlated であり process-causal 
 
 ## Performance と large-run safety
 
-v0.6.3 では bounded filesystem/viewer protection、incremental Live JSONL tailing、large-graph safety guard を追加し、v0.6.4 では detached Top と configured provider integration 用 provisional live sidecar を追加しました。これらは v0.6.9 にも残っています。本 release だけを理由に Live を SSE、artifact storage を SQLite、renderer を Canvas/WebGL、collector を Rust へ移行してはいません。
+ExecWeave は bounded filesystem/viewer protection、incremental Live JSONL tailing、large-graph safety guard、detached Top、configured provider integration 用 provisional live sidecar を備えています。
 
 再現可能な incremental `GraphAccumulator` reference result は、文書化された GitHub Actions workload の 1M synthetic events で **164,273 ev/s** です。これは graph accumulation benchmark であり、end-to-end collector/browser throughput ではありません。
 
@@ -269,8 +265,6 @@ Content が secret-redacted 済みだと仮定しないでください。Command
 
 ## 現在の状態
 
-ExecWeave `main` は現在 **v0.6.9** で release hardening 中です。公開 package/release は main より遅れる場合があります。GitHub Release を明示的に publish した場合のみ publish workflow が動作し、PyPI upload 前に release tag と package version が完全一致することを検証します。
-
 v0.6.9 は cross-platform runtime collection、materialized execution graph、standalone/live viewer、保守的 provider↔runtime correlation、content-addressed full-fidelity provider evidence、evidence grades、bounded rule packs、明示的 runtime threat/fidelity contract、honest local run-integrity sealing を組み合わせています。Observed evidence と inference は設計上分離されています。
 
 ## ドキュメント
@@ -299,4 +293,4 @@ v0.6.9 は cross-platform runtime collection、materialized execution graph、st
 
 ## License
 
-ExecWeave v0.6.8 以降は **PolyForm Noncommercial License 1.0.0** の下で提供されます。非商用の利用・変更・再配布はその条件に従って許可されますが、商用利用には別途書面による商用ライセンスが必要です。以前に MIT で公開済みの旧バージョンは当時のライセンス条件のままです。詳しくは [`LICENSE`](LICENSE) を参照してください。
+ExecWeave は **PolyForm Noncommercial License 1.0.0** の下で提供されます。非商用の利用・変更・再配布はその条件に従って許可され、商用利用にはライセンサーから別途書面による商用ライセンスが必要です。詳しくは [`LICENSE`](LICENSE) を参照してください。
