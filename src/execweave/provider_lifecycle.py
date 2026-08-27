@@ -27,6 +27,8 @@ _RELATION_MAP: dict[str, tuple[str, str]] = {
     # Session / model lifecycle.
     "STARTED_PROVIDER_SESSION": ("provider_session", "started"),
     "USED_MODEL": ("model", "selected"),
+    "SERVED_BY_MODEL": ("model", "served"),
+    "SWITCHED_MODEL": ("model", "runtime_transition"),
     # Prompt / inference request surfaces.
     "RECEIVED_USER_PROMPT": ("prompt", "received"),
     "OBSERVED_CHAT_MESSAGE": ("prompt", "observed_message"),

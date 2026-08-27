@@ -10,6 +10,7 @@ from typing import Any
 
 from .claude_adapter import append_semantic_records, claude_hook_to_semantic_events, read_hook_payload
 from .claude_full_fidelity import claude_hook_to_content_events
+from .claude_model_observer import append_claude_transcript_model_events
 from .content_store import FullFidelityContentStore
 
 
@@ -120,6 +121,11 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
         append_semantic_records(sidecar, records)
+        append_claude_transcript_model_events(
+            payload,
+            sidecar=sidecar,
+            timestamp=observed_at,
+        )
     except (OSError, RuntimeError, TimeoutError, TypeError, ValueError) as exc:
         print(f"ExecWeave Claude hook warning: {exc}", file=sys.stderr)
         return 1 if args.strict else 0
