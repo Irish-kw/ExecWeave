@@ -31,7 +31,7 @@ PyPI から最新の公開 wheel/sdist をインストールします。
 python -m pip install -U execweave
 ```
 
-現在の `main` の package version は **v0.6.8** です。公開 release が main より遅れる場合があります。現在の mainline を直接試すには：
+現在の `main` の package version は **v0.6.9** です。公開 release が main より遅れる場合があります。現在の mainline を直接試すには：
 
 ```bash
 python -m pip install --upgrade --force-reinstall "execweave @ git+https://github.com/Irish-kw/ExecWeave.git@main"
@@ -71,9 +71,9 @@ execweave record --open -- python my_agent.py
 
 `execweave top -- codex` は Agent を起動 terminal で対話可能なまま保持し、ホスト環境に応じて detached Top dashboard を開くか attach します。
 
-## v0.6.8：明示的な evidence boundary を持つ full-fidelity observability
+## v0.6.9：明示的な evidence boundary を持つ full-fidelity observability
 
-v0.6.8 は compact metadata だけでなく、対応 integration point が明示的に提供した content を保存できます。ExecWeave は**その source から提供された完全な値**をローカル SHA-256 content-addressed store に保存し、semantic event stream には reference のみを残します。
+v0.6.9 は compact metadata だけでなく、対応 integration point が明示的に提供した content を保存できます。ExecWeave は**その source から提供された完全な値**をローカル SHA-256 content-addressed store に保存し、semantic event stream には reference のみを残します。
 
 ```text
 <run-root>/content/sha256/<sha256>.<json|txt|bin>
@@ -228,7 +228,7 @@ Portable filesystem observation は session-correlated であり process-causal 
 
 ## Performance と large-run safety
 
-v0.6.3 では bounded filesystem/viewer protection、incremental Live JSONL tailing、large-graph safety guard を追加し、v0.6.4 では detached Top と configured provider integration 用 provisional live sidecar を追加しました。これらは v0.6.8 にも残っています。本 release だけを理由に Live を SSE、artifact storage を SQLite、renderer を Canvas/WebGL、collector を Rust へ移行してはいません。
+v0.6.3 では bounded filesystem/viewer protection、incremental Live JSONL tailing、large-graph safety guard を追加し、v0.6.4 では detached Top と configured provider integration 用 provisional live sidecar を追加しました。これらは v0.6.9 にも残っています。本 release だけを理由に Live を SSE、artifact storage を SQLite、renderer を Canvas/WebGL、collector を Rust へ移行してはいません。
 
 再現可能な incremental `GraphAccumulator` reference result は、文書化された GitHub Actions workload の 1M synthetic events で **164,273 ev/s** です。これは graph accumulation benchmark であり、end-to-end collector/browser throughput ではありません。
 
@@ -263,15 +263,15 @@ Derived correlation は raw runtime / provider sidecar evidence を書き換え�
 
 ## Privacy
 
-ExecWeave は local-first であり、capture、content blob、graph、report、viewer はデフォルトでローカルに残ります。**OS runtime collector** は file content や raw read/write byte buffer を意図的に取得しません。ただし、この境界を v0.6.8 の **provider full-fidelity content store** と混同してはいけません。対応 hook/API が prompt、tool argument/result、model response、reasoning/thinking text、shell output、file content などを明示的に提供した場合、それらは完全に保存される可能性があります。
+ExecWeave は local-first であり、capture、content blob、graph、report、viewer はデフォルトでローカルに残ります。**OS runtime collector** は file content や raw read/write byte buffer を意図的に取得しません。ただし、この境界を v0.6.9 の **provider full-fidelity content store** と混同してはいけません。対応 hook/API が prompt、tool argument/result、model response、reasoning/thinking text、shell output、file content などを明示的に提供した場合、それらは完全に保存される可能性があります。
 
 Content が secret-redacted 済みだと仮定しないでください。Command、path、endpoint metadata、identifier、model metadata、prompt、tool value、content blob はすべて sensitive になり得ます。共有前に run directory 全体を確認してください。
 
 ## 現在の状態
 
-ExecWeave `main` は現在 **v0.6.8** で release hardening 中です。公開 package/release は main より遅れる場合があります。GitHub Release を明示的に publish した場合のみ publish workflow が動作し、PyPI upload 前に release tag と package version が完全一致することを検証します。
+ExecWeave `main` は現在 **v0.6.9** で release hardening 中です。公開 package/release は main より遅れる場合があります。GitHub Release を明示的に publish した場合のみ publish workflow が動作し、PyPI upload 前に release tag と package version が完全一致することを検証します。
 
-v0.6.8 は cross-platform runtime collection、materialized execution graph、standalone/live viewer、保守的 provider↔runtime correlation、content-addressed full-fidelity provider evidence、evidence grades、bounded rule packs、明示的 runtime threat/fidelity contract、honest local run-integrity sealing を組み合わせています。Observed evidence と inference は設計上分離されています。
+v0.6.9 は cross-platform runtime collection、materialized execution graph、standalone/live viewer、保守的 provider↔runtime correlation、content-addressed full-fidelity provider evidence、evidence grades、bounded rule packs、明示的 runtime threat/fidelity contract、honest local run-integrity sealing を組み合わせています。Observed evidence と inference は設計上分離されています。
 
 ## ドキュメント
 

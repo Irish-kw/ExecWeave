@@ -31,7 +31,7 @@ ExecWeave — source-available, local-first проект observability, кото
 python -m pip install -U execweave
 ```
 
-Версия package в `main` сейчас **v0.6.8**. Опубликованный release может отставать от main; чтобы протестировать текущий mainline напрямую:
+Версия package в `main` сейчас **v0.6.9**. Опубликованный release может отставать от main; чтобы протестировать текущий mainline напрямую:
 
 ```bash
 python -m pip install --upgrade --force-reinstall "execweave @ git+https://github.com/Irish-kw/ExecWeave.git@main"
@@ -71,9 +71,9 @@ execweave record --open -- python my_agent.py
 
 `execweave top -- codex` оставляет Agent интерактивным в терминале запуска и открывает либо подключает detached Top dashboard в зависимости от среды хоста.
 
-## v0.6.8: full-fidelity observability с явными evidence boundaries
+## v0.6.9: full-fidelity observability с явными evidence boundaries
 
-v0.6.8 расширяет observability за пределы компактных metadata. Если поддерживаемая integration point явно предоставляет content, ExecWeave может сохранить **полное значение, предоставленное этим источником**, в локальном SHA-256 content-addressed store, оставляя в semantic event stream только reference.
+v0.6.9 расширяет observability за пределы компактных metadata. Если поддерживаемая integration point явно предоставляет content, ExecWeave может сохранить **полное значение, предоставленное этим источником**, в локальном SHA-256 content-addressed store, оставляя в semantic event stream только reference.
 
 ```text
 <run-root>/content/sha256/<sha256>.<json|txt|bin>
@@ -228,7 +228,7 @@ Portable filesystem observation является session-correlated, а не pro
 
 ## Performance и large-run safety
 
-v0.6.3 добавил bounded filesystem/viewer protections, incremental Live JSONL tailing и large-graph safety guards. v0.6.4 добавил detached Top и общий provisional live sidecar для настроенных provider integrations. Эти возможности остаются в v0.6.8. Ради этой release проект **не** мигрировал Live на SSE, artifact storage на SQLite, renderer на Canvas/WebGL или collectors на Rust только ради смены архитектуры.
+v0.6.3 добавил bounded filesystem/viewer protections, incremental Live JSONL tailing и large-graph safety guards. v0.6.4 добавил detached Top и общий provisional live sidecar для настроенных provider integrations. Эти возможности остаются в v0.6.9. Ради этой release проект **не** мигрировал Live на SSE, artifact storage на SQLite, renderer на Canvas/WebGL или collectors на Rust только ради смены архитектуры.
 
 Воспроизводимый reference result incremental `GraphAccumulator` достигает **164,273 ev/s** на 1M synthetic events в документированном GitHub Actions workload. Это benchmark накопления graph, а не end-to-end collector/browser throughput.
 
@@ -263,15 +263,15 @@ Derived correlation никогда не переписывает raw runtime и�
 
 ## Privacy
 
-ExecWeave — local-first: captures, content blobs, graphs, reports и viewers по умолчанию остаются локальными. **OS runtime collector** намеренно не захватывает file content или raw read/write byte buffers. Эту boundary нельзя путать с **provider full-fidelity content store** v0.6.8: если поддерживаемый hook/API явно предоставляет prompt, tool argument/result, model response, reasoning/thinking text, shell output, file content или другую sensitive value, ExecWeave может сохранить её полностью.
+ExecWeave — local-first: captures, content blobs, graphs, reports и viewers по умолчанию остаются локальными. **OS runtime collector** намеренно не захватывает file content или raw read/write byte buffers. Эту boundary нельзя путать с **provider full-fidelity content store** v0.6.9: если поддерживаемый hook/API явно предоставляет prompt, tool argument/result, model response, reasoning/thinking text, shell output, file content или другую sensitive value, ExecWeave может сохранить её полностью.
 
 Не предполагайте, что content уже secret-redacted. Commands, paths, endpoint metadata, identifiers, model metadata, prompts, tool values и content blobs могут быть sensitive. Проверяйте весь run directory перед публикацией.
 
 ## Текущий статус
 
-ExecWeave `main` сейчас **v0.6.8** и проходит release hardening. Последний публичный package/release может отставать от main до явной публикации GitHub Release; publish workflow проверяет точное совпадение release tag и package version до загрузки в PyPI.
+ExecWeave `main` сейчас **v0.6.9** и проходит release hardening. Последний публичный package/release может отставать от main до явной публикации GitHub Release; publish workflow проверяет точное совпадение release tag и package version до загрузки в PyPI.
 
-v0.6.8 объединяет cross-platform runtime collection, materialized execution graphs, standalone/live viewing, консервативную provider↔runtime correlation, content-addressed full-fidelity provider evidence, evidence grades, bounded rule packs, явный runtime threat/fidelity contract и честный local run-integrity seal. Observed evidence и inference остаются разделёнными по дизайну.
+v0.6.9 объединяет cross-platform runtime collection, materialized execution graphs, standalone/live viewing, консервативную provider↔runtime correlation, content-addressed full-fidelity provider evidence, evidence grades, bounded rule packs, явный runtime threat/fidelity contract и честный local run-integrity seal. Observed evidence и inference остаются разделёнными по дизайну.
 
 ## Документация
 

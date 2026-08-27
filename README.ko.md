@@ -31,7 +31,7 @@ PyPI에서 최신 공개 wheel/sdist를 설치합니다.
 python -m pip install -U execweave
 ```
 
-현재 `main`의 package version은 **v0.6.8**입니다. 공개 release가 main보다 늦을 수 있습니다. 현재 mainline을 직접 테스트하려면:
+현재 `main`의 package version은 **v0.6.9**입니다. 공개 release가 main보다 늦을 수 있습니다. 현재 mainline을 직접 테스트하려면:
 
 ```bash
 python -m pip install --upgrade --force-reinstall "execweave @ git+https://github.com/Irish-kw/ExecWeave.git@main"
@@ -71,9 +71,9 @@ execweave record --open -- python my_agent.py
 
 `execweave top -- codex`는 Agent를 시작 terminal에서 계속 대화 가능하게 유지하면서 호스트 환경에 따라 detached Top dashboard를 열거나 attach합니다.
 
-## v0.6.8: 명확한 evidence boundary를 가진 full-fidelity observability
+## v0.6.9: 명확한 evidence boundary를 가진 full-fidelity observability
 
-v0.6.8는 compact metadata에만 머물지 않습니다. 지원되는 integration point가 content를 명시적으로 제공하면 ExecWeave는 **그 source가 제공한 전체 값**을 로컬 SHA-256 content-addressed store에 보존하고 semantic event stream에는 reference만 남길 수 있습니다.
+v0.6.9는 compact metadata에만 머물지 않습니다. 지원되는 integration point가 content를 명시적으로 제공하면 ExecWeave는 **그 source가 제공한 전체 값**을 로컬 SHA-256 content-addressed store에 보존하고 semantic event stream에는 reference만 남길 수 있습니다.
 
 ```text
 <run-root>/content/sha256/<sha256>.<json|txt|bin>
@@ -228,7 +228,7 @@ Portable filesystem observation은 session-correlated이며 process-causal이 �
 
 ## Performance와 large-run safety
 
-v0.6.3은 bounded filesystem/viewer protection, incremental Live JSONL tailing, large-graph safety guard를 추가했고 v0.6.4는 detached Top과 configured provider integration용 provisional live sidecar를 추가했습니다. 이 기능들은 v0.6.8에도 유지됩니다. 이번 release만을 위해 Live를 SSE로, artifact storage를 SQLite로, renderer를 Canvas/WebGL로, collector를 Rust로 전환하지 않았습니다.
+v0.6.3은 bounded filesystem/viewer protection, incremental Live JSONL tailing, large-graph safety guard를 추가했고 v0.6.4는 detached Top과 configured provider integration용 provisional live sidecar를 추가했습니다. 이 기능들은 v0.6.9에도 유지됩니다. 이번 release만을 위해 Live를 SSE로, artifact storage를 SQLite로, renderer를 Canvas/WebGL로, collector를 Rust로 전환하지 않았습니다.
 
 재현 가능한 incremental `GraphAccumulator` reference result는 문서화된 GitHub Actions workload에서 1M synthetic events 기준 **164,273 ev/s**입니다. 이는 graph accumulation benchmark이며 end-to-end collector/browser throughput이 아닙니다.
 
@@ -263,15 +263,15 @@ Derived correlation은 raw runtime 또는 provider sidecar evidence를 다시 �
 
 ## Privacy
 
-ExecWeave는 local-first이며 capture, content blob, graph, report, viewer는 기본적으로 로컬에 남습니다. **OS runtime collector**는 file content나 raw read/write byte buffer를 의도적으로 캡처하지 않습니다. 그러나 이 경계를 v0.6.8 **provider full-fidelity content store**와 혼동하면 안 됩니다. 지원되는 hook/API가 prompt, tool argument/result, model response, reasoning/thinking text, shell output, file content 등을 명시적으로 제공하면 ExecWeave가 이를 완전히 보존할 수 있습니다.
+ExecWeave는 local-first이며 capture, content blob, graph, report, viewer는 기본적으로 로컬에 남습니다. **OS runtime collector**는 file content나 raw read/write byte buffer를 의도적으로 캡처하지 않습니다. 그러나 이 경계를 v0.6.9 **provider full-fidelity content store**와 혼동하면 안 됩니다. 지원되는 hook/API가 prompt, tool argument/result, model response, reasoning/thinking text, shell output, file content 등을 명시적으로 제공하면 ExecWeave가 이를 완전히 보존할 수 있습니다.
 
 Content가 secret-redacted되었다고 가정하지 마세요. Command, path, endpoint metadata, identifier, model metadata, prompt, tool value, content blob은 모두 sensitive할 수 있습니다. 공유하기 전에 run directory 전체를 검토하세요.
 
 ## 현재 상태
 
-ExecWeave `main`은 현재 **v0.6.8**이며 release hardening 중입니다. 공개 package/release는 main보다 늦을 수 있습니다. GitHub Release가 명시적으로 publish될 때만 publish workflow가 실행되며 PyPI upload 전에 release tag와 package version이 정확히 일치하는지 검증합니다.
+ExecWeave `main`은 현재 **v0.6.9**이며 release hardening 중입니다. 공개 package/release는 main보다 늦을 수 있습니다. GitHub Release가 명시적으로 publish될 때만 publish workflow가 실행되며 PyPI upload 전에 release tag와 package version이 정확히 일치하는지 검증합니다.
 
-v0.6.8는 cross-platform runtime collection, materialized execution graph, standalone/live viewer, 보수적인 provider↔runtime correlation, content-addressed full-fidelity provider evidence, evidence grades, bounded rule packs, 명시적 runtime threat/fidelity contract, honest local run-integrity sealing을 결합합니다. Observed evidence와 inference는 설계상 분리됩니다.
+v0.6.9는 cross-platform runtime collection, materialized execution graph, standalone/live viewer, 보수적인 provider↔runtime correlation, content-addressed full-fidelity provider evidence, evidence grades, bounded rule packs, 명시적 runtime threat/fidelity contract, honest local run-integrity sealing을 결합합니다. Observed evidence와 inference는 설계상 분리됩니다.
 
 ## 문서
 

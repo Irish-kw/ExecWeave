@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "execweave"
-version = "0.6.8"
+version = "0.6.9"
 description = "Turn AI-agent runtime behavior into a local interactive execution graph."
 readme = "README.md"
 requires-python = ">=3.10"

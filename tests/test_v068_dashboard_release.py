@@ -92,7 +92,7 @@ def test_live_gif_export_uses_reset_bounded_lzw_and_emits_a_gif() -> None:
 
 
 def test_release_version_and_noncommercial_license_metadata_are_068() -> None:
-    assert __version__ == "0.6.8"
+    assert __version__ == "0.6.9"
     pyproject = Path("pyproject.toml").read_text(encoding="utf-8")
     assert 'version = "0.6.8"' in pyproject
     assert "License :: Other/Proprietary License" in pyproject

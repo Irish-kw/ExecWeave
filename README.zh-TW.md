@@ -31,7 +31,7 @@ ExecWeave 是一個 source-available、local-first 的可觀測性專案，會�
 python -m pip install -U execweave
 ```
 
-目前 `main` 的套件版本是 **v0.6.8**。正式 release 可能晚於 main；若要測試目前 mainline：
+目前 `main` 的套件版本是 **v0.6.9**。正式 release 可能晚於 main；若要測試目前 mainline：
 
 ```bash
 python -m pip install --upgrade --force-reinstall "execweave @ git+https://github.com/Irish-kw/ExecWeave.git@main"
@@ -71,9 +71,9 @@ execweave record --open -- python my_agent.py
 
 `execweave top -- codex` 會讓 Agent 保持在啟動 terminal 中互動，並依主機環境開啟或附加 detached Top dashboard。
 
-## v0.6.8：full-fidelity observability 與明確 evidence boundary
+## v0.6.9：full-fidelity observability 與明確 evidence boundary
 
-v0.6.8 不再只保留精簡 metadata。當受支援的 integration point 明確提供內容時，ExecWeave 可以把**來源實際提供的完整值**存進本機 SHA-256 content-addressed store，而 semantic event stream 只保留 reference。
+v0.6.9 不再只保留精簡 metadata。當受支援的 integration point 明確提供內容時，ExecWeave 可以把**來源實際提供的完整值**存進本機 SHA-256 content-addressed store，而 semantic event stream 只保留 reference。
 
 ```text
 <run-root>/content/sha256/<sha256>.<json|txt|bin>
@@ -230,7 +230,7 @@ Portable filesystem observation 是 session-correlated，不是 process-causal�
 
 ## Performance 與 large-run safety
 
-v0.6.3 加入 bounded filesystem/viewer protection、incremental Live JSONL tailing 與 large-graph safety guard；v0.6.4 加入 detached Top，以及 configured provider integration 共用的 provisional live sidecar。這些能力都保留在 v0.6.8。這次 release **沒有**僅為架構替換而把 Live 遷移到 SSE、artifact storage 改成 SQLite、renderer 改成 Canvas/WebGL，或把 collector 改寫成 Rust。
+v0.6.3 加入 bounded filesystem/viewer protection、incremental Live JSONL tailing 與 large-graph safety guard；v0.6.4 加入 detached Top，以及 configured provider integration 共用的 provisional live sidecar。這些能力都保留在 v0.6.9。這次 release **沒有**僅為架構替換而把 Live 遷移到 SSE、artifact storage 改成 SQLite、renderer 改成 Canvas/WebGL，或把 collector 改寫成 Rust。
 
 可重現的 incremental `GraphAccumulator` reference result 在文件化的 GitHub Actions workload 上，1M synthetic events 達到 **164,273 ev/s**。這是 graph accumulation benchmark，不是 end-to-end collector/browser throughput。
 
@@ -267,15 +267,15 @@ Derived correlation 不會重寫 raw runtime 或 provider sidecar evidence。
 
 ## Privacy
 
-ExecWeave 是 local-first：capture、content blob、graph、report、viewer 預設留在本機。**OS runtime collector** 不會刻意擷取 file content 或 raw read/write byte buffer；但這個邊界不能和 v0.6.8 的 **provider full-fidelity content store** 混為一談。受支援 hook/API 若明確提供 prompt、tool argument/result、model response、reasoning/thinking text、shell output、file content 或其他敏感值，ExecWeave 可以完整保存。
+ExecWeave 是 local-first：capture、content blob、graph、report、viewer 預設留在本機。**OS runtime collector** 不會刻意擷取 file content 或 raw read/write byte buffer；但這個邊界不能和 v0.6.9 的 **provider full-fidelity content store** 混為一談。受支援 hook/API 若明確提供 prompt、tool argument/result、model response、reasoning/thinking text、shell output、file content 或其他敏感值，ExecWeave 可以完整保存。
 
 不要假設 content 已經過 secret redaction。Command、path、endpoint metadata、identifier、model metadata、prompt、tool value、content blob 都可能敏感；分享前請檢查整個 run directory。
 
 ## 目前狀態
 
-ExecWeave `main` 目前是 **v0.6.8**，正在進行 release hardening。最新公開 package/release 可能會晚於 main；只有明確發布 GitHub Release 才會觸發 publish workflow，而且 workflow 會先驗證 release tag 與 package version 完全一致再上傳 PyPI。
+ExecWeave `main` 目前是 **v0.6.9**，正在進行 release hardening。最新公開 package/release 可能會晚於 main；只有明確發布 GitHub Release 才會觸發 publish workflow，而且 workflow 會先驗證 release tag 與 package version 完全一致再上傳 PyPI。
 
-v0.6.8 整合 cross-platform runtime collection、materialized execution graph、standalone/live viewer、保守的 provider↔runtime correlation、content-addressed full-fidelity provider evidence、evidence grades、bounded rule packs、明確的 runtime threat/fidelity contract，以及誠實定義信任邊界的 local run-integrity sealing。Observed evidence 與 inference 仍從設計上分離。
+v0.6.9 整合 cross-platform runtime collection、materialized execution graph、standalone/live viewer、保守的 provider↔runtime correlation、content-addressed full-fidelity provider evidence、evidence grades、bounded rule packs、明確的 runtime threat/fidelity contract，以及誠實定義信任邊界的 local run-integrity sealing。Observed evidence 與 inference 仍從設計上分離。
 
 ## 文件
 
