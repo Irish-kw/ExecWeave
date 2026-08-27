@@ -7,7 +7,7 @@ from pathlib import Path
 
 ALL_LANGS = ["zh-TW", "zh-CN", "ja", "ko", "fr", "de", "ru"]
 DEFAULT_STRICT_LANGS = ["fr", "de", "ru"]
-ALL_LANGUAGE_STRICT_STEMS = {"docs/live-graph", "docs/evidence-grades"}
+ALL_LANGUAGE_STRICT_STEMS = {"docs/live-graph", "docs/evidence-grades", "docs/rule-packs"}
 DOCS = [
     (Path("README.md"), "README"),
     (Path("docs/phase-1-runtime-collection.md"), "docs/phase-1-runtime-collection"),
@@ -23,6 +23,7 @@ DOCS = [
     (Path("docs/model-runtime.md"), "docs/model-runtime"),
     (Path("docs/security-analysis.md"), "docs/security-analysis"),
     (Path("docs/evidence-grades.md"), "docs/evidence-grades"),
+    (Path("docs/rule-packs.md"), "docs/rule-packs"),
 ]
 
 README_REQUIRED_SNIPPETS = [

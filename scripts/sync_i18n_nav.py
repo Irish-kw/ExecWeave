@@ -30,6 +30,7 @@ DOC_BASE_NAMES = [
     "model-runtime.md",
     "security-analysis.md",
     "evidence-grades.md",
+    "rule-packs.md",
 ]
 
 START = "<!-- i18n-nav:start -->"
