@@ -86,9 +86,31 @@ def test_analysis_reports_sensitive_file_and_possible_network_path() -> None:
         if finding["rule_id"] == "possible-sensitive-file-to-network-path"
     )
     assert possible["severity"] == "high"
+    assert possible["evidence_grade"] == "U"
     assert possible["attributes"]["data_flow_proven"] is False
     assert possible["attributes"]["exfiltration_proven"] is False
     assert result["severity_counts"]["high"] == 1
+    assert result["evidence_grade_counts"]["U"] == 3
+
+
+def test_analysis_evidence_grade_is_derived_without_changing_severity() -> None:
+    graph = _base_graph()
+    for edge in graph["edges"]:
+        edge["backends"] = ["strace"]
+        edge["attributions"] = ["syscall"]
+        edge["inferred"] = False
+
+    result = analyze_graph(graph)
+    possible = next(
+        finding
+        for finding in result["findings"]
+        if finding["rule_id"] == "possible-sensitive-file-to-network-path"
+    )
+
+    assert possible["severity"] == "high"
+    assert possible["evidence_grade"] == "A"
+    assert [item["grade"] for item in possible["evidence_basis"]] == ["A", "A"]
+    assert result["evidence_grade_counts"]["A"] == 3
 
 
 def test_analysis_does_not_create_dataflow_finding_from_noncausal_file_observation() -> None:
@@ -103,6 +125,7 @@ def test_analysis_does_not_create_dataflow_finding_from_noncausal_file_observati
         finding for finding in result["findings"] if finding["rule_id"] == "sensitive-file-access"
     )
     assert sensitive["severity"] == "low"
+    assert sensitive["evidence_grade"] == "C"
 
 
 def test_analysis_ignores_private_network_endpoint_for_external_rule() -> None:
@@ -135,7 +158,8 @@ def test_analysis_reports_chronological_causal_delegated_path() -> None:
     assert finding["attributes"]["ipc_proven"] is False
     assert finding["attributes"]["data_flow_proven"] is False
     assert finding["attributes"]["exfiltration_proven"] is False
-    assert result["analysis_schema_version"] == "0.2"
+    assert result["analysis_schema_version"] == "0.3"
+    assert result["evidence_grade_schema_version"] == "0.1"
 
 
 def test_analysis_rejects_noncausal_spawn_for_delegated_path() -> None:

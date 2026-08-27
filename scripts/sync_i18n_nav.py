@@ -29,6 +29,7 @@ DOC_BASE_NAMES = [
     "inference-gateway.md",
     "model-runtime.md",
     "security-analysis.md",
+    "evidence-grades.md",
 ]
 
 START = "<!-- i18n-nav:start -->"

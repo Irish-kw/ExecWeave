@@ -6,6 +6,11 @@ from dataclasses import asdict, dataclass, field
 from pathlib import PurePath
 from typing import Any
 
+from .evidence_grade import (
+    EVIDENCE_GRADES,
+    EVIDENCE_GRADE_SCHEMA_VERSION,
+    annotate_finding,
+)
 
 _SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2, "info": 3}
 _SENSITIVE_MARKERS = (
@@ -203,6 +208,11 @@ def analyze_graph(graph: dict[str, Any]) -> dict[str, Any]:
     """
     nodes = _node_map(graph)
     edges = [edge for edge in graph.get("edges", []) if isinstance(edge, dict)]
+    edges_by_id = {
+        edge_id: edge
+        for edge in edges
+        if isinstance((edge_id := edge.get("id")), str) and edge_id
+    }
     findings: list[Finding] = []
     sensitive_by_process: dict[str, list[dict[str, Any]]] = {}
     external_by_process: dict[str, list[dict[str, Any]]] = {}
@@ -389,18 +399,29 @@ def analyze_graph(graph: dict[str, Any]) -> dict[str, Any]:
         )
     )
     counts = Counter(finding.severity for finding in findings)
+    finding_payloads = [
+        annotate_finding(finding.to_dict(), edges_by_id) for finding in findings
+    ]
+    grade_counts = Counter(
+        str(finding.get("evidence_grade") or "U") for finding in finding_payloads
+    )
     return {
-        "analysis_schema_version": "0.2",
+        "analysis_schema_version": "0.3",
+        "evidence_grade_schema_version": EVIDENCE_GRADE_SCHEMA_VERSION,
         "session_id": graph.get("session_id"),
         "finding_count": len(findings),
         "severity_counts": {
             severity: counts.get(severity, 0) for severity in ("high", "medium", "low", "info")
+        },
+        "evidence_grade_counts": {
+            grade: grade_counts.get(grade, 0) for grade in EVIDENCE_GRADES
         },
         "limitations": [
             "Findings are rule-based prioritization signals, not proof of malicious intent.",
             "Sensitive-file-to-network findings do not prove byte-level data flow or exfiltration.",
             "SPAWNED lineage does not prove data inheritance, IPC, or taint propagation.",
             "Collector coverage and attribution strength depend on the backend.",
+            "Evidence grades describe provenance strength, not probability, correctness, or maliciousness.",
         ],
-        "findings": [finding.to_dict() for finding in findings],
+        "findings": finding_payloads,
     }
