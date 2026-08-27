@@ -1,0 +1,80 @@
+name: Prepare v0.6.9
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/prepare-v069.yml
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Bump release metadata and remove this workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git checkout -B main origin/main
+          base_sha="$(git rev-parse HEAD)"
+
+          python - <<'PY'
+          from pathlib import Path
+
+          pyproject = Path("pyproject.toml")
+          text = pyproject.read_text(encoding="utf-8")
+          old = 'version = "0.6.8"'
+          new = 'version = "0.6.9"'
+          if text.count(old) != 1:
+              raise SystemExit(f"expected exactly one {old!r} in pyproject.toml")
+          pyproject.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          init_file = Path("src/execweave/__init__.py")
+          text = init_file.read_text(encoding="utf-8")
+          old = '__version__ = "0.6.8"'
+          new = '__version__ = "0.6.9"'
+          if text.count(old) != 1:
+              raise SystemExit(f"expected exactly one {old!r} in {init_file}")
+          init_file.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          test_file = Path("tests/test_v068_dashboard_release.py")
+          if test_file.exists():
+              text = test_file.read_text(encoding="utf-8")
+              text = text.replace('assert __version__ == "0.6.8"', 'assert __version__ == "0.6.9"')
+              text = text.replace('def test_release_version_is_068()', 'def test_release_version_is_069()')
+              test_file.write_text(text, encoding="utf-8")
+
+          for readme in sorted(Path(".").glob("README*.md")):
+              original = readme.read_text(encoding="utf-8")
+              updated_lines = []
+              for line in original.splitlines(keepends=True):
+                  # Preserve the historical licensing boundary: v0.6.8 was the first
+                  # PolyForm Noncommercial release. Everything else that describes
+                  # the current release moves to v0.6.9.
+                  if "PolyForm" not in line and "MIT" not in line:
+                      line = line.replace("v0.6.8", "v0.6.9")
+                  updated_lines.append(line)
+              updated = "".join(updated_lines)
+              readme.write_text(updated, encoding="utf-8")
+          PY
+
+          git rm .github/workflows/prepare-v069.yml
+          git add pyproject.toml src/execweave/__init__.py tests/test_v068_dashboard_release.py README*.md
+
+          git fetch origin main
+          if [ "$(git rev-parse origin/main)" != "$base_sha" ]; then
+            echo "main moved during v0.6.9 preparation; aborting without push" >&2
+            exit 1
+          fi
+
+          git commit -m "chore: prepare v0.6.9 release"
+          git push origin HEAD:main
