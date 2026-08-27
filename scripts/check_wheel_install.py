@@ -62,6 +62,7 @@ def main() -> int:
             [str(_console_script(env_root, "execweave-scalability")), "--help"],
             [str(_console_script(env_root, "execweave-inference-gateway")), "--help"],
             [str(_console_script(env_root, "execweave-openai-compatible")), "--help"],
+            [str(_console_script(env_root, "execweave-anthropic")), "--help"],
             [str(_console_script(env_root, "execweave-http-proxy")), "--help"],
             [str(_console_script(env_root, "execweave-litellm-callback")), "--print-callback"],
             [str(_console_script(env_root, "execweave-litellm-callback")), "--print-config"],
