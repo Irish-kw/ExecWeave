@@ -1,0 +1,35 @@
+{
+  "fixture_schema_version": "0.1",
+  "provider": "claude",
+  "payloads": [
+    {
+      "session_id": "fixture-claude-session",
+      "prompt_id": "fixture-prompt-1",
+      "cwd": "/workspace/execweave-fixture",
+      "permission_mode": "default",
+      "hook_event_name": "SessionStart",
+      "source": "startup"
+    },
+    {
+      "session_id": "fixture-claude-session",
+      "prompt_id": "fixture-prompt-1",
+      "cwd": "/workspace/execweave-fixture",
+      "permission_mode": "default",
+      "hook_event_name": "PreToolUse",
+      "tool_name": "Bash",
+      "tool_use_id": "fixture-call-1",
+      "tool_input": {"command": "echo execweave-fixture"}
+    },
+    {
+      "session_id": "fixture-claude-session",
+      "prompt_id": "fixture-prompt-1",
+      "cwd": "/workspace/execweave-fixture",
+      "permission_mode": "default",
+      "hook_event_name": "PostToolUse",
+      "tool_name": "Bash",
+      "tool_use_id": "fixture-call-1",
+      "tool_input": {"command": "echo execweave-fixture"},
+      "tool_response": {"stdout": "execweave-fixture", "stderr": "", "interrupted": false}
+    }
+  ]
+}

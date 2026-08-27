@@ -1,0 +1,57 @@
+{
+  "fixture_manifest_version": "0.1",
+  "corpus_kind": "sanitized_representative_regression_schema",
+  "live_capture": false,
+  "contains_real_user_data": false,
+  "contains_credentials": false,
+  "workspace_placeholder": "/workspace/execweave-fixture",
+  "sanitization": {
+    "identifiers": "synthetic fixture identifiers only",
+    "paths": "fixed non-user workspace placeholder",
+    "credentials": "not present",
+    "personal_identity": "removed or replaced with <redacted>",
+    "timestamps": "fixed deterministic values where provider schema exposes them"
+  },
+  "entries": [
+    {
+      "provider": "claude",
+      "path": "claude.json",
+      "source_kind": "existing_regression_schema",
+      "source_paths": ["tests/test_claude_record.py", "tests/test_claude_adapter.py"],
+      "payload_count": 3,
+      "expected_relations": ["REQUESTED_TOOL_CALL", "USES_TOOL", "DECLARED_COMMAND"]
+    },
+    {
+      "provider": "codex",
+      "path": "codex.json",
+      "source_kind": "existing_regression_schema",
+      "source_paths": ["tests/test_codex_record.py", "tests/test_codex_adapter.py"],
+      "payload_count": 3,
+      "expected_relations": ["USED_MODEL", "REQUESTED_TOOL_CALL", "USES_TOOL", "DECLARED_COMMAND", "TOOL_CALL_RETURNED"]
+    },
+    {
+      "provider": "gemini",
+      "path": "gemini.json",
+      "source_kind": "existing_regression_schema",
+      "source_paths": ["tests/test_gemini_record.py", "tests/test_gemini_adapter.py"],
+      "payload_count": 3,
+      "expected_relations": ["STARTED_PROVIDER_SESSION", "REQUESTED_TOOL_CALL", "USES_TOOL", "DECLARED_COMMAND", "TOOL_RESULT_RETURNED"]
+    },
+    {
+      "provider": "cursor",
+      "path": "cursor.json",
+      "source_kind": "existing_regression_schema",
+      "source_paths": ["tests/test_cursor_record.py", "tests/test_cursor_adapter.py"],
+      "payload_count": 3,
+      "expected_relations": ["USED_MODEL", "REQUESTED_TOOL_CALL", "USES_TOOL", "DECLARED_COMMAND", "TOOL_CALL_RETURNED"]
+    },
+    {
+      "provider": "opencode",
+      "path": "opencode.json",
+      "source_kind": "existing_regression_schema",
+      "source_paths": ["tests/test_opencode_record.py", "tests/test_opencode_adapter.py"],
+      "payload_count": 3,
+      "expected_relations": ["USED_MODEL", "REQUESTED_TOOL_CALL", "USES_TOOL", "DECLARED_COMMAND", "TOOL_CALL_RETURNED"]
+    }
+  ]
+}

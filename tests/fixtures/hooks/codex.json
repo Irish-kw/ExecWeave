@@ -1,0 +1,40 @@
+{
+  "fixture_schema_version": "0.1",
+  "provider": "codex",
+  "payloads": [
+    {
+      "cwd": "/workspace/execweave-fixture",
+      "model": "gpt-5.6-codex",
+      "permission_mode": "default",
+      "session_id": "fixture-codex-session",
+      "transcript_path": null,
+      "hook_event_name": "SessionStart",
+      "source": "startup"
+    },
+    {
+      "cwd": "/workspace/execweave-fixture",
+      "model": "gpt-5.6-codex",
+      "permission_mode": "default",
+      "session_id": "fixture-codex-session",
+      "transcript_path": null,
+      "hook_event_name": "PreToolUse",
+      "turn_id": "fixture-turn-1",
+      "tool_name": "Bash",
+      "tool_use_id": "fixture-call-1",
+      "tool_input": {"command": "echo execweave-fixture"}
+    },
+    {
+      "cwd": "/workspace/execweave-fixture",
+      "model": "gpt-5.6-codex",
+      "permission_mode": "default",
+      "session_id": "fixture-codex-session",
+      "transcript_path": null,
+      "hook_event_name": "PostToolUse",
+      "turn_id": "fixture-turn-1",
+      "tool_name": "Bash",
+      "tool_use_id": "fixture-call-1",
+      "tool_input": {"command": "echo execweave-fixture"},
+      "tool_response": "execweave-fixture"
+    }
+  ]
+}

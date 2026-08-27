@@ -1,0 +1,33 @@
+{
+  "fixture_schema_version": "0.1",
+  "provider": "gemini",
+  "payloads": [
+    {
+      "cwd": "/workspace/execweave-fixture",
+      "session_id": "fixture-gemini-session",
+      "timestamp": "2026-08-25T08:20:00Z",
+      "transcript_path": "/workspace/execweave-fixture/transcript.json",
+      "hook_event_name": "SessionStart",
+      "source": "startup"
+    },
+    {
+      "cwd": "/workspace/execweave-fixture",
+      "session_id": "fixture-gemini-session",
+      "timestamp": "2026-08-25T08:20:01Z",
+      "transcript_path": "/workspace/execweave-fixture/transcript.json",
+      "hook_event_name": "BeforeTool",
+      "tool_name": "run_shell_command",
+      "tool_input": {"command": "echo execweave-fixture"}
+    },
+    {
+      "cwd": "/workspace/execweave-fixture",
+      "session_id": "fixture-gemini-session",
+      "timestamp": "2026-08-25T08:20:02Z",
+      "transcript_path": "/workspace/execweave-fixture/transcript.json",
+      "hook_event_name": "AfterTool",
+      "tool_name": "run_shell_command",
+      "tool_input": {"command": "echo execweave-fixture"},
+      "tool_response": {"returnDisplay": "execweave-fixture", "error": null}
+    }
+  ]
+}
