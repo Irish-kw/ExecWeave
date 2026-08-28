@@ -5,6 +5,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from .codex_conversation import codex_rollout_preview
+
 _CONVERSATION_PATH_RE = re.compile(
     r"^content/sha256/(?P<sha256>[0-9a-f]{64})\.(?P<suffix>json|txt|bin)$"
 )
@@ -79,8 +81,39 @@ def _provider(source: dict[str, Any] | None, content_kind: str) -> str:
     return prefix if prefix else "unknown"
 
 
-def conversation_record_entries(graph: dict[str, Any]) -> list[dict[str, Any]]:
-    """Build stable run-relative conversation references from graph evidence only."""
+def _run_local_path(root: Path, relative: str) -> Path | None:
+    try:
+        candidate = (root / relative).resolve(strict=False)
+        candidate.relative_to(root)
+    except (OSError, RuntimeError, ValueError):
+        return None
+    return candidate if candidate.is_file() else None
+
+
+def _conversation_preview(
+    root: Path | None,
+    reference: dict[str, Any],
+) -> dict[str, Any] | None:
+    if root is None:
+        return None
+    content_kind = reference.get("content_kind")
+    if not isinstance(content_kind, str) or not content_kind.startswith(
+        "codex.conversation_transcript"
+    ):
+        return None
+    relative = reference.get("path")
+    if not isinstance(relative, str):
+        return None
+    path = _run_local_path(root, relative)
+    return codex_rollout_preview(path) if path is not None else None
+
+
+def conversation_record_entries(
+    graph: dict[str, Any],
+    run_root: str | Path | None = None,
+) -> list[dict[str, Any]]:
+    """Build stable run-relative conversation references and safe visible previews."""
+    root = Path(run_root).expanduser().resolve() if run_root is not None else None
     nodes = [node for node in graph.get("nodes", []) if isinstance(node, dict)]
     edges = [edge for edge in graph.get("edges", []) if isinstance(edge, dict)]
     node_by_id = {
@@ -101,11 +134,17 @@ def conversation_record_entries(graph: dict[str, Any]) -> list[dict[str, Any]]:
             continue
         source_id = edge.get("source")
         source = node_by_id.get(source_id) if isinstance(source_id, str) else None
+        preview = _conversation_preview(root, reference)
+        source_name = source.get("name") if isinstance(source, dict) else None
+        if isinstance(preview, dict):
+            agent_path = preview.get("agent_path")
+            if isinstance(agent_path, str) and agent_path:
+                source_name = agent_path
         entry = {
             "provider": _provider(source, str(reference["content_kind"])),
             "relation": edge.get("relation"),
             "source_id": source_id,
-            "source_name": source.get("name") if isinstance(source, dict) else None,
+            "source_name": source_name,
             "source_type": source.get("type") if isinstance(source, dict) else None,
             "content_kind": reference["content_kind"],
             "path": reference["path"],
@@ -119,6 +158,8 @@ def conversation_record_entries(graph: dict[str, Any]) -> list[dict[str, Any]]:
             "first_seen": edge.get("first_seen"),
             "last_seen": edge.get("last_seen"),
         }
+        if preview is not None:
+            entry["conversation_preview"] = preview
         entries.append(entry)
     entries.sort(
         key=lambda entry: (
@@ -139,17 +180,64 @@ def _markdown_text(value: object) -> str:
     return text.replace("|", "\\|").replace("\n", " ")
 
 
+def _markdown_message_text(value: object) -> str:
+    if not isinstance(value, str) or not value:
+        return ""
+    return (
+        value.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("\r", "")
+        .replace("\n", "  \n")
+    )
+
+
+def _preview_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    latest: dict[str, dict[str, Any]] = {}
+    for entry in entries:
+        preview = entry.get("conversation_preview")
+        if not isinstance(preview, dict):
+            continue
+        thread_id = preview.get("thread_id")
+        key = str(thread_id or entry.get("source_id") or entry.get("path"))
+        current = latest.get(key)
+        if current is None:
+            latest[key] = entry
+            continue
+        current_sequence = current.get("last_sequence")
+        next_sequence = entry.get("last_sequence")
+        current_rank = current_sequence if isinstance(current_sequence, int) else -1
+        next_rank = next_sequence if isinstance(next_sequence, int) else -1
+        if next_rank > current_rank or (
+            next_rank == current_rank
+            and int(entry.get("size_bytes") or 0) > int(current.get("size_bytes") or 0)
+        ):
+            latest[key] = entry
+    return sorted(
+        latest.values(),
+        key=lambda entry: (
+            str((entry.get("conversation_preview") or {}).get("agent_path") or ""),
+            str(entry.get("source_id") or ""),
+        ),
+    )
+
+
 def _render_markdown(entries: list[dict[str, Any]]) -> str:
     lines = [
         "# ExecWeave Conversation Records",
         "",
-        "This index points only to run-local, content-addressed evidence. You do not need to browse provider-specific Agent folders.",
+        "This index uses run-local, content-addressed evidence. Provider-specific Agent folders are not required for inspection.",
         "",
         f"Records: **{len(entries)}**",
         "",
     ]
     if not entries:
-        lines.extend(["No conversation content was exposed by the selected integrations for this run.", ""])
+        lines.extend(
+            [
+                "No run-local conversation record was captured for this run.",
+                "",
+            ]
+        )
         return "\n".join(lines)
     lines.extend(
         [
@@ -174,9 +262,49 @@ def _render_markdown(entries: list[dict[str, Any]]) -> str:
             )
             + " |"
         )
+
+    rich_entries = _preview_entries(entries)
+    if rich_entries:
+        lines.extend(["", "## Visible conversation timeline", ""])
+    for entry in rich_entries:
+        preview = entry.get("conversation_preview") or {}
+        agent_path = preview.get("agent_path") or entry.get("source_name") or entry.get("source_id")
+        nickname = preview.get("agent_nickname")
+        heading = f"### {_markdown_text(agent_path)}"
+        if isinstance(nickname, str) and nickname:
+            heading += f" ({_markdown_text(nickname)})"
+        lines.extend([heading, ""])
+        messages = preview.get("messages")
+        if not isinstance(messages, list) or not messages:
+            lines.extend(["No user-visible messages were projected from this rollout.", ""])
+            continue
+        for message in messages:
+            if not isinstance(message, dict):
+                continue
+            sender = message.get("sender") or agent_path
+            recipient = message.get("recipient")
+            direction = str(sender)
+            if isinstance(recipient, str) and recipient:
+                direction += f" → {recipient}"
+            kind = str(message.get("kind") or "message")
+            phase = message.get("phase")
+            label = f"**{_markdown_text(kind)}**"
+            if isinstance(phase, str) and phase:
+                label += f" / {_markdown_text(phase)}"
+            timestamp = message.get("timestamp")
+            prefix = f"- `{_markdown_text(timestamp)}` {direction} · {label}: "
+            if message.get("content_state") == "provider_encrypted":
+                lines.append(
+                    prefix
+                    + "*provider-encrypted payload; plaintext is not exposed by the Codex rollout*"
+                )
+            else:
+                text = _markdown_message_text(message.get("text"))
+                lines.append(prefix + (text or "*(no plaintext body exposed)*"))
+        lines.append("")
+
     lines.extend(
         [
-            "",
             "Paths above are SHA-256-addressed copies inside this ExecWeave run. External Claude, Codex, Cursor, OpenCode, or Antigravity cache paths are intentionally not required for inspection.",
             "",
         ]
@@ -191,11 +319,17 @@ def write_conversation_records(
     """Write deterministic JSON + Markdown indexes beside the viewer artifacts."""
     root = Path(run_root).expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True)
-    entries = conversation_record_entries(graph)
+    entries = conversation_record_entries(graph, root)
+    visible_message_count = sum(
+        len(preview.get("messages") or [])
+        for entry in entries
+        if isinstance((preview := entry.get("conversation_preview")), dict)
+    )
     payload = {
-        "schema_version": "0.1",
+        "schema_version": "0.2",
         "scope": "run_local_content_references",
         "entry_count": len(entries),
+        "visible_message_count": visible_message_count,
         "external_provider_folder_lookup_required": False,
         "entries": entries,
     }
