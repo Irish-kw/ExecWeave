@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .agent_trace import provider_agent_trace_visibility_event
 from .claude_adapter import append_semantic_records, claude_hook_to_semantic_events, read_hook_payload
 from .claude_full_fidelity import claude_hook_to_content_events
 from .claude_model_observer import append_claude_transcript_model_events
@@ -76,11 +77,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Return non-zero on telemetry errors. Default is fail-open so tracing cannot block Claude.",
     )
-    parser.add_argument(
-        "--auto",
-        action="store_true",
-        help=argparse.SUPPRESS,
-    )
+    parser.add_argument("--auto", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument(
         "--print-config",
         action="store_true",
@@ -112,6 +109,15 @@ def main(argv: list[str] | None = None) -> int:
         sidecar = Path(sidecar).expanduser().resolve()
         observed_at = _now()
         records = claude_hook_to_semantic_events(payload, timestamp=observed_at)
+        if payload.get("hook_event_name") == "SessionStart":
+            records.append(
+                provider_agent_trace_visibility_event(
+                    "claude",
+                    timestamp=observed_at,
+                    attribution="claude_hook",
+                    evidence_source="provider_hook",
+                )
+            )
         content_store = FullFidelityContentStore(sidecar.parent)
         records.extend(
             claude_hook_to_content_events(

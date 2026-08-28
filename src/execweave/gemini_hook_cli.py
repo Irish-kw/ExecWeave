@@ -4,12 +4,18 @@ import argparse
 import json
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .agent_trace import provider_agent_trace_visibility_event
 from .content_store import FullFidelityContentStore
 from .gemini_adapter import append_semantic_records, gemini_hook_to_semantic_events, read_hook_payload
 from .gemini_full_fidelity import gemini_hook_to_content_events
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _handler(command: str) -> dict[str, Any]:
@@ -98,9 +104,18 @@ def main(argv: list[str] | None = None) -> int:
         observed_at = (
             provider_timestamp
             if isinstance(provider_timestamp, str) and provider_timestamp
-            else None
+            else _now()
         )
         summary_records = gemini_hook_to_semantic_events(payload, timestamp=observed_at)
+        if payload.get("hook_event_name") == "SessionStart":
+            summary_records.append(
+                provider_agent_trace_visibility_event(
+                    "gemini",
+                    timestamp=observed_at,
+                    attribution="gemini_hook",
+                    evidence_source="provider_hook",
+                )
+            )
         append_semantic_records(sidecar, summary_records)
 
         content_store = FullFidelityContentStore(sidecar.parent)

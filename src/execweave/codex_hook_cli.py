@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .agent_trace import provider_agent_trace_visibility_event
 from .codex_adapter import (
     append_semantic_records,
     codex_hook_to_semantic_events,
@@ -80,11 +81,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Return non-zero on telemetry errors. Default is fail-open so tracing cannot block Codex.",
     )
-    parser.add_argument(
-        "--auto",
-        action="store_true",
-        help=argparse.SUPPRESS,
-    )
+    parser.add_argument("--auto", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument(
         "--print-config",
         action="store_true",
@@ -116,6 +113,15 @@ def main(argv: list[str] | None = None) -> int:
         sidecar = Path(sidecar).expanduser().resolve()
         observed_at = _now()
         summary_records = codex_hook_to_semantic_events(payload, timestamp=observed_at)
+        if payload.get("hook_event_name") == "SessionStart":
+            summary_records.append(
+                provider_agent_trace_visibility_event(
+                    "codex",
+                    timestamp=observed_at,
+                    attribution="codex_hook",
+                    evidence_source="provider_hook",
+                )
+            )
         append_semantic_records(sidecar, summary_records)
 
         content_store = FullFidelityContentStore(sidecar.parent)

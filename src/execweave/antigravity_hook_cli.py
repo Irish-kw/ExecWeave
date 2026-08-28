@@ -4,9 +4,11 @@ import argparse
 import json
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .agent_trace import provider_agent_trace_visibility_event
 from .antigravity_adapter import (
     antigravity_hook_to_semantic_events,
     append_semantic_records,
@@ -14,6 +16,10 @@ from .antigravity_adapter import (
 )
 from .antigravity_full_fidelity import antigravity_hook_to_content_events
 from .content_store import FullFidelityContentStore
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _handler(event: str) -> dict[str, Any]:
@@ -96,13 +102,28 @@ def main(argv: list[str] | None = None) -> int:
             sidecar = Path(configured) if configured else _default_sidecar(payload)
         sidecar = Path(sidecar).expanduser().resolve()
 
-        summary = antigravity_hook_to_semantic_events(payload, hook_event=args.event)
+        observed_at = _now()
+        summary = antigravity_hook_to_semantic_events(
+            payload,
+            hook_event=args.event,
+            timestamp=observed_at,
+        )
+        if args.event == "PreInvocation":
+            summary.append(
+                provider_agent_trace_visibility_event(
+                    "antigravity",
+                    timestamp=observed_at,
+                    attribution="antigravity_hook",
+                    evidence_source="provider_hook",
+                )
+            )
         append_semantic_records(sidecar, summary)
         store = FullFidelityContentStore(sidecar.parent)
         content = antigravity_hook_to_content_events(
             payload,
             hook_event=args.event,
             store=store,
+            timestamp=observed_at,
         )
         append_semantic_records(sidecar, content)
     except (OSError, RuntimeError, TimeoutError, TypeError, ValueError) as exc:

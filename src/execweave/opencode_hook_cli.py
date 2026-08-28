@@ -6,6 +6,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .agent_trace import opencode_agent_trace_events
 from .content_store import FullFidelityContentStore
 from .opencode_adapter import append_semantic_records, opencode_plugin_to_semantic_events, read_plugin_payload
 from .opencode_full_fidelity import opencode_plugin_to_content_events
@@ -49,12 +50,24 @@ def main(argv: list[str] | None = None) -> int:
             sidecar = Path(configured) if configured else _default_sidecar(payload)
         sidecar = Path(sidecar).expanduser().resolve()
         observed_at = _now()
-        append_semantic_records(sidecar, opencode_plugin_to_semantic_events(payload, timestamp=observed_at))
+        store = FullFidelityContentStore(sidecar.parent)
+        append_semantic_records(
+            sidecar,
+            opencode_plugin_to_semantic_events(payload, timestamp=observed_at),
+        )
         append_semantic_records(
             sidecar,
             opencode_plugin_to_content_events(
                 payload,
-                store=FullFidelityContentStore(sidecar.parent),
+                store=store,
+                timestamp=observed_at,
+            ),
+        )
+        append_semantic_records(
+            sidecar,
+            opencode_agent_trace_events(
+                payload,
+                store=store,
                 timestamp=observed_at,
             ),
         )

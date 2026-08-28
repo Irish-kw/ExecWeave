@@ -4,7 +4,9 @@ from dataclasses import dataclass
 from typing import Any
 
 LIFECYCLE_SCHEMA_VERSION = "0.1"
-SUPPORTED_PROVIDER_LIFECYCLES = frozenset({"claude", "codex", "gemini", "cursor", "opencode"})
+SUPPORTED_PROVIDER_LIFECYCLES = frozenset(
+    {"claude", "codex", "gemini", "antigravity", "cursor", "opencode"}
+)
 
 
 @dataclass(frozen=True, order=True)
@@ -24,13 +26,16 @@ class ProviderLifecycleAnnotation:
 
 
 _RELATION_MAP: dict[str, tuple[str, str]] = {
-    # Session / model lifecycle.
     "STARTED_PROVIDER_SESSION": ("provider_session", "started"),
+    "STARTED_AGENT_SESSION": ("agent_session", "started"),
+    "HAS_CHILD_AGENT_SESSION": ("subagent", "child_session"),
     "USED_MODEL": ("model", "selected"),
+    "INVOKES_MODEL": ("model", "invocation_requested"),
+    "MODEL_INVOCATION_COMPLETED": ("model", "invocation_completed"),
     "SERVED_BY_MODEL": ("model", "served"),
     "SWITCHED_MODEL": ("model", "runtime_transition"),
-    # Prompt / inference request surfaces.
     "RECEIVED_USER_PROMPT": ("prompt", "received"),
+    "DELIVERED_USER_MESSAGE": ("prompt", "delivered"),
     "OBSERVED_CHAT_MESSAGE": ("prompt", "observed_message"),
     "OBSERVED_CHAT_MESSAGE_PARTS": ("prompt", "observed_parts"),
     "OBSERVED_INFERENCE_MESSAGE": ("inference_request", "message_observed"),
@@ -38,23 +43,33 @@ _RELATION_MAP: dict[str, tuple[str, str]] = {
     "OBSERVED_REQUEST_HEADERS": ("inference_request", "headers_observed"),
     "OBSERVED_MODEL_CONTEXT": ("inference_request", "model_context_observed"),
     "OBSERVED_SYSTEM_PROMPT": ("inference_request", "system_prompt_observed"),
-    # Assistant output. Returned/displayed text is classified without implying hidden state.
     "RECEIVED_LLM_RESPONSE_CHUNK": ("assistant_response", "stream_chunk"),
     "PRODUCED_ASSISTANT_RESPONSE": ("assistant_response", "final"),
     "PRODUCED_ASSISTANT_TEXT": ("assistant_response", "final"),
+    "PRODUCED_ASSISTANT_MESSAGE": ("assistant_response", "message"),
     "OBSERVED_AGENT_THOUGHT": ("assistant_thought", "provider_labeled_observed"),
-    # Tool definition / selection / lifecycle.
+    "PRODUCED_REASONING_TEXT": ("reasoning", "provider_exposed_text"),
+    "PRODUCED_REASONING_SUMMARY": ("reasoning", "provider_exposed_summary"),
+    "PRODUCED_ENCODED_REASONING": ("reasoning", "provider_exposed_encoded"),
+    "COMPLETED_AGENT_STEP": ("assistant_response", "step_completed"),
     "EXPOSES_TOOL": ("tool_definition", "exposed"),
     "OBSERVED_TOOL_DESCRIPTION": ("tool_definition", "description_observed"),
     "OBSERVED_TOOL_SCHEMA": ("tool_definition", "schema_observed"),
     "REQUESTED_TOOL_CALL": ("tool_call", "requested"),
+    "OWNED_TOOL_CALL": ("tool_call", "agent_owned"),
+    "OBSERVED_TOOL_CALL": ("tool_call", "observed"),
     "USES_TOOL": ("tool_call", "tool_selected"),
     "HAS_TOOL_INPUT": ("tool_call", "input_observed"),
     "OBSERVED_TOOL_INPUT": ("tool_call", "input_observed"),
+    "OBSERVED_TOOL_INPUT_AFTER_EXECUTION": ("tool_call", "input_observed_after_execution"),
+    "OBSERVED_TOOL_INPUT_FROM_PROVIDER_EVENT": ("tool_call", "event_input_observed"),
     "HAS_TOOL_OUTPUT": ("tool_call", "output_observed"),
     "RECEIVED_TOOL_OUTPUT": ("tool_call", "output_observed"),
+    "RECEIVED_TOOL_OUTPUT_FROM_PROVIDER_EVENT": ("tool_call", "event_output_observed"),
     "MODEL_RECEIVED_TOOL_RESULT": ("tool_call", "model_visible_result_observed"),
     "RECEIVED_TOOL_ERROR": ("tool_call", "error_observed"),
+    "OBSERVED_TOOL_ERROR": ("tool_call", "error_observed"),
+    "RECEIVED_TOOL_ERROR_FROM_PROVIDER_EVENT": ("tool_call", "event_error_observed"),
     "TOOL_CALL_SUCCEEDED": ("tool_call", "succeeded"),
     "TOOL_CALL_RETURNED": ("tool_call", "returned"),
     "TOOL_CALL_FAILED": ("tool_call", "failed"),
@@ -62,33 +77,36 @@ _RELATION_MAP: dict[str, tuple[str, str]] = {
     "TOOL_RESULT_REPORTED_ERROR": ("tool_result", "provider_reported_error"),
     "REQUESTED_PERMISSION_FOR_TOOL_INPUT": ("permission", "requested"),
     "OBSERVED_PERMISSION_REQUEST": ("permission", "requested"),
-    # Shell lifecycle. Observing a command before/after does not assert command success.
     "DECLARED_COMMAND": ("shell_command", "declared"),
+    "OWNED_AGENT_OPERATION": ("agent_operation", "agent_owned"),
     "OBSERVED_SHELL_COMMAND_BEFORE_EXECUTION": ("shell_command", "before_execution"),
     "OBSERVED_SHELL_COMMAND_AFTER_EXECUTION": ("shell_command", "after_execution"),
     "RECEIVED_SHELL_OUTPUT": ("shell_command", "output_observed"),
     "OBSERVED_COMMAND": ("shell_command", "observed"),
     "OBSERVED_COMMAND_ARGUMENTS": ("shell_command", "arguments_observed"),
     "OBSERVED_COMMAND_PARTS": ("shell_command", "parts_observed"),
-    # MCP lifecycle. Provider hooks may expose tool/server content without proving OS causality.
     "VIA_MCP": ("mcp", "invoked"),
     "OBSERVED_MCP_SERVER_COMMAND": ("mcp", "server_command_observed"),
     "OBSERVED_MCP_TOOL_INPUT": ("mcp", "tool_input_observed"),
     "RECEIVED_MCP_TOOL_RESULT": ("mcp", "tool_result_observed"),
-    # File lifecycle. These stages deliberately stop short of claiming completion.
     "OBSERVED_FILE_CONTENT_BEFORE_READ": ("file_read", "pre_read_content_observed"),
     "OBSERVED_FILE_EDITS": ("file_write", "edits_observed"),
-    # Subagent/task lifecycle. Observation-only stages are distinct from linked start/stop events.
     "SPAWNED_SUBAGENT": ("subagent", "started"),
     "RETURNED_TO": ("subagent", "returned"),
+    "REQUESTED_SUBTASK": ("subagent", "task_requested"),
+    "TARGETS_AGENT_PROFILE": ("subagent", "target_profile"),
+    "USED_AGENT_PROFILE": ("subagent", "agent_profile"),
+    "HAS_SUBTASK_PROMPT": ("subagent", "task_prompt_observed"),
+    "HAS_SUBTASK_DESCRIPTION": ("subagent", "task_description_observed"),
     "OBSERVED_SUBAGENT_TASK": ("subagent", "task_observed"),
     "OBSERVED_SUBAGENT_DESCRIPTION": ("subagent", "description_observed"),
     "RECEIVED_SUBAGENT_SUMMARY": ("subagent", "summary_observed"),
-    # Provider/plugin lifecycle surfaces.
+    "DECLARES_AGENT_TRACE_VISIBILITY": ("agent_trace_capability", "declared"),
     "OBSERVED_PROVIDER_METADATA": ("provider_metadata", "observed"),
     "OBSERVED_PROVIDER_EVENT": ("provider_event", "observed"),
     "OBSERVED_COMPACTION_CONTEXT": ("context_compaction", "context_observed"),
     "OBSERVED_COMPACTION_PROMPT": ("context_compaction", "prompt_observed"),
+    "COMPACTED_CONTEXT": ("context_compaction", "completed"),
 }
 
 

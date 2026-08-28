@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .agent_trace import cursor_agent_trace_events
 from .content_store import FullFidelityContentStore
 from .cursor_adapter import append_semantic_records, cursor_hook_to_semantic_events, read_hook_payload
 from .cursor_full_fidelity import cursor_hook_to_content_events
@@ -77,6 +78,7 @@ def main(argv: list[str] | None = None) -> int:
             sidecar = Path(configured) if configured else _default_sidecar(payload)
         sidecar = Path(sidecar).expanduser().resolve()
         observed_at = _now()
+        store = FullFidelityContentStore(sidecar.parent)
         append_semantic_records(
             sidecar,
             cursor_hook_to_semantic_events(payload, timestamp=observed_at),
@@ -85,7 +87,15 @@ def main(argv: list[str] | None = None) -> int:
             sidecar,
             cursor_hook_to_content_events(
                 payload,
-                store=FullFidelityContentStore(sidecar.parent),
+                store=store,
+                timestamp=observed_at,
+            ),
+        )
+        append_semantic_records(
+            sidecar,
+            cursor_agent_trace_events(
+                payload,
+                store=store,
                 timestamp=observed_at,
             ),
         )
