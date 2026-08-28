@@ -12,6 +12,26 @@ _CONTENT_PATH_RE = re.compile(
 
 def _content_category(content_kind: str) -> str:
     value = content_kind.lower()
+    if "agent_message" in value:
+        return "Agent Message Payload"
+    if "reasoning.encoded" in value or "encoded_reasoning" in value:
+        return "Encoded Reasoning"
+    if "reasoning.summary" in value or "reasoning_summary" in value:
+        return "Reasoning Summary"
+    if "reasoning.text" in value or value.endswith(".reasoning"):
+        return "Reasoning Text"
+    if "inference_request" in value:
+        return "Inference Request"
+    if "inference_response" in value:
+        return "Inference Response"
+    if "terminal.request" in value:
+        return "Terminal Request"
+    if "terminal.result" in value:
+        return "Terminal Result"
+    if "code_cell.source" in value:
+        return "Code Cell Source"
+    if "raw_payload" in value:
+        return "Raw Provider Payload"
     if "provider_metadata" in value or "provider_request_config" in value or value.endswith("metadata"):
         return "Provider Metadata"
     if any(token in value for token in ("tool_output", "tool_result", "tool_response", "shell_output")):
@@ -146,12 +166,13 @@ def decorate_viewer_content_references(graph: dict[str, Any]) -> dict[str, Any]:
 
 
 _INSPECTOR_CSS = r"""
-.content-inspector{margin:14px 0 4px;border:1px solid var(--border);border-radius:8px;background:var(--panel2);overflow:hidden}
-.content-inspector summary{cursor:pointer;padding:9px 10px;font-weight:700;list-style:none}.content-inspector summary::-webkit-details-marker{display:none}
-.content-inspector summary::before{content:'▸';display:inline-block;width:14px;color:var(--muted)}.content-inspector[open] summary::before{content:'▾'}
-.content-inspector-body{padding:0 10px 10px}.content-meta{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:4px 8px;margin:2px 0 9px;font:11px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.content-meta dt{color:var(--muted)}.content-meta dd{margin:0;overflow-wrap:anywhere}
-.content-note{margin:8px 0;color:var(--muted);font-size:11px}.content-open{display:inline-block;margin:3px 0 9px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;color:var(--text);text-decoration:none}.content-open:hover{border-color:var(--selected)}
+.content-inspector,.agent-inspector{margin:14px 0 4px;border:1px solid var(--border);border-radius:8px;background:var(--panel2);overflow:hidden}
+.content-inspector summary,.agent-inspector summary{cursor:pointer;padding:9px 10px;font-weight:700;list-style:none}.content-inspector summary::-webkit-details-marker,.agent-inspector summary::-webkit-details-marker{display:none}
+.content-inspector summary::before,.agent-inspector summary::before{content:'▸';display:inline-block;width:14px;color:var(--muted)}.content-inspector[open] summary::before,.agent-inspector[open] summary::before{content:'▾'}
+.content-inspector-body,.agent-inspector-body{padding:0 10px 10px}.content-meta{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:4px 8px;margin:2px 0 9px;font:11px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.content-meta dt{color:var(--muted)}.content-meta dd{margin:0;overflow-wrap:anywhere}
+.content-note{margin:8px 0;color:var(--muted);font-size:11px}.content-open{display:inline-block;margin:3px 5px 9px 0;padding:5px 8px;border:1px solid var(--border);border-radius:6px;color:var(--text);text-decoration:none}.content-open:hover{border-color:var(--selected)}
 .content-frame{display:block;width:100%;min-height:220px;border:1px solid var(--border);border-radius:6px;background:#fff}.content-unavailable{color:var(--muted);font-size:11px}
+.agent-activity-list{display:grid;gap:7px}.agent-activity{border:1px solid var(--border);border-radius:7px;padding:7px 8px;background:var(--panel)}.agent-activity-head{display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:11px}.agent-activity-relation{font-weight:700;color:var(--text)}.agent-activity-direction{color:var(--selected);font-weight:800}.agent-activity-peer{margin-top:3px;color:var(--muted);font:11px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow-wrap:anywhere}.agent-activity-meta{margin-left:auto;color:var(--muted);font-size:10px}.agent-activity-actions{display:flex;gap:5px;flex-wrap:wrap;margin-top:6px}.agent-activity-actions button{padding:3px 6px;font-size:10px}.agent-empty{color:var(--muted);font-size:11px}.agent-section-title{margin:9px 0 6px;color:var(--muted);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
 """.strip()
 
 _INSPECTOR_JS = r"""
@@ -175,14 +196,44 @@ function execweaveAppendContentInspector(kind,value){
   }
   panel.appendChild(body);details.appendChild(panel);
 }
+function execweaveActivitySequence(edge){return Number.isInteger(edge.first_sequence)?edge.first_sequence:Number.isInteger(edge.last_sequence)?edge.last_sequence:Number.MAX_SAFE_INTEGER}
+function execweaveActivityTime(edge){return edge.first_seen||edge.last_seen||''}
+function execweaveAgentNodeMap(){return new Map(possibleNodes.filter(node=>node&&node.id).map(node=>[node.id,node]))}
+function execweaveIncidentEdges(nodeId){return possibleEdges.filter(edge=>edge&&(edge.source===nodeId||edge.target===nodeId)).sort((a,b)=>execweaveActivitySequence(a)-execweaveActivitySequence(b)||String(execweaveActivityTime(a)).localeCompare(String(execweaveActivityTime(b)))||String(a.id||'').localeCompare(String(b.id||'')))}
+function execweavePayloadNodes(nodeId,nodeMap){
+  const result=[],seen=new Set();
+  possibleEdges.forEach(edge=>{if(!edge||(edge.source!==nodeId&&edge.target!==nodeId))return;const peerId=edge.source===nodeId?edge.target:edge.source;const peer=nodeMap.get(peerId);const ref=peer&&peer.type==='observed_content'&&peer.attributes&&peer.attributes.viewer_content;if(!ref||seen.has(peer.id))return;seen.add(peer.id);result.push(peer)});
+  return result;
+}
+function execweaveAppendPayloadLinks(container,nodeId,nodeMap){
+  if(location.protocol!=='file:')return;
+  execweavePayloadNodes(nodeId,nodeMap).forEach(node=>{const ref=node.attributes.viewer_content;const link=document.createElement('a');link.className='content-open';link.href=ref.safe_relative_path;link.target='_blank';link.rel='noreferrer';link.textContent=`${ref.category||'Payload'} · ${execweaveFormatBytes(ref.size_bytes)}`;container.appendChild(link)});
+}
+function execweaveActivityRow(edge,agentId,nodeMap){
+  const outbound=edge.source===agentId,peerId=outbound?edge.target:edge.source,peer=nodeMap.get(peerId);const row=document.createElement('div');row.className='agent-activity';
+  const head=document.createElement('div');head.className='agent-activity-head';const direction=document.createElement('span');direction.className='agent-activity-direction';direction.textContent=outbound?'OUT':'IN';const relation=document.createElement('span');relation.className='agent-activity-relation';relation.textContent=edge.relation||'UNKNOWN';const meta=document.createElement('span');meta.className='agent-activity-meta';const seq=execweaveActivitySequence(edge);meta.textContent=`${seq===Number.MAX_SAFE_INTEGER?'seq —':`seq ${seq}`}${execweaveActivityTime(edge)?` · ${execweaveActivityTime(edge)}`:''}`;head.append(direction,relation,meta);row.appendChild(head);
+  const peerLabel=document.createElement('div');peerLabel.className='agent-activity-peer';peerLabel.textContent=`${peer&&peer.type?peer.type:'node'} · ${peer&&(peer.name||peer.id)?(peer.name||peer.id):peerId}`;row.appendChild(peerLabel);
+  const actions=document.createElement('div');actions.className='agent-activity-actions';const inspect=document.createElement('button');inspect.type='button';inspect.textContent='Inspect edge';inspect.addEventListener('click',()=>showDetails('Edge',edge));actions.appendChild(inspect);if(peer){const peerButton=document.createElement('button');peerButton.type='button';peerButton.textContent='Inspect peer';peerButton.addEventListener('click',()=>showDetails('Node',peer));actions.appendChild(peerButton)}row.appendChild(actions);
+  execweaveAppendPayloadLinks(row,peerId,nodeMap);return row;
+}
+function execweaveCommunicationEdges(agentId,nodeMap){
+  const communicationRelations=new Set(['SPAWNED_AGENT','ASSIGNED_AGENT_TASK','SENT_AGENT_MESSAGE','DELIVERED_AGENT_MESSAGE','RETURNED_AGENT_RESULT','CLOSED_AGENT','SUBAGENT_STOPPED']);
+  return execweaveIncidentEdges(agentId).filter(edge=>{const peerId=edge.source===agentId?edge.target:edge.source,peer=nodeMap.get(peerId);return communicationRelations.has(edge.relation)||(peer&&['agent','agent_message','agent_interaction'].includes(peer.type))});
+}
+function execweaveAppendActivitySection(body,title,edges,agentId,nodeMap){const heading=document.createElement('div');heading.className='agent-section-title';heading.textContent=`${title} · ${edges.length}`;body.appendChild(heading);if(!edges.length){const empty=document.createElement('div');empty.className='agent-empty';empty.textContent='No matching evidence in this graph.';body.appendChild(empty);return}const list=document.createElement('div');list.className='agent-activity-list';edges.forEach(edge=>list.appendChild(execweaveActivityRow(edge,agentId,nodeMap)));body.appendChild(list)}
+function execweaveAppendAgentActivity(kind,value){
+  if(kind!=='Node'||!value||value.type!=='agent'||!value.id)return;
+  const nodeMap=execweaveAgentNodeMap(),all=execweaveIncidentEdges(value.id),communications=execweaveCommunicationEdges(value.id,nodeMap);const panel=document.createElement('details');panel.className='agent-inspector';panel.open=true;const summary=document.createElement('summary');summary.textContent=`Agent trace · ${communications.length} communications · ${all.length} activities`;panel.appendChild(summary);const body=document.createElement('div');body.className='agent-inspector-body';execweaveAppendActivitySection(body,'Agent communications',communications,value.id,nodeMap);execweaveAppendActivitySection(body,'Agent activity',all,value.id,nodeMap);panel.appendChild(body);details.appendChild(panel);
+}
 """.strip()
 
 
 def inject_standalone_content_inspector(html: str) -> str:
-    """Inject a reference-only inspector into the retained standalone viewer.
+    """Inject reference-only content and agent-activity inspectors.
 
     Protective-mode HTML is intentionally left untouched. Full content bytes are
     never embedded in the HTML and are never fetched over HTTP by this inspector.
+    Agent activity is derived only from already materialized graph evidence.
     """
     marker = "function showDetails(kind,value){"
     if marker not in html:
@@ -190,7 +241,10 @@ def inject_standalone_content_inspector(html: str) -> str:
     result = html.replace("</style>", _INSPECTOR_CSS + "\n</style>", 1)
     result = result.replace(marker, _INSPECTOR_JS + "\n" + marker, 1)
     detail_end = "  details.append(p);\n}"
-    replacement = "  details.append(p);execweaveAppendContentInspector(kind,value);\n}"
+    replacement = (
+        "  details.append(p);execweaveAppendContentInspector(kind,value);"
+        "execweaveAppendAgentActivity(kind,value);\n}"
+    )
     if detail_end not in result:
         raise RuntimeError("standalone viewer detail seam changed; content inspector not injected")
     return result.replace(detail_end, replacement, 1)
