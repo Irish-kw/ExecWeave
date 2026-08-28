@@ -8,6 +8,7 @@ from . import viewer_projection_base as _base
 from .conversation_records import conversation_record_entries, write_conversation_records
 from .viewer_antigravity_linkage_inspector import inject_standalone_antigravity_linkage_inspector
 from .viewer_conversation_panel import inject_standalone_conversation_panel
+from .viewer_conversation_tree import inject_standalone_conversation_tree
 from .viewer_dashboard_clean import inject_standalone_dashboard_clean
 from .viewer_execution_inspector import inject_standalone_execution_inspector
 
@@ -32,6 +33,7 @@ def _render_enriched_graph_html(
     html = inject_standalone_execution_inspector(_base_render_graph_html(graph))
     html = inject_standalone_antigravity_linkage_inspector(html)
     html = inject_standalone_conversation_panel(html, entries=conversation_entries)
+    html = inject_standalone_conversation_tree(html)
     return inject_standalone_dashboard_clean(html)
 
 
