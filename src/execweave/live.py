@@ -6,6 +6,7 @@ from collections import deque
 
 from . import live_core as _core
 from .viewer_conversation_panel import inject_live_conversation_panel
+from .viewer_conversation_tree import inject_live_conversation_tree
 from .viewer_dashboard_clean import inject_live_dashboard_clean
 from .viewer_live_layout import inject_live_dashboard_layout
 from .viewer_projection import (
@@ -32,7 +33,9 @@ VIEWER_MAX_EDGES = _core.VIEWER_MAX_EDGES
 VIEWER_MAX_DOM_ELEMENTS = _core.VIEWER_MAX_DOM_ELEMENTS
 _BASE_LIVE_HTML = _core._LIVE_HTML
 _LIVE_HTML = inject_live_dashboard_layout(
-    inject_live_dashboard_clean(inject_live_conversation_panel(_BASE_LIVE_HTML))
+    inject_live_dashboard_clean(
+        inject_live_conversation_tree(inject_live_conversation_panel(_BASE_LIVE_HTML))
+    )
 )
 render_graph_html = _projected_render_graph_html
 write_graph_html = _projected_write_graph_html
