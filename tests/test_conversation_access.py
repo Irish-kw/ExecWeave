@@ -253,7 +253,7 @@ def test_live_content_server_auth_and_path_boundaries(tmp_path: Path) -> None:
         with urlopen(f"{base}/content/sha256/{digest}.txt?t={token}", timeout=2) as response:
             assert response.read().decode("utf-8") == "stored conversation"
         with urlopen(f"{base}/conversations.md?t={token}", timeout=2) as response:
-            assert response.read().decode("utf-8") == "# index\n"
+            assert response.read().decode("utf-8").splitlines() == ["# index"]
 
         with pytest.raises(HTTPError) as traversal:
             urlopen(f"{base}/content/../secret.txt?t={token}", timeout=2)
