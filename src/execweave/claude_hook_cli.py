@@ -10,6 +10,7 @@ from typing import Any
 
 from .agent_trace import provider_agent_trace_visibility_event
 from .claude_adapter import append_semantic_records, claude_hook_to_semantic_events, read_hook_payload
+from .claude_delegation import claude_delegation_events
 from .claude_full_fidelity import claude_hook_to_content_events
 from .claude_model_observer import append_claude_transcript_model_events
 from .content_store import FullFidelityContentStore
@@ -119,10 +120,16 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
         content_store = FullFidelityContentStore(sidecar.parent)
+        content_records = claude_hook_to_content_events(
+            payload,
+            store=content_store,
+            timestamp=observed_at,
+        )
+        records.extend(content_records)
         records.extend(
-            claude_hook_to_content_events(
+            claude_delegation_events(
                 payload,
-                store=content_store,
+                content_events=content_records,
                 timestamp=observed_at,
             )
         )
