@@ -17,6 +17,20 @@ from .antigravity_adapter import (
 from .antigravity_full_fidelity import antigravity_hook_to_content_events
 from .content_store import FullFidelityContentStore
 
+ANTIGRAVITY_OFFICIAL_HOOK_EVENTS = (
+    "PreToolUse",
+    "PostToolUse",
+    "PreInvocation",
+    "PostInvocation",
+    "Stop",
+)
+ANTIGRAVITY_PASSIVE_HOOK_EVENTS = (
+    "PostToolUse",
+    "PreInvocation",
+    "PostInvocation",
+    "Stop",
+)
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -30,11 +44,21 @@ def _handler(event: str) -> dict[str, Any]:
     }
 
 
+def _passive_response(event: str | None) -> dict[str, str]:
+    if event == "Stop":
+        # Antigravity only re-enters the execution loop for decision="continue".
+        # Any other decision allows the provider's original stop to proceed.
+        return {"decision": "stop"}
+    return {}
+
+
 def antigravity_hook_config() -> dict[str, Any]:
     """Return a passive Antigravity hooks.json fragment.
 
-    ExecWeave intentionally avoids PreToolUse because its response can alter the
-    user's permission decision. PostToolUse is observational and returns ``{}``.
+    PreToolUse is deliberately excluded because its required response participates
+    in Antigravity's permission gating. The remaining hooks are observational;
+    Stop explicitly returns a non-``continue`` decision so ExecWeave never keeps
+    an execution loop alive.
     """
     return {
         "execweave-observability": {
@@ -47,6 +71,7 @@ def antigravity_hook_config() -> dict[str, Any]:
             ],
             "PreInvocation": [_handler("PreInvocation")],
             "PostInvocation": [_handler("PostInvocation")],
+            "Stop": [_handler("Stop")],
         }
     }
 
@@ -73,7 +98,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--sidecar", type=Path, default=None)
     parser.add_argument(
         "--event",
-        choices=["PostToolUse", "PreInvocation", "PostInvocation"],
+        choices=list(ANTIGRAVITY_PASSIVE_HOOK_EVENTS),
         default=None,
     )
     parser.add_argument("--strict", action="store_true")
@@ -88,7 +113,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(antigravity_hook_config(), indent=2, sort_keys=True))
         return 0
     if args.auto and not os.environ.get("EXECWEAVE_SEMANTIC_SIDECAR"):
-        print("{}")
+        print(json.dumps(_passive_response(args.event), sort_keys=True))
         return 0
     if args.event is None:
         print("ExecWeave Antigravity hook warning: --event is required", file=sys.stderr)
@@ -130,7 +155,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ExecWeave Antigravity hook warning: {exc}", file=sys.stderr)
         if args.strict:
             return 1
-    print("{}")
+    print(json.dumps(_passive_response(args.event), sort_keys=True))
     return 0
 
 

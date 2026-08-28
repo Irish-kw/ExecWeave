@@ -49,6 +49,9 @@ def _common(payload: dict[str, Any]) -> dict[str, Any]:
         "stepIdx": "antigravity_step_index",
         "invocationNum": "antigravity_invocation_number",
         "initialNumSteps": "antigravity_initial_num_steps",
+        "executionNum": "antigravity_execution_number",
+        "terminationReason": "antigravity_termination_reason",
+        "fullyIdle": "antigravity_fully_idle",
     }
     for source, target in mapping.items():
         value = payload.get(source)
@@ -105,6 +108,35 @@ def _model(payload: dict[str, Any]) -> dict[str, Any] | None:
         f"model:antigravity:{model_name}",
         name=model_name,
         attributes={"provider": "antigravity", "model_name": model_name},
+    )
+
+
+def _execution(payload: dict[str, Any]) -> dict[str, Any]:
+    conversation_id, _ = _conversation(payload)
+    execution_num = payload.get("executionNum")
+    if (
+        not isinstance(execution_num, int)
+        or isinstance(execution_num, bool)
+        or execution_num < 0
+    ):
+        raise ValueError("Antigravity Stop payload has no valid executionNum")
+    termination_reason = payload.get("terminationReason")
+    if not isinstance(termination_reason, str) or not termination_reason:
+        raise ValueError("Antigravity Stop payload has no terminationReason")
+    fully_idle = payload.get("fullyIdle")
+    if not isinstance(fully_idle, bool):
+        raise ValueError("Antigravity Stop payload has no valid fullyIdle flag")
+    return _entity(
+        "agent_execution",
+        f"agent-execution:antigravity:{conversation_id}:{execution_num}",
+        name=f"execution {execution_num}",
+        attributes={
+            "provider": "antigravity",
+            "execution_num": execution_num,
+            "termination_reason": termination_reason,
+            "fully_idle": fully_idle,
+            "identity_semantics": "provider_conversation_and_execution_number",
+        },
     )
 
 
@@ -203,10 +235,11 @@ def antigravity_hook_to_semantic_events(
             _event(
                 timestamp=observed_at,
                 event_type="semantic.antigravity.session.observed",
-                relation="STARTED_PROVIDER_SESSION",
+                relation="OBSERVED_PROVIDER_SESSION",
                 source=_agent(),
                 target=conversation,
                 payload=payload,
+                attributes={"provider_contract_exact": True},
             )
         ]
         model = _model(payload)
@@ -219,6 +252,7 @@ def antigravity_hook_to_semantic_events(
                     source=conversation,
                     target=model,
                     payload=payload,
+                    attributes={"provider_contract_exact": True},
                 )
             )
         return events
@@ -235,8 +269,40 @@ def antigravity_hook_to_semantic_events(
                 source=conversation,
                 target=model,
                 payload=payload,
+                attributes={"provider_contract_exact": True},
             )
         ]
+
+    if hook_event == "Stop":
+        execution = _execution(payload)
+        events = [
+            _event(
+                timestamp=observed_at,
+                event_type="semantic.antigravity.execution.stopped",
+                relation="OBSERVED_EXECUTION_STOP",
+                source=conversation,
+                target=execution,
+                payload=payload,
+                attributes={"provider_contract_exact": True},
+            )
+        ]
+        error = payload.get("error")
+        if isinstance(error, str) and error:
+            events.append(
+                _event(
+                    timestamp=observed_at,
+                    event_type="semantic.antigravity.execution.error_observed",
+                    relation="OBSERVED_EXECUTION_ERROR",
+                    source=conversation,
+                    target=execution,
+                    payload=payload,
+                    attributes={
+                        "provider_contract_exact": True,
+                        "provider_reported_error": True,
+                    },
+                )
+            )
+        return events
 
     if hook_event != "PostToolUse":
         return []

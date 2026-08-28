@@ -62,7 +62,11 @@ def antigravity_hook_to_content_events(
         )
         source = {
             "type": "tool_call_observation",
-            "id": f"tool-call-observation:antigravity:{payload.get('conversationId','unknown')}:{payload.get('stepIdx','unknown')}",
+            "id": (
+                "tool-call-observation:antigravity:"
+                f"{payload.get('conversationId', 'unknown')}:"
+                f"{payload.get('stepIdx', 'unknown')}"
+            ),
             "name": name,
             "attributes": {"provider": "antigravity", "tool_name": name},
         }
@@ -94,6 +98,26 @@ def antigravity_hook_to_content_events(
                 evidence_source="provider_hook",
                 attribution="antigravity_hook",
                 attributes={"antigravity_hook_event_name": hook_event},
+            )
+        )
+
+    if hook_event == "Stop" and isinstance(error, str) and error:
+        reference = store.put_text(error, content_kind="antigravity.execution_stop_error")
+        execution_num = payload.get("executionNum")
+        attributes: dict[str, Any] = {"antigravity_hook_event_name": hook_event}
+        if isinstance(execution_num, int) and not isinstance(execution_num, bool):
+            attributes["antigravity_execution_number"] = execution_num
+        events.append(
+            content_observation_event(
+                timestamp=observed_at,
+                provider="antigravity",
+                source=_agent(),
+                reference=reference,
+                relation="OBSERVED_EXECUTION_ERROR_CONTENT",
+                observed_field="error",
+                evidence_source="provider_hook",
+                attribution="antigravity_hook",
+                attributes=attributes,
             )
         )
     return events
