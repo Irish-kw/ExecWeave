@@ -203,7 +203,7 @@ def _session_id_from(
 ) -> str | None:
     candidates: list[Any] = []
     if info is not None:
-        candidates.extend((info.get("id"), info.get("sessionID"), info.get("sessionId")))
+        candidates.extend((info.get("sessionID"), info.get("sessionId"), info.get("session_id")))
     if part is not None:
         candidates.extend((part.get("sessionID"), part.get("sessionId"), part.get("session_id")))
     candidates.extend(
@@ -214,6 +214,8 @@ def _session_id_from(
             payload.get("sessionID"),
         )
     )
+    if info is not None:
+        candidates.append(info.get("id"))
     for candidate in candidates:
         value = _string(candidate)
         if value is not None:
