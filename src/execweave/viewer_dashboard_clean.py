@@ -5,7 +5,15 @@ function execweaveDashboardGraph(data){
   const allNodes=Array.isArray(data?.nodes)?data.nodes:[],allEdges=Array.isArray(data?.edges)?data.edges:[];
   const allById=new Map(allNodes.filter(node=>node&&node.id).map(node=>[node.id,node]));
   const hiddenTypes=new Set(['observed_content','tool_call','agent_turn','conversation_item','provider_session','permission_request','context_compaction','agent_turn_stop','compaction','compaction_request','terminal_operation']);
-  const hiddenIds=new Set(allNodes.filter(node=>node&&hiddenTypes.has(String(node.type||''))).map(node=>node.id).filter(Boolean));
+  const hiddenDetailIds=new Set(allNodes.filter(node=>node&&hiddenTypes.has(String(node.type||''))).map(node=>node.id).filter(Boolean));
+  const internalStaging=node=>{
+    const type=String(node?.type||'');
+    if(type!=='file'&&type!=='directory')return false;
+    const attrs=node?.attributes||{},values=[node?.name,attrs.path,attrs.file_path,attrs.source_path,attrs.target_path,attrs.real_path];
+    return values.some(value=>/(^|[\\/])\.execweave-content-[^\\/]+$/.test(String(value||'')));
+  };
+  const internalStagingIds=new Set(allNodes.filter(node=>node&&internalStaging(node)).map(node=>node.id).filter(Boolean));
+  const hiddenIds=new Set([...hiddenDetailIds,...internalStagingIds]);
   const incoming=new Map(),outgoing=new Map();
   for(const edge of allEdges){
     if(!edge)continue;
@@ -54,25 +62,61 @@ function execweaveDashboardGraph(data){
       group.first_seen=earlier(group.first_seen,edge.first_seen);group.last_seen=later(group.last_seen,edge.last_seen);
     }
   }
-  let nodes=allNodes.filter(node=>node&&node.id&&!hiddenIds.has(node.id)).map(node=>{
+  let visibleNodes=allNodes.filter(node=>node&&node.id&&!hiddenIds.has(node.id)).map(node=>{
     if(node.type!=='tool'||!toolCounts.has(node.id))return node;
     return{...node,attributes:{...(node.attributes||{}),viewer_aggregated_tool_call_count:toolCounts.get(node.id)}};
   });
+
+  const canonicalTypes=new Set(['process']);
+  const canonicalGroups=new Map();
+  const canonicalKey=node=>{
+    const type=String(node?.type||'');
+    if(!canonicalTypes.has(type))return `id\u0000${node.id}`;
+    const name=String(node?.name||'').trim().toLowerCase();
+    return name?`${type}\u0000${name}`:`id\u0000${node.id}`;
+  };
+  for(const node of visibleNodes){const key=canonicalKey(node);if(!canonicalGroups.has(key))canonicalGroups.set(key,[]);canonicalGroups.get(key).push(node)}
+  const canonicalId=new Map();
+  const nodes=[];
+  let canonicalizedProcessOccurrenceCount=0;
+  for(const group of canonicalGroups.values()){
+    group.sort((a,b)=>String(a.first_seen||'').localeCompare(String(b.first_seen||''))||String(a.id).localeCompare(String(b.id)));
+    const base=group[0];
+    for(const item of group)canonicalId.set(item.id,base.id);
+    if(group.length===1){nodes.push(base);continue}
+    canonicalizedProcessOccurrenceCount+=group.length-1;
+    const occurrenceRows=group.map(item=>{
+      const attrs=item.attributes||{};
+      return{id:item.id,first_seen:item.first_seen||null,last_seen:item.last_seen||null,pid:attrs.pid??attrs.process_id??null,ppid:attrs.ppid??attrs.parent_pid??null};
+    });
+    const pids=[...new Set(occurrenceRows.map(item=>item.pid).filter(value=>value!==null&&value!==undefined))];
+    const ppids=[...new Set(occurrenceRows.map(item=>item.ppid).filter(value=>value!==null&&value!==undefined))];
+    const firstSeen=group.reduce((value,item)=>earlier(value,item.first_seen),null),lastSeen=group.reduce((value,item)=>later(value,item.last_seen),null);
+    nodes.push({...base,first_seen:firstSeen||base.first_seen,last_seen:lastSeen||base.last_seen,attributes:{...(base.attributes||{}),viewer_canonicalized:true,viewer_occurrence_count:group.length,viewer_occurrence_ids:group.map(item=>item.id),viewer_occurrences:occurrenceRows,viewer_pids:pids,viewer_ppids:ppids}});
+  }
+
   let nodeIds=new Set(nodes.map(node=>node.id));
-  let edges=allEdges.filter(edge=>edge&&nodeIds.has(edge.source)&&nodeIds.has(edge.target));
+  let edges=allEdges.map(edge=>{
+    if(!edge)return null;
+    const source=canonicalId.get(edge.source)||edge.source,target=canonicalId.get(edge.target)||edge.target;
+    if(!nodeIds.has(source)||!nodeIds.has(target))return null;
+    if(source===edge.source&&target===edge.target)return edge;
+    return{...edge,source,target,viewer_canonicalized:true,viewer_original_source:edge.source,viewer_original_target:edge.target};
+  }).filter(Boolean);
   for(const group of groups.values()){
-    if(!nodeIds.has(group.owner)||!nodeIds.has(group.tool))continue;
+    const owner=canonicalId.get(group.owner)||group.owner,tool=canonicalId.get(group.tool)||group.tool;
+    if(!nodeIds.has(owner)||!nodeIds.has(tool))continue;
     edges.push({
-      id:`viewer:${group.owner}--CALLED_TOOL-->${group.tool}`,source:group.owner,target:group.tool,
+      id:`viewer:${owner}--CALLED_TOOL-->${tool}`,source:owner,target:tool,
       relation:'CALLED_TOOL',count:group.count,first_sequence:group.first_sequence,last_sequence:group.last_sequence,
       first_seen:group.first_seen,last_seen:group.last_seen,causal:null,inferred:false,viewer_only:true,
       attributions:['viewer_tool_call_aggregation'],evidence_call_count:group.count
     });
   }
   const incident=new Set();for(const edge of edges){incident.add(edge.source);incident.add(edge.target)}
-  nodes=nodes.filter(node=>node.type!=='tool'||incident.has(node.id));
-  nodeIds=new Set(nodes.map(node=>node.id));edges=edges.filter(edge=>nodeIds.has(edge.source)&&nodeIds.has(edge.target));
-  return{...data,nodes,edges,node_count:nodes.length,edge_count:edges.length,dashboard_projection:{hidden_detail_node_count:hiddenIds.size,collapsed_tool_call_count:[...groups.values()].reduce((sum,item)=>sum+item.count,0)}};
+  visibleNodes=nodes.filter(node=>node.type!=='tool'||incident.has(node.id));
+  nodeIds=new Set(visibleNodes.map(node=>node.id));edges=edges.filter(edge=>nodeIds.has(edge.source)&&nodeIds.has(edge.target));
+  return{...data,nodes:visibleNodes,edges,node_count:visibleNodes.length,edge_count:edges.length,dashboard_projection:{hidden_detail_node_count:hiddenDetailIds.size,hidden_internal_staging_node_count:internalStagingIds.size,canonicalized_process_occurrence_count:canonicalizedProcessOccurrenceCount,collapsed_tool_call_count:[...groups.values()].reduce((sum,item)=>sum+item.count,0)}};
 }
 """.strip()
 
