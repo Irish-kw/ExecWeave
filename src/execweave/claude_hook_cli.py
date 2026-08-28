@@ -72,6 +72,25 @@ def _default_sidecar(payload: dict[str, Any]) -> Path:
     return Path(cwd) / ".execweave" / "semantic" / "claude" / f"{safe_session}.jsonl"
 
 
+def _restore_official_hook_event_name(
+    records: list[dict[str, Any]],
+    payload: dict[str, Any],
+) -> None:
+    """Keep persisted official content evidence tied to the exact hook event that emitted it."""
+
+    hook_event = payload.get("hook_event_name")
+    if not isinstance(hook_event, str) or not hook_event:
+        return
+    for record in records:
+        attributes = record.get("attributes")
+        if not isinstance(attributes, dict):
+            continue
+        if attributes.get("attribution") != "claude_official_hook_contract":
+            continue
+        if attributes.get("claude_hook_event_name") in (None, ""):
+            attributes["claude_hook_event_name"] = hook_event
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="execweave-claude-hook",
@@ -144,6 +163,7 @@ def main(argv: list[str] | None = None) -> int:
             store=content_store,
             timestamp=observed_at,
         )
+        _restore_official_hook_event_name(content_records, payload)
         records.extend(content_records)
         records.extend(
             claude_delegation_events(
