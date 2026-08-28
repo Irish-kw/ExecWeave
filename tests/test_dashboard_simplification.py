@@ -23,7 +23,7 @@ def _dashboard_graph() -> dict[str, object]:
         "id": "agent:codex:root",
         "type": "agent",
         "name": "/root",
-        "attributes": {"provider": "codex"},
+        "attributes": {"provider": "codex", "agent_path": "/root"},
     }
     tool = {
         "id": "tool:codex:wait_agent",
@@ -104,17 +104,24 @@ def _repeated_process_graph() -> dict[str, object]:
         "name": ".execweave-content-xn4uvhqy",
         "attributes": {"path": "content/sha256/.execweave-content-xn4uvhqy"},
     }
+    endpoint = {
+        "id": "network:104.18.25.193:443",
+        "type": "network_endpoint",
+        "name": "104.18.25.193:443",
+        "attributes": {},
+    }
     return {
         "graph_schema_version": "0.2",
         "session_id": "dashboard-process-canonicalization",
-        "event_count": 6,
-        "node_count": 4,
-        "edge_count": 3,
-        "nodes": [parent, git_a, git_b, staging],
+        "event_count": 7,
+        "node_count": 5,
+        "edge_count": 4,
+        "nodes": [parent, git_a, git_b, staging, endpoint],
         "edges": [
             _edge("spawn-a", parent["id"], git_a["id"], "SPAWNED", 1),
             _edge("spawn-b", parent["id"], git_b["id"], "SPAWNED", 2),
             _edge("staging-write", git_b["id"], staging["id"], "WROTE", 3),
+            _edge("connect", parent["id"], endpoint["id"], "CONNECTED_TO", 4),
         ],
     }
 
@@ -138,6 +145,9 @@ def test_static_dashboard_cleans_only_canvas_and_keeps_embedded_evidence() -> No
     assert "'observed_content','tool_call','agent_turn'" in html
     assert "relation:'CALLED_TOOL'" in html
     assert "viewer_aggregated_tool_call_count" in html
+    assert "execweaveDashboardGraphBase" in html
+    assert "'agent_trace_capability','model','session','directory','network_endpoint'" in html
+    assert "execweave-agent-tree-root" in html
     assert "tool-call:a" in html
     assert "content:hook-meta" in html
     assert "agent-trace-capability:codex" in html
@@ -151,18 +161,25 @@ def test_dashboard_process_canonicalization_is_presentation_only() -> None:
     raw_ids = {node["id"] for node in projected["nodes"]}
     html = render_graph_html(graph)
 
-    assert {"process:git:101", "process:git:102", "file:staging"} <= raw_ids
+    assert {
+        "process:git:101",
+        "process:git:102",
+        "file:staging",
+        "network:104.18.25.193:443",
+    } <= raw_ids
     assert "canonicalTypes=new Set(['process'])" in html
     assert "viewer_occurrence_count" in html
     assert "viewer_occurrences" in html
     assert "viewer_original_source" in html
     assert "hidden_internal_staging_node_count" in html
+    assert "hidden_context_node_count" in html
     assert "process:git:101" in html
     assert "process:git:102" in html
     assert ".execweave-content-xn4uvhqy" in html
+    assert "104.18.25.193:443" in html
 
 
-def test_live_dashboard_uses_client_side_clean_graph_without_changing_protocol() -> None:
+def test_live_dashboard_uses_client_side_summary_without_changing_protocol() -> None:
     html = live_module._LIVE_HTML
 
     assert "function execweaveDashboardGraph(data)" in html
@@ -172,4 +189,10 @@ def test_live_dashboard_uses_client_side_clean_graph_without_changing_protocol()
     assert "relation:'CALLED_TOOL'" in html
     assert "viewer_occurrence_count" in html
     assert "hidden_internal_staging_node_count" in html
+    assert "execweaveDashboardGraphBase" in html
+    assert "hidden_context_node_count" in html
+    assert "execweave-agent-tree-root" in html
+    assert "id=\"activity-resizer\"" in html
+    assert "execweave.live.activity-height" in html
+    assert "pointermove" in html
     assert "provider_hook_metadata" not in html
