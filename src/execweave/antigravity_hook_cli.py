@@ -8,13 +8,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .agent_trace import provider_agent_trace_visibility_event
 from .antigravity_adapter import (
     antigravity_hook_to_semantic_events,
     append_semantic_records,
     read_hook_payload,
 )
 from .antigravity_full_fidelity import antigravity_hook_to_content_events
+from .antigravity_trace_capability import antigravity_agent_trace_visibility_event
 from .content_store import FullFidelityContentStore
 
 ANTIGRAVITY_OFFICIAL_HOOK_EVENTS = (
@@ -135,8 +135,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         if args.event == "PreInvocation":
             summary.append(
-                provider_agent_trace_visibility_event(
-                    "antigravity",
+                antigravity_agent_trace_visibility_event(
                     timestamp=observed_at,
                     attribution="antigravity_hook",
                     evidence_source="provider_hook",

@@ -3,6 +3,9 @@ from __future__ import annotations
 from typing import Any
 
 from . import viewer_projection_base as _base
+from .viewer_antigravity_linkage_inspector import (
+    inject_standalone_antigravity_linkage_inspector,
+)
 from .viewer_execution_inspector import inject_standalone_execution_inspector
 
 VIEWER_MAX_DOM_ELEMENTS = _base.VIEWER_MAX_DOM_ELEMENTS
@@ -19,7 +22,8 @@ _base_render_graph_html = _base.render_graph_html
 
 
 def render_graph_html(graph: dict[str, Any]) -> str:
-    return inject_standalone_execution_inspector(_base_render_graph_html(graph))
+    html = inject_standalone_execution_inspector(_base_render_graph_html(graph))
+    return inject_standalone_antigravity_linkage_inspector(html)
 
 
 _base.render_graph_html = render_graph_html

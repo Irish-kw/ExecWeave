@@ -74,6 +74,8 @@ def _assignment_event(
             "evidence_source": "provider_hook_plus_validated_transcript",
             "causal": False,
             "inferred": False,
+            "identity_exact": True,
+            "identity_method": "validated_transcript_record_order_and_provider_ids",
             "provider_collaboration_tool_exact": True,
             "provider_post_tool_success": True,
             "provider_child_identity_exact": True,
