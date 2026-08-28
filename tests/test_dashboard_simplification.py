@@ -146,7 +146,7 @@ def test_static_dashboard_cleans_only_canvas_and_keeps_embedded_evidence() -> No
     assert "relation:'CALLED_TOOL'" in html
     assert "viewer_aggregated_tool_call_count" in html
     assert "execweaveDashboardGraphBase" in html
-    assert "'agent_trace_capability','session','process'" in html
+    assert "'agent_trace_capability','session','command'" in html
     assert "mergeTypes=new Set(['model','directory','network_endpoint'])" in html
     assert "execweave-conversation-root-node" in html
     assert "tool-call:a" in html
@@ -170,6 +170,7 @@ def test_dashboard_process_canonicalization_is_presentation_only() -> None:
     } <= raw_ids
     assert "canonicalTypes=new Set(['process'])" in html
     assert "mergeTypes=new Set(['model','directory','network_endpoint'])" in html
+    assert "node.type==='process'&&occurrenceCount>1" in html
     assert "viewer_occurrence_count" in html
     assert "viewer_occurrences" in html
     assert "viewer_original_source" in html
@@ -177,6 +178,7 @@ def test_dashboard_process_canonicalization_is_presentation_only() -> None:
     assert "hidden_internal_staging_node_count" in html
     assert "hidden_context_node_count" in html
     assert "merged_context_node_count" in html
+    assert "hidden_orphan_file_node_count:0" in html
     assert "process:git:101" in html
     assert "process:git:102" in html
     assert ".execweave-content-xn4uvhqy" in html

@@ -60,6 +60,7 @@ def _mechanical_graph() -> dict[str, object]:
         path="content/sha256/.execweave-content-xn4uvhqy",
     )
     meaningful = _node("file:result", "file", "result.txt", path="result.txt")
+    unlinked_file = _node("file:notes", "file", "notes.txt", path="notes.txt")
     nodes = [
         root,
         child,
@@ -73,6 +74,7 @@ def _mechanical_graph() -> dict[str, object]:
         capability,
         internal,
         meaningful,
+        unlinked_file,
     ]
     edges = [
         _edge("spawn-agent", root["id"], child["id"], "SPAWNED_AGENT"),
@@ -105,41 +107,59 @@ def test_low_level_dashboard_cleanup_remains_presentation_only() -> None:
 
     assert {"process", "network_endpoint", "directory", "model", "agent_trace_capability"} <= raw_types
     assert ".execweave-content-xn4uvhqy" in raw_names
+    assert "notes.txt" in raw_names
     assert "dashboard_projection" not in raw
 
     html = render_graph_html(_mechanical_graph())
-    assert "hiddenTypes=new Set(['agent_trace_capability','session','process'" in html
+    assert "hiddenTypes=new Set(['agent_trace_capability','session','command'" in html
     assert "mergeTypes=new Set(['model','directory','network_endpoint'])" in html
+    assert "canonicalTypes=new Set(['process'])" in html
+    assert "node.type==='process'&&occurrenceCount>1" in html
     assert "viewer_occurrence_count" in html
     assert "viewer_edge_occurrence_count" in html
-    assert "viewer_flattened_hidden_runtime" in html
-    assert "flattened_hidden_runtime_edge_count" in html
     assert "merged_context_node_count" in html
     assert ".execweave-content-" in html
     assert "content/sha256/" in html
-    assert "node.type!=='file'||incident.has(node.id)" in html
-    # Full raw evidence remains embedded even when the default SVG canvas hides or merges it.
+    assert "node.type!=='file'||incident.has(node.id)" not in html
+    assert "value.includes('.git/')" not in html
+    assert "value.includes('.execweave/')" not in html
+    # Full raw evidence remains embedded even when the SVG canvas merges it.
     assert "git.exe" in html
     assert "104.18.25.195:443" in html
     assert ".github" in html
     assert "gpt-5.6" in html
+    assert "result.txt" in html
+    assert "notes.txt" in html
     assert ".execweave-content-xn4uvhqy" in html
 
 
-def test_model_directory_and_network_nodes_are_retained_but_canonicalized() -> None:
+def test_process_model_directory_and_network_nodes_are_retained_but_canonicalized() -> None:
     html = render_graph_html(_mechanical_graph())
 
+    assert "canonicalTypes=new Set(['process'])" in html
     assert "mergeTypes=new Set(['model','directory','network_endpoint'])" in html
     assert "if(type==='model')" in html
     assert "if(type==='directory')" in html
-    assert "attrs.host||attrs.hostname||attrs.address||attrs.ip" in html
+    assert "attrs.host||attrs.hostname||attrs.address||attrs.ip||attrs.remote_host" in html
     assert "viewer_occurrence_ids" in html
     assert "viewer_edge_occurrence_ids" in html
-    assert "viewer_flattened_hidden_runtime" in html
     # Raw duplicates still exist in the embedded graph and evidence contract.
     assert "network:github:repeat" in html
     assert "directory:.github:repeat" in html
     assert "model:codex:gpt:repeat" in html
+
+
+def test_file_nodes_are_retained_except_execweave_atomic_staging() -> None:
+    html = render_graph_html(_mechanical_graph())
+
+    assert "const internalStaging=node=>" in html
+    assert ".execweave-content-" in html
+    assert "node.type!=='file'||incident.has(node.id)" not in html
+    assert "hidden_orphan_file_node_count:0" in html
+    # Raw evidence remains embedded; only the presentation projection hides the temp file.
+    assert "result.txt" in html
+    assert "notes.txt" in html
+    assert ".execweave-content-xn4uvhqy" in html
 
 
 def test_agent_labels_are_human_facing_without_mutating_raw_graph() -> None:
