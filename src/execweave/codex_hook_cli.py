@@ -20,6 +20,7 @@ from .codex_hook_lifecycle import (
     codex_official_hook_lifecycle_events,
 )
 from .content_store import FullFidelityContentStore
+from .conversation_archive import codex_conversation_archive_events
 
 
 def _hook_handler(command: str) -> dict[str, str]:
@@ -143,6 +144,12 @@ def main(argv: list[str] | None = None) -> int:
             timestamp=observed_at,
         )
         append_semantic_records(sidecar, content_records)
+        archive_records = codex_conversation_archive_events(
+            payload,
+            store=content_store,
+            timestamp=observed_at,
+        )
+        append_semantic_records(sidecar, archive_records)
     except (OSError, RuntimeError, TimeoutError, TypeError, ValueError) as exc:
         print(f"ExecWeave Codex hook warning: {exc}", file=sys.stderr)
         return 1 if args.strict else 0
