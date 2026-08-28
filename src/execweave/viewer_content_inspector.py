@@ -20,6 +20,20 @@ def _content_category(content_kind: str) -> str:
         return "Subtask Description"
     if "agent_result" in value:
         return "Agent Result"
+    if "prompt_expansion" in value:
+        return "Prompt Expansion"
+    if "permission" in value:
+        return "Permission Evidence"
+    if ".task." in value or value.endswith(".task"):
+        return "Agent Task"
+    if "compaction" in value:
+        return "Context Compaction"
+    if "elicitation" in value:
+        return "MCP Elicitation"
+    if "notification" in value:
+        return "Provider Notification"
+    if ".stop.background_tasks" in value or ".stop.session_crons" in value:
+        return "Agent Runtime State"
     if "reasoning.encoded" in value or "encoded_reasoning" in value:
         return "Encoded Reasoning"
     if "reasoning.summary" in value or "reasoning_summary" in value:
@@ -239,8 +253,8 @@ function execweaveActivityRow(edge,agentId,nodeMap){
   execweaveAppendPayloadLinks(row,peerId,nodeMap);return row;
 }
 function execweaveCommunicationEdges(agentId,nodeMap){
-  const communicationRelations=new Set(['SPAWNED_AGENT','ASSIGNED_AGENT_TASK','SENT_AGENT_MESSAGE','DELIVERED_AGENT_MESSAGE','RETURNED_AGENT_RESULT','CLOSED_AGENT','SUBAGENT_STOPPED','HAS_CHILD_AGENT_SESSION','SPAWNED_SUBAGENT','RETURNED_TO','REQUESTED_SUBTASK']);
-  return execweaveIncidentEdges(agentId).filter(edge=>{const peerId=edge.source===agentId?edge.target:edge.source,peer=nodeMap.get(peerId);return communicationRelations.has(edge.relation)||(peer&&['agent','agent_message','agent_interaction','subtask'].includes(peer.type))});
+  const communicationRelations=new Set(['SPAWNED_AGENT','ASSIGNED_AGENT_TASK','CREATED_AGENT_TASK','COMPLETED_AGENT_TASK','SENT_AGENT_MESSAGE','DELIVERED_AGENT_MESSAGE','RETURNED_AGENT_RESULT','CLOSED_AGENT','SUBAGENT_STOPPED','HAS_CHILD_AGENT_SESSION','SPAWNED_SUBAGENT','RETURNED_TO','REQUESTED_SUBTASK']);
+  return execweaveIncidentEdges(agentId).filter(edge=>{const peerId=edge.source===agentId?edge.target:edge.source,peer=nodeMap.get(peerId);return communicationRelations.has(edge.relation)||(peer&&['agent','agent_message','agent_interaction','subtask','agent_task'].includes(peer.type))});
 }
 function execweaveAppendActivitySection(body,title,edges,agentId,nodeMap){const heading=document.createElement('div');heading.className='agent-section-title';heading.textContent=`${title} · ${edges.length}`;body.appendChild(heading);if(!edges.length){const empty=document.createElement('div');empty.className='agent-empty';empty.textContent='No matching evidence in this graph.';body.appendChild(empty);return}const list=document.createElement('div');list.className='agent-activity-list';edges.forEach(edge=>list.appendChild(execweaveActivityRow(edge,agentId,nodeMap)));body.appendChild(list)}
 function execweaveAppendAgentActivity(kind,value){
