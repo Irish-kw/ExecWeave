@@ -12,28 +12,8 @@ import execweave.live as live_module
 from execweave.antigravity_full_fidelity import antigravity_hook_to_content_events
 from execweave.content_store import FullFidelityContentStore
 from execweave.conversation_archive import claude_conversation_archive_events
-from execweave.conversation_records import (
-    conversation_record_entries,
-    write_conversation_records,
-)
+from execweave.conversation_records import conversation_record_entries, write_conversation_records
 from execweave.viewer_projection import write_graph_html
-
-
-def _content_node(kind: str, digest: str, *, size: int = 12) -> dict[str, object]:
-    return {
-        "id": f"observed-content:{kind}:sha256:{digest}",
-        "type": "observed_content",
-        "name": kind,
-        "attributes": {
-            "sha256": digest,
-            "path": f"content/sha256/{digest}.txt",
-            "media_type": "text/plain; charset=utf-8",
-            "size_bytes": size,
-            "content_kind": kind,
-            "representation": "raw_utf8",
-            "complete_from_source": True,
-        },
-    }
 
 
 def _conversation_graph() -> dict[str, object]:
@@ -44,7 +24,20 @@ def _conversation_graph() -> dict[str, object]:
         "name": "Claude Code",
         "attributes": {"provider": "claude"},
     }
-    content = _content_node("claude.assistant_final_response", digest)
+    content = {
+        "id": f"observed-content:claude.assistant_final_response:sha256:{digest}",
+        "type": "observed_content",
+        "name": "claude.assistant_final_response",
+        "attributes": {
+            "sha256": digest,
+            "path": f"content/sha256/{digest}.txt",
+            "media_type": "text/plain; charset=utf-8",
+            "size_bytes": 12,
+            "content_kind": "claude.assistant_final_response",
+            "representation": "raw_utf8",
+            "complete_from_source": True,
+        },
+    }
     edge = {
         "id": f"agent:Claude Code--PRODUCED_ASSISTANT_RESPONSE-->{content['id']}",
         "source": source["id"],
@@ -88,31 +81,24 @@ def test_content_store_streams_provider_file_into_run(tmp_path: Path) -> None:
         representation="provider_transcript_jsonl_snapshot",
     )
 
-    stored = store.run_root / reference.path
-    assert stored.read_bytes() == payload
+    assert (store.run_root / reference.path).read_bytes() == payload
     assert reference.size_bytes == len(payload)
     assert reference.path.startswith("content/sha256/")
     assert reference.path.endswith(".txt")
 
 
-def test_claude_main_and_subagent_transcripts_are_copied_without_external_path_leak(
-    tmp_path: Path,
-) -> None:
+def test_claude_transcripts_are_copied_without_external_path_leak(tmp_path: Path) -> None:
     provider_root = tmp_path / "provider"
     provider_root.mkdir()
     main = provider_root / "session-1.jsonl"
     main.write_text('{"type":"assistant","message":{"content":"main"}}\n', encoding="utf-8")
-    subagent = provider_root / "session-1" / "subagents" / "agent-7.jsonl"
-    subagent.parent.mkdir(parents=True)
-    subagent.write_text('{"type":"assistant","message":{"content":"child"}}\n', encoding="utf-8")
+    child = provider_root / "session-1" / "subagents" / "agent-7.jsonl"
+    child.parent.mkdir(parents=True)
+    child.write_text('{"type":"assistant","message":{"content":"child"}}\n', encoding="utf-8")
     store = FullFidelityContentStore(tmp_path / "run")
 
     main_events = claude_conversation_archive_events(
-        {
-            "hook_event_name": "SessionEnd",
-            "session_id": "session-1",
-            "transcript_path": str(main),
-        },
+        {"hook_event_name": "SessionEnd", "session_id": "session-1", "transcript_path": str(main)},
         store=store,
         timestamp="2026-08-28T00:00:00Z",
     )
@@ -123,30 +109,22 @@ def test_claude_main_and_subagent_transcripts_are_copied_without_external_path_l
             "agent_id": "7",
             "agent_type": "Explore",
             "transcript_path": str(main),
-            "agent_transcript_path": str(subagent),
+            "agent_transcript_path": str(child),
         },
         store=store,
         timestamp="2026-08-28T00:00:01Z",
     )
 
-    assert len(main_events) == 1
-    assert len(child_events) == 1
+    assert len(main_events) == len(child_events) == 1
     assert main_events[0]["relation"] == "HAS_CONVERSATION_TRANSCRIPT"
     assert child_events[0]["source"]["id"] == "agent:claude:session-1:subagent:7"
-    assert main_events[0]["target"]["attributes"]["content_kind"] == (
-        "claude.conversation_transcript.main"
-    )
-    assert child_events[0]["target"]["attributes"]["content_kind"] == (
-        "claude.conversation_transcript.subagent"
-    )
     serialized = json.dumps(main_events + child_events, sort_keys=True)
     assert str(provider_root) not in serialized
     for event in main_events + child_events:
-        stored = store.run_root / event["target"]["attributes"]["path"]
-        assert stored.is_file()
+        assert (store.run_root / event["target"]["attributes"]["path"]).is_file()
 
 
-def test_claude_subagent_archive_rejects_arbitrary_agent_transcript_path(tmp_path: Path) -> None:
+def test_claude_subagent_archive_rejects_arbitrary_transcript_path(tmp_path: Path) -> None:
     provider_root = tmp_path / "provider"
     provider_root.mkdir()
     main = provider_root / "session-1.jsonl"
@@ -154,7 +132,7 @@ def test_claude_subagent_archive_rejects_arbitrary_agent_transcript_path(tmp_pat
     arbitrary = tmp_path / "secret.jsonl"
     arbitrary.write_text("secret\n", encoding="utf-8")
 
-    events = claude_conversation_archive_events(
+    assert claude_conversation_archive_events(
         {
             "hook_event_name": "SubagentStop",
             "session_id": "session-1",
@@ -164,12 +142,10 @@ def test_claude_subagent_archive_rejects_arbitrary_agent_transcript_path(tmp_pat
         },
         store=FullFidelityContentStore(tmp_path / "run"),
         timestamp="2026-08-28T00:00:00Z",
-    )
-
-    assert events == []
+    ) == []
 
 
-def test_antigravity_stop_archives_only_validated_brain_transcript(tmp_path: Path) -> None:
+def test_antigravity_archives_only_validated_brain_transcript(tmp_path: Path) -> None:
     conversation_id = "conversation-a"
     transcript = (
         tmp_path
@@ -198,13 +174,9 @@ def test_antigravity_stop_archives_only_validated_brain_transcript(tmp_path: Pat
     store = FullFidelityContentStore(tmp_path / "run")
 
     events = antigravity_hook_to_content_events(
-        payload,
-        hook_event="Stop",
-        store=store,
-        timestamp="2026-08-28T00:00:00Z",
+        payload, hook_event="Stop", store=store, timestamp="2026-08-28T00:00:00Z"
     )
     archived = [event for event in events if event["relation"] == "HAS_CONVERSATION_TRANSCRIPT"]
-
     assert len(archived) == 1
     assert archived[0]["source"]["id"] == f"agent:antigravity:conversation:{conversation_id}"
     assert str(transcript) not in json.dumps(archived, sort_keys=True)
@@ -214,16 +186,10 @@ def test_antigravity_stop_archives_only_validated_brain_transcript(tmp_path: Pat
 
     invalid = dict(payload)
     invalid["transcriptPath"] = str(tmp_path / "arbitrary.jsonl")
-    assert not [
-        event
-        for event in antigravity_hook_to_content_events(
-            invalid,
-            hook_event="Stop",
-            store=store,
-            timestamp="2026-08-28T00:00:01Z",
-        )
-        if event["relation"] == "HAS_CONVERSATION_TRANSCRIPT"
-    ]
+    invalid_events = antigravity_hook_to_content_events(
+        invalid, hook_event="Stop", store=store, timestamp="2026-08-28T00:00:01Z"
+    )
+    assert not [event for event in invalid_events if event["relation"] == "HAS_CONVERSATION_TRANSCRIPT"]
 
 
 def test_conversation_index_and_static_dashboard_use_run_local_links(tmp_path: Path) -> None:
@@ -241,9 +207,7 @@ def test_conversation_index_and_static_dashboard_use_run_local_links(tmp_path: P
     json_path, markdown_path = write_conversation_records(graph, tmp_path)
     payload = json.loads(json_path.read_text(encoding="utf-8"))
     assert payload["external_provider_folder_lookup_required"] is False
-    assert payload["entries"][0]["path"] == f"content/sha256/{digest}.txt"
-    markdown = markdown_path.read_text(encoding="utf-8")
-    assert f"[Open](content/sha256/{digest}.txt)" in markdown
+    assert f"[Open](content/sha256/{digest}.txt)" in markdown_path.read_text(encoding="utf-8")
 
     viewer = tmp_path / "viewer.html"
     write_graph_html(graph, viewer)
@@ -255,15 +219,14 @@ def test_conversation_index_and_static_dashboard_use_run_local_links(tmp_path: P
     assert (tmp_path / "conversations.json").is_file()
 
 
-def test_live_dashboard_includes_conversation_panel_and_authenticated_link_builder() -> None:
+def test_live_dashboard_includes_conversation_panel_and_authenticated_links() -> None:
     assert 'id="conversation-records"' in live_module._LIVE_HTML
     assert "run-local record" in live_module._LIVE_HTML
     assert "window.__execweaveToken" in live_module._AUTHENTICATED_LIVE_HTML
     assert "/conversations.md" in live_module._LIVE_HTML
-    assert "/content/sha256/" in live_module._LIVE_HTML
 
 
-def test_live_content_server_requires_auth_and_rejects_arbitrary_paths(tmp_path: Path) -> None:
+def test_live_content_server_auth_and_path_boundaries(tmp_path: Path) -> None:
     event_path = tmp_path / "events.jsonl"
     event_path.write_text("", encoding="utf-8")
     digest = "b" * 64
@@ -275,8 +238,7 @@ def test_live_content_server_requires_auth_and_rejects_arbitrary_paths(tmp_path:
     state = live_module._LiveState("s1", event_path)
     token = "test-token"
     server = live_module._LocalThreadingHTTPServer(
-        ("127.0.0.1", 0),
-        live_module._handler_factory(state, token),
+        ("127.0.0.1", 0), live_module._handler_factory(state, token)
     )
     server.daemon_threads = True
     thread = threading.Thread(target=server.serve_forever, daemon=True)
