@@ -166,15 +166,16 @@ def decorate_viewer_content_references(graph: dict[str, Any]) -> dict[str, Any]:
 
 
 _INSPECTOR_CSS = r"""
-.content-inspector,.agent-inspector{margin:14px 0 4px;border:1px solid var(--border);border-radius:8px;background:var(--panel2);overflow:hidden}
-.content-inspector summary,.agent-inspector summary{cursor:pointer;padding:9px 10px;font-weight:700;list-style:none}.content-inspector summary::-webkit-details-marker,.agent-inspector summary::-webkit-details-marker{display:none}
-.content-inspector summary::before,.agent-inspector summary::before{content:'▸';display:inline-block;width:14px;color:var(--muted)}.content-inspector[open] summary::before,.agent-inspector[open] summary::before{content:'▾'}
-.content-inspector-body,.agent-inspector-body{padding:0 10px 10px}.content-meta{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:4px 8px;margin:2px 0 9px;font:11px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.content-meta dt{color:var(--muted)}.content-meta dd{margin:0;overflow-wrap:anywhere}
+.content-inspector,.agent-inspector,.message-inspector{margin:14px 0 4px;border:1px solid var(--border);border-radius:8px;background:var(--panel2);overflow:hidden}
+.content-inspector summary,.agent-inspector summary,.message-inspector summary{cursor:pointer;padding:9px 10px;font-weight:700;list-style:none}.content-inspector summary::-webkit-details-marker,.agent-inspector summary::-webkit-details-marker,.message-inspector summary::-webkit-details-marker{display:none}
+.content-inspector summary::before,.agent-inspector summary::before,.message-inspector summary::before{content:'▸';display:inline-block;width:14px;color:var(--muted)}.content-inspector[open] summary::before,.agent-inspector[open] summary::before,.message-inspector[open] summary::before{content:'▾'}
+.content-inspector-body,.agent-inspector-body,.message-inspector-body{padding:0 10px 10px}.content-meta{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:4px 8px;margin:2px 0 9px;font:11px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.content-meta dt{color:var(--muted)}.content-meta dd{margin:0;overflow-wrap:anywhere}
 .content-note{margin:8px 0;color:var(--muted);font-size:11px}.content-open{display:inline-block;margin:3px 5px 9px 0;padding:5px 8px;border:1px solid var(--border);border-radius:6px;color:var(--text);text-decoration:none}.content-open:hover{border-color:var(--selected)}
 .content-frame{display:block;width:100%;min-height:220px;border:1px solid var(--border);border-radius:6px;background:#fff}.content-unavailable{color:var(--muted);font-size:11px}
 .agent-visibility{margin:7px 0 10px;padding:8px;border:1px solid var(--border);border-radius:7px;background:var(--panel)}.agent-visibility-head{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:7px}.agent-visibility-title{font-weight:700;font-size:11px}.agent-visibility-provider{color:var(--muted);font:10px/1.3 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.agent-visibility-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.agent-visibility-card{min-width:0;padding:7px;border:1px solid var(--border);border-radius:6px;background:var(--panel2)}.agent-visibility-label{color:var(--muted);font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.05em}.agent-visibility-value{margin-top:3px;font-size:10px;line-height:1.35;overflow-wrap:anywhere}.agent-visibility-card.is-gap .agent-visibility-value{font-weight:700}.agent-visibility-note{margin-top:7px;color:var(--muted);font-size:10px;line-height:1.4}
 .agent-activity-list{display:grid;gap:7px}.agent-activity{border:1px solid var(--border);border-radius:7px;padding:7px 8px;background:var(--panel)}.agent-activity-head{display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:11px}.agent-activity-relation{font-weight:700;color:var(--text)}.agent-activity-direction{color:var(--selected);font-weight:800}.agent-activity-peer{margin-top:3px;color:var(--muted);font:11px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow-wrap:anywhere}.agent-activity-meta{margin-left:auto;color:var(--muted);font-size:10px}.agent-activity-actions{display:flex;gap:5px;flex-wrap:wrap;margin-top:6px}.agent-activity-actions button{padding:3px 6px;font-size:10px}.agent-empty{color:var(--muted);font-size:11px}.agent-section-title{margin:9px 0 6px;color:var(--muted);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
-@media(max-width:720px){.agent-visibility-grid{grid-template-columns:1fr}}
+.message-stage-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin:4px 0 9px}.message-stage{min-width:0;padding:7px;border:1px solid var(--border);border-radius:6px;background:var(--panel)}.message-stage-label{color:var(--muted);font-size:9px;font-weight:800;letter-spacing:.06em}.message-stage-value{margin-top:3px;font-size:10px;line-height:1.35}.message-stage.is-observed .message-stage-value{font-weight:800;color:var(--text)}.message-route{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:4px 8px;margin:7px 0 9px;font:10px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.message-route dt{color:var(--muted)}.message-route dd{margin:0;overflow-wrap:anywhere}.message-inferences{display:grid;gap:6px;margin-top:7px}.message-inference{display:flex;align-items:center;gap:7px;padding:6px 7px;border:1px solid var(--border);border-radius:6px;background:var(--panel)}.message-inference-label{min-width:0;flex:1;color:var(--muted);font:10px/1.35 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow-wrap:anywhere}.message-inference button{padding:3px 6px;font-size:10px}
+@media(max-width:720px){.agent-visibility-grid,.message-stage-grid{grid-template-columns:1fr}}
 """.strip()
 
 _INSPECTOR_JS = r"""
@@ -239,15 +240,23 @@ function execweaveAppendAgentActivity(kind,value){
   if(kind!=='Node'||!value||value.type!=='agent'||!value.id)return;
   const nodeMap=execweaveAgentNodeMap(),all=execweaveIncidentEdges(value.id),communications=execweaveCommunicationEdges(value.id,nodeMap);const panel=document.createElement('details');panel.className='agent-inspector';panel.open=true;const summary=document.createElement('summary');summary.textContent=`Agent trace · ${communications.length} communications · ${all.length} activities`;panel.appendChild(summary);const body=document.createElement('div');body.className='agent-inspector-body';execweaveAppendAgentVisibility(body,value,nodeMap);execweaveAppendActivitySection(body,'Agent communications',communications,value.id,nodeMap);execweaveAppendActivitySection(body,'Agent activity',all,value.id,nodeMap);panel.appendChild(body);details.appendChild(panel);
 }
+function execweaveMessageStageCard(label,relation,edges){const observed=edges.some(edge=>edge&&edge.relation===relation);const card=document.createElement('div');card.className=`message-stage${observed?' is-observed':''}`;const key=document.createElement('div');key.className='message-stage-label';key.textContent=label;const value=document.createElement('div');value.className='message-stage-value';value.textContent=observed?'Observed':'No evidence';card.title=relation;card.append(key,value);return card}
+function execweaveAppendMessageInspector(kind,value){
+  if(kind!=='Node'||!value||value.type!=='agent_message'||!value.id)return;
+  const nodeMap=execweaveAgentNodeMap(),edges=execweaveIncidentEdges(value.id),attrs=value.attributes||{};const panel=document.createElement('details');panel.className='message-inspector';panel.open=true;const summary=document.createElement('summary');summary.textContent='Message Evidence';panel.appendChild(summary);const body=document.createElement('div');body.className='message-inspector-body';const stages=document.createElement('div');stages.className='message-stage-grid';stages.append(execweaveMessageStageCard('SEND','SENT_AGENT_MESSAGE',edges),execweaveMessageStageCard('DELIVER','DELIVERED_AGENT_MESSAGE',edges),execweaveMessageStageCard('CONTEXT','INCLUDED_AGENT_MESSAGE_IN_INFERENCE',edges),execweaveMessageStageCard('CONSUME','CONSUMED_AGENT_MESSAGE',edges));body.appendChild(stages);
+  const route=document.createElement('dl');route.className='message-route';execweaveAppendMeta(route,'author',attrs.author);execweaveAppendMeta(route,'recipient',attrs.recipient);execweaveAppendMeta(route,'conversation item',attrs.conversation_item_id);body.appendChild(route);
+  const inferenceEdges=edges.filter(edge=>edge&&edge.relation==='INCLUDED_AGENT_MESSAGE_IN_INFERENCE'&&edge.source===value.id);if(inferenceEdges.length){const title=document.createElement('div');title.className='agent-section-title';title.textContent=`Inference context · ${inferenceEdges.length}`;body.appendChild(title);const list=document.createElement('div');list.className='message-inferences';inferenceEdges.forEach(edge=>{const inference=nodeMap.get(edge.target);const row=document.createElement('div');row.className='message-inference';const label=document.createElement('div');label.className='message-inference-label';label.textContent=inference?(inference.name||inference.id):String(edge.target||'inference');row.appendChild(label);if(inference){const button=document.createElement('button');button.type='button';button.textContent='Inspect inference';button.addEventListener('click',()=>showDetails('Node',inference));row.appendChild(button)}list.appendChild(row)});body.appendChild(list)}
+  execweaveAppendPayloadLinks(body,value.id,nodeMap);const note=document.createElement('div');note.className='content-note';note.textContent='CONTEXT and CONSUME reflect provider-recorded request-context evidence. They are not proof that the model attended to, read, or semantically used the message. “No evidence” is not a failure state.';body.appendChild(note);panel.appendChild(body);details.appendChild(panel);
+}
 """.strip()
 
 
 def inject_standalone_content_inspector(html: str) -> str:
-    """Inject reference-only content and agent-activity inspectors.
+    """Inject reference-only content, agent-activity, and message inspectors.
 
     Protective-mode HTML is intentionally left untouched. Full content bytes are
     never embedded in the HTML and are never fetched over HTTP by this inspector.
-    Agent activity is derived only from already materialized graph evidence.
+    Agent activity and message stages are derived only from materialized graph evidence.
     """
     marker = "function showDetails(kind,value){"
     if marker not in html:
@@ -257,7 +266,8 @@ def inject_standalone_content_inspector(html: str) -> str:
     detail_end = "  details.append(p);\n}"
     replacement = (
         "  details.append(p);execweaveAppendContentInspector(kind,value);"
-        "execweaveAppendAgentActivity(kind,value);\n}"
+        "execweaveAppendAgentActivity(kind,value);"
+        "execweaveAppendMessageInspector(kind,value);\n}"
     )
     if detail_end not in result:
         raise RuntimeError("standalone viewer detail seam changed; content inspector not injected")
