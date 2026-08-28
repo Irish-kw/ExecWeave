@@ -11,7 +11,13 @@ from typing import Any
 
 _MAX_COMMAND_CHARS = 4096
 _MAX_LABEL_CHARS = 160
-_SUPPORTED_EVENTS = {"SessionStart", "PreToolUse", "PostToolUse"}
+_SUPPORTED_EVENTS = {
+    "SessionStart",
+    "PreToolUse",
+    "PostToolUse",
+    "SubagentStart",
+    "SubagentStop",
+}
 
 
 def _now() -> str:
@@ -173,6 +179,46 @@ def _session_start_events(payload: dict[str, Any], *, timestamp: str) -> list[di
     ]
 
 
+def _subagent_start_events(payload: dict[str, Any], *, timestamp: str) -> list[dict[str, Any]]:
+    agent_id = payload.get("agent_id")
+    if not isinstance(agent_id, str) or not agent_id:
+        raise ValueError("SubagentStart requires agent_id")
+    attrs = _common_attributes(payload)
+    attrs["lifecycle"] = "started"
+    attrs["identity_semantics"] = (
+        "Codex hook exposes child identity but not the parent subagent identity; "
+        "root attribution is hook-level only"
+    )
+    return [
+        _event(
+            timestamp=timestamp,
+            event_type="semantic.codex.subagent.started",
+            relation="SPAWNED_AGENT",
+            source=_main_agent(),
+            target=_actor(payload),
+            attributes=attrs,
+        )
+    ]
+
+
+def _subagent_stop_events(payload: dict[str, Any], *, timestamp: str) -> list[dict[str, Any]]:
+    agent_id = payload.get("agent_id")
+    if not isinstance(agent_id, str) or not agent_id:
+        raise ValueError("SubagentStop requires agent_id")
+    attrs = _common_attributes(payload)
+    attrs["lifecycle"] = "stopped"
+    return [
+        _event(
+            timestamp=timestamp,
+            event_type="semantic.codex.subagent.stopped",
+            relation="SUBAGENT_STOPPED",
+            source=_actor(payload),
+            target=_main_agent(),
+            attributes=attrs,
+        )
+    ]
+
+
 def _tool_pre_events(payload: dict[str, Any], *, timestamp: str) -> list[dict[str, Any]]:
     tool_name = payload.get("tool_name")
     tool_use_id = payload.get("tool_use_id")
@@ -265,6 +311,10 @@ def codex_hook_to_semantic_events(
         return _tool_pre_events(payload, timestamp=observed_at)
     if hook_event == "PostToolUse":
         return _tool_post_events(payload, timestamp=observed_at)
+    if hook_event == "SubagentStart":
+        return _subagent_start_events(payload, timestamp=observed_at)
+    if hook_event == "SubagentStop":
+        return _subagent_stop_events(payload, timestamp=observed_at)
     return []
 
 

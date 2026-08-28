@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import os
 import webbrowser
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 from .agent_bootstrap import AgentBootstrapResult, bootstrap_supported_agent
@@ -16,11 +18,15 @@ from .workflow import RecordResult, record_to_viewer
 
 _SEMANTIC_ENV = "EXECWEAVE_SEMANTIC_SIDECAR"
 
+ProviderEnvironmentBuilder = Callable[[Path], Mapping[str, str]]
+ProviderSemanticEnricher = Callable[[RecordResult, Path, Mapping[str, str]], object | None]
+
 
 @dataclass(frozen=True)
 class ProviderRecordResult:
     runtime: RecordResult
     specialized_observability: AgentBootstrapResult
+    provider_enrichment: dict[str, object] | None
     semantic_status: str
     semantic_sidecar: Path
     merged_event_stream: Path | None
@@ -37,6 +43,7 @@ class ProviderRecordResult:
         return {
             "runtime": self.runtime.to_dict(),
             "specialized_observability": self.specialized_observability.to_dict(),
+            "provider_enrichment": self.provider_enrichment,
             "semantic_status": self.semantic_status,
             "semantic_sidecar": str(self.semantic_sidecar),
             "merged_event_stream": (
@@ -84,6 +91,27 @@ def _preflight(paths: list[Path], *, provider_name: str) -> None:
         )
 
 
+def _restore_environment(previous: Mapping[str, str | None]) -> None:
+    for key, value in previous.items():
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = value
+
+
+def _enrichment_payload(value: object | None) -> dict[str, object] | None:
+    if value is None:
+        return None
+    to_dict = getattr(value, "to_dict", None)
+    if callable(to_dict):
+        rendered = to_dict()
+        if isinstance(rendered, dict):
+            return {str(key): child for key, child in rendered.items()}
+    if isinstance(value, dict):
+        return {str(key): child for key, child in value.items()}
+    return {"status": "completed", "result": str(value)}
+
+
 def record_provider_to_viewer(
     command: list[str],
     *,
@@ -97,6 +125,8 @@ def record_provider_to_viewer(
     keep_raw_trace: bool = False,
     correlation_window_ms: int = 3000,
     open_browser: bool = False,
+    provider_environment_builder: ProviderEnvironmentBuilder | None = None,
+    post_runtime_semantic_enricher: ProviderSemanticEnricher | None = None,
 ) -> ProviderRecordResult:
     """Record runtime + provider semantic evidence into layered local artifacts.
 
@@ -105,6 +135,11 @@ def record_provider_to_viewer(
     unavailable or cannot be configured. Raw runtime and semantic evidence remain
     separate; correlation always derives a new stream and stays explicitly
     inferred/non-causal.
+
+    Provider integrations may additionally opt the child process into richer local
+    diagnostic capture with ``provider_environment_builder`` and import that evidence
+    after the provider exits through ``post_runtime_semantic_enricher``. These hooks
+    are diagnostic and fail-open; their status is surfaced in ``provider_enrichment``.
     """
     if not command:
         raise ValueError("command must not be empty")
@@ -125,8 +160,18 @@ def record_provider_to_viewer(
     specialized_observability = bootstrap_supported_agent(command)
 
     semantic_sidecar = paths["semantic_sidecar"]
-    previous = os.environ.get(_SEMANTIC_ENV)
-    os.environ[_SEMANTIC_ENV] = str(semantic_sidecar)
+    provider_environment: dict[str, str] = {}
+    if provider_environment_builder is not None:
+        raw_environment = provider_environment_builder(run_dir)
+        provider_environment = {
+            str(key): str(value)
+            for key, value in raw_environment.items()
+            if str(key) and value is not None
+        }
+
+    environment_updates = {_SEMANTIC_ENV: str(semantic_sidecar), **provider_environment}
+    previous_environment = {key: os.environ.get(key) for key in environment_updates}
+    os.environ.update(environment_updates)
     try:
         runtime = record_to_viewer(
             command,
@@ -140,10 +185,23 @@ def record_provider_to_viewer(
             open_browser=False,
         )
     finally:
-        if previous is None:
-            os.environ.pop(_SEMANTIC_ENV, None)
-        else:
-            os.environ[_SEMANTIC_ENV] = previous
+        _restore_environment(previous_environment)
+
+    provider_enrichment: dict[str, object] | None = None
+    if post_runtime_semantic_enricher is not None:
+        try:
+            enrichment_result = post_runtime_semantic_enricher(
+                runtime,
+                semantic_sidecar,
+                provider_environment,
+            )
+            provider_enrichment = _enrichment_payload(enrichment_result)
+        except Exception as exc:  # diagnostic enrichment must never break the recorded run
+            provider_enrichment = {
+                "status": "import_failed",
+                "error_type": type(exc).__name__,
+                "detail": " ".join(str(exc).split())[:500],
+            }
 
     if not semantic_sidecar.exists() or semantic_sidecar.stat().st_size == 0:
         if open_browser:
@@ -151,6 +209,7 @@ def record_provider_to_viewer(
         return ProviderRecordResult(
             runtime=runtime,
             specialized_observability=specialized_observability,
+            provider_enrichment=provider_enrichment,
             semantic_status="no_events",
             semantic_sidecar=semantic_sidecar.resolve(),
             merged_event_stream=None,
@@ -190,7 +249,10 @@ def record_provider_to_viewer(
     correlated_execution_graph = strip_internal_hook_execution_graph(
         build_execution_graph(correlated_event_stream)
     )
-    correlation_metadata = {"correlation": correlation_result.to_dict()}
+    correlation_metadata: dict[str, Any] = {
+        "correlation": correlation_result.to_dict(),
+        "provider_enrichment": provider_enrichment,
+    }
     write_execution_graph(
         correlated_execution_graph,
         correlated_graph,
@@ -212,6 +274,7 @@ def record_provider_to_viewer(
     return ProviderRecordResult(
         runtime=runtime,
         specialized_observability=specialized_observability,
+        provider_enrichment=provider_enrichment,
         semantic_status="merged",
         semantic_sidecar=semantic_sidecar.resolve(),
         merged_event_stream=merged_event_stream.resolve(),

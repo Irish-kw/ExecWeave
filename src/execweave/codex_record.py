@@ -5,6 +5,11 @@ import json
 from pathlib import Path
 
 from .backends import BackendName
+from .codex_rollout_trace import (
+    CODEX_ROLLOUT_TRACE_ROOT_ENV,
+    codex_rollout_trace_environment,
+    import_codex_rollout_traces,
+)
 from .provider_record import ProviderRecordResult, record_provider_to_viewer
 
 CodexRecordResult = ProviderRecordResult
@@ -23,12 +28,27 @@ def record_codex_to_viewer(
     correlation_window_ms: int = 3000,
     open_browser: bool = False,
 ) -> CodexRecordResult:
-    """Record one Codex run using the shared provider-record pipeline.
+    """Record one Codex run with runtime, hooks, and first-party rollout tracing.
 
-    When the launched command is Codex, the shared core automatically bootstraps
-    ExecWeave's fail-open hook integration before launch and binds it to the
-    run-specific semantic sidecar.
+    ExecWeave opts the child process into Codex's local rollout-trace bundle,
+    preserving prompts, model-visible conversation, reasoning representations,
+    tool/runtime payloads, terminal activity, and multi-agent information-flow
+    whenever the installed Codex build exposes them. The richer bundle is
+    reduced and imported after Codex exits; older builds safely fall back to the
+    existing hook + runtime collection path.
     """
+
+    def enrich_rollout(runtime, semantic_sidecar, environment):
+        del runtime
+        trace_root = environment.get(CODEX_ROLLOUT_TRACE_ROOT_ENV)
+        if not trace_root:
+            return None
+        return import_codex_rollout_traces(
+            trace_root=trace_root,
+            semantic_sidecar=semantic_sidecar,
+            codex_executable=command[0],
+        )
+
     return record_provider_to_viewer(
         command,
         provider_name="Codex",
@@ -41,6 +61,8 @@ def record_codex_to_viewer(
         keep_raw_trace=keep_raw_trace,
         correlation_window_ms=correlation_window_ms,
         open_browser=open_browser,
+        provider_environment_builder=codex_rollout_trace_environment,
+        post_runtime_semantic_enricher=enrich_rollout,
     )
 
 
@@ -55,8 +77,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="execweave-codex-record",
         description=(
-            "Record runtime evidence, OpenAI Codex hook telemetry, and conservative "
-            "Tool-to-Process correlation in one local run."
+            "Record runtime evidence, Codex hooks, first-party rollout payloads, "
+            "multi-agent communication, and conservative Tool-to-Process correlation."
         ),
     )
     parser.add_argument("--watch-root", type=Path, default=None)
