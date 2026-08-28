@@ -27,6 +27,7 @@ class ProviderLifecycleAnnotation:
 
 _RELATION_MAP: dict[str, tuple[str, str]] = {
     "STARTED_PROVIDER_SESSION": ("provider_session", "started"),
+    "OBSERVED_PROVIDER_SESSION": ("provider_session", "observed"),
     "OBSERVED_PROVIDER_SESSION_END": ("provider_session", "ended"),
     "OBSERVED_PROVIDER_SETUP": ("provider_setup", "observed"),
     "STARTED_AGENT_SESSION": ("agent_session", "started"),
@@ -61,6 +62,12 @@ _RELATION_MAP: dict[str, tuple[str, str]] = {
     "OBSERVED_SESSION_CRONS": ("agent_turn", "session_crons_observed"),
     "OBSERVED_AGENT_TURN_START": ("agent_turn", "start_observed"),
     "OBSERVED_AGENT_TURN_END": ("agent_turn", "end_observed"),
+    "OBSERVED_EXECUTION_STOP": ("agent_execution", "stopped"),
+    "OBSERVED_EXECUTION_ERROR": ("agent_execution", "error_observed"),
+    "OBSERVED_EXECUTION_ERROR_CONTENT": (
+        "agent_execution",
+        "error_content_observed",
+    ),
     "USED_MODEL": ("model", "selected"),
     "INVOKES_MODEL": ("model", "invocation_requested"),
     "MODEL_INVOCATION_COMPLETED": ("model", "invocation_completed"),
