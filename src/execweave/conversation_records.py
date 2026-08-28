@@ -97,7 +97,9 @@ def _conversation_preview(
     if root is None:
         return None
     content_kind = reference.get("content_kind")
-    if not isinstance(content_kind, str) or not content_kind.startswith("codex.conversation_transcript"):
+    if not isinstance(content_kind, str) or not content_kind.startswith(
+        "codex.conversation_transcript"
+    ):
         return None
     relative = reference.get("path")
     if not isinstance(relative, str):
@@ -255,7 +257,7 @@ def _render_markdown(entries: list[dict[str, Any]]) -> str:
                     _markdown_text(entry.get("relation")),
                     _markdown_text(entry.get("content_kind")),
                     str(entry.get("size_bytes") or 0),
-                    f"[Open raw evidence]({path})",
+                    f"[Open]({path})",
                 ]
             )
             + " |"
