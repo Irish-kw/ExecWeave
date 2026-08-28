@@ -94,6 +94,35 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _official_contract_records(
+    payload: dict[str, Any],
+    *,
+    timestamp: str,
+    strict: bool,
+) -> list[dict[str, Any]]:
+    """Project the official contract without discarding other hook evidence.
+
+    Historical or synthetic payloads can omit fields that the current Cursor
+    contract documents as required. In normal fail-open mode, skip only this
+    contract projection rather than dropping adapter/full-fidelity evidence.
+    Strict mode preserves validation behavior for diagnostics and tests.
+    """
+
+    try:
+        return cursor_official_hook_semantic_events(
+            payload,
+            timestamp=timestamp,
+        )
+    except ValueError as exc:
+        if strict:
+            raise
+        print(
+            f"ExecWeave Cursor official hook contract warning: {exc}",
+            file=sys.stderr,
+        )
+        return []
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.print_config:
@@ -116,13 +145,15 @@ def main(argv: list[str] | None = None) -> int:
             payload,
             timestamp=observed_at,
         )
-        summary_records.extend(
-            cursor_official_hook_semantic_events(
+        append_semantic_records(sidecar, summary_records)
+        append_semantic_records(
+            sidecar,
+            _official_contract_records(
                 payload,
                 timestamp=observed_at,
-            )
+                strict=args.strict,
+            ),
         )
-        append_semantic_records(sidecar, summary_records)
         append_semantic_records(
             sidecar,
             cursor_hook_to_content_events(
