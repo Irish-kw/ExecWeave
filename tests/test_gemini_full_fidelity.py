@@ -130,16 +130,19 @@ def test_provider_metadata_is_complete_except_transport_credentials(tmp_path: Pa
     ]
 
 
-def test_after_agent_preserves_final_response(tmp_path: Path) -> None:
-    response = "final answer with full detail"
+def test_after_agent_preserves_unaccepted_response_candidate(tmp_path: Path) -> None:
+    response = "turn response with full detail"
     events = gemini_hook_to_content_events(
         {**_base("AfterAgent"), "prompt": "question", "prompt_response": response},
         store=FullFidelityContentStore(tmp_path),
     )
-    final_event = next(
-        event for event in events if event["relation"] == "PRODUCED_ASSISTANT_RESPONSE"
+    candidate_event = next(
+        event for event in events if event["relation"] == "OBSERVED_AGENT_RESPONSE_CANDIDATE"
     )
-    assert _read_content(tmp_path, final_event) == response
+    assert _read_content(tmp_path, candidate_event) == response
+    assert candidate_event["attributes"]["accepted_final_response_asserted"] is False
+    assert candidate_event["attributes"]["response_can_be_rejected_and_retried_by_hook"] is True
+    assert all(event["relation"] != "PRODUCED_ASSISTANT_RESPONSE" for event in events)
 
 
 def test_identical_prompt_values_dedupe_to_same_content_hash(tmp_path: Path) -> None:
