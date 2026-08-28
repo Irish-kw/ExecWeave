@@ -4,19 +4,30 @@ _FOCUS_JS = r"""
 const execweaveDashboardGraphBase=execweaveDashboardGraph;
 execweaveDashboardGraph=function(data){
   const projected=execweaveDashboardGraphBase(data);
-  const contextTypes=new Set(['agent_trace_capability','model','session','directory','network_endpoint']);
+  const contextTypes=new Set(['agent_trace_capability','model','session','directory','network_endpoint','process','command','inference_call','code_cell','agent_message']);
+  const textOf=node=>{const attrs=node?.attributes||{};return [node?.id,node?.name,attrs.path,attrs.file_path,attrs.source_path,attrs.target_path,attrs.real_path].map(value=>String(value||'')).join(' ')};
+  const internalNode=node=>{const value=textOf(node).replaceAll('\\\\','/').toLowerCase();return value.includes('.execweave-content-')||value.includes('.git/')||value.includes('.execweave/')||value.includes('content/sha256/')||value.includes('codex-rollout-trace/')};
   const before=Array.isArray(projected.nodes)?projected.nodes:[];
-  const nodes=before.filter(node=>node&&!contextTypes.has(String(node.type||''))).map(node=>{
+  let focused=before.filter(node=>node&&!contextTypes.has(String(node.type||''))&&!internalNode(node)).map(node=>{
     const attrs=node.attributes||{};
     let name=node.name;
-    if(node.type==='agent'&&typeof attrs.agent_path==='string'&&attrs.agent_path)name=attrs.agent_path;
-    const occurrences=Number(attrs.viewer_occurrence_count||0);
-    if(node.type==='process'&&occurrences>1)name=`${node.name||'process'} ×${occurrences}`;
+    if(node.type==='agent'){
+      const agentPath=typeof attrs.agent_path==='string'?attrs.agent_path.trim():'';
+      const agentId=String(attrs.agent_id||'');
+      const provider=String(attrs.provider||'').toLowerCase();
+      if(agentPath)name=agentPath;
+      else if(node.id==='agent:OpenAI Codex'||(provider==='codex'&&String(node.name||'')==='OpenAI Codex'))name='/root';
+      else if(agentId&&String(node.name||'').toLowerCase()==='default')name=`subagent · ${agentId.slice(0,8)}`;
+    }
     return name===node.name?node:{...node,name};
   });
-  const ids=new Set(nodes.map(node=>node.id));
-  const edges=(projected.edges||[]).filter(edge=>edge&&ids.has(edge.source)&&ids.has(edge.target));
-  return{...projected,nodes,edges,node_count:nodes.length,edge_count:edges.length,dashboard_projection:{...(projected.dashboard_projection||{}),hidden_context_node_count:before.length-nodes.length}};
+  let ids=new Set(focused.map(node=>node.id));
+  let edges=(projected.edges||[]).filter(edge=>edge&&ids.has(edge.source)&&ids.has(edge.target));
+  const incident=new Set();for(const edge of edges){incident.add(edge.source);incident.add(edge.target)}
+  const beforeOrphanFiles=focused.length;
+  focused=focused.filter(node=>node.type!=='file'||incident.has(node.id));
+  ids=new Set(focused.map(node=>node.id));edges=edges.filter(edge=>ids.has(edge.source)&&ids.has(edge.target));
+  return{...projected,nodes:focused,edges,node_count:focused.length,edge_count:edges.length,dashboard_projection:{...(projected.dashboard_projection||{}),hidden_context_node_count:before.length-beforeOrphanFiles,hidden_orphan_file_node_count:beforeOrphanFiles-focused.length}};
 };
 """.strip()
 

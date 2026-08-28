@@ -1,63 +1,62 @@
 from __future__ import annotations
 
 _TREE_CSS = r"""
-.execweave-agent-tree{display:grid;gap:7px}.execweave-agent-tree-root{display:flex;align-items:center;gap:8px;padding:7px 9px;border:1px solid color-mix(in srgb,var(--selected,var(--accent)) 42%,var(--border));border-radius:8px;background:color-mix(in srgb,var(--panel2) 88%,var(--selected,var(--accent)) 7%)}.execweave-agent-tree-root::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--selected,var(--accent));box-shadow:0 0 0 3px color-mix(in srgb,var(--selected,var(--accent)) 16%,transparent)}.execweave-agent-tree-root strong{font-size:11px}.execweave-agent-tree-root span{font-size:9px;color:var(--muted)}.execweave-agent-tree-body{display:grid;gap:7px;padding-left:10px;border-left:1px solid var(--border)}.execweave-agent-child{position:relative}.execweave-agent-child::before{content:"";position:absolute;left:-11px;top:18px;width:10px;border-top:1px solid var(--border)}.execweave-agent-path{font:9px/1.3 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted);margin:2px 0 5px;overflow-wrap:anywhere}.execweave-root-conversation{border-color:color-mix(in srgb,var(--selected,var(--accent)) 28%,var(--border))}
+.execweave-conversation-tree{display:grid;gap:7px}.execweave-conversation-root-node,.execweave-conversation-agent-node{display:flex;align-items:center;gap:7px;min-width:0;font-size:11px;font-weight:750;color:var(--text)}.execweave-conversation-root-node::before,.execweave-conversation-agent-node::before{content:"";width:8px;height:8px;flex:0 0 8px;border-radius:50%;background:var(--selected);box-shadow:0 0 0 3px color-mix(in srgb,var(--selected) 16%,transparent)}.execweave-conversation-root-node{padding:7px 8px;border:1px solid color-mix(in srgb,var(--selected) 35%,var(--border));border-radius:8px;background:color-mix(in srgb,var(--panel2) 92%,var(--selected) 8%)}.execweave-conversation-agent-node{padding:4px 2px}.execweave-conversation-agent-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.execweave-conversation-agent-badge{margin-left:auto;color:var(--muted);font-size:8px;font-weight:650;text-transform:uppercase;letter-spacing:.08em}.execweave-conversation-children{display:grid;gap:9px;margin-left:12px;padding:2px 0 2px 13px;border-left:1px solid var(--border)}.execweave-conversation-branch{position:relative}.execweave-conversation-branch::before{content:"";position:absolute;left:-14px;top:10px;width:10px;border-top:1px solid var(--border)}.execweave-conversation-thread{margin-top:5px;padding:6px 7px 7px 10px;border-radius:7px;background:color-mix(in srgb,var(--panel2) 72%,transparent)}.execweave-conversation-thread>.execweave-conversation-meta,.execweave-conversation-thread>.conversation-live-meta{margin-top:0}.execweave-conversation-tree .execweave-conversation-messages,.execweave-conversation-tree .conversation-live-messages{margin-top:6px}
 """.strip()
 
-_TREE_JS = r"""
-<script>
-(()=>{
-  const configs=[
-    {panel:'#execweave-conversation-panel',list:'.execweave-conversation-list',row:'.execweave-conversation-row',title:'.execweave-conversation-title',meta:'.execweave-conversation-message-meta'},
-    {panel:'#conversation-records',list:'.conversation-live-list',row:'.conversation-live-row',title:'.conversation-live-title',meta:'.conversation-live-message-meta'}
-  ];
-  const parseTitle=text=>{const raw=String(text||''),parts=raw.split(' · ');return{path:parts[0]||'',suffix:parts.length>1?` · ${parts.slice(1).join(' · ')}`:''}};
-  function treeify(config){
-    const panel=document.querySelector(config.panel);if(!panel)return;
-    const list=panel.querySelector(config.list);if(!list||list.dataset.execweaveAgentTree==='1')return;
-    const rows=[...list.querySelectorAll(config.row)];if(!rows.length)return;
-    const parsed=rows.map(row=>({row,title:row.querySelector(config.title),...parseTitle(row.querySelector(config.title)?.textContent)}));
-    if(!parsed.some(item=>item.path==='/root'||item.path.startsWith('/root/')))return;
-    list.dataset.execweaveAgentTree='1';list.classList.add('execweave-agent-tree');
-    const root=document.createElement('div');root.className='execweave-agent-tree-root';
-    const label=document.createElement('strong');label.textContent='/root';const hint=document.createElement('span');hint.textContent='agents started in this run';root.append(label,hint);
-    const body=document.createElement('div');body.className='execweave-agent-tree-body';
-    list.replaceChildren(root,body);
-    parsed.sort((a,b)=>a.path.localeCompare(b.path));
-    for(const item of parsed){
-      const {row,title,path,suffix}=item;if(!title)continue;
-      if(path==='/root'){
-        title.hidden=true;row.classList.add('execweave-root-conversation');body.appendChild(row);
-      }else{
-        const leaf=path.split('/').filter(Boolean).pop()||path;title.textContent=`${leaf}${suffix}`;
-        const pathLine=document.createElement('div');pathLine.className='execweave-agent-path';pathLine.textContent=path;
-        title.insertAdjacentElement('afterend',pathLine);
-        const depth=Math.max(1,path.split('/').filter(Boolean).length-1);row.classList.add('execweave-agent-child');row.style.marginLeft=`${Math.min(depth-1,4)*12}px`;body.appendChild(row);
-      }
-      for(const meta of row.querySelectorAll(config.meta)){
-        const text=String(meta.textContent||'');
-        if(path&&text.startsWith(`${path} · `))meta.textContent=text.slice(path.length+3);
-      }
-    }
-  }
-  function run(){for(const config of configs)treeify(config)}
-  run();setTimeout(run,0);setTimeout(run,250);
-  for(const config of configs){const panel=document.querySelector(config.panel);if(panel)new MutationObserver(()=>queueMicrotask(run)).observe(panel,{childList:true,subtree:true})}
-})();
-</script>
+_STATIC_HELPERS = r"""
+function execweaveConversationPath(entry){const preview=entry?.conversation_preview||{},path=String(preview.agent_path||'').trim();return path||String(entry?.source_name||entry?.source_id||'agent')}
+function execweaveConversationAgentRecords(threads){const records=new Map();for(const entry of threads){const path=execweaveConversationPath(entry),key=path.startsWith('/root')?`path:${path}`:`source:${entry?.source_id||path}`;records.set(key,{key,path,label:path,entry})}for(const node of (Array.isArray(possibleNodes)?possibleNodes:[])){if(node?.type!=='agent'||!node.id)continue;const attrs=node.attributes||{},agentPath=String(attrs.agent_path||'').trim(),isRoot=node.id==='agent:OpenAI Codex',agentId=String(attrs.agent_id||''),path=agentPath||(isRoot?'/root':''),key=path?`path:${path}`:agentId?`agent:${agentId}`:`id:${node.id}`,existing=records.get(key),label=path||(agentId?`subagent · ${agentId.slice(0,8)}`:String(node.name||node.id));if(existing){if(path)existing.path=path,existing.label=path;continue}records.set(key,{key,path,label,entry:null})}return[...records.values()]}
+function execweaveConversationRootRecord(records){return records.find(record=>record.path==='/root')||{key:'path:/root',path:'/root',label:'/root',entry:null}}
+function execweaveAppendTreeConversationMessage(container,message,currentPath){const row=document.createElement('div');row.className='execweave-conversation-message';if(message?.phase==='final_answer')row.classList.add('final');if(message?.content_state==='provider_encrypted')row.classList.add('encrypted');const meta=document.createElement('div');meta.className='execweave-conversation-message-meta';const sender=String(message?.sender||''),recipient=String(message?.recipient||''),kind=String(message?.kind||'message'),phase=message?.phase?String(message.phase):'',route=recipient?`${sender||currentPath} → ${recipient}`:(sender&&sender!==currentPath?sender:'');meta.textContent=[route,kind,phase].filter(Boolean).join(' · ');const body=document.createElement('div');body.className='execweave-conversation-message-body';body.textContent=message?.content_state==='provider_encrypted'?'Provider-encrypted payload — plaintext is not exposed by the Codex rollout.':String(message?.text||'(no plaintext body exposed)');row.append(meta,body);container.appendChild(row)}
+function execweaveConversationThread(entry,path){const preview=entry.conversation_preview||{},thread=document.createElement('div');thread.className='execweave-conversation-thread';const meta=document.createElement('div');meta.className='execweave-conversation-meta';meta.textContent=`${entry.provider||'provider'} · ${entry.relation||'conversation'} · ${entry.size_bytes||0} bytes`;const messages=document.createElement('div');messages.className='execweave-conversation-messages';for(const message of (preview.messages||[]).slice(-40))execweaveAppendTreeConversationMessage(messages,message,path);const raw=document.createElement('a');raw.className='execweave-conversation-link';raw.href=execweaveConversationHref(String(entry.path||''));raw.target='_blank';raw.rel='noreferrer';raw.textContent='Open raw rollout evidence';thread.append(meta,messages,raw);return thread}
+function execweaveConversationAgentNode(record,isRoot=false){const node=document.createElement('div');node.className=isRoot?'execweave-conversation-root-node':'execweave-conversation-agent-node';const label=document.createElement('span');label.className='execweave-conversation-agent-label';const nickname=record.entry?.conversation_preview?.agent_nickname;label.textContent=`${record.label||record.path||record.key}${nickname?` · ${nickname}`:''}`;const badge=document.createElement('span');badge.className='execweave-conversation-agent-badge';badge.textContent=isRoot?'run root':record.entry?'agent':'agent · waiting';node.append(label,badge);return node}
 """.strip()
 
+_STATIC_RENDER = r"""function execweaveRenderRichConversationRecords(panel,entries){const threads=execweaveLatestConversationThreads(entries),records=execweaveConversationAgentRecords(threads);if(!threads.length&&!records.length)return false;panel.replaceChildren();const messageCount=threads.reduce((total,entry)=>total+((entry.conversation_preview?.messages||[]).length),0),summary=document.createElement('div');summary.className='execweave-conversation-summary';summary.textContent=`${records.length} agent${records.length===1?'':'s'} · ${messageCount} visible item${messageCount===1?'':'s'} · run-local evidence`;panel.appendChild(summary);const rootRecord=execweaveConversationRootRecord(records),tree=document.createElement('div');tree.className='execweave-conversation-tree';tree.appendChild(execweaveConversationAgentNode(rootRecord,true));if(rootRecord.entry)tree.appendChild(execweaveConversationThread(rootRecord.entry,rootRecord.path||'/root'));const children=document.createElement('div');children.className='execweave-conversation-children';const childRecords=records.filter(record=>record.key!==rootRecord.key).sort((a,b)=>String(a.label||a.path||a.key).localeCompare(String(b.label||b.path||b.key)));for(const record of childRecords){const branch=document.createElement('div');branch.className='execweave-conversation-branch';branch.appendChild(execweaveConversationAgentNode(record,false));if(record.entry)branch.appendChild(execweaveConversationThread(record.entry,record.path||record.label));children.appendChild(branch)}if(childRecords.length)tree.appendChild(children);panel.appendChild(tree);const index=document.createElement('a');index.className='execweave-conversation-index';index.href=location.protocol==='file:'?'conversations.md':`/conversations.md${window.__execweaveToken?`?t=${encodeURIComponent(window.__execweaveToken)}`:''}`;index.target='_blank';index.rel='noreferrer';index.textContent='Open complete conversation index';panel.appendChild(index);return true}""".strip()
 
-def _inject(html: str) -> str:
-    if "execweave-agent-tree-root" not in html:
-        html = html.replace("</style>", _TREE_CSS + "\n</style>", 1)
-        html = html.replace("</body>", _TREE_JS + "\n</body>", 1)
-    return html
+_LIVE_HELPERS = r"""
+function conversationPath(entry){const preview=entry?.conversation_preview||{},path=String(preview.agent_path||'').trim();return path||String(entry?.source_name||entry?.source_id||'agent')}
+function conversationAgentRecords(threads){const records=new Map();for(const entry of threads){const path=conversationPath(entry),key=path.startsWith('/root')?`path:${path}`:`source:${entry?.source_id||path}`;records.set(key,{key,path,label:path,entry})}const graph=core.getGraph?.()||{};for(const node of (graph.nodes||[])){if(node?.type!=='agent'||!node.id)continue;const attrs=node.attributes||{},agentPath=String(attrs.agent_path||'').trim(),isRoot=node.id==='agent:OpenAI Codex',agentId=String(attrs.agent_id||''),path=agentPath||(isRoot?'/root':''),key=path?`path:${path}`:agentId?`agent:${agentId}`:`id:${node.id}`,existing=records.get(key),label=path||(agentId?`subagent · ${agentId.slice(0,8)}`:String(node.name||node.id));if(existing){if(path)existing.path=path,existing.label=path;continue}records.set(key,{key,path,label,entry:null})}return[...records.values()]}
+function conversationRootRecord(records){return records.find(record=>record.path==='/root')||{key:'path:/root',path:'/root',label:'/root',entry:null}}
+function appendTreeMessage(container,message,currentPath){const row=document.createElement('div');row.className='conversation-live-message';if(message?.phase==='final_answer')row.classList.add('final');if(message?.content_state==='provider_encrypted')row.classList.add('encrypted');const meta=document.createElement('div');meta.className='conversation-live-message-meta';const sender=String(message?.sender||''),recipient=String(message?.recipient||''),kind=String(message?.kind||'message'),phase=message?.phase?String(message.phase):'',route=recipient?`${sender||currentPath} → ${recipient}`:(sender&&sender!==currentPath?sender:'');meta.textContent=[route,kind,phase].filter(Boolean).join(' · ');const body=document.createElement('div');body.className='conversation-live-message-body';body.textContent=message?.content_state==='provider_encrypted'?'Provider-encrypted payload — plaintext is not exposed by the Codex rollout.':String(message?.text||'(no plaintext body exposed)');row.append(meta,body);container.appendChild(row)}
+function conversationThread(entry,path){const preview=entry.conversation_preview||{},thread=document.createElement('div');thread.className='execweave-conversation-thread';const meta=document.createElement('div');meta.className='conversation-live-meta';meta.textContent=`${entry.provider||'provider'} · ${entry.relation||'conversation'} · ${entry.size_bytes||0} bytes`;const messages=document.createElement('div');messages.className='conversation-live-messages';for(const message of (preview.messages||[]).slice(-40))appendTreeMessage(messages,message,path);const raw=document.createElement('a');raw.className='conversation-live-link';raw.href=href(String(entry.path||''));raw.target='_blank';raw.rel='noreferrer';raw.textContent='Open raw rollout evidence';thread.append(meta,messages,raw);return thread}
+function conversationAgentNode(record,isRoot=false){const node=document.createElement('div');node.className=isRoot?'execweave-conversation-root-node':'execweave-conversation-agent-node';const label=document.createElement('span');label.className='execweave-conversation-agent-label';const nickname=record.entry?.conversation_preview?.agent_nickname;label.textContent=`${record.label||record.path||record.key}${nickname?` · ${nickname}`:''}`;const badge=document.createElement('span');badge.className='execweave-conversation-agent-badge';badge.textContent=isRoot?'run root':record.entry?'agent':'agent · waiting';node.append(label,badge);return node}
+""".strip()
+
+_LIVE_RENDER = r"""function renderRich(entries){const threads=latestThreads(entries),records=conversationAgentRecords(threads);if(!threads.length&&!records.length)return false;panel.replaceChildren();const count=threads.reduce((n,e)=>n+((e.conversation_preview?.messages||[]).length),0),summary=document.createElement('div');summary.className='conversation-live-summary';summary.textContent=`${records.length} agent${records.length===1?'':'s'} · ${count} visible item${count===1?'':'s'} · run-local record`;panel.appendChild(summary);const rootRecord=conversationRootRecord(records),tree=document.createElement('div');tree.className='execweave-conversation-tree';tree.appendChild(conversationAgentNode(rootRecord,true));if(rootRecord.entry)tree.appendChild(conversationThread(rootRecord.entry,rootRecord.path||'/root'));const children=document.createElement('div');children.className='execweave-conversation-children';const childRecords=records.filter(record=>record.key!==rootRecord.key).sort((a,b)=>String(a.label||a.path||a.key).localeCompare(String(b.label||b.path||b.key)));for(const record of childRecords){const branch=document.createElement('div');branch.className='execweave-conversation-branch';branch.appendChild(conversationAgentNode(record,false));if(record.entry)branch.appendChild(conversationThread(record.entry,record.path||record.label));children.appendChild(branch)}if(childRecords.length)tree.appendChild(children);panel.appendChild(tree);const index=document.createElement('a');index.className='conversation-live-index';index.href=`/conversations.md${window.__execweaveToken?`?t=${encodeURIComponent(window.__execweaveToken)}`:''}`;index.target='_blank';index.rel='noreferrer';index.textContent='Open complete conversation index';panel.appendChild(index);return true}""".strip()
 
 
-def inject_live_conversation_tree(html: str) -> str:
-    return _inject(html)
+def _replace_between(html: str, start: str, following: str, replacement: str) -> str:
+    begin = html.find(start)
+    if begin < 0:
+        return html
+    end = html.find(following, begin)
+    if end < 0:
+        return html
+    return html[:begin] + replacement + "\n" + html[end:]
 
 
 def inject_standalone_conversation_tree(html: str) -> str:
-    return _inject(html)
+    """Render run-local conversations as one run root with agent branches beneath it."""
+    if "function execweaveRenderRichConversationRecords(panel,entries){" not in html:
+        return html
+    result = html.replace("</style>", _TREE_CSS + "\n</style>", 1)
+    marker = "function execweaveRenderRichConversationRecords(panel,entries){"
+    result = result.replace(marker, _STATIC_HELPERS + "\n" + marker, 1)
+    return _replace_between(
+        result,
+        marker,
+        "function execweaveRenderConversationRecords(){",
+        _STATIC_RENDER,
+    )
+
+
+def inject_live_conversation_tree(html: str) -> str:
+    """Give the live conversation panel the same root/agent hierarchy."""
+    if "function renderRich(entries){" not in html:
+        return html
+    result = html.replace("</style>", _TREE_CSS + "\n</style>", 1)
+    marker = "function renderRich(entries){"
+    result = result.replace(marker, _LIVE_HELPERS + "\n" + marker, 1)
+    return _replace_between(result, marker, "async function loadIndex(){", _LIVE_RENDER)
