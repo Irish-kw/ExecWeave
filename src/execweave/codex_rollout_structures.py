@@ -42,8 +42,8 @@ def _maps(state: Mapping[str, Any], key: str) -> dict[str, dict[str, Any]]:
     return {str(k): v for k, v in value.items() if isinstance(v, dict)}
 
 
-def _node(kind: str, ident: str, name: str, **attrs: Any) -> dict[str, Any]:
-    return {"type": kind, "id": ident, "name": name, "attributes": attrs}
+def _node(entity_type: str, ident: str, name: str, **attrs: Any) -> dict[str, Any]:
+    return {"type": entity_type, "id": ident, "name": name, "attributes": attrs}
 
 
 def _agent(thread_id: str, threads: Mapping[str, Mapping[str, Any]], rollout: str) -> dict[str, Any]:
@@ -51,16 +51,20 @@ def _agent(thread_id: str, threads: Mapping[str, Mapping[str, Any]], rollout: st
     path = thread.get("agent_path")
     nickname = thread.get("nickname")
     name = path if isinstance(path, str) and path else nickname if isinstance(nickname, str) and nickname else f"Codex agent {thread_id}"
+    attrs: dict[str, Any] = {
+        "provider": "codex",
+        "rollout_id": rollout,
+        "thread_id": thread_id,
+        "agent_path": path,
+        "nickname": nickname,
+    }
+    if not thread:
+        attrs["unresolved_thread_metadata"] = True
     return _node(
         "agent",
         f"agent:codex:rollout:{rollout}:thread:{thread_id}",
         name,
-        provider="codex",
-        rollout_id=rollout,
-        thread_id=thread_id,
-        agent_path=path,
-        nickname=nickname,
-        unresolved_thread_metadata=not bool(thread),
+        **attrs,
     )
 
 
