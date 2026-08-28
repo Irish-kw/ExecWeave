@@ -31,6 +31,21 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _codex_trace_visibility_event(timestamp: str) -> dict[str, Any]:
+    return provider_agent_trace_visibility_event(
+        "codex",
+        timestamp=timestamp,
+        source={
+            "type": "agent",
+            "id": "agent:OpenAI Codex",
+            "name": "OpenAI Codex",
+            "attributes": {"provider": "codex"},
+        },
+        attribution="codex_hook",
+        evidence_source="provider_hook",
+    )
+
+
 def codex_hook_config(command: str = "execweave-codex-hook") -> dict[str, Any]:
     handler = _hook_handler(command)
     tool_group = {"matcher": "*", "hooks": [handler]}
@@ -127,14 +142,7 @@ def main(argv: list[str] | None = None) -> int:
             codex_official_hook_lifecycle_events(payload, timestamp=observed_at)
         )
         if payload.get("hook_event_name") == "SessionStart":
-            summary_records.append(
-                provider_agent_trace_visibility_event(
-                    "codex",
-                    timestamp=observed_at,
-                    attribution="codex_hook",
-                    evidence_source="provider_hook",
-                )
-            )
+            summary_records.append(_codex_trace_visibility_event(observed_at))
         append_semantic_records(sidecar, summary_records)
 
         content_store = FullFidelityContentStore(sidecar.parent)
