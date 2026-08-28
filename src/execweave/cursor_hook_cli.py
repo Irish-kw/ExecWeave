@@ -10,16 +10,17 @@ from typing import Any
 
 from .agent_trace import cursor_agent_trace_events
 from .content_store import FullFidelityContentStore
-from .cursor_adapter import append_semantic_records, cursor_hook_to_semantic_events, read_hook_payload
+from .cursor_adapter import (
+    append_semantic_records,
+    cursor_hook_to_semantic_events,
+    read_hook_payload,
+)
 from .cursor_delegation import cursor_delegation_events
 from .cursor_full_fidelity import cursor_hook_to_content_events
-
-_HOOKS = (
-    "sessionStart", "sessionEnd", "preToolUse", "postToolUse", "postToolUseFailure",
-    "subagentStart", "subagentStop", "beforeShellExecution", "afterShellExecution",
-    "beforeMCPExecution", "afterMCPExecution", "beforeReadFile", "afterFileEdit",
-    "beforeSubmitPrompt", "preCompact", "stop", "afterAgentResponse", "afterAgentThought",
-    "beforeTabFileRead", "afterTabFileEdit",
+from .cursor_hook_contract import (
+    OFFICIAL_CURSOR_HOOK_EVENTS,
+    cursor_official_hook_semantic_events,
+    cursor_workspace_scope,
 )
 
 
@@ -28,26 +29,56 @@ def _now() -> str:
 
 
 def cursor_hook_config(command: str = "execweave-cursor-hook") -> dict[str, Any]:
-    return {"version": 1, "hooks": {name: [{"command": command}] for name in _HOOKS}}
+    hooks = {
+        name: [{"command": command}]
+        for name in sorted(OFFICIAL_CURSOR_HOOK_EVENTS)
+    }
+    if set(hooks) != set(OFFICIAL_CURSOR_HOOK_EVENTS):
+        raise RuntimeError("Cursor hook config drifted from the official event set")
+    return {"version": 1, "hooks": hooks}
 
 
 def _default_sidecar(payload: dict[str, Any]) -> Path:
+    hook = payload.get("hook_event_name")
+    if hook == "workspaceOpen":
+        workspace_scope, root = cursor_workspace_scope(payload)
+        return (
+            root
+            / ".execweave"
+            / "semantic"
+            / "cursor"
+            / f"workspace-{workspace_scope}.jsonl"
+        )
+
     cwd = payload.get("cwd")
     if not isinstance(cwd, str) or not cwd:
         roots = payload.get("workspace_roots")
         if isinstance(roots, list) and roots and isinstance(roots[0], str):
             cwd = roots[0]
     if not isinstance(cwd, str) or not cwd:
-        raise ValueError("Cursor hook payload has no cwd/workspace root for sidecar placement")
+        raise ValueError(
+            "Cursor hook payload has no cwd/workspace root for sidecar placement"
+        )
     scope = next(
-        (payload[key] for key in ("conversation_id", "session_id", "generation_id")
-         if isinstance(payload.get(key), str) and payload[key]),
+        (
+            payload[key]
+            for key in ("conversation_id", "session_id", "generation_id")
+            if isinstance(payload.get(key), str) and payload[key]
+        ),
         None,
     )
     if scope is None:
         raise ValueError("Cursor hook payload has no conversation/session identifier")
-    safe_scope = "".join(c if c.isalnum() or c in "-_." else "_" for c in scope)
-    return Path(cwd) / ".execweave" / "semantic" / "cursor" / f"{safe_scope}.jsonl"
+    safe_scope = "".join(
+        c if c.isalnum() or c in "-_." else "_" for c in scope
+    )
+    return (
+        Path(cwd)
+        / ".execweave"
+        / "semantic"
+        / "cursor"
+        / f"{safe_scope}.jsonl"
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -80,10 +111,18 @@ def main(argv: list[str] | None = None) -> int:
         sidecar = Path(sidecar).expanduser().resolve()
         observed_at = _now()
         store = FullFidelityContentStore(sidecar.parent)
-        append_semantic_records(
-            sidecar,
-            cursor_hook_to_semantic_events(payload, timestamp=observed_at),
+
+        summary_records = cursor_hook_to_semantic_events(
+            payload,
+            timestamp=observed_at,
         )
+        summary_records.extend(
+            cursor_official_hook_semantic_events(
+                payload,
+                timestamp=observed_at,
+            )
+        )
+        append_semantic_records(sidecar, summary_records)
         append_semantic_records(
             sidecar,
             cursor_hook_to_content_events(

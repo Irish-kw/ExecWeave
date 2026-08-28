@@ -48,15 +48,19 @@ def test_pre_tool_use_records_exact_tool_call_and_shell_command() -> None:
         "tool_input": {"command": "python task.py", "working_directory": "/repo"},
         "agent_message": "secret narrative",
     }
-    events = cursor_hook_to_semantic_events(payload)
-    assert {event["relation"] for event in events} == {
+    first = cursor_hook_to_semantic_events(payload)
+    assert {event["relation"] for event in first} == {
         "REQUESTED_TOOL_CALL",
         "USES_TOOL",
         "DECLARED_COMMAND",
     }
-    call = next(event["target"] for event in events if event["relation"] == "REQUESTED_TOOL_CALL")
+    call = next(
+        event["target"]
+        for event in first
+        if event["relation"] == "REQUESTED_TOOL_CALL"
+    )
     assert call["id"] == "tool-call:cursor:conversation-1:call-123"
-    rendered = json.dumps(events)
+    rendered = json.dumps(first)
     assert "python task.py" in rendered
     assert "secret narrative" not in rendered
 
@@ -74,7 +78,9 @@ def test_post_tool_events_reuse_tool_use_id_without_storing_output() -> None:
     assert event["source"]["id"] == "tool-call:cursor:conversation-1:call-123"
     assert "sensitive output" not in json.dumps(event)
 
-    failure = cursor_hook_to_semantic_events({**payload, "hook_event_name": "postToolUseFailure"})[0]
+    failure = cursor_hook_to_semantic_events(
+        {**payload, "hook_event_name": "postToolUseFailure"}
+    )[0]
     assert failure["relation"] == "TOOL_CALL_FAILED"
     assert failure["attributes"]["provider_reported_failure"] is True
 
@@ -88,7 +94,9 @@ def test_mcp_tool_keeps_tool_identity_without_inventing_server() -> None:
             "tool_input": {"query": "execweave"},
         }
     )
-    tool = next(event["target"] for event in events if event["relation"] == "USES_TOOL")
+    tool = next(
+        event["target"] for event in events if event["relation"] == "USES_TOOL"
+    )
     assert tool["id"] == "tool:cursor:mcp:search_repositories"
     assert tool["attributes"]["mcp_server_identity_available"] is False
     assert all(event["target"]["type"] != "mcp_server" for event in events)
@@ -118,12 +126,16 @@ def test_cursor_config_and_sidecar_io(tmp_path: Path) -> None:
         "afterAgentThought",
         "beforeTabFileRead",
         "afterTabFileEdit",
+        "workspaceOpen",
     }
     payload = {
         **_base("preToolUse"),
         "tool_name": "Write",
         "tool_use_id": "write-1",
-        "tool_input": {"path": str(tmp_path / "output.txt"), "content": "secret body"},
+        "tool_input": {
+            "path": str(tmp_path / "output.txt"),
+            "content": "secret body",
+        },
     }
     parsed = read_hook_payload(StringIO(json.dumps(payload)))
     output = append_semantic_records(
