@@ -73,6 +73,52 @@ def _dashboard_graph() -> dict[str, object]:
     }
 
 
+def _repeated_process_graph() -> dict[str, object]:
+    parent = {
+        "id": "process:node",
+        "type": "process",
+        "name": "node.exe",
+        "attributes": {"pid": 100},
+        "first_seen": "2026-08-28T00:00:01Z",
+        "last_seen": "2026-08-28T00:00:09Z",
+    }
+    git_a = {
+        "id": "process:git:101",
+        "type": "process",
+        "name": "git.exe",
+        "attributes": {"pid": 101, "ppid": 100},
+        "first_seen": "2026-08-28T00:00:02Z",
+        "last_seen": "2026-08-28T00:00:03Z",
+    }
+    git_b = {
+        "id": "process:git:102",
+        "type": "process",
+        "name": "git.exe",
+        "attributes": {"pid": 102, "ppid": 100},
+        "first_seen": "2026-08-28T00:00:04Z",
+        "last_seen": "2026-08-28T00:00:05Z",
+    }
+    staging = {
+        "id": "file:staging",
+        "type": "file",
+        "name": ".execweave-content-xn4uvhqy",
+        "attributes": {"path": "content/sha256/.execweave-content-xn4uvhqy"},
+    }
+    return {
+        "graph_schema_version": "0.2",
+        "session_id": "dashboard-process-canonicalization",
+        "event_count": 6,
+        "node_count": 4,
+        "edge_count": 3,
+        "nodes": [parent, git_a, git_b, staging],
+        "edges": [
+            _edge("spawn-a", parent["id"], git_a["id"], "SPAWNED", 1),
+            _edge("spawn-b", parent["id"], git_b["id"], "SPAWNED", 2),
+            _edge("staging-write", git_b["id"], staging["id"], "WROTE", 3),
+        ],
+    }
+
+
 def test_project_viewer_graph_keeps_evidence_contract() -> None:
     graph = _dashboard_graph()
     projected = project_viewer_graph(graph)
@@ -99,6 +145,23 @@ def test_static_dashboard_cleans_only_canvas_and_keeps_embedded_evidence() -> No
     assert "loadPresets();execweavePreferAgentView();applyGraphFilters()" not in html
 
 
+def test_dashboard_process_canonicalization_is_presentation_only() -> None:
+    graph = _repeated_process_graph()
+    projected = project_viewer_graph(graph)
+    raw_ids = {node["id"] for node in projected["nodes"]}
+    html = render_graph_html(graph)
+
+    assert {"process:git:101", "process:git:102", "file:staging"} <= raw_ids
+    assert "canonicalTypes=new Set(['process'])" in html
+    assert "viewer_occurrence_count" in html
+    assert "viewer_occurrences" in html
+    assert "viewer_original_source" in html
+    assert "hidden_internal_staging_node_count" in html
+    assert "process:git:101" in html
+    assert "process:git:102" in html
+    assert ".execweave-content-xn4uvhqy" in html
+
+
 def test_live_dashboard_uses_client_side_clean_graph_without_changing_protocol() -> None:
     html = live_module._LIVE_HTML
 
@@ -107,4 +170,6 @@ def test_live_dashboard_uses_client_side_clean_graph_without_changing_protocol()
     assert "const display=execweaveDashboardGraph(data)" in html
     assert "const rawNodes=new Map((graph.nodes||[]).map" in html
     assert "relation:'CALLED_TOOL'" in html
+    assert "viewer_occurrence_count" in html
+    assert "hidden_internal_staging_node_count" in html
     assert "provider_hook_metadata" not in html
