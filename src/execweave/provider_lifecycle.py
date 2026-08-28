@@ -34,6 +34,8 @@ _RELATION_MAP: dict[str, tuple[str, str]] = {
     "ASSIGNED_AGENT_TASK": ("subagent", "task_assigned"),
     "SENT_AGENT_MESSAGE": ("agent_message", "sent"),
     "DELIVERED_AGENT_MESSAGE": ("agent_message", "delivered"),
+    "CONSUMED_AGENT_MESSAGE": ("agent_message", "consumed"),
+    "INCLUDED_AGENT_MESSAGE_IN_INFERENCE": ("agent_message", "included_in_inference"),
     "HAS_AGENT_MESSAGE_PAYLOAD": ("agent_message", "payload_observed"),
     "RETURNED_AGENT_RESULT": ("subagent", "result_returned"),
     "CLOSED_AGENT": ("subagent", "closed"),
