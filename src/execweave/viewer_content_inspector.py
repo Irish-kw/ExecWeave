@@ -14,6 +14,12 @@ def _content_category(content_kind: str) -> str:
     value = content_kind.lower()
     if "agent_message" in value:
         return "Agent Message Payload"
+    if "subtask_prompt" in value:
+        return "Subtask Prompt"
+    if "subtask_description" in value:
+        return "Subtask Description"
+    if "agent_result" in value:
+        return "Agent Result"
     if "reasoning.encoded" in value or "encoded_reasoning" in value:
         return "Encoded Reasoning"
     if "reasoning.summary" in value or "reasoning_summary" in value:
@@ -166,16 +172,17 @@ def decorate_viewer_content_references(graph: dict[str, Any]) -> dict[str, Any]:
 
 
 _INSPECTOR_CSS = r"""
-.content-inspector,.agent-inspector,.message-inspector{margin:14px 0 4px;border:1px solid var(--border);border-radius:8px;background:var(--panel2);overflow:hidden}
-.content-inspector summary,.agent-inspector summary,.message-inspector summary{cursor:pointer;padding:9px 10px;font-weight:700;list-style:none}.content-inspector summary::-webkit-details-marker,.agent-inspector summary::-webkit-details-marker,.message-inspector summary::-webkit-details-marker{display:none}
-.content-inspector summary::before,.agent-inspector summary::before,.message-inspector summary::before{content:'▸';display:inline-block;width:14px;color:var(--muted)}.content-inspector[open] summary::before,.agent-inspector[open] summary::before,.message-inspector[open] summary::before{content:'▾'}
-.content-inspector-body,.agent-inspector-body,.message-inspector-body{padding:0 10px 10px}.content-meta{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:4px 8px;margin:2px 0 9px;font:11px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.content-meta dt{color:var(--muted)}.content-meta dd{margin:0;overflow-wrap:anywhere}
+.content-inspector,.agent-inspector,.message-inspector,.delegation-inspector{margin:14px 0 4px;border:1px solid var(--border);border-radius:8px;background:var(--panel2);overflow:hidden}
+.content-inspector summary,.agent-inspector summary,.message-inspector summary,.delegation-inspector summary{cursor:pointer;padding:9px 10px;font-weight:700;list-style:none}.content-inspector summary::-webkit-details-marker,.agent-inspector summary::-webkit-details-marker,.message-inspector summary::-webkit-details-marker,.delegation-inspector summary::-webkit-details-marker{display:none}
+.content-inspector summary::before,.agent-inspector summary::before,.message-inspector summary::before,.delegation-inspector summary::before{content:'▸';display:inline-block;width:14px;color:var(--muted)}.content-inspector[open] summary::before,.agent-inspector[open] summary::before,.message-inspector[open] summary::before,.delegation-inspector[open] summary::before{content:'▾'}
+.content-inspector-body,.agent-inspector-body,.message-inspector-body,.delegation-inspector-body{padding:0 10px 10px}.content-meta{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:4px 8px;margin:2px 0 9px;font:11px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.content-meta dt{color:var(--muted)}.content-meta dd{margin:0;overflow-wrap:anywhere}
 .content-note{margin:8px 0;color:var(--muted);font-size:11px}.content-open{display:inline-block;margin:3px 5px 9px 0;padding:5px 8px;border:1px solid var(--border);border-radius:6px;color:var(--text);text-decoration:none}.content-open:hover{border-color:var(--selected)}
 .content-frame{display:block;width:100%;min-height:220px;border:1px solid var(--border);border-radius:6px;background:#fff}.content-unavailable{color:var(--muted);font-size:11px}
 .agent-visibility{margin:7px 0 10px;padding:8px;border:1px solid var(--border);border-radius:7px;background:var(--panel)}.agent-visibility-head{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:7px}.agent-visibility-title{font-weight:700;font-size:11px}.agent-visibility-provider{color:var(--muted);font:10px/1.3 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.agent-visibility-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.agent-visibility-card{min-width:0;padding:7px;border:1px solid var(--border);border-radius:6px;background:var(--panel2)}.agent-visibility-label{color:var(--muted);font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.05em}.agent-visibility-value{margin-top:3px;font-size:10px;line-height:1.35;overflow-wrap:anywhere}.agent-visibility-card.is-gap .agent-visibility-value{font-weight:700}.agent-visibility-note{margin-top:7px;color:var(--muted);font-size:10px;line-height:1.4}
 .agent-activity-list{display:grid;gap:7px}.agent-activity{border:1px solid var(--border);border-radius:7px;padding:7px 8px;background:var(--panel)}.agent-activity-head{display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:11px}.agent-activity-relation{font-weight:700;color:var(--text)}.agent-activity-direction{color:var(--selected);font-weight:800}.agent-activity-peer{margin-top:3px;color:var(--muted);font:11px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow-wrap:anywhere}.agent-activity-meta{margin-left:auto;color:var(--muted);font-size:10px}.agent-activity-actions{display:flex;gap:5px;flex-wrap:wrap;margin-top:6px}.agent-activity-actions button{padding:3px 6px;font-size:10px}.agent-empty{color:var(--muted);font-size:11px}.agent-section-title{margin:9px 0 6px;color:var(--muted);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
 .message-stage-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin:4px 0 9px}.message-stage{min-width:0;padding:7px;border:1px solid var(--border);border-radius:6px;background:var(--panel)}.message-stage-label{color:var(--muted);font-size:9px;font-weight:800;letter-spacing:.06em}.message-stage-value{margin-top:3px;font-size:10px;line-height:1.35}.message-stage.is-observed .message-stage-value{font-weight:800;color:var(--text)}.message-route{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:4px 8px;margin:7px 0 9px;font:10px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.message-route dt{color:var(--muted)}.message-route dd{margin:0;overflow-wrap:anywhere}.message-inferences{display:grid;gap:6px;margin-top:7px}.message-inference{display:flex;align-items:center;gap:7px;padding:6px 7px;border:1px solid var(--border);border-radius:6px;background:var(--panel)}.message-inference-label{min-width:0;flex:1;color:var(--muted);font:10px/1.35 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow-wrap:anywhere}.message-inference button{padding:3px 6px;font-size:10px}
-@media(max-width:720px){.agent-visibility-grid,.message-stage-grid{grid-template-columns:1fr}}
+.delegation-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin:4px 0 9px}.delegation-card{min-width:0;padding:8px;border:1px solid var(--border);border-radius:7px;background:var(--panel)}.delegation-card.is-exact{border-color:var(--selected)}.delegation-label{color:var(--muted);font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.06em}.delegation-value{margin-top:3px;font-size:10px;line-height:1.4;overflow-wrap:anywhere}.delegation-card.is-exact .delegation-value{font-weight:800}.delegation-actions{display:flex;gap:5px;flex-wrap:wrap;margin:7px 0}.delegation-actions button{padding:3px 6px;font-size:10px}
+@media(max-width:720px){.agent-visibility-grid,.message-stage-grid,.delegation-grid{grid-template-columns:1fr}}
 """.strip()
 
 _INSPECTOR_JS = r"""
@@ -216,7 +223,7 @@ function execweaveAppendAgentVisibility(body,agent,nodeMap){
   const capability=execweaveAgentTraceCapability(agent,nodeMap);if(!capability)return;const attrs=capability.attributes||{};const panel=document.createElement('div');panel.className='agent-visibility';const head=document.createElement('div');head.className='agent-visibility-head';const title=document.createElement('span');title.className='agent-visibility-title';title.textContent='Provider trace visibility';const provider=document.createElement('span');provider.className='agent-visibility-provider';provider.textContent=String(attrs.provider||'provider');head.append(title,provider);panel.appendChild(head);const grid=document.createElement('div');grid.className='agent-visibility-grid';grid.append(execweaveVisibilityCard('Identity',attrs.agent_identity_visibility),execweaveVisibilityCard('Subagents',attrs.subagent_visibility),execweaveVisibilityCard('Reasoning',attrs.reasoning_visibility));panel.appendChild(grid);const note=document.createElement('div');note.className='agent-visibility-note';note.textContent='This describes what the selected provider integration exposed. “Not exposed” is a source capability boundary, not evidence that ExecWeave dropped an event or that hidden provider state was unavailable internally.';panel.appendChild(note);body.appendChild(panel);
 }
 function execweavePayloadNodes(nodeId,nodeMap){
-  const result=[],seen=new Set();
+  const result=[],seen=new Set(),current=nodeMap.get(nodeId);if(current&&current.type==='observed_content'&&current.attributes&&current.attributes.viewer_content){seen.add(current.id);result.push(current)}
   possibleEdges.forEach(edge=>{if(!edge||(edge.source!==nodeId&&edge.target!==nodeId))return;const peerId=edge.source===nodeId?edge.target:edge.source;const peer=nodeMap.get(peerId);const ref=peer&&peer.type==='observed_content'&&peer.attributes&&peer.attributes.viewer_content;if(!ref||seen.has(peer.id))return;seen.add(peer.id);result.push(peer)});
   return result;
 }
@@ -248,15 +255,28 @@ function execweaveAppendMessageInspector(kind,value){
   const inferenceEdges=edges.filter(edge=>edge&&edge.relation==='INCLUDED_AGENT_MESSAGE_IN_INFERENCE'&&edge.source===value.id);if(inferenceEdges.length){const title=document.createElement('div');title.className='agent-section-title';title.textContent=`Inference context · ${inferenceEdges.length}`;body.appendChild(title);const list=document.createElement('div');list.className='message-inferences';inferenceEdges.forEach(edge=>{const inference=nodeMap.get(edge.target);const row=document.createElement('div');row.className='message-inference';const label=document.createElement('div');label.className='message-inference-label';label.textContent=inference?(inference.name||inference.id):String(edge.target||'inference');row.appendChild(label);if(inference){const button=document.createElement('button');button.type='button';button.textContent='Inspect inference';button.addEventListener('click',()=>showDetails('Node',inference));row.appendChild(button)}list.appendChild(row)});body.appendChild(list)}
   execweaveAppendPayloadLinks(body,value.id,nodeMap);const note=document.createElement('div');note.className='content-note';note.textContent='CONTEXT and CONSUME reflect provider-recorded request-context evidence. They are not proof that the model attended to, read, or semantically used the message. “No evidence” is not a failure state.';body.appendChild(note);panel.appendChild(body);details.appendChild(panel);
 }
+function execweaveDelegationCard(label,text,exact=false){const card=document.createElement('div');card.className=`delegation-card${exact?' is-exact':''}`;const key=document.createElement('div');key.className='delegation-label';key.textContent=label;const value=document.createElement('div');value.className='delegation-value';value.textContent=text;card.append(key,value);return card}
+function execweaveDelegationPeer(edge,subtaskId,nodeMap){if(!edge)return null;const peerId=edge.source===subtaskId?edge.target:edge.source;return nodeMap.get(peerId)||null}
+function execweaveAppendDelegationInspector(kind,value){
+  if(kind!=='Node'||!value||value.type!=='subtask'||!value.id)return;
+  const nodeMap=execweaveAgentNodeMap(),edges=execweaveIncidentEdges(value.id),attrs=value.attributes||{};
+  const requested=edges.find(edge=>edge&&edge.relation==='REQUESTED_SUBTASK'&&edge.target===value.id);const requester=execweaveDelegationPeer(requested,value.id,nodeMap);
+  const assigned=edges.find(edge=>edge&&edge.relation==='ASSIGNED_AGENT_TASK'&&edge.source===value.id&&nodeMap.get(edge.target)&&nodeMap.get(edge.target).type==='agent');const child=execweaveDelegationPeer(assigned,value.id,nodeMap);
+  const targeted=edges.find(edge=>edge&&edge.relation==='TARGETS_AGENT_PROFILE'&&edge.source===value.id);const profile=execweaveDelegationPeer(targeted,value.id,nodeMap);
+  const exact=Boolean(assigned&&child);const panel=document.createElement('details');panel.className='delegation-inspector';panel.open=true;const summary=document.createElement('summary');summary.textContent='Delegation Evidence';panel.appendChild(summary);const body=document.createElement('div');body.className='delegation-inspector-body';const grid=document.createElement('div');grid.className='delegation-grid';
+  grid.append(execweaveDelegationCard('Requester',requester?(requester.name||requester.id):'No requester evidence'),execweaveDelegationCard('Target',child?(child.name||child.id):profile?(profile.name||profile.id):'No target evidence'),execweaveDelegationCard('Child linkage',exact?'Exact child linkage':'Linkage not asserted',exact),execweaveDelegationCard('Provider',String(attrs.provider||'unknown')));body.appendChild(grid);
+  const actions=document.createElement('div');actions.className='delegation-actions';[[requester,'Inspect requester'],[child,'Inspect child'],[profile,'Inspect target profile']].forEach(([node,label])=>{if(!node)return;const button=document.createElement('button');button.type='button';button.textContent=label;button.addEventListener('click',()=>showDetails('Node',node));actions.appendChild(button)});if(actions.childElementCount)body.appendChild(actions);
+  execweaveAppendPayloadLinks(body,value.id,nodeMap);const note=document.createElement('div');note.className='content-note';note.textContent=exact?'Exact child linkage is shown only because the materialized graph contains an ASSIGNED_AGENT_TASK edge from this subtask to a provider-identified child agent.':'Linkage not asserted: the materialized evidence does not contain an exact subtask → child-agent assignment. A target agent profile or separate parent/child session relation must not be treated as that join.';body.appendChild(note);panel.appendChild(body);details.appendChild(panel);
+}
 """.strip()
 
 
 def inject_standalone_content_inspector(html: str) -> str:
-    """Inject reference-only content, agent-activity, and message inspectors.
+    """Inject reference-only content, agent, message, and delegation inspectors.
 
     Protective-mode HTML is intentionally left untouched. Full content bytes are
     never embedded in the HTML and are never fetched over HTTP by this inspector.
-    Agent activity and message stages are derived only from materialized graph evidence.
+    Agent, message, and delegation views are derived only from graph evidence.
     """
     marker = "function showDetails(kind,value){"
     if marker not in html:
@@ -267,7 +287,8 @@ def inject_standalone_content_inspector(html: str) -> str:
     replacement = (
         "  details.append(p);execweaveAppendContentInspector(kind,value);"
         "execweaveAppendAgentActivity(kind,value);"
-        "execweaveAppendMessageInspector(kind,value);\n}"
+        "execweaveAppendMessageInspector(kind,value);"
+        "execweaveAppendDelegationInspector(kind,value);\n}"
     )
     if detail_end not in result:
         raise RuntimeError("standalone viewer detail seam changed; content inspector not injected")
