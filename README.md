@@ -298,4 +298,4 @@ Contributions are welcome, especially around native OS collectors, Agent/IDE ada
 
 ## License
 
-ExecWeave is licensed under the **PolyForm Noncommercial License 1.0.0**. Noncommercial use, modification, and redistribution are permitted under its terms. Commercial use requires a separate written commercial license from the licensor. See [`LICENSE`](LICENSE).
+Starting with v0.6.8, ExecWeave is licensed under the **PolyForm Noncommercial License 1.0.0**. Noncommercial use, modification, and redistribution are permitted under its terms. Commercial use requires a separate written commercial license from the licensor. See [`LICENSE`](LICENSE).

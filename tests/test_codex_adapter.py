@@ -12,6 +12,7 @@ from execweave.codex_adapter import (
     read_hook_payload,
 )
 from execweave.codex_hook_cli import codex_hook_config
+from execweave.codex_hook_lifecycle import OFFICIAL_CODEX_HOOK_EVENTS
 
 
 def _base(event: str) -> dict:
@@ -109,9 +110,11 @@ def test_required_tool_identity_is_enforced() -> None:
         codex_hook_to_semantic_events(payload)
 
 
-def test_codex_hook_config_uses_current_upstream_lifecycle_events() -> None:
+def test_codex_hook_config_matches_official_documented_event_set() -> None:
     config = codex_hook_config("execweave-codex-hook --strict")
     hooks = config["hooks"]
+    assert set(hooks) == set(OFFICIAL_CODEX_HOOK_EVENTS)
+    assert "Interrupt" not in hooks
     assert set(hooks) == {
         "PreToolUse",
         "PermissionRequest",
@@ -124,7 +127,6 @@ def test_codex_hook_config_uses_current_upstream_lifecycle_events() -> None:
         "SubagentStart",
         "SubagentStop",
         "Stop",
-        "Interrupt",
     }
     for event_name in {"PreToolUse", "PermissionRequest", "PostToolUse"}:
         assert hooks[event_name][0]["matcher"] == "*"

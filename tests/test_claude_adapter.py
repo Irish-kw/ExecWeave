@@ -6,6 +6,7 @@ from pathlib import Path
 
 from execweave.claude_adapter import append_semantic_records, claude_hook_to_semantic_events
 from execweave.claude_hook_cli import claude_hook_config, main as claude_hook_main
+from execweave.claude_hook_contract import PASSIVE_CLAUDE_HOOK_EVENTS
 
 
 def _base(event: str) -> dict:
@@ -164,26 +165,23 @@ def test_append_semantic_records_writes_jsonl(tmp_path: Path) -> None:
     assert not output.with_name(output.name + ".lock").exists()
 
 
-def test_hook_config_covers_supported_events() -> None:
+def test_hook_config_covers_passive_official_events() -> None:
     config = claude_hook_config("custom-execweave-hook")
     hooks = config["hooks"]
 
-    assert set(hooks) == {
-        "SessionStart",
-        "UserPromptSubmit",
-        "MessageDisplay",
-        "PreToolUse",
-        "PostToolUse",
-        "PostToolUseFailure",
-        "PostToolBatch",
-        "SubagentStart",
-        "SubagentStop",
-        "Stop",
-        "StopFailure",
-    }
+    assert set(hooks) == set(PASSIVE_CLAUDE_HOOK_EVENTS)
+    assert "MessageDisplay" in hooks
+    assert "WorktreeCreate" not in hooks
+    assert "FileChanged" not in hooks
     for event_name, groups in hooks.items():
         assert groups[0]["hooks"][0]["command"] == "custom-execweave-hook"
-        if event_name in {"PreToolUse", "PostToolUse", "PostToolUseFailure"}:
+        if event_name in {
+            "PreToolUse",
+            "PermissionRequest",
+            "PostToolUse",
+            "PostToolUseFailure",
+            "PermissionDenied",
+        }:
             assert groups[0]["matcher"] == "*"
         else:
             assert "matcher" not in groups[0]
@@ -224,6 +222,8 @@ def test_hook_cli_print_config(capsys) -> None:
     assert "UserPromptSubmit" in config["hooks"]
     assert "PostToolBatch" in config["hooks"]
     assert "Stop" in config["hooks"]
+    assert "InstructionsLoaded" in config["hooks"]
+    assert "DirectoryAdded" in config["hooks"]
 
 
 def test_hook_cli_is_fail_open_by_default(monkeypatch, tmp_path: Path, capsys) -> None:

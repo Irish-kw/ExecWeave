@@ -5,6 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from execweave.claude_hook_contract import PASSIVE_CLAUDE_HOOK_EVENTS
+
 
 def main() -> int:
     output = Path("claude-hook-smoke.jsonl").resolve()
@@ -66,21 +68,14 @@ def main() -> int:
         check=True,
     )
     parsed = json.loads(config.stdout)
-    required = {
-        "SessionStart",
-        "UserPromptSubmit",
-        "MessageDisplay",
-        "PreToolUse",
-        "PostToolUse",
-        "PostToolUseFailure",
-        "PostToolBatch",
-        "SubagentStart",
-        "SubagentStop",
-        "Stop",
-        "StopFailure",
-    }
-    if set(parsed.get("hooks", {})) != required:
-        raise SystemExit("generated Claude hook config is incomplete")
+    configured_events = set(parsed.get("hooks", {}))
+    if configured_events != set(PASSIVE_CLAUDE_HOOK_EVENTS):
+        missing = sorted(set(PASSIVE_CLAUDE_HOOK_EVENTS) - configured_events)
+        unexpected = sorted(configured_events - set(PASSIVE_CLAUDE_HOOK_EVENTS))
+        raise SystemExit(
+            "generated Claude hook config drifted from passive official contract: "
+            f"missing={missing}, unexpected={unexpected}"
+        )
 
     print("Claude hook command smoke passed")
     return 0

@@ -8,10 +8,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .agent_trace import provider_agent_trace_visibility_event
 from .claude_adapter import append_semantic_records, claude_hook_to_semantic_events, read_hook_payload
-from .claude_full_fidelity import claude_hook_to_content_events
+from .claude_delegation import claude_delegation_events
+from .claude_hook_contract import (
+    PASSIVE_CLAUDE_HOOK_EVENTS,
+    claude_official_full_fidelity_events,
+    claude_official_hook_semantic_events,
+)
 from .claude_model_observer import append_claude_transcript_model_events
 from .content_store import FullFidelityContentStore
+from .conversation_archive import claude_conversation_archive_events
 
 
 def _hook_handler(command: str) -> dict[str, str]:
@@ -22,25 +29,34 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+_MATCH_ALL_EVENTS = frozenset(
+    {
+        "PreToolUse",
+        "PermissionRequest",
+        "PostToolUse",
+        "PostToolUseFailure",
+        "PermissionDenied",
+    }
+)
+
+
 def claude_hook_config(command: str = "execweave-claude-hook") -> dict[str, Any]:
+    """Return a passive Claude Code observer config grounded in the official hook contract.
+
+    WorktreeCreate is intentionally excluded because configuring it replaces Claude
+    Code's default worktree creation. FileChanged is excluded because its matcher
+    defines the literal file watch list and therefore cannot be enabled generically.
+    """
+
     handler = _hook_handler(command)
     tool_group = {"matcher": "*", "hooks": [handler]}
     plain_group = {"hooks": [handler]}
-    return {
-        "hooks": {
-            "SessionStart": [plain_group],
-            "UserPromptSubmit": [plain_group],
-            "MessageDisplay": [plain_group],
-            "PreToolUse": [tool_group],
-            "PostToolUse": [tool_group],
-            "PostToolUseFailure": [tool_group],
-            "PostToolBatch": [plain_group],
-            "SubagentStart": [plain_group],
-            "SubagentStop": [plain_group],
-            "Stop": [plain_group],
-            "StopFailure": [plain_group],
-        }
-    }
+    hooks: dict[str, Any] = {}
+    for event in sorted(PASSIVE_CLAUDE_HOOK_EVENTS):
+        hooks[event] = [tool_group if event in _MATCH_ALL_EVENTS else plain_group]
+    if set(hooks) != set(PASSIVE_CLAUDE_HOOK_EVENTS):
+        raise RuntimeError("Claude hook config drifted from the passive official event set")
+    return {"hooks": hooks}
 
 
 def _default_sidecar(payload: dict[str, Any]) -> Path:
@@ -55,6 +71,25 @@ def _default_sidecar(payload: dict[str, Any]) -> Path:
         for character in session_id
     )
     return Path(cwd) / ".execweave" / "semantic" / "claude" / f"{safe_session}.jsonl"
+
+
+def _restore_official_hook_event_name(
+    records: list[dict[str, Any]],
+    payload: dict[str, Any],
+) -> None:
+    """Keep persisted official content evidence tied to the exact hook event that emitted it."""
+
+    hook_event = payload.get("hook_event_name")
+    if not isinstance(hook_event, str) or not hook_event:
+        return
+    for record in records:
+        attributes = record.get("attributes")
+        if not isinstance(attributes, dict):
+            continue
+        if attributes.get("attribution") != "claude_official_hook_contract":
+            continue
+        if attributes.get("claude_hook_event_name") in (None, ""):
+            attributes["claude_hook_event_name"] = hook_event
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -76,15 +111,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Return non-zero on telemetry errors. Default is fail-open so tracing cannot block Claude.",
     )
-    parser.add_argument(
-        "--auto",
-        action="store_true",
-        help=argparse.SUPPRESS,
-    )
+    parser.add_argument("--auto", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument(
         "--print-config",
         action="store_true",
-        help="Print a Claude Code settings fragment for the supported ExecWeave hooks and exit.",
+        help="Print a passive Claude Code settings fragment grounded in the official hook contract.",
     )
     parser.add_argument(
         "--command",
@@ -112,11 +143,40 @@ def main(argv: list[str] | None = None) -> int:
         sidecar = Path(sidecar).expanduser().resolve()
         observed_at = _now()
         records = claude_hook_to_semantic_events(payload, timestamp=observed_at)
-        content_store = FullFidelityContentStore(sidecar.parent)
         records.extend(
-            claude_hook_to_content_events(
+            claude_official_hook_semantic_events(
+                payload,
+                timestamp=observed_at,
+            )
+        )
+        if payload.get("hook_event_name") == "SessionStart":
+            records.append(
+                provider_agent_trace_visibility_event(
+                    "claude",
+                    timestamp=observed_at,
+                    attribution="claude_hook",
+                    evidence_source="provider_hook",
+                )
+            )
+        content_store = FullFidelityContentStore(sidecar.parent)
+        content_records = claude_official_full_fidelity_events(
+            payload,
+            store=content_store,
+            timestamp=observed_at,
+        )
+        _restore_official_hook_event_name(content_records, payload)
+        content_records.extend(
+            claude_conversation_archive_events(
                 payload,
                 store=content_store,
+                timestamp=observed_at,
+            )
+        )
+        records.extend(content_records)
+        records.extend(
+            claude_delegation_events(
+                payload,
+                content_events=content_records,
                 timestamp=observed_at,
             )
         )

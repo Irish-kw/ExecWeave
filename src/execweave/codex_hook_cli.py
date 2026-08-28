@@ -8,12 +8,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .agent_trace import provider_agent_trace_visibility_event
 from .codex_adapter import (
     append_semantic_records,
     codex_hook_to_semantic_events,
     read_hook_payload,
 )
 from .codex_full_fidelity import codex_hook_to_content_events
+from .codex_hook_lifecycle import (
+    OFFICIAL_CODEX_HOOK_EVENTS,
+    codex_official_hook_lifecycle_events,
+)
 from .content_store import FullFidelityContentStore
 
 
@@ -29,22 +34,27 @@ def codex_hook_config(command: str = "execweave-codex-hook") -> dict[str, Any]:
     handler = _hook_handler(command)
     tool_group = {"matcher": "*", "hooks": [handler]}
     plain_group = {"hooks": [handler]}
-    return {
-        "hooks": {
-            "PreToolUse": [tool_group],
-            "PermissionRequest": [tool_group],
-            "PostToolUse": [tool_group],
-            "PreCompact": [plain_group],
-            "PostCompact": [plain_group],
-            "SessionStart": [plain_group],
-            "SessionEnd": [plain_group],
-            "UserPromptSubmit": [plain_group],
-            "SubagentStart": [plain_group],
-            "SubagentStop": [plain_group],
-            "Stop": [plain_group],
-            "Interrupt": [plain_group],
-        }
-    }
+    hooks: dict[str, Any] = {}
+    for event in (
+        "PreToolUse",
+        "PermissionRequest",
+        "PostToolUse",
+    ):
+        hooks[event] = [tool_group]
+    for event in (
+        "PreCompact",
+        "PostCompact",
+        "SessionStart",
+        "SessionEnd",
+        "UserPromptSubmit",
+        "SubagentStart",
+        "SubagentStop",
+        "Stop",
+    ):
+        hooks[event] = [plain_group]
+    if set(hooks) != set(OFFICIAL_CODEX_HOOK_EVENTS):
+        raise RuntimeError("Codex hook config drifted from the documented official event set")
+    return {"hooks": hooks}
 
 
 def _default_sidecar(payload: dict[str, Any]) -> Path:
@@ -80,11 +90,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Return non-zero on telemetry errors. Default is fail-open so tracing cannot block Codex.",
     )
-    parser.add_argument(
-        "--auto",
-        action="store_true",
-        help=argparse.SUPPRESS,
-    )
+    parser.add_argument("--auto", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument(
         "--print-config",
         action="store_true",
@@ -116,6 +122,18 @@ def main(argv: list[str] | None = None) -> int:
         sidecar = Path(sidecar).expanduser().resolve()
         observed_at = _now()
         summary_records = codex_hook_to_semantic_events(payload, timestamp=observed_at)
+        summary_records.extend(
+            codex_official_hook_lifecycle_events(payload, timestamp=observed_at)
+        )
+        if payload.get("hook_event_name") == "SessionStart":
+            summary_records.append(
+                provider_agent_trace_visibility_event(
+                    "codex",
+                    timestamp=observed_at,
+                    attribution="codex_hook",
+                    evidence_source="provider_hook",
+                )
+            )
         append_semantic_records(sidecar, summary_records)
 
         content_store = FullFidelityContentStore(sidecar.parent)

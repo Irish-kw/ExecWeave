@@ -55,6 +55,16 @@ def _graph(node: dict[str, object]) -> dict[str, object]:
         ("opencode.tool_output", "Tool Output"),
         ("inference_gateway.openrouter.response", "Response"),
         ("litellm.provider_metadata", "Provider Metadata"),
+        ("codex.agent_message.payload", "Agent Message Payload"),
+        ("codex.reasoning.text", "Reasoning Text"),
+        ("codex.reasoning.summary", "Reasoning Summary"),
+        ("codex.reasoning.encoded", "Encoded Reasoning"),
+        ("codex.rollout.raw_payload.inference_request", "Inference Request"),
+        ("codex.rollout.raw_payload.inference_response", "Inference Response"),
+        ("codex.terminal.request", "Terminal Request"),
+        ("codex.terminal.result", "Terminal Result"),
+        ("codex.code_cell.source_js", "Code Cell Source"),
+        ("codex.rollout.raw_payload.protocol_event", "Raw Provider Payload"),
     ],
 )
 def test_content_reference_categories_are_cross_provider(
@@ -120,6 +130,71 @@ def test_projected_standalone_viewer_has_expandable_reference_only_inspector() -
     assert "content_embedded_in_viewer\":false" in html
     assert "http_content_serving_enabled\":false" in html
     assert "PRIVATE_TOOL_BODY_THAT_IS_NOT_IN_THE_GRAPH" not in html
+
+
+def test_standalone_viewer_exposes_agent_communication_and_activity_inspector() -> None:
+    payload = _content_node("codex.agent_message.payload", digest="b" * 64)
+    agent = {
+        "id": "agent:codex:root",
+        "type": "agent",
+        "name": "/root",
+        "attributes": {"provider": "codex", "thread_id": "root"},
+    }
+    message = {
+        "id": "agent-message:codex:m1",
+        "type": "agent_message",
+        "name": "Codex agent message",
+        "attributes": {"author": "/root", "recipient": "/root/agent_b"},
+    }
+    raw = {
+        "graph_schema_version": "0.2",
+        "session_id": "agent-viewer-test",
+        "event_count": 2,
+        "node_count": 3,
+        "edge_count": 2,
+        "nodes": [agent, message, payload],
+        "edges": [
+            {
+                "id": "send",
+                "source": agent["id"],
+                "target": message["id"],
+                "relation": "SENT_AGENT_MESSAGE",
+                "count": 1,
+                "first_sequence": 1,
+                "last_sequence": 1,
+                "event_ids": ["e1"],
+                "event_types": ["semantic.codex.rollout.agent_message.sent"],
+                "backends": ["semantic"],
+                "attributions": ["codex_rollout_trace"],
+                "causal": False,
+            },
+            {
+                "id": "payload",
+                "source": message["id"],
+                "target": payload["id"],
+                "relation": "HAS_AGENT_MESSAGE_PAYLOAD",
+                "count": 1,
+                "first_sequence": 2,
+                "last_sequence": 2,
+                "event_ids": ["e2"],
+                "event_types": ["semantic.codex.rollout.content.observed"],
+                "backends": ["semantic"],
+                "attributions": ["codex_rollout_trace"],
+                "causal": False,
+            },
+        ],
+    }
+
+    html = render_graph_html(raw)
+
+    assert "Agent communications" in html
+    assert "Agent activity" in html
+    assert "Inspect edge" in html
+    assert "Inspect peer" in html
+    assert "SENT_AGENT_MESSAGE" in html
+    assert "Agent Message Payload" in html
+    assert f"content/sha256/{'b' * 64}.json" in html
+    assert "execweavePayloadNodes" in html
 
 
 def test_invalid_content_ref_stays_generic_and_does_not_gain_local_file_link() -> None:

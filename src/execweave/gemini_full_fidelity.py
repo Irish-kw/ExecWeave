@@ -214,12 +214,16 @@ def gemini_hook_to_content_events(
                 _content_event(
                     store=store,
                     value=payload["prompt_response"],
-                    content_kind="gemini.assistant_final_response",
+                    content_kind="gemini.agent_response_candidate",
                     timestamp=observed_at,
                     source=_main_agent(),
-                    relation="PRODUCED_ASSISTANT_RESPONSE",
+                    relation="OBSERVED_AGENT_RESPONSE_CANDIDATE",
                     observed_field="prompt_response",
                     hook_event=hook_event,
+                    attributes={
+                        "accepted_final_response_asserted": False,
+                        "response_can_be_rejected_and_retried_by_hook": True,
+                    },
                 )
             )
 

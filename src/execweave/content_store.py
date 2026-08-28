@@ -10,6 +10,7 @@ from typing import Any
 
 _CONTENT_DIR = "content"
 _HASH_ALGORITHM = "sha256"
+_COPY_CHUNK_BYTES = 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -100,6 +101,98 @@ class FullFidelityContentStore:
             media_type=media_type,
             representation=representation,
         )
+
+    def put_file(
+        self,
+        source: str | Path,
+        *,
+        content_kind: str,
+        media_type: str = "application/octet-stream",
+        representation: str = "source_file_snapshot",
+    ) -> ContentReference:
+        """Stream one provider-declared file into the run-local content store.
+
+        The source is stat-checked before and after the copy. If it changes while
+        being read, no reference is returned and the temporary snapshot is removed.
+        """
+        if not content_kind:
+            raise ValueError("content_kind must not be empty")
+        source_path = Path(source).expanduser().resolve()
+        if not source_path.is_file():
+            raise FileNotFoundError(source_path)
+        destination_dir = self.run_root / _CONTENT_DIR / _HASH_ALGORITHM
+        destination_dir.mkdir(parents=True, exist_ok=True)
+        if os.name != "nt":
+            try:
+                destination_dir.chmod(0o700)
+            except OSError:
+                pass
+
+        before = source_path.stat()
+        fd, temp_name = tempfile.mkstemp(prefix=".execweave-content-", dir=destination_dir)
+        temp_path = Path(temp_name)
+        digest = hashlib.sha256()
+        size = 0
+        try:
+            if os.name != "nt":
+                try:
+                    os.fchmod(fd, 0o600)
+                except OSError:
+                    pass
+            with source_path.open("rb") as source_handle, os.fdopen(
+                fd, "wb", closefd=True
+            ) as destination_handle:
+                while True:
+                    chunk = source_handle.read(_COPY_CHUNK_BYTES)
+                    if not chunk:
+                        break
+                    digest.update(chunk)
+                    size += len(chunk)
+                    destination_handle.write(chunk)
+                destination_handle.flush()
+                os.fsync(destination_handle.fileno())
+
+            after = source_path.stat()
+            before_signature = (before.st_size, before.st_mtime_ns)
+            after_signature = (after.st_size, after.st_mtime_ns)
+            if before_signature != after_signature or size != after.st_size:
+                raise RuntimeError(f"source changed while archiving content: {source_path}")
+
+            digest_hex = digest.hexdigest()
+            suffix = _suffix_for_media_type(media_type)
+            relative = Path(_CONTENT_DIR) / _HASH_ALGORITHM / f"{digest_hex}{suffix}"
+            destination = self.run_root / relative
+            if destination.exists():
+                if destination.stat().st_size != size or self._file_sha256(destination) != digest_hex:
+                    raise RuntimeError(f"content hash collision at {destination}")
+            else:
+                temp_path.replace(destination)
+            if os.name != "nt":
+                try:
+                    destination.chmod(0o600)
+                except OSError:
+                    pass
+            return ContentReference(
+                sha256=digest_hex,
+                path=relative.as_posix(),
+                media_type=media_type,
+                size_bytes=size,
+                content_kind=content_kind,
+                representation=representation,
+            )
+        finally:
+            temp_path.unlink(missing_ok=True)
+
+    @staticmethod
+    def _file_sha256(path: Path) -> str:
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            while True:
+                chunk = handle.read(_COPY_CHUNK_BYTES)
+                if not chunk:
+                    break
+                digest.update(chunk)
+        return digest.hexdigest()
 
     def _write_once(self, destination: Path, payload: bytes) -> None:
         destination.parent.mkdir(parents=True, exist_ok=True)
