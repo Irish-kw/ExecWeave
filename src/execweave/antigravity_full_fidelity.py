@@ -5,6 +5,7 @@ from typing import Any
 from . import antigravity_full_fidelity_collaboration_base as _base
 from .antigravity_subagent_linkage import validated_subagent_links
 from .content_store import FullFidelityContentStore
+from .conversation_archive import antigravity_conversation_archive_events
 
 
 def _entity(
@@ -149,11 +150,18 @@ def antigravity_hook_to_content_events(
         store=store,
         timestamp=timestamp,
     )
-    if hook_event != "PostToolUse":
-        return events
     if timestamp is None:
         from datetime import datetime, timezone
 
         timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    events.extend(_subagent_assignment_events(payload, timestamp=timestamp))
+    if hook_event == "PostToolUse":
+        events.extend(_subagent_assignment_events(payload, timestamp=timestamp))
+    elif hook_event == "Stop":
+        events.extend(
+            antigravity_conversation_archive_events(
+                payload,
+                store=store,
+                timestamp=timestamp,
+            )
+        )
     return events

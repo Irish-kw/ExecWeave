@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import re
+import shutil
 from collections import deque
 
 from . import live_core as _core
+from .viewer_conversation_panel import inject_live_conversation_panel
 from .viewer_projection import (
     internal_hook_process_ids_in_event,
     project_viewer_graph,
-    strip_internal_hook_execution_graph,
     render_graph_html as _projected_render_graph_html,
+    strip_internal_hook_execution_graph,
     write_graph_html as _projected_write_graph_html,
 )
 
@@ -25,7 +28,8 @@ LIVE_DELTA_HISTORY_BYTES = _core.LIVE_DELTA_HISTORY_BYTES
 VIEWER_MAX_NODES = _core.VIEWER_MAX_NODES
 VIEWER_MAX_EDGES = _core.VIEWER_MAX_EDGES
 VIEWER_MAX_DOM_ELEMENTS = _core.VIEWER_MAX_DOM_ELEMENTS
-_LIVE_HTML = _core._LIVE_HTML
+_BASE_LIVE_HTML = _core._LIVE_HTML
+_LIVE_HTML = inject_live_conversation_panel(_BASE_LIVE_HTML)
 render_graph_html = _projected_render_graph_html
 write_graph_html = _projected_write_graph_html
 
@@ -34,6 +38,8 @@ _BaseLiveState = _core._LiveState
 _base_inject_live_auth = _core._inject_live_auth
 _base_inject_final_theme = _core._inject_final_theme
 _base_build_execution_graph = _core.build_execution_graph
+_base_handler_factory = _core._handler_factory
+_RUN_CONTENT_ROUTE_RE = re.compile(r"^/content/sha256/[0-9a-f]{64}\.(?:json|txt|bin)$")
 
 
 def _within_live_payload_budget(node_count: int, edge_count: int) -> bool:
@@ -81,6 +87,69 @@ def _inject_final_theme(html: str) -> str:
 
 def _build_execution_graph_without_internal_hooks(*args, **kwargs):
     return strip_internal_hook_execution_graph(_base_build_execution_graph(*args, **kwargs))
+
+
+def _handler_factory(state, token: str):
+    base_handler = _base_handler_factory(state, token)
+    run_root = state.event_path.parent.resolve()
+
+    class Handler(base_handler):
+        def _send_run_file(self, target: Path, content_type: str) -> None:
+            try:
+                size = target.stat().st_size
+                handle = target.open("rb")
+            except OSError:
+                self._send(b"Not found", "text/plain; charset=utf-8", 404)
+                return
+            with handle:
+                self.send_response(200)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Length", str(size))
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.send_header("Referrer-Policy", "no-referrer")
+                self.end_headers()
+                shutil.copyfileobj(handle, self.wfile, length=1024 * 1024)
+
+        def do_GET(self) -> None:
+            parsed = _core.urlsplit(self.path)
+            request_path = parsed.path
+            run_artifact = (
+                request_path in {"/conversations.md", "/conversations.json"}
+                or request_path.startswith("/content/")
+            )
+            if not run_artifact:
+                super().do_GET()
+                return
+            if not self._authorized(parsed):
+                self._send(b"Unauthorized", "text/plain; charset=utf-8", 401)
+                return
+            if request_path.startswith("/content/") and not _RUN_CONTENT_ROUTE_RE.fullmatch(
+                request_path
+            ):
+                self._send(b"Not found", "text/plain; charset=utf-8", 404)
+                return
+            relative = request_path.lstrip("/")
+            target = (run_root / relative).resolve(strict=False)
+            try:
+                target.relative_to(run_root)
+            except ValueError:
+                self._send(b"Not found", "text/plain; charset=utf-8", 404)
+                return
+            if not target.is_file():
+                self._send(b"Not found", "text/plain; charset=utf-8", 404)
+                return
+            if request_path.endswith(".json"):
+                content_type = "application/json; charset=utf-8"
+            elif request_path.endswith(".md"):
+                content_type = "text/markdown; charset=utf-8"
+            elif request_path.endswith(".txt"):
+                content_type = "text/plain; charset=utf-8"
+            else:
+                content_type = "application/octet-stream"
+            self._send_run_file(target, content_type)
+
+    return Handler
 
 
 class _LiveState(_BaseLiveState):
@@ -260,5 +329,7 @@ _core._inject_live_auth = _inject_live_auth
 _core._inject_final_theme = _inject_final_theme
 _core.build_execution_graph = _build_execution_graph_without_internal_hooks
 _core._LiveState = _LiveState
+_core._handler_factory = _handler_factory
+_core._LIVE_HTML = _LIVE_HTML
 _AUTHENTICATED_LIVE_HTML = _inject_live_auth(_LIVE_HTML)
 _core._AUTHENTICATED_LIVE_HTML = _AUTHENTICATED_LIVE_HTML

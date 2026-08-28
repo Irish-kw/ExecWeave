@@ -18,6 +18,7 @@ from .claude_hook_contract import (
 )
 from .claude_model_observer import append_claude_transcript_model_events
 from .content_store import FullFidelityContentStore
+from .conversation_archive import claude_conversation_archive_events
 
 
 def _hook_handler(command: str) -> dict[str, str]:
@@ -164,6 +165,13 @@ def main(argv: list[str] | None = None) -> int:
             timestamp=observed_at,
         )
         _restore_official_hook_event_name(content_records, payload)
+        content_records.extend(
+            claude_conversation_archive_events(
+                payload,
+                store=content_store,
+                timestamp=observed_at,
+            )
+        )
         records.extend(content_records)
         records.extend(
             claude_delegation_events(

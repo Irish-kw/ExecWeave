@@ -60,6 +60,20 @@ def _transcript_root(path: Path, conversation_id: str) -> Path | None:
     return brain.parent
 
 
+def validated_transcript_path(payload: dict[str, Any]) -> Path | None:
+    """Return the canonical parent transcript only for the verified Antigravity brain layout."""
+    conversation_id = payload.get("conversationId")
+    transcript_raw = payload.get("transcriptPath")
+    if not isinstance(conversation_id, str) or not conversation_id:
+        return None
+    if not isinstance(transcript_raw, str) or not transcript_raw:
+        return None
+    transcript = _canonical_path(transcript_raw)
+    if transcript is None or _transcript_root(transcript, conversation_id) is None:
+        return None
+    return transcript
+
+
 def _read_records(path: Path) -> list[dict[str, Any]] | None:
     try:
         size = path.stat().st_size
@@ -215,12 +229,9 @@ def validated_subagent_links(
     public stable schema. Every validation failure therefore abstains rather than infers.
     """
     parent_id = payload.get("conversationId")
-    transcript_raw = payload.get("transcriptPath")
     if not isinstance(parent_id, str) or not parent_id:
         return []
-    if not isinstance(transcript_raw, str) or not transcript_raw:
-        return []
-    transcript = _canonical_path(transcript_raw)
+    transcript = validated_transcript_path(payload)
     if transcript is None:
         return []
     app_data_root = _transcript_root(transcript, parent_id)

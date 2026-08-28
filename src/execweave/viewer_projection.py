@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from . import viewer_projection_base as _base
+from .conversation_records import write_conversation_records
 from .viewer_antigravity_linkage_inspector import (
     inject_standalone_antigravity_linkage_inspector,
 )
+from .viewer_conversation_panel import inject_standalone_conversation_panel
 from .viewer_execution_inspector import inject_standalone_execution_inspector
 
 VIEWER_MAX_DOM_ELEMENTS = _base.VIEWER_MAX_DOM_ELEMENTS
@@ -19,13 +22,29 @@ strip_internal_hook_processes = _base.strip_internal_hook_processes
 strip_internal_hook_execution_graph = _base.strip_internal_hook_execution_graph
 project_viewer_graph = _base.project_viewer_graph
 _base_render_graph_html = _base.render_graph_html
+_base_write_graph_html = _base.write_graph_html
 
 
 def render_graph_html(graph: dict[str, Any]) -> str:
     html = inject_standalone_execution_inspector(_base_render_graph_html(graph))
-    return inject_standalone_antigravity_linkage_inspector(html)
+    html = inject_standalone_antigravity_linkage_inspector(html)
+    return inject_standalone_conversation_panel(html)
+
+
+def write_graph_html(
+    graph: dict[str, Any],
+    path: str | Path,
+    *,
+    open_browser: bool = False,
+) -> Path:
+    """Write the viewer plus deterministic run-local conversation indexes."""
+    output = Path(path).expanduser().resolve()
+    if output.exists() and output.stat().st_size > 0:
+        raise FileExistsError(f"ExecWeave viewer output already exists: {output}")
+    write_conversation_records(graph, output.parent)
+    return _base_write_graph_html(graph, output, open_browser=open_browser)
 
 
 _base.render_graph_html = render_graph_html
-write_graph_html = _base.write_graph_html
+_base.write_graph_html = write_graph_html
 build_viewer_from_graph = _base.build_viewer_from_graph
