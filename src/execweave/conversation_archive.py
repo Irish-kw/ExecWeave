@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from .antigravity_subagent_linkage import validated_transcript_path as _antigravity_transcript_path
+from .codex_conversation import validated_codex_transcript
 from .content_evidence import content_observation_event
 from .content_store import FullFidelityContentStore
 
@@ -180,6 +181,102 @@ def claude_conversation_archive_events(
             },
         )
     return []
+
+
+def codex_conversation_archive_events(
+    payload: dict[str, Any],
+    *,
+    store: FullFidelityContentStore,
+    timestamp: str,
+) -> list[dict[str, Any]]:
+    """Snapshot validated Codex rollout JSONL so later inspection never needs ~/.codex."""
+    hook = payload.get("hook_event_name")
+    if hook not in {"SubagentStop", "Stop", "SessionEnd"}:
+        return []
+    session_id = payload.get("session_id")
+    if not isinstance(session_id, str) or not session_id:
+        return []
+    validated = validated_codex_transcript(payload)
+    if validated is None:
+        return []
+    path, identity = validated
+    agent_id = payload.get("agent_id")
+    if hook == "SubagentStop" and isinstance(agent_id, str) and agent_id:
+        agent_path = identity.get("agent_path")
+        nickname = identity.get("agent_nickname")
+        agent_type = payload.get("agent_type")
+        name = next(
+            (
+                value
+                for value in (agent_path, nickname, agent_type, "Codex subagent")
+                if isinstance(value, str) and value
+            ),
+            "Codex subagent",
+        )
+        source = _entity(
+            "agent",
+            f"agent:codex:{session_id}:subagent:{agent_id}",
+            name=name,
+            attributes={
+                "provider": "codex",
+                "session_id": session_id,
+                "agent_id": agent_id,
+                "agent_type": agent_type,
+                "agent_path": agent_path,
+                "agent_nickname": nickname,
+                "parent_thread_id": identity.get("parent_thread_id"),
+                "identity_semantics": "provider_rollout_session_meta",
+            },
+        )
+        return _archive(
+            path=path,
+            store=store,
+            timestamp=timestamp,
+            provider="codex",
+            source=source,
+            content_kind="codex.conversation_transcript.subagent",
+            observed_field="transcript_path",
+            attribution="codex_hook_plus_rollout",
+            evidence_source="provider_hook_plus_validated_transcript",
+            attributes={
+                "codex_hook_event_name": hook,
+                "provider_subagent_id_exact": True,
+                "provider_rollout_thread_id_exact": True,
+                "transcript_scope": "subagent",
+            },
+        )
+
+    if isinstance(agent_id, str) and agent_id:
+        return []
+    source = _entity(
+        "agent",
+        "agent:OpenAI Codex",
+        name="OpenAI Codex",
+        attributes={
+            "provider": "codex",
+            "session_id": session_id,
+            "thread_id": identity.get("thread_id"),
+            "agent_path": "/root",
+            "identity_semantics": "provider_rollout_session_meta",
+        },
+    )
+    return _archive(
+        path=path,
+        store=store,
+        timestamp=timestamp,
+        provider="codex",
+        source=source,
+        content_kind="codex.conversation_transcript.main",
+        observed_field="transcript_path",
+        attribution="codex_hook_plus_rollout",
+        evidence_source="provider_hook_plus_validated_transcript",
+        attributes={
+            "codex_hook_event_name": hook,
+            "provider_session_id_exact": True,
+            "provider_rollout_thread_id_exact": True,
+            "transcript_scope": "main_session",
+        },
+    )
 
 
 def antigravity_conversation_archive_events(
