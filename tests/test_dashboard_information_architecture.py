@@ -42,8 +42,11 @@ def _mechanical_graph() -> dict[str, object]:
     )
     process = _node("process:git", "process", "git.exe", pid=42)
     endpoint = _node("network:github", "network_endpoint", "104.18.25.195:443")
-    directory = _node("directory:.github", "directory", ".github")
+    endpoint_repeat = _node("network:github:repeat", "network_endpoint", "104.18.25.195:443")
+    directory = _node("directory:.github", "directory", ".github", path=".github")
+    directory_repeat = _node("directory:.github:repeat", "directory", ".github", path=".github/")
     model = _node("model:codex:gpt", "model", "gpt-5.6", provider="codex")
+    model_repeat = _node("model:codex:gpt:repeat", "model", "gpt-5.6", provider="codex")
     capability = _node(
         "agent-trace-capability:codex",
         "agent_trace_capability",
@@ -57,33 +60,41 @@ def _mechanical_graph() -> dict[str, object]:
         path="content/sha256/.execweave-content-xn4uvhqy",
     )
     meaningful = _node("file:result", "file", "result.txt", path="result.txt")
+    nodes = [
+        root,
+        child,
+        process,
+        endpoint,
+        endpoint_repeat,
+        directory,
+        directory_repeat,
+        model,
+        model_repeat,
+        capability,
+        internal,
+        meaningful,
+    ]
+    edges = [
+        _edge("spawn-agent", root["id"], child["id"], "SPAWNED_AGENT"),
+        _edge("spawn-process", root["id"], process["id"], "SPAWNED"),
+        _edge("connect", process["id"], endpoint["id"], "CONNECTED_TO"),
+        _edge("connect-repeat", process["id"], endpoint_repeat["id"], "CONNECTED_TO"),
+        _edge("cwd", process["id"], directory["id"], "USED_DIRECTORY"),
+        _edge("cwd-repeat", process["id"], directory_repeat["id"], "USED_DIRECTORY"),
+        _edge("model", root["id"], model["id"], "USED_MODEL"),
+        _edge("model-repeat", root["id"], model_repeat["id"], "USED_MODEL"),
+        _edge("capability", root["id"], capability["id"], "DECLARES_AGENT_TRACE_VISIBILITY"),
+        _edge("internal", process["id"], internal["id"], "WROTE"),
+        _edge("meaningful", root["id"], meaningful["id"], "WROTE_FILE"),
+    ]
     return {
         "graph_schema_version": "0.2",
         "session_id": "information-architecture",
-        "event_count": 9,
-        "node_count": 9,
-        "edge_count": 8,
-        "nodes": [
-            root,
-            child,
-            process,
-            endpoint,
-            directory,
-            model,
-            capability,
-            internal,
-            meaningful,
-        ],
-        "edges": [
-            _edge("spawn-agent", root["id"], child["id"], "SPAWNED_AGENT"),
-            _edge("spawn-process", root["id"], process["id"], "SPAWNED"),
-            _edge("connect", process["id"], endpoint["id"], "CONNECTED_TO"),
-            _edge("cwd", process["id"], directory["id"], "USED_DIRECTORY"),
-            _edge("model", root["id"], model["id"], "USED_MODEL"),
-            _edge("capability", root["id"], capability["id"], "DECLARES_AGENT_TRACE_VISIBILITY"),
-            _edge("internal", process["id"], internal["id"], "WROTE"),
-            _edge("meaningful", root["id"], meaningful["id"], "WROTE_FILE"),
-        ],
+        "event_count": len(edges),
+        "node_count": len(nodes),
+        "edge_count": len(edges),
+        "nodes": nodes,
+        "edges": edges,
     }
 
 
@@ -97,23 +108,35 @@ def test_low_level_dashboard_cleanup_remains_presentation_only() -> None:
     assert "dashboard_projection" not in raw
 
     html = render_graph_html(_mechanical_graph())
-    for node_type in (
-        "directory",
-        "process",
-        "network_endpoint",
-        "model",
-        "agent_trace_capability",
-        "command",
-        "inference_call",
-    ):
-        assert f"'{node_type}'" in html
+    assert "hiddenTypes=new Set(['agent_trace_capability','session','process'" in html
+    assert "mergeTypes=new Set(['model','directory','network_endpoint'])" in html
+    assert "viewer_occurrence_count" in html
+    assert "viewer_edge_occurrence_count" in html
+    assert "merged_context_node_count" in html
     assert ".execweave-content-" in html
     assert "content/sha256/" in html
     assert "node.type!=='file'||incident.has(node.id)" in html
-    # Raw evidence is still embedded even though the default SVG canvas suppresses it.
+    # Full raw evidence remains embedded even when the default SVG canvas hides or merges it.
     assert "git.exe" in html
     assert "104.18.25.195:443" in html
+    assert ".github" in html
+    assert "gpt-5.6" in html
     assert ".execweave-content-xn4uvhqy" in html
+
+
+def test_model_directory_and_network_nodes_are_retained_but_canonicalized() -> None:
+    html = render_graph_html(_mechanical_graph())
+
+    assert "mergeTypes=new Set(['model','directory','network_endpoint'])" in html
+    assert "if(type==='model')" in html
+    assert "if(type==='directory')" in html
+    assert "attrs.host||attrs.hostname||attrs.address||attrs.ip" in html
+    assert "viewer_occurrence_ids" in html
+    assert "viewer_edge_occurrence_ids" in html
+    # Raw duplicates still exist in the embedded graph and evidence contract.
+    assert "network:github:repeat" in html
+    assert "directory:.github:repeat" in html
+    assert "model:codex:gpt:repeat" in html
 
 
 def test_agent_labels_are_human_facing_without_mutating_raw_graph() -> None:

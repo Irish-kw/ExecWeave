@@ -146,8 +146,9 @@ def test_static_dashboard_cleans_only_canvas_and_keeps_embedded_evidence() -> No
     assert "relation:'CALLED_TOOL'" in html
     assert "viewer_aggregated_tool_call_count" in html
     assert "execweaveDashboardGraphBase" in html
-    assert "'agent_trace_capability','model','session','directory','network_endpoint'" in html
-    assert "execweave-agent-tree-root" in html
+    assert "'agent_trace_capability','session','process'" in html
+    assert "mergeTypes=new Set(['model','directory','network_endpoint'])" in html
+    assert "execweave-conversation-root-node" in html
     assert "tool-call:a" in html
     assert "content:hook-meta" in html
     assert "agent-trace-capability:codex" in html
@@ -168,11 +169,14 @@ def test_dashboard_process_canonicalization_is_presentation_only() -> None:
         "network:104.18.25.193:443",
     } <= raw_ids
     assert "canonicalTypes=new Set(['process'])" in html
+    assert "mergeTypes=new Set(['model','directory','network_endpoint'])" in html
     assert "viewer_occurrence_count" in html
     assert "viewer_occurrences" in html
     assert "viewer_original_source" in html
+    assert "viewer_edge_occurrence_count" in html
     assert "hidden_internal_staging_node_count" in html
     assert "hidden_context_node_count" in html
+    assert "merged_context_node_count" in html
     assert "process:git:101" in html
     assert "process:git:102" in html
     assert ".execweave-content-xn4uvhqy" in html
@@ -191,7 +195,8 @@ def test_live_dashboard_uses_client_side_summary_without_changing_protocol() -> 
     assert "hidden_internal_staging_node_count" in html
     assert "execweaveDashboardGraphBase" in html
     assert "hidden_context_node_count" in html
-    assert "execweave-agent-tree-root" in html
+    assert "mergeTypes=new Set(['model','directory','network_endpoint'])" in html
+    assert "execweave-conversation-root-node" in html
     assert "id=\"activity-resizer\"" in html
     assert "execweave.live.activity-height" in html
     assert "pointermove" in html
