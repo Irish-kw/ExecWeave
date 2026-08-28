@@ -86,8 +86,9 @@ def test_permission_request_does_not_invent_tool_use_id() -> None:
     assert event["target"]["attributes"]["identity_semantics"] == (
         "provider_hook_observation_without_tool_use_id"
     )
+    assert "tool_use_id" not in event["target"]["attributes"]
+    assert "tool_use_id" not in event["attributes"]
     serialized = json.dumps(event)
-    assert "tool_use_id" not in serialized
     assert "sudo apt update" not in serialized
     assert event["attributes"]["description_present"] is True
 
