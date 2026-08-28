@@ -97,14 +97,22 @@ _STATIC_MATERIALIZED_CLEAN = """function materializedGraph(){
 _STATIC_TYPE_OPTIONS = "[...new Set(possibleNodes.map(n=>n.type).filter(Boolean))].sort().forEach(v=>option(typeFilter,v));\n[...new Set(possibleEdges.map(e=>e.relation).filter(Boolean))].sort().forEach(v=>option(relationFilter,v));"
 _STATIC_TYPE_OPTIONS_CLEAN = "const execweavePossibleGraph=execweaveDashboardGraph({nodes:possibleNodes,edges:possibleEdges});\n[...new Set(execweavePossibleGraph.nodes.map(n=>n.type).filter(Boolean))].sort().forEach(v=>option(typeFilter,v));\n[...new Set(execweavePossibleGraph.edges.map(e=>e.relation).filter(Boolean))].sort().forEach(v=>option(relationFilter,v));"
 
-_LIVE_SET_SNAPSHOT = "function setSnapshot(data){graph=data;nodeById=new Map((data.nodes||[]).map(n=>[n.id,n]));edgeById=new Map((data.edges||[]).map(e=>[edgeId(e),e]));rebuildAdjacency();updateStats(data);if(!withinRenderBudget(data)){enterProtectiveMode(data);return}renderSnapshot();seedActivities();const sortedEdges=[...edgeById.values()].sort((a,b)=>String(a.last_seen||'').localeCompare(String(b.last_seen||''))),sortedNodes=[...nodeById.values()].sort((a,b)=>String(a.last_seen||'').localeCompare(String(b.last_seen||''))),lastEdge=sortedEdges.length?sortedEdges[sortedEdges.length-1]:null,lastNode=sortedNodes.length?sortedNodes[sortedNodes.length-1]:null;markLatest(lastEdge?.target||lastNode?.id||null,lastEdge?edgeId(lastEdge):null);if(!hasFitted&&positions.size){fit(false);hasFitted=true}else scheduleCamera(true)}"
 _LIVE_SET_SNAPSHOT_CLEAN = "function setSnapshot(data){graph=data;const display=execweaveDashboardGraph(data);nodeById=new Map((display.nodes||[]).map(n=>[n.id,n]));edgeById=new Map((display.edges||[]).map(e=>[edgeId(e),e]));rebuildAdjacency();updateStats({...data,node_count:display.node_count,edge_count:display.edge_count});if(!withinRenderBudget(display)){enterProtectiveMode(display);return}renderSnapshot();seedActivities();const sortedEdges=[...edgeById.values()].sort((a,b)=>String(a.last_seen||'').localeCompare(String(b.last_seen||''))),sortedNodes=[...nodeById.values()].sort((a,b)=>String(a.last_seen||'').localeCompare(String(b.last_seen||''))),lastEdge=sortedEdges.length?sortedEdges[sortedEdges.length-1]:null,lastNode=sortedNodes.length?sortedNodes[sortedNodes.length-1]:null;markLatest(lastEdge?.target||lastNode?.id||null,lastEdge?edgeId(lastEdge):null);if(!hasFitted&&positions.size){fit(false);hasFitted=true}else scheduleCamera(true)}"
 
-_LIVE_APPLY_DELTA = "function applyDelta(update){updateStats(update);if(update.live_payload_compact||!withinRenderBudget(update)){enterProtectiveMode(update);return}if(protectedMode){liveSequence=-1;return}const addedNodeIds=mergeById(update.nodes_added,nodeById,false);mergeById(update.nodes_updated,nodeById,false);const addedEdgeIds=mergeById(update.edges_added,edgeById,true);const updatedEdgeIds=mergeById(update.edges_updated,edgeById,true);graph={...graph,event_count:update.event_count,node_count:update.node_count,edge_count:update.edge_count,nodes:[...nodeById.values()],edges:[...edgeById.values()]};placeAddedNodes(addedNodeIds);for(const id of addedNodeIds)createNodeElement(nodeById.get(id));for(const n of update.nodes_updated||[])updateNodeElement(n);for(const id of addedEdgeIds)createEdgeElement(edgeById.get(id));for(const e of update.edges_updated||[])updateEdgeElement(e);applySearch();const changedEdges=[...(update.edges_added||[]),...(update.edges_updated||[])];const latestEdge=changedEdges.length?changedEdges[changedEdges.length-1]:null,addedNodes=update.nodes_added||[],updatedNodes=update.nodes_updated||[],latestNode=latestEdge?.target||(addedNodes.length?addedNodes[addedNodes.length-1].id:null)||(updatedNodes.length?updatedNodes[updatedNodes.length-1].id:null)||null;markLatest(latestNode,latestEdge?edgeId(latestEdge):null);const newActivities=changedEdges.length?changedEdges.map(e=>activityFromEdge(e)):((update.nodes_added||[]).map(activityFromNode));addActivities(newActivities);scheduleCamera(false);if(!hasFitted&&positions.size){fit(false);hasFitted=true}}"
 _LIVE_APPLY_DELTA_CLEAN = "function applyDelta(update){if(update.live_payload_compact){updateStats(update);enterProtectiveMode(update);return}const rawNodes=new Map((graph.nodes||[]).map(n=>[n.id,n])),rawEdges=new Map((graph.edges||[]).map(e=>[edgeId(e),e]));for(const node of [...(update.nodes_added||[]),...(update.nodes_updated||[])])if(node?.id)rawNodes.set(node.id,node);for(const edge of [...(update.edges_added||[]),...(update.edges_updated||[])])rawEdges.set(edgeId(edge),edge);graph={...graph,event_count:update.event_count,node_count:update.node_count,edge_count:update.edge_count,nodes:[...rawNodes.values()],edges:[...rawEdges.values()]};const display=execweaveDashboardGraph(graph);updateStats({...update,node_count:display.node_count,edge_count:display.edge_count});if(!withinRenderBudget(display)){enterProtectiveMode(display);return}if(protectedMode)leaveProtectiveMode();nodeById=new Map((display.nodes||[]).map(n=>[n.id,n]));edgeById=new Map((display.edges||[]).map(e=>[edgeId(e),e]));rebuildAdjacency();renderSnapshot();seedActivities();const sortedEdges=[...edgeById.values()].sort((a,b)=>String(a.last_seen||'').localeCompare(String(b.last_seen||''))),sortedNodes=[...nodeById.values()].sort((a,b)=>String(a.last_seen||'').localeCompare(String(b.last_seen||''))),lastEdge=sortedEdges.length?sortedEdges[sortedEdges.length-1]:null,lastNode=sortedNodes.length?sortedNodes[sortedNodes.length-1]:null;markLatest(lastEdge?.target||lastNode?.id||null,lastEdge?edgeId(lastEdge):null);scheduleCamera(false);if(!hasFitted&&positions.size){fit(false);hasFitted=true}}"
 
 _LIVE_CORE_EXPORT = "window.__execweaveCore={getActivities:()=>activities.slice(),getGraph:()=>graph,getPositions:()=>new Map(positions),selectEdge,selectNode,focusNode,markLatest,setCameraMode};"
 _LIVE_CORE_EXPORT_CLEAN = "window.__execweaveCore={getActivities:()=>activities.slice(),getGraph:()=>graph,getDisplayGraph:()=>({...graph,nodes:[...nodeById.values()],edges:[...edgeById.values()],node_count:nodeById.size,edge_count:edgeById.size}),getPositions:()=>new Map(positions),selectEdge,selectNode,focusNode,markLatest,setCameraMode};"
+
+
+def _replace_function(html: str, start: str, following: str, replacement: str) -> str:
+    begin = html.find(start)
+    if begin < 0:
+        return html
+    end = html.find(following, begin)
+    if end < 0:
+        return html
+    return html[:begin] + replacement + html[end:]
 
 
 def inject_standalone_dashboard_clean(html: str) -> str:
@@ -122,8 +130,18 @@ def inject_live_dashboard_clean(html: str) -> str:
     marker = "function renderSnapshot(){"
     if "function execweaveDashboardGraph(data){" not in html and marker in html:
         html = html.replace(marker, _DASHBOARD_JS + "\n" + marker, 1)
-    html = html.replace(_LIVE_SET_SNAPSHOT, _LIVE_SET_SNAPSHOT_CLEAN, 1)
-    html = html.replace(_LIVE_APPLY_DELTA, _LIVE_APPLY_DELTA_CLEAN, 1)
+    html = _replace_function(
+        html,
+        "function setSnapshot(data){",
+        "function mergeById(",
+        _LIVE_SET_SNAPSHOT_CLEAN + "\n",
+    )
+    html = _replace_function(
+        html,
+        "function applyDelta(update){",
+        "function applyTransform(){",
+        _LIVE_APPLY_DELTA_CLEAN + "\n",
+    )
     html = html.replace(_LIVE_CORE_EXPORT, _LIVE_CORE_EXPORT_CLEAN, 1)
     html = html.replace(
         "const graph=core.getGraph(),positions=core.getPositions(),steps=sortedGifSteps(graph);",
