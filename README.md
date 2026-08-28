@@ -67,21 +67,9 @@ execweave record --open -- python my_agent.py
 
 `execweave top -- codex` keeps the Agent interactive in the launch terminal while opening/attaching the detached Top dashboard according to the host environment.
 
-## v0.7.0: full multi-agent execution traces and direct conversation access
+v0.7.0 extends ExecWeave from provider/runtime observability into attributable multi-agent execution traces. Where providers expose authoritative identity or lifecycle evidence, ExecWeave records parent/child relationships, delegated tasks, inter-agent messages, waits/results, tool ownership, and provider-supplied reasoning/content without promoting weak timing proximity into causal claims. Current provider coverage includes Claude Code, OpenAI Codex, Cursor, OpenCode, and Google Antigravity; missing or ambiguous evidence causes abstention rather than heuristic linkage.
 
-v0.7.0 extends ExecWeave from provider/runtime observability into attributable multi-agent execution traces. Where providers expose authoritative identity or lifecycle evidence, ExecWeave records parent/child relationships, delegated tasks, inter-agent messages, waits/results, tool ownership, and provider-supplied reasoning/content without promoting weak timing proximity into causal claims.
-
-Current provider coverage includes Claude Code, OpenAI Codex, Cursor, OpenCode, and Google Antigravity. Each adapter keeps its own evidence boundary: exact child identity is used only when the provider surface proves it, and missing or ambiguous evidence causes abstention rather than heuristic linkage.
-
-Conversation evidence is now surfaced directly from each ExecWeave run. Existing provider content is indexed, and validated provider transcripts that would otherwise require browsing Agent-specific folders are copied into the run-local SHA-256 content store. Finalized runs generate:
-
-```text
-<run-root>/conversations.md
-<run-root>/conversations.json
-<run-root>/content/sha256/<sha256>.<json|txt|bin>
-```
-
-Static and Live dashboards link directly to these run-local records. Live content serving is token-authenticated and restricted to validated run-local conversation indexes and SHA-256 content paths; arbitrary local files and path traversal are not exposed.
+Conversation evidence is now surfaced directly from each ExecWeave run. Existing provider content is indexed, validated provider transcripts that would otherwise require browsing Agent-specific folders are copied into the run-local SHA-256 content store, and finalized runs generate `conversations.md` plus `conversations.json`. Static and Live dashboards link directly to these run-local records. Live content serving is token-authenticated and restricted to validated run-local conversation indexes and SHA-256 content paths; arbitrary local files and path traversal are not exposed.
 
 ## v0.6.9: full-fidelity observability with explicit evidence boundaries
 

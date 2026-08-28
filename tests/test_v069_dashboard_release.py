@@ -116,7 +116,7 @@ def test_all_readmes_use_real_dashboard_gif_and_english_current_release() -> Non
 
     readme = Path("README.md").read_text(encoding="utf-8")
     assert "The current release is **v0.7.0**." in readme
-    assert "## v0.7.0:" in readme
+    assert "v0.7.0 extends ExecWeave from provider/runtime observability" in readme
 
 
 def test_english_readme_declares_noncommercial_source_available_license() -> None:
