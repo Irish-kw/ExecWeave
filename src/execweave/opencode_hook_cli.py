@@ -15,6 +15,7 @@ from .opencode_adapter import (
 )
 from .opencode_event_contract import opencode_official_event_semantic_events
 from .opencode_full_fidelity import opencode_plugin_to_content_events
+from .opencode_task_linkage import opencode_task_session_events
 
 
 def _now() -> str:
@@ -72,6 +73,12 @@ def main(argv: list[str] | None = None) -> int:
         )
         summary_records.extend(
             opencode_official_event_semantic_events(
+                payload,
+                timestamp=observed_at,
+            )
+        )
+        summary_records.extend(
+            opencode_task_session_events(
                 payload,
                 timestamp=observed_at,
             )
