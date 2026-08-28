@@ -12,6 +12,10 @@ from .agent_trace import provider_agent_trace_visibility_event
 from .content_store import FullFidelityContentStore
 from .gemini_adapter import append_semantic_records, gemini_hook_to_semantic_events, read_hook_payload
 from .gemini_full_fidelity import gemini_hook_to_content_events
+from .gemini_hook_contract import (
+    OFFICIAL_GEMINI_HOOK_EVENTS,
+    gemini_official_hook_semantic_events,
+)
 
 
 def _now() -> str:
@@ -27,25 +31,21 @@ def _handler(command: str) -> dict[str, Any]:
     }
 
 
+_TOOL_EVENTS = frozenset({"BeforeTool", "AfterTool"})
+
+
 def gemini_hook_config(command: str = "execweave-gemini-hook") -> dict[str, Any]:
+    """Return a passive observer config covering the current official Gemini CLI hook set."""
+
     handler = _handler(command)
     tool_group = {"matcher": ".*", "hooks": [handler]}
     plain_group = {"hooks": [handler]}
-    return {
-        "hooks": {
-            "SessionStart": [plain_group],
-            "SessionEnd": [plain_group],
-            "BeforeAgent": [plain_group],
-            "AfterAgent": [plain_group],
-            "BeforeModel": [plain_group],
-            "AfterModel": [plain_group],
-            "BeforeToolSelection": [plain_group],
-            "BeforeTool": [tool_group],
-            "AfterTool": [tool_group],
-            "PreCompress": [plain_group],
-            "Notification": [plain_group],
-        }
-    }
+    hooks: dict[str, Any] = {}
+    for event in sorted(OFFICIAL_GEMINI_HOOK_EVENTS):
+        hooks[event] = [tool_group if event in _TOOL_EVENTS else plain_group]
+    if set(hooks) != set(OFFICIAL_GEMINI_HOOK_EVENTS):
+        raise RuntimeError("Gemini hook config drifted from the official event set")
+    return {"hooks": hooks}
 
 
 def _default_sidecar(payload: dict[str, Any]) -> Path:
@@ -107,6 +107,12 @@ def main(argv: list[str] | None = None) -> int:
             else _now()
         )
         summary_records = gemini_hook_to_semantic_events(payload, timestamp=observed_at)
+        summary_records.extend(
+            gemini_official_hook_semantic_events(
+                payload,
+                timestamp=observed_at,
+            )
+        )
         if payload.get("hook_event_name") == "SessionStart":
             summary_records.append(
                 provider_agent_trace_visibility_event(
