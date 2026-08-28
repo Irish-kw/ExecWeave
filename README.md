@@ -31,7 +31,7 @@ Install the latest published wheel/sdist from PyPI:
 python -m pip install -U execweave
 ```
 
-The current release is **v0.6.9**.
+The current release is **v0.7.0**.
 
 For development:
 
@@ -66,6 +66,22 @@ execweave record --open -- python my_agent.py
 ```
 
 `execweave top -- codex` keeps the Agent interactive in the launch terminal while opening/attaching the detached Top dashboard according to the host environment.
+
+## v0.7.0: full multi-agent execution traces and direct conversation access
+
+v0.7.0 extends ExecWeave from provider/runtime observability into attributable multi-agent execution traces. Where providers expose authoritative identity or lifecycle evidence, ExecWeave records parent/child relationships, delegated tasks, inter-agent messages, waits/results, tool ownership, and provider-supplied reasoning/content without promoting weak timing proximity into causal claims.
+
+Current provider coverage includes Claude Code, OpenAI Codex, Cursor, OpenCode, and Google Antigravity. Each adapter keeps its own evidence boundary: exact child identity is used only when the provider surface proves it, and missing or ambiguous evidence causes abstention rather than heuristic linkage.
+
+Conversation evidence is now surfaced directly from each ExecWeave run. Existing provider content is indexed, and validated provider transcripts that would otherwise require browsing Agent-specific folders are copied into the run-local SHA-256 content store. Finalized runs generate:
+
+```text
+<run-root>/conversations.md
+<run-root>/conversations.json
+<run-root>/content/sha256/<sha256>.<json|txt|bin>
+```
+
+Static and Live dashboards link directly to these run-local records. Live content serving is token-authenticated and restricted to validated run-local conversation indexes and SHA-256 content paths; arbitrary local files and path traversal are not exposed.
 
 ## v0.6.9: full-fidelity observability with explicit evidence boundaries
 
@@ -251,6 +267,8 @@ A provider-integrated run may contain:
 ├── viewer.html
 ├── semantic.jsonl
 ├── content/sha256/...
+├── conversations.md
+├── conversations.json
 ├── events.semantic.jsonl
 ├── graph.semantic.json
 ├── viewer.semantic.html
@@ -264,13 +282,13 @@ Derived correlation never rewrites the raw runtime or provider sidecar evidence.
 
 ## Privacy
 
-ExecWeave is local-first: captures, content blobs, graphs, reports, and viewers remain local by default. The **OS runtime collector** does not intentionally capture file contents or raw read/write byte buffers. That boundary must not be confused with the v0.6.9 **provider full-fidelity content store**: supported hooks/APIs can explicitly supply prompts, tool arguments/results, model responses, reasoning/thinking text, shell output, file content, or other sensitive values, and ExecWeave can preserve those values completely.
+ExecWeave is local-first: captures, content blobs, graphs, reports, and viewers remain local by default. The **OS runtime collector** does not intentionally capture file contents or raw read/write byte buffers. That boundary must not be confused with the **provider full-fidelity content store introduced in v0.6.9**: supported hooks/APIs can explicitly supply prompts, tool arguments/results, model responses, reasoning/thinking text, shell output, file content, or other sensitive values, and ExecWeave can preserve those values completely.
 
 Do not assume content has been secret-redacted. Commands, paths, endpoint metadata, identifiers, model metadata, prompts, tool values, and content blobs can all be sensitive. Review the entire run directory before sharing it.
 
 ## Current status
 
-v0.6.9 combines cross-platform runtime collection, materialized execution graphs, standalone/live viewing, conservative provider↔runtime correlation, full-fidelity content-addressed provider evidence, evidence grades, bounded rule packs, an explicit runtime threat/fidelity contract, and honest local run-integrity sealing. Observed evidence and inference remain separate by design.
+v0.7.0 combines cross-platform runtime collection, materialized execution graphs, standalone/live viewing, conservative provider↔runtime correlation, full-fidelity content-addressed provider evidence, attributable multi-agent execution traces, direct run-local conversation access, evidence grades, bounded rule packs, an explicit runtime threat/fidelity contract, and honest local run-integrity sealing. Observed evidence and inference remain separate by design.
 
 ## Documentation
 
