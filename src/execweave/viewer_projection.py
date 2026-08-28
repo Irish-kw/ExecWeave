@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import webbrowser
 from pathlib import Path
 from typing import Any
 
 from . import viewer_projection_base as _base
-from .conversation_records import write_conversation_records
+from .conversation_records import conversation_record_entries, write_conversation_records
 from .viewer_antigravity_linkage_inspector import (
     inject_standalone_antigravity_linkage_inspector,
 )
@@ -22,13 +23,20 @@ strip_internal_hook_processes = _base.strip_internal_hook_processes
 strip_internal_hook_execution_graph = _base.strip_internal_hook_execution_graph
 project_viewer_graph = _base.project_viewer_graph
 _base_render_graph_html = _base.render_graph_html
-_base_write_graph_html = _base.write_graph_html
+
+
+def _render_enriched_graph_html(
+    graph: dict[str, Any],
+    *,
+    conversation_entries: list[dict[str, Any]] | None = None,
+) -> str:
+    html = inject_standalone_execution_inspector(_base_render_graph_html(graph))
+    html = inject_standalone_antigravity_linkage_inspector(html)
+    return inject_standalone_conversation_panel(html, entries=conversation_entries)
 
 
 def render_graph_html(graph: dict[str, Any]) -> str:
-    html = inject_standalone_execution_inspector(_base_render_graph_html(graph))
-    html = inject_standalone_antigravity_linkage_inspector(html)
-    return inject_standalone_conversation_panel(html)
+    return _render_enriched_graph_html(graph)
 
 
 def write_graph_html(
@@ -39,10 +47,18 @@ def write_graph_html(
 ) -> Path:
     """Write the viewer plus deterministic run-local conversation indexes."""
     output = Path(path).expanduser().resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
     if output.exists() and output.stat().st_size > 0:
         raise FileExistsError(f"ExecWeave viewer output already exists: {output}")
     write_conversation_records(graph, output.parent)
-    return _base_write_graph_html(graph, output, open_browser=open_browser)
+    entries = conversation_record_entries(graph, output.parent)
+    output.write_text(
+        _render_enriched_graph_html(graph, conversation_entries=entries),
+        encoding="utf-8",
+    )
+    if open_browser:
+        webbrowser.open(output.as_uri())
+    return output
 
 
 _base.render_graph_html = render_graph_html
