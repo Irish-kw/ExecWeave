@@ -22,6 +22,20 @@ execweaveDashboardGraph=function(data){
     }
     return name===node.name?node:{...node,name};
   });
+  const allById=new Map(before.filter(node=>node?.id).map(node=>[node.id,node])),preparedIds=new Set(prepared.map(node=>node.id)),incomingAll=new Map();
+  for(const edge of (projected.edges||[])){if(!edge)continue;if(!incomingAll.has(edge.target))incomingAll.set(edge.target,[]);incomingAll.get(edge.target).push(edge)}
+  function visibleOwner(id,seen=new Set()){
+    if(!id||seen.has(id))return null;seen.add(id);if(preparedIds.has(id))return id;
+    const node=allById.get(id);if(!node||(!hiddenTypes.has(String(node.type||''))&&!internalNode(node)))return null;
+    for(const edge of (incomingAll.get(id)||[])){const owner=visibleOwner(edge.source,seen);if(owner)return owner}
+    return null;
+  }
+  const flattenedEdges=[];
+  for(const edge of (projected.edges||[])){
+    if(!edge||!preparedIds.has(edge.target)||preparedIds.has(edge.source))continue;
+    const owner=visibleOwner(edge.source);if(!owner||owner===edge.target)continue;
+    flattenedEdges.push({...edge,id:`viewer:flatten:${edge.id||`${edge.source}:${edge.relation}:${edge.target}`}`,source:owner,viewer_only:true,viewer_flattened_hidden_runtime:true,viewer_original_source:edge.source});
+  }
   const normalized=value=>String(value||'').trim().replaceAll('\\\\','/').replace(/\/+$/,'').toLowerCase();
   const canonicalKey=node=>{
     const type=String(node?.type||''),attrs=node?.attributes||{};
@@ -43,7 +57,7 @@ execweaveDashboardGraph=function(data){
     nodes.push({...base,name:`${base.name||base.id} ×${group.length}`,first_seen:firstSeen||base.first_seen,last_seen:lastSeen||base.last_seen,attributes:{...(base.attributes||{}),viewer_canonicalized:true,viewer_occurrence_count:group.length,viewer_occurrence_ids:group.map(item=>item.id),viewer_occurrences:group.map(item=>({id:item.id,name:item.name||null,first_seen:item.first_seen||null,last_seen:item.last_seen||null}))}});
   }
   let ids=new Set(nodes.map(node=>node.id));
-  const remapped=[];for(const edge of (projected.edges||[])){
+  const remapped=[];for(const edge of [...(projected.edges||[]),...flattenedEdges]){
     if(!edge)continue;const source=canonicalId.get(edge.source)||edge.source,target=canonicalId.get(edge.target)||edge.target;
     if(!ids.has(source)||!ids.has(target)||source===target)continue;
     remapped.push(source===edge.source&&target===edge.target?edge:{...edge,source,target,viewer_canonicalized:true,viewer_original_source:edge.source,viewer_original_target:edge.target});
@@ -55,7 +69,7 @@ execweaveDashboardGraph=function(data){
   const beforeOrphanFiles=nodes.length;
   const focused=nodes.filter(node=>node.type!=='file'||incident.has(node.id));
   ids=new Set(focused.map(node=>node.id));edges=edges.filter(edge=>ids.has(edge.source)&&ids.has(edge.target));
-  return{...projected,nodes:focused,edges,node_count:focused.length,edge_count:edges.length,dashboard_projection:{...(projected.dashboard_projection||{}),hidden_context_node_count:before.length-prepared.length,merged_context_node_count:mergedContextNodeCount,hidden_orphan_file_node_count:beforeOrphanFiles-focused.length}};
+  return{...projected,nodes:focused,edges,node_count:focused.length,edge_count:edges.length,dashboard_projection:{...(projected.dashboard_projection||{}),hidden_context_node_count:before.length-prepared.length,merged_context_node_count:mergedContextNodeCount,flattened_hidden_runtime_edge_count:flattenedEdges.length,hidden_orphan_file_node_count:beforeOrphanFiles-focused.length}};
 };
 """.strip()
 

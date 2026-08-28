@@ -112,6 +112,8 @@ def test_low_level_dashboard_cleanup_remains_presentation_only() -> None:
     assert "mergeTypes=new Set(['model','directory','network_endpoint'])" in html
     assert "viewer_occurrence_count" in html
     assert "viewer_edge_occurrence_count" in html
+    assert "viewer_flattened_hidden_runtime" in html
+    assert "flattened_hidden_runtime_edge_count" in html
     assert "merged_context_node_count" in html
     assert ".execweave-content-" in html
     assert "content/sha256/" in html
@@ -133,6 +135,7 @@ def test_model_directory_and_network_nodes_are_retained_but_canonicalized() -> N
     assert "attrs.host||attrs.hostname||attrs.address||attrs.ip" in html
     assert "viewer_occurrence_ids" in html
     assert "viewer_edge_occurrence_ids" in html
+    assert "viewer_flattened_hidden_runtime" in html
     # Raw duplicates still exist in the embedded graph and evidence contract.
     assert "network:github:repeat" in html
     assert "directory:.github:repeat" in html
