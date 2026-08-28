@@ -11,6 +11,7 @@ from typing import Any
 from .agent_trace import cursor_agent_trace_events
 from .content_store import FullFidelityContentStore
 from .cursor_adapter import append_semantic_records, cursor_hook_to_semantic_events, read_hook_payload
+from .cursor_delegation import cursor_delegation_events
 from .cursor_full_fidelity import cursor_hook_to_content_events
 
 _HOOKS = (
@@ -94,6 +95,14 @@ def main(argv: list[str] | None = None) -> int:
         append_semantic_records(
             sidecar,
             cursor_agent_trace_events(
+                payload,
+                store=store,
+                timestamp=observed_at,
+            ),
+        )
+        append_semantic_records(
+            sidecar,
+            cursor_delegation_events(
                 payload,
                 store=store,
                 timestamp=observed_at,
