@@ -17,6 +17,54 @@ from .provider_record import ProviderRecordResult, record_provider_to_viewer
 
 CodexRecordResult = ProviderRecordResult
 
+_DIRECT_JS_RUNNERS = frozenset({"npx", "pnpx", "bunx"})
+_SUBCOMMAND_JS_RUNNERS = {
+    "npm": frozenset({"exec"}),
+    "pnpm": frozenset({"dlx", "exec"}),
+}
+
+
+def _launcher_name(value: str) -> str:
+    name = Path(value).name.lower()
+    for suffix in (".exe", ".cmd", ".bat"):
+        if name.endswith(suffix):
+            return name[: -len(suffix)]
+    return name
+
+
+def _is_codex_package(value: str) -> bool:
+    normalized = value.strip().lower()
+    return (
+        normalized == "codex"
+        or normalized == "@openai/codex"
+        or normalized.startswith("@openai/codex@")
+    )
+
+
+def _codex_reducer_command_prefix(command: list[str]) -> list[str]:
+    """Return the launch prefix needed to invoke Codex subcommands again.
+
+    Direct launchers keep the historical one-argv behavior. For explicit,
+    recognized JavaScript package runners, preserve the runner flags/subcommand
+    through the Codex package token, but never copy Codex runtime arguments such
+    as ``--model`` into the reducer invocation.
+    """
+    if not command:
+        raise ValueError("Codex command must not be empty")
+
+    launcher = _launcher_name(command[0])
+    scan = False
+    if launcher in _DIRECT_JS_RUNNERS:
+        scan = True
+    elif launcher in _SUBCOMMAND_JS_RUNNERS and len(command) > 1:
+        scan = _launcher_name(command[1]) in _SUBCOMMAND_JS_RUNNERS[launcher]
+
+    if scan:
+        for index, value in enumerate(command[1:], start=1):
+            if _is_codex_package(value):
+                return list(command[: index + 1])
+    return [command[0]]
+
 
 def record_codex_to_viewer(
     command: list[str],
@@ -41,6 +89,8 @@ def record_codex_to_viewer(
     existing hook + runtime collection path.
     """
 
+    reducer_prefix = _codex_reducer_command_prefix(command)
+
     def enrich_rollout(runtime, semantic_sidecar, environment):
         del runtime
         trace_root = environment.get(CODEX_ROLLOUT_TRACE_ROOT_ENV)
@@ -49,7 +99,7 @@ def record_codex_to_viewer(
         result = import_codex_rollout_traces(
             trace_root=trace_root,
             semantic_sidecar=semantic_sidecar,
-            codex_executable=command[0],
+            codex_executable=reducer_prefix,
         )
         enrich_codex_rollout_structures(
             trace_root=trace_root,
