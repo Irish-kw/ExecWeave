@@ -131,7 +131,7 @@ def test_antigravity_stop_requires_official_identity_fields(tmp_path) -> None:
         )
 
 
-def test_antigravity_stop_error_is_content_addressed(tmp_path) -> None:
+def test_antigravity_stop_error_is_content_addressed_and_execution_linked(tmp_path) -> None:
     secret_error = "sensitive-provider-stop-error"
     store = FullFidelityContentStore(tmp_path / "content-store")
 
@@ -145,6 +145,12 @@ def test_antigravity_stop_error_is_content_addressed(tmp_path) -> None:
         event for event in events if event["relation"] == "OBSERVED_EXECUTION_ERROR_CONTENT"
     )
 
+    assert error_event["source"]["type"] == "agent_execution"
+    assert error_event["source"]["id"] == "agent-execution:antigravity:conversation-stop:2"
+    assert error_event["source"]["attributes"]["execution_num"] == 2
+    assert error_event["source"]["attributes"]["termination_reason"] == "error"
+    assert error_event["source"]["attributes"]["fully_idle"] is True
+    assert error_event["attributes"]["provider_execution_identity_exact"] is True
     assert error_event["target"]["name"] == "antigravity.execution_stop_error"
     assert error_event["attributes"]["content_sha256"]
     assert error_event["attributes"]["content_path"].startswith("content/sha256/")

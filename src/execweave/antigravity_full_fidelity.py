@@ -20,6 +20,37 @@ def _agent() -> dict[str, Any]:
     }
 
 
+def _execution(payload: dict[str, Any]) -> dict[str, Any]:
+    conversation_id = payload.get("conversationId")
+    if not isinstance(conversation_id, str) or not conversation_id:
+        raise ValueError("Antigravity Stop payload has no conversationId")
+    execution_num = payload.get("executionNum")
+    if (
+        not isinstance(execution_num, int)
+        or isinstance(execution_num, bool)
+        or execution_num < 0
+    ):
+        raise ValueError("Antigravity Stop payload has no valid executionNum")
+    termination_reason = payload.get("terminationReason")
+    if not isinstance(termination_reason, str) or not termination_reason:
+        raise ValueError("Antigravity Stop payload has no terminationReason")
+    fully_idle = payload.get("fullyIdle")
+    if not isinstance(fully_idle, bool):
+        raise ValueError("Antigravity Stop payload has no valid fullyIdle flag")
+    return {
+        "type": "agent_execution",
+        "id": f"agent-execution:antigravity:{conversation_id}:{execution_num}",
+        "name": f"execution {execution_num}",
+        "attributes": {
+            "provider": "antigravity",
+            "execution_num": execution_num,
+            "termination_reason": termination_reason,
+            "fully_idle": fully_idle,
+            "identity_semantics": "provider_conversation_and_execution_number",
+        },
+    }
+
+
 def antigravity_hook_to_content_events(
     payload: dict[str, Any],
     *,
@@ -103,21 +134,22 @@ def antigravity_hook_to_content_events(
 
     if hook_event == "Stop" and isinstance(error, str) and error:
         reference = store.put_text(error, content_kind="antigravity.execution_stop_error")
-        execution_num = payload.get("executionNum")
-        attributes: dict[str, Any] = {"antigravity_hook_event_name": hook_event}
-        if isinstance(execution_num, int) and not isinstance(execution_num, bool):
-            attributes["antigravity_execution_number"] = execution_num
+        execution = _execution(payload)
         events.append(
             content_observation_event(
                 timestamp=observed_at,
                 provider="antigravity",
-                source=_agent(),
+                source=execution,
                 reference=reference,
                 relation="OBSERVED_EXECUTION_ERROR_CONTENT",
                 observed_field="error",
                 evidence_source="provider_hook",
                 attribution="antigravity_hook",
-                attributes=attributes,
+                attributes={
+                    "antigravity_hook_event_name": hook_event,
+                    "antigravity_execution_number": execution["attributes"]["execution_num"],
+                    "provider_execution_identity_exact": True,
+                },
             )
         )
     return events
