@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from .backends import BackendName
+from .codex_rollout_structures import enrich_codex_rollout_structures
 from .codex_rollout_trace import (
     CODEX_ROLLOUT_TRACE_ROOT_ENV,
     codex_rollout_trace_environment,
@@ -43,11 +44,16 @@ def record_codex_to_viewer(
         trace_root = environment.get(CODEX_ROLLOUT_TRACE_ROOT_ENV)
         if not trace_root:
             return None
-        return import_codex_rollout_traces(
+        result = import_codex_rollout_traces(
             trace_root=trace_root,
             semantic_sidecar=semantic_sidecar,
             codex_executable=command[0],
         )
+        enrich_codex_rollout_structures(
+            trace_root=trace_root,
+            semantic_sidecar=semantic_sidecar,
+        )
+        return result
 
     return record_provider_to_viewer(
         command,
