@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from .antigravity_adapter_base import (
-    append_semantic_records,
-    antigravity_hook_to_semantic_events as _base_semantic_events,
-    read_hook_payload,
-)
+from . import antigravity_adapter_base as _base
+
+append_semantic_records = _base.append_semantic_records
+read_hook_payload = _base.read_hook_payload
+_base_semantic_events = _base.antigravity_hook_to_semantic_events
 
 
 def _post_tool_observation(payload: dict[str, Any], *, timestamp: str) -> dict[str, Any]:
