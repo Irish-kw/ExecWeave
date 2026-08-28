@@ -15,6 +15,10 @@ from .codex_adapter import (
     read_hook_payload,
 )
 from .codex_full_fidelity import codex_hook_to_content_events
+from .codex_hook_lifecycle import (
+    OFFICIAL_CODEX_HOOK_EVENTS,
+    codex_official_hook_lifecycle_events,
+)
 from .content_store import FullFidelityContentStore
 
 
@@ -30,22 +34,27 @@ def codex_hook_config(command: str = "execweave-codex-hook") -> dict[str, Any]:
     handler = _hook_handler(command)
     tool_group = {"matcher": "*", "hooks": [handler]}
     plain_group = {"hooks": [handler]}
-    return {
-        "hooks": {
-            "PreToolUse": [tool_group],
-            "PermissionRequest": [tool_group],
-            "PostToolUse": [tool_group],
-            "PreCompact": [plain_group],
-            "PostCompact": [plain_group],
-            "SessionStart": [plain_group],
-            "SessionEnd": [plain_group],
-            "UserPromptSubmit": [plain_group],
-            "SubagentStart": [plain_group],
-            "SubagentStop": [plain_group],
-            "Stop": [plain_group],
-            "Interrupt": [plain_group],
-        }
-    }
+    hooks: dict[str, Any] = {}
+    for event in (
+        "PreToolUse",
+        "PermissionRequest",
+        "PostToolUse",
+    ):
+        hooks[event] = [tool_group]
+    for event in (
+        "PreCompact",
+        "PostCompact",
+        "SessionStart",
+        "SessionEnd",
+        "UserPromptSubmit",
+        "SubagentStart",
+        "SubagentStop",
+        "Stop",
+    ):
+        hooks[event] = [plain_group]
+    if set(hooks) != set(OFFICIAL_CODEX_HOOK_EVENTS):
+        raise RuntimeError("Codex hook config drifted from the documented official event set")
+    return {"hooks": hooks}
 
 
 def _default_sidecar(payload: dict[str, Any]) -> Path:
@@ -113,6 +122,9 @@ def main(argv: list[str] | None = None) -> int:
         sidecar = Path(sidecar).expanduser().resolve()
         observed_at = _now()
         summary_records = codex_hook_to_semantic_events(payload, timestamp=observed_at)
+        summary_records.extend(
+            codex_official_hook_lifecycle_events(payload, timestamp=observed_at)
+        )
         if payload.get("hook_event_name") == "SessionStart":
             summary_records.append(
                 provider_agent_trace_visibility_event(
