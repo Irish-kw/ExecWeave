@@ -8,7 +8,12 @@ from pathlib import Path
 
 from .agent_trace import opencode_agent_trace_events
 from .content_store import FullFidelityContentStore
-from .opencode_adapter import append_semantic_records, opencode_plugin_to_semantic_events, read_plugin_payload
+from .opencode_adapter import (
+    append_semantic_records,
+    opencode_plugin_to_semantic_events,
+    read_plugin_payload,
+)
+from .opencode_event_contract import opencode_official_event_semantic_events
 from .opencode_full_fidelity import opencode_plugin_to_content_events
 
 
@@ -22,8 +27,17 @@ def _default_sidecar(payload: dict) -> Path:
         cwd = str(Path.cwd())
     session_id = payload.get("sessionID")
     scope = session_id if isinstance(session_id, str) and session_id else "unscoped"
-    safe = "".join(character if character.isalnum() or character in {"-", "_", "."} else "_" for character in scope)
-    return Path(cwd) / ".execweave" / "semantic" / "opencode" / f"{safe}.jsonl"
+    safe = "".join(
+        character if character.isalnum() or character in {"-", "_", "."} else "_"
+        for character in scope
+    )
+    return (
+        Path(cwd)
+        / ".execweave"
+        / "semantic"
+        / "opencode"
+        / f"{safe}.jsonl"
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -51,10 +65,18 @@ def main(argv: list[str] | None = None) -> int:
         sidecar = Path(sidecar).expanduser().resolve()
         observed_at = _now()
         store = FullFidelityContentStore(sidecar.parent)
-        append_semantic_records(
-            sidecar,
-            opencode_plugin_to_semantic_events(payload, timestamp=observed_at),
+
+        summary_records = opencode_plugin_to_semantic_events(
+            payload,
+            timestamp=observed_at,
         )
+        summary_records.extend(
+            opencode_official_event_semantic_events(
+                payload,
+                timestamp=observed_at,
+            )
+        )
+        append_semantic_records(sidecar, summary_records)
         append_semantic_records(
             sidecar,
             opencode_plugin_to_content_events(
