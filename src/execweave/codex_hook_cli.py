@@ -14,13 +14,18 @@ from .codex_adapter import (
     codex_hook_to_semantic_events,
     read_hook_payload,
 )
-from .codex_full_fidelity import codex_hook_to_content_events
+from .codex_full_fidelity import (
+    codex_hook_to_content_events,
+    codex_hook_to_metadata_events,
+)
 from .codex_hook_lifecycle import (
     OFFICIAL_CODEX_HOOK_EVENTS,
     codex_official_hook_lifecycle_events,
 )
 from .content_store import FullFidelityContentStore
 from .conversation_archive import codex_conversation_archive_events
+
+_CAPTURE_ERRORS = (OSError, RuntimeError, TimeoutError, TypeError, ValueError)
 
 
 def _hook_handler(command: str) -> dict[str, str]:
@@ -87,6 +92,24 @@ def _default_sidecar(payload: dict[str, Any]) -> Path:
     return Path(cwd) / ".execweave" / "semantic" / "codex" / f"{safe_session}.jsonl"
 
 
+def _capture_warning(stage: str, exc: BaseException) -> None:
+    print(f"ExecWeave Codex hook warning [{stage}]: {exc}", file=sys.stderr)
+
+
+def _append_stage(
+    sidecar: Path,
+    records: list[dict[str, Any]],
+    *,
+    stage: str,
+    failures: list[str],
+) -> None:
+    try:
+        append_semantic_records(sidecar, records)
+    except _CAPTURE_ERRORS as exc:
+        failures.append(stage)
+        _capture_warning(stage, exc)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="execweave-codex-hook",
@@ -104,7 +127,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--strict",
         action="store_true",
-        help="Return non-zero on telemetry errors. Default is fail-open so tracing cannot block Codex.",
+        help=(
+            "Return non-zero on telemetry errors after attempting every independent "
+            "capture stage. Default is fail-open so tracing cannot block Codex."
+        ),
     )
     parser.add_argument("--auto", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument(
@@ -136,32 +162,90 @@ def main(argv: list[str] | None = None) -> int:
             configured = os.environ.get("EXECWEAVE_SEMANTIC_SIDECAR")
             sidecar = Path(configured) if configured else _default_sidecar(payload)
         sidecar = Path(sidecar).expanduser().resolve()
-        observed_at = _now()
+        content_store = FullFidelityContentStore(sidecar.parent)
+    except _CAPTURE_ERRORS as exc:
+        _capture_warning("setup", exc)
+        return 1 if args.strict else 0
+
+    observed_at = _now()
+    failures: list[str] = []
+
+    # Every stage below is independent. In particular, optional full-fidelity content
+    # capture must never prevent a provider-declared transcript from being archived.
+    try:
         summary_records = codex_hook_to_semantic_events(payload, timestamp=observed_at)
         summary_records.extend(
             codex_official_hook_lifecycle_events(payload, timestamp=observed_at)
         )
         if payload.get("hook_event_name") == "SessionStart":
             summary_records.append(_codex_trace_visibility_event(observed_at))
-        append_semantic_records(sidecar, summary_records)
+    except _CAPTURE_ERRORS as exc:
+        failures.append("summary_capture")
+        _capture_warning("summary_capture", exc)
+    else:
+        _append_stage(
+            sidecar,
+            summary_records,
+            stage="summary_append",
+            failures=failures,
+        )
 
-        content_store = FullFidelityContentStore(sidecar.parent)
-        content_records = codex_hook_to_content_events(
+    # Provider hook metadata is persisted separately from optional content values. A
+    # failure while storing a final response/tool payload therefore cannot erase the
+    # already-observed agent_transcript_path that is needed to diagnose the run.
+    try:
+        metadata_records = codex_hook_to_metadata_events(
             payload,
             store=content_store,
             timestamp=observed_at,
         )
-        append_semantic_records(sidecar, content_records)
+    except _CAPTURE_ERRORS as exc:
+        failures.append("metadata_capture")
+        _capture_warning("metadata_capture", exc)
+    else:
+        _append_stage(
+            sidecar,
+            metadata_records,
+            stage="metadata_append",
+            failures=failures,
+        )
+
+    try:
+        content_records = codex_hook_to_content_events(
+            payload,
+            store=content_store,
+            timestamp=observed_at,
+            include_metadata=False,
+        )
+    except _CAPTURE_ERRORS as exc:
+        failures.append("content_capture")
+        _capture_warning("content_capture", exc)
+    else:
+        _append_stage(
+            sidecar,
+            content_records,
+            stage="content_append",
+            failures=failures,
+        )
+
+    try:
         archive_records = codex_conversation_archive_events(
             payload,
             store=content_store,
             timestamp=observed_at,
         )
-        append_semantic_records(sidecar, archive_records)
-    except (OSError, RuntimeError, TimeoutError, TypeError, ValueError) as exc:
-        print(f"ExecWeave Codex hook warning: {exc}", file=sys.stderr)
-        return 1 if args.strict else 0
-    return 0
+    except _CAPTURE_ERRORS as exc:
+        failures.append("conversation_archive")
+        _capture_warning("conversation_archive", exc)
+    else:
+        _append_stage(
+            sidecar,
+            archive_records,
+            stage="archive_append",
+            failures=failures,
+        )
+
+    return 1 if args.strict and failures else 0
 
 
 if __name__ == "__main__":
