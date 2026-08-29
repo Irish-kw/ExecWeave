@@ -66,13 +66,17 @@ jobs:
               Path("README.de.md"),
               Path("README.ru.md"),
           ]
+          total = 0
           for path in readmes:
               text = path.read_text(encoding="utf-8")
               count = text.count(old_tag)
               if count == 0:
                   raise SystemExit(f"{path}: expected at least one stale {old_tag} anchor")
               path.write_text(text.replace(old_tag, new_tag), encoding="utf-8")
+              total += count
               print(f"{path}: replaced {count} release anchor(s)")
+          if total != 24:
+              raise SystemExit(f"expected exactly 24 README release replacements, got {total}")
 
           audit_path = Path("scripts/audit_i18n_parity.py")
           audit = audit_path.read_text(encoding="utf-8")
@@ -94,46 +98,17 @@ jobs:
           '''
           if old_required not in audit:
               raise SystemExit("audit_i18n_parity.py: stale release snippet block not found")
-          audit = audit.replace(old_required, new_required, 1)
-
-          old_loop = '''    for lang in ALL_LANGS:
-              path = Path(f"README.{lang}.md")
-              if not path.exists():
-                  continue
-              text = path.read_text(encoding="utf-8")
-              missing = [snippet for snippet in README_REQUIRED_SNIPPETS if snippet not in text]
-              if missing:
-                  print(f"FAIL {lang:5} {path}: missing release anchors {missing}")
-                  failures += 1
-          '''
-          new_loop = '''    readmes = [("en", Path("README.md"))]
-              readmes.extend((lang, Path(f"README.{lang}.md")) for lang in ALL_LANGS)
-              for lang, path in readmes:
-                  if not path.exists():
-                      continue
-                  text = path.read_text(encoding="utf-8")
-                  missing = [snippet for snippet in README_REQUIRED_SNIPPETS if snippet not in text]
-                  if missing:
-                      print(f"FAIL {lang:5} {path}: missing release anchors {missing}")
-                      failures += 1
-          '''
-          if old_loop not in audit:
-              raise SystemExit("audit_i18n_parity.py: README coverage loop not found")
-          audit_path.write_text(audit.replace(old_loop, new_loop, 1), encoding="utf-8")
+          audit_path.write_text(audit.replace(old_required, new_required, 1), encoding="utf-8")
 
           test_path = Path("tests/test_v069_dashboard_release.py")
           test = test_path.read_text(encoding="utf-8")
-          old_test = '''        assert "v0.7.2" in text, path
-          '''
-          new_test = '''        assert f"v{__version__}" in text, path
-          '''
+          old_test = '        assert "v0.7.2" in text, path\n'
+          new_test = '        assert f"v{__version__}" in text, path\n'
           if old_test not in test:
               raise SystemExit("README release assertion not found")
           test = test.replace(old_test, new_test, 1)
-          old_english = '''    assert "The current release is **v0.7.2**." in readme
-          '''
-          new_english = '''    assert f"The current release is **v{__version__}**." in readme
-          '''
+          old_english = '    assert "The current release is **v0.7.2**." in readme\n'
+          new_english = '    assert f"The current release is **v{__version__}**." in readme\n'
           if old_english not in test:
               raise SystemExit("English current release assertion not found")
           test_path.write_text(test.replace(old_english, new_english, 1), encoding="utf-8")
@@ -144,6 +119,7 @@ jobs:
             exit 1
           fi
           python scripts/audit_i18n_parity.py
+          python -m ruff check scripts/audit_i18n_parity.py tests/test_v069_dashboard_release.py
           python -m pytest -q tests/test_v069_dashboard_release.py
           git diff --check
 
