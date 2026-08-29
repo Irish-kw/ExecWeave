@@ -52,7 +52,12 @@ _ASSISTANT_RESPONSE_KINDS = (
     "assistant_response",
     "assistant_display",
 )
-_SUBAGENT_TASK_KINDS = ("subagent_task", "subtask_prompt", "subtask_description")
+_SUBAGENT_TASK_KINDS = (
+    "subagent_task",
+    "subagent_description",
+    "subtask_prompt",
+    "subtask_description",
+)
 _SUBAGENT_SUMMARY_KINDS = ("subagent_summary", "subagent_final_response")
 
 
@@ -88,10 +93,7 @@ def _source_attributes(source: dict[str, Any] | None) -> dict[str, Any]:
     return attrs if isinstance(attrs, dict) else {}
 
 
-def _agent_identity(
-    provider: str,
-    source: dict[str, Any] | None,
-) -> dict[str, Any]:
+def _agent_identity(provider: str, source: dict[str, Any] | None) -> dict[str, Any]:
     source = source if isinstance(source, dict) else {}
     attrs = _source_attributes(source)
     source_id = source.get("id")
@@ -111,6 +113,8 @@ def _agent_identity(
     elif normalized_provider == "antigravity" and source_id_text.startswith(
         "agent:antigravity:conversation:"
     ):
+        # Antigravity exposes conversation routing IDs, but not a stable child
+        # execution identity/parentage on the observed hook surface.
         agent_path = "/root"
         is_root = True
     elif source_type == "agent":
@@ -132,6 +136,7 @@ def _agent_identity(
         attrs.get("agent_nickname")
         or attrs.get("agent_type")
         or attrs.get("subagent_type")
+        or attrs.get("native_agent_name")
         or source_name
     )
     if is_root:
@@ -252,9 +257,7 @@ def _structured_messages(
         role = str(item.get("role") or "").lower()
         if role in {"system", "developer", "tool", "function"}:
             continue
-        text = _text_parts(item.get("content"))
-        if not text:
-            text = _text_parts(item.get("text"))
+        text = _text_parts(item.get("content")) or _text_parts(item.get("text"))
         if not text:
             continue
         if role in {"user", "human"}:
@@ -283,12 +286,13 @@ def _structured_messages(
     return messages
 
 
-def _claude_transcript_messages(
+def _line_transcript_messages(
     path: Path,
     *,
     timestamp: object,
     ordinal: object,
     agent_path: str,
+    antigravity: bool = False,
 ) -> list[dict[str, Any]]:
     messages: list[dict[str, Any]] = []
     try:
@@ -304,25 +308,28 @@ def _claude_transcript_messages(
             continue
         if not isinstance(record, dict):
             continue
-        record_type = str(record.get("type") or "").lower()
-        payload = record.get("message")
-        role = ""
-        content: object = None
-        if isinstance(payload, dict):
-            role = str(payload.get("role") or record_type).lower()
-            content = payload.get("content")
-        else:
-            role = record_type
-            content = record.get("content") or record.get("text")
-        if role not in {"user", "human", "assistant", "model"}:
-            continue
-        text = _text_parts(content)
-        if not text:
-            continue
         record_timestamp = record.get("timestamp") or timestamp
         record_ordinal = record.get("ordinal")
         if not isinstance(record_ordinal, int):
             record_ordinal = (ordinal if isinstance(ordinal, int) else 0) + index
+
+        if antigravity:
+            role = str(record.get("source") or "").lower()
+            text = _text_parts(record.get("content") or record.get("text"))
+            phase = str(record.get("type") or "").lower() or "response"
+        else:
+            record_type = str(record.get("type") or "").lower()
+            payload = record.get("message")
+            if isinstance(payload, dict):
+                role = str(payload.get("role") or record_type).lower()
+                text = _text_parts(payload.get("content"))
+            else:
+                role = record_type
+                text = _text_parts(record.get("content") or record.get("text"))
+            phase = "response"
+
+        if not text:
+            continue
         if role in {"user", "human"}:
             messages.append(
                 _message(
@@ -334,7 +341,7 @@ def _claude_transcript_messages(
                     text=text,
                 )
             )
-        else:
+        elif role in {"assistant", "model"}:
             messages.append(
                 _message(
                     timestamp=record_timestamp,
@@ -343,63 +350,7 @@ def _claude_transcript_messages(
                     sender=agent_path,
                     recipient=None,
                     text=text,
-                    phase="response",
-                )
-            )
-    return messages
-
-
-def _antigravity_transcript_messages(
-    path: Path,
-    *,
-    timestamp: object,
-    ordinal: object,
-    agent_path: str,
-) -> list[dict[str, Any]]:
-    messages: list[dict[str, Any]] = []
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except (OSError, UnicodeError):
-        return []
-    for index, line in enumerate(lines):
-        if not line.strip():
-            continue
-        try:
-            record = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(record, dict):
-            continue
-        source = str(record.get("source") or "").upper()
-        record_type = str(record.get("type") or "")
-        text = _text_parts(record.get("content") or record.get("text"))
-        if not text:
-            continue
-        record_timestamp = record.get("timestamp") or timestamp
-        record_ordinal = record.get("ordinal")
-        if not isinstance(record_ordinal, int):
-            record_ordinal = (ordinal if isinstance(ordinal, int) else 0) + index
-        if source in {"USER", "HUMAN"}:
-            messages.append(
-                _message(
-                    timestamp=record_timestamp,
-                    ordinal=record_ordinal,
-                    kind="user_message",
-                    sender="user",
-                    recipient=agent_path,
-                    text=text,
-                )
-            )
-        elif source == "MODEL":
-            messages.append(
-                _message(
-                    timestamp=record_timestamp,
-                    ordinal=record_ordinal,
-                    kind="assistant_message",
-                    sender=agent_path,
-                    recipient=None,
-                    text=text,
-                    phase=record_type.lower() or "response",
+                    phase=phase,
                 )
             )
     return messages
@@ -448,8 +399,7 @@ def _response_messages(
             )
             if messages:
                 return messages
-        content = value.get("content")
-        text = _text_parts(content)
+        text = _text_parts(value.get("content"))
         if text:
             return [
                 _message(
@@ -476,6 +426,43 @@ def _response_messages(
             )
         ]
     return []
+
+
+def _routed_agent_message(
+    value: object,
+    *,
+    timestamp: object,
+    ordinal: object,
+    agent_path: str,
+) -> list[dict[str, Any]]:
+    if not isinstance(value, dict):
+        return []
+    text = _text_parts(value.get("text") or value.get("content") or value.get("message"))
+    if not text:
+        return []
+    sender = value.get("sender")
+    recipient = value.get("recipient")
+    kind = value.get("kind")
+    phase = value.get("phase")
+    task_name = value.get("task_name")
+    content_state = value.get("content_state")
+    return [
+        _message(
+            timestamp=timestamp,
+            ordinal=ordinal,
+            kind=kind if isinstance(kind, str) and kind else "agent_message",
+            sender=sender if isinstance(sender, str) and sender else agent_path,
+            recipient=recipient if isinstance(recipient, str) and recipient else None,
+            text=text,
+            phase=phase if isinstance(phase, str) and phase else None,
+            task_name=task_name if isinstance(task_name, str) and task_name else None,
+            content_state=(
+                content_state
+                if isinstance(content_state, str) and content_state
+                else "plaintext"
+            ),
+        )
+    ]
 
 
 def _generic_content_messages(
@@ -522,6 +509,16 @@ def _generic_content_messages(
         if structured:
             return structured
 
+    if "agent_message" in kind:
+        routed = _routed_agent_message(
+            value,
+            timestamp=timestamp,
+            ordinal=ordinal,
+            agent_path=agent_path,
+        )
+        if routed:
+            return routed
+
     text = _text_parts(value)
     if not text:
         return []
@@ -556,13 +553,14 @@ def _generic_content_messages(
         ]
 
     if any(token in kind for token in _ASSISTANT_FINAL_KINDS):
+        child = not bool(identity.get("is_root"))
         return [
             _message(
                 timestamp=timestamp,
                 ordinal=ordinal,
-                kind="assistant_message",
+                kind="subagent_final_response" if child else "assistant_message",
                 sender=agent_path,
-                recipient=None,
+                recipient="/root" if child else None,
                 text=text,
                 phase="final_answer",
             )
@@ -650,18 +648,19 @@ def conversation_preview(
 
     identity = _agent_identity(provider, source)
     if content_kind.startswith("claude.conversation_transcript"):
-        messages = _claude_transcript_messages(
+        messages = _line_transcript_messages(
             source_path,
             timestamp=timestamp,
             ordinal=ordinal,
             agent_path=str(identity["agent_path"]),
         )
     elif content_kind.startswith("antigravity.conversation_transcript"):
-        messages = _antigravity_transcript_messages(
+        messages = _line_transcript_messages(
             source_path,
             timestamp=timestamp,
             ordinal=ordinal,
             agent_path=str(identity["agent_path"]),
+            antigravity=True,
         )
     else:
         value = _read_value(source_path)

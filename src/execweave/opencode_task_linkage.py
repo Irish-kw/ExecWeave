@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from .content_evidence import content_observation_event
+from .content_store import FullFidelityContentStore
+
 
 def _string(value: object) -> str | None:
     return value if isinstance(value, str) and value else None
@@ -50,12 +53,47 @@ def _tool_call(session_id: str, call_id: str) -> dict[str, Any]:
     }
 
 
+def _task_content_event(
+    *,
+    child: dict[str, Any],
+    value: str,
+    content_kind: str,
+    relation: str,
+    observed_field: str,
+    store: FullFidelityContentStore,
+    timestamp: str,
+    attributes: dict[str, Any],
+) -> dict[str, Any]:
+    reference = store.put_text(value, content_kind=content_kind)
+    return content_observation_event(
+        timestamp=timestamp,
+        provider="opencode",
+        source=child,
+        reference=reference,
+        relation=relation,
+        observed_field=observed_field,
+        evidence_source="provider_plugin",
+        attribution="opencode_task_tool_metadata",
+        event_type="semantic.opencode.task_session.content",
+        attributes={
+            **attributes,
+            "conversation_projection_basis": "exact_task_tool_child_session_metadata",
+        },
+    )
+
+
 def opencode_task_session_events(
     payload: dict[str, Any],
     *,
     timestamp: str,
+    store: FullFidelityContentStore | None = None,
 ) -> list[dict[str, Any]]:
-    """Project exact OpenCode Task tool metadata into child-session assignment evidence."""
+    """Project exact OpenCode Task metadata into child-session assignment evidence.
+
+    When a content store is supplied, the same provider-exposed task prompt and
+    description are also attached to the exact child session so the dashboard can
+    render the delegated task inside that child agent's conversation thread.
+    """
     parsed = _event_body(payload)
     if parsed is None:
         return []
@@ -113,13 +151,45 @@ def opencode_task_session_events(
     if isinstance(background, bool):
         attributes["background_requested"] = background
 
-    return [
+    child = _agent(child_session, agent_name=agent_name)
+    events: list[dict[str, Any]] = [
         {
             "timestamp": timestamp,
             "event_type": "semantic.opencode.task_session.assigned",
             "relation": "ASSIGNED_AGENT_TASK",
             "source": _tool_call(current_session, call_id),
-            "target": _agent(child_session, agent_name=agent_name),
+            "target": child,
             "attributes": attributes,
         }
     ]
+
+    if store is not None:
+        prompt = state_input.get("prompt")
+        if isinstance(prompt, str) and prompt:
+            events.append(
+                _task_content_event(
+                    child=child,
+                    value=prompt,
+                    content_kind="opencode.subtask_prompt",
+                    relation="OBSERVED_SUBAGENT_TASK",
+                    observed_field="event.properties.part.state.input.prompt",
+                    store=store,
+                    timestamp=timestamp,
+                    attributes=attributes,
+                )
+            )
+        description = state_input.get("description")
+        if isinstance(description, str) and description:
+            events.append(
+                _task_content_event(
+                    child=child,
+                    value=description,
+                    content_kind="opencode.subtask_description",
+                    relation="OBSERVED_SUBAGENT_DESCRIPTION",
+                    observed_field="event.properties.part.state.input.description",
+                    store=store,
+                    timestamp=timestamp,
+                    attributes=attributes,
+                )
+            )
+    return events

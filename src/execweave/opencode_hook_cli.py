@@ -81,6 +81,7 @@ def main(argv: list[str] | None = None) -> int:
             opencode_task_session_events(
                 payload,
                 timestamp=observed_at,
+                store=store,
             )
         )
         append_semantic_records(sidecar, summary_records)

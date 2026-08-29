@@ -75,6 +75,51 @@ def _digest(*values: object) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
 
 
+def _route_content_event(
+    *,
+    store: FullFidelityContentStore,
+    timestamp: str,
+    source: dict[str, Any],
+    sender: str,
+    recipient: str,
+    text: str,
+    kind: str,
+    relation: str,
+    observed_field: str,
+    task_name: str | None = None,
+    attributes: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    route: dict[str, Any] = {
+        "kind": kind,
+        "sender": sender,
+        "recipient": recipient,
+        "text": text,
+    }
+    if task_name:
+        route["task_name"] = task_name
+    reference = store.put_json(
+        route,
+        content_kind="antigravity.agent_message.route",
+    )
+    return content_observation_event(
+        timestamp=timestamp,
+        provider="antigravity",
+        source=source,
+        reference=reference,
+        relation=relation,
+        observed_field=observed_field,
+        evidence_source="provider_hook",
+        attribution="antigravity_hook",
+        event_type="semantic.antigravity.conversation.route",
+        attributes={
+            "provider_collaboration_tool_exact": True,
+            "provider_post_tool_success": True,
+            "normalized_conversation_route": True,
+            **(attributes or {}),
+        },
+    )
+
+
 def _invoke_subagent_events(
     payload: dict[str, Any],
     *,
@@ -159,6 +204,25 @@ def _invoke_subagent_events(
                         "provider_collaboration_tool_exact": True,
                         "provider_post_tool_success": True,
                         "child_identity_exposed": False,
+                    },
+                )
+            )
+            unresolved = role or type_name or f"index-{index}"
+            events.append(
+                _route_content_event(
+                    store=store,
+                    timestamp=timestamp,
+                    source=parent,
+                    sender=f"antigravity:{conversation_id}",
+                    recipient=f"unresolved-subagent:{unresolved}",
+                    text=prompt,
+                    kind="task",
+                    relation="OBSERVED_SUBAGENT_TASK",
+                    observed_field="toolCall.args.Subagents[].Prompt",
+                    task_name=role or type_name,
+                    attributes={
+                        "child_identity_exposed": False,
+                        "recipient_is_unresolved_subagent_label": True,
                     },
                 )
             )
@@ -247,6 +311,22 @@ def _send_message_events(
             attributes={
                 "provider_collaboration_tool_exact": True,
                 "provider_post_tool_success": True,
+                "delivery_observed": False,
+                "consumption_observed": False,
+            },
+        ),
+        _route_content_event(
+            store=store,
+            timestamp=timestamp,
+            source=author,
+            sender=f"antigravity:{conversation_id}",
+            recipient=f"antigravity:{recipient}",
+            text=message_text,
+            kind="send_message",
+            relation="SENT_AGENT_MESSAGE",
+            observed_field="toolCall.args.Message",
+            attributes={
+                "provider_recipient_exact": True,
                 "delivery_observed": False,
                 "consumption_observed": False,
             },

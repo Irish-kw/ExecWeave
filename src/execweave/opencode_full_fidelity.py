@@ -25,7 +25,21 @@ def _entity(kind: str, ident: str, name: str, **attrs: Any) -> dict[str, Any]:
     return {"type": kind, "id": ident, "name": name, "attributes": attrs}
 
 
-def _agent() -> dict[str, Any]:
+def _agent(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    if isinstance(payload, dict):
+        session_id = payload.get("sessionID")
+        if isinstance(session_id, str) and session_id:
+            agent_name = payload.get("agent")
+            name = agent_name if isinstance(agent_name, str) and agent_name else "OpenCode session"
+            return _entity(
+                "agent",
+                f"agent:opencode:session:{session_id}",
+                name,
+                provider="opencode",
+                session_id=session_id,
+                native_agent_name=agent_name if isinstance(agent_name, str) else None,
+                identity_semantics="provider_session_id",
+            )
     return _entity("agent", "agent:OpenCode", "OpenCode", provider="opencode")
 
 
@@ -115,26 +129,28 @@ def opencode_plugin_to_content_events(
     if metadata is not None:
         events.append(metadata)
 
+    conversation_agent = _agent(payload)
+
     if hook == "chat.message":
         if "message" in payload:
             _observe(events, store, value=payload["message"], kind="opencode.user_message", timestamp=ts,
-                     source=_agent(), relation="OBSERVED_CHAT_MESSAGE", field="message", hook=hook)
+                     source=conversation_agent, relation="OBSERVED_CHAT_MESSAGE", field="message", hook=hook)
         if "parts" in payload:
             _observe(events, store, value=payload["parts"], kind="opencode.user_message_parts", timestamp=ts,
-                     source=_agent(), relation="OBSERVED_CHAT_MESSAGE_PARTS", field="parts", hook=hook)
+                     source=conversation_agent, relation="OBSERVED_CHAT_MESSAGE_PARTS", field="parts", hook=hook)
 
     if hook == "chat.params":
         if "message" in payload:
             _observe(events, store, value=payload["message"], kind="opencode.inference_message", timestamp=ts,
-                     source=_agent(), relation="OBSERVED_INFERENCE_MESSAGE", field="message", hook=hook)
+                     source=conversation_agent, relation="OBSERVED_INFERENCE_MESSAGE", field="message", hook=hook)
         if "params" in payload:
             _observe(events, store, value=payload["params"], kind="opencode.inference_parameters", timestamp=ts,
-                     source=_agent(), relation="OBSERVED_INFERENCE_PARAMETERS", field="params", hook=hook)
+                     source=conversation_agent, relation="OBSERVED_INFERENCE_PARAMETERS", field="params", hook=hook)
 
     if hook == "chat.headers" and isinstance(payload.get("headers"), dict):
         headers, removed = filter_transport_credentials(payload["headers"])
         _observe(events, store, value=headers, kind="opencode.request_headers_without_credentials", timestamp=ts,
-                 source=_agent(), relation="OBSERVED_REQUEST_HEADERS", field="headers", hook=hook,
+                 source=conversation_agent, relation="OBSERVED_REQUEST_HEADERS", field="headers", hook=hook,
                  transport_credentials_excluded=removed)
 
     if hook in {"tool.execute.before", "tool.execute.after"}:
@@ -148,40 +164,40 @@ def opencode_plugin_to_content_events(
 
     if hook == "event" and "event" in payload:
         _observe(events, store, value=payload["event"], kind="opencode.bus_event", timestamp=ts,
-                 source=_agent(), relation="OBSERVED_PROVIDER_EVENT", field="event", hook=hook,
+                 source=conversation_agent, relation="OBSERVED_PROVIDER_EVENT", field="event", hook=hook,
                  provider_event_type=payload.get("event_type"))
 
     if hook == "experimental.chat.messages.transform" and "messages" in payload:
         _observe(events, store, value=payload["messages"], kind="opencode.model_context_messages", timestamp=ts,
-                 source=_agent(), relation="OBSERVED_MODEL_CONTEXT", field="messages", hook=hook)
+                 source=conversation_agent, relation="OBSERVED_MODEL_CONTEXT", field="messages", hook=hook)
     if hook == "experimental.chat.system.transform" and "system" in payload:
         _observe(events, store, value=payload["system"], kind="opencode.system_prompt", timestamp=ts,
-                 source=_agent(), relation="OBSERVED_SYSTEM_PROMPT", field="system", hook=hook)
+                 source=conversation_agent, relation="OBSERVED_SYSTEM_PROMPT", field="system", hook=hook)
     if hook == "experimental.text.complete" and isinstance(payload.get("text"), str):
         _observe(events, store, value=payload["text"], kind="opencode.completed_text", timestamp=ts,
-                 source=_agent(), relation="PRODUCED_ASSISTANT_TEXT", field="text", hook=hook)
+                 source=conversation_agent, relation="PRODUCED_ASSISTANT_TEXT", field="text", hook=hook)
 
     if hook == "command.execute.before":
         for field, relation in (("command", "OBSERVED_COMMAND"), ("arguments", "OBSERVED_COMMAND_ARGUMENTS"), ("command_parts", "OBSERVED_COMMAND_PARTS")):
             if field in payload:
                 _observe(events, store, value=payload[field], kind=f"opencode.{field}", timestamp=ts,
-                         source=_agent(), relation=relation, field=field, hook=hook)
+                         source=conversation_agent, relation=relation, field=field, hook=hook)
 
     if hook == "tool.definition":
         for field, relation in (("description", "OBSERVED_TOOL_DESCRIPTION"), ("parameters", "OBSERVED_TOOL_SCHEMA")):
             if field in payload:
                 _observe(events, store, value=payload[field], kind=f"opencode.tool_{field}", timestamp=ts,
-                         source=_agent(), relation=relation, field=field, hook=hook,
+                         source=conversation_agent, relation=relation, field=field, hook=hook,
                          tool_id=payload.get("toolID"))
 
     if hook == "permission.ask" and "permission" in payload:
         _observe(events, store, value=payload["permission"], kind="opencode.permission_request", timestamp=ts,
-                 source=_agent(), relation="OBSERVED_PERMISSION_REQUEST", field="permission", hook=hook,
+                 source=conversation_agent, relation="OBSERVED_PERMISSION_REQUEST", field="permission", hook=hook,
                  decision=payload.get("decision"))
 
     if hook == "experimental.session.compacting":
         for field, relation in (("context", "OBSERVED_COMPACTION_CONTEXT"), ("prompt", "OBSERVED_COMPACTION_PROMPT")):
             if field in payload:
                 _observe(events, store, value=payload[field], kind=f"opencode.compaction_{field}", timestamp=ts,
-                         source=_agent(), relation=relation, field=field, hook=hook)
+                         source=conversation_agent, relation=relation, field=field, hook=hook)
     return events
