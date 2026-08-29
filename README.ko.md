@@ -13,11 +13,11 @@
 </p>
 <!-- i18n-nav:end -->
 
-**AI Agent가 내 컴퓨터에서 실제로 무엇을 하는지 확인하세요.**
+**AI Agent가 내 컴퓨터에서 실제로 무엇을 했는지 확인하세요.**
 
-ExecWeave는 AI Agent 활동을 인터랙티브 execution graph로 변환하면서 observed evidence, provider content, derived inference를 명확히 분리하는 source-available, local-first observability 프로젝트입니다.
+ExecWeave는 source-available, local-first observability 프로젝트입니다. AI Agent 활동을 interactive execution graph로 바꾸고 observed evidence, provider content, derived inference를 명확하게 분리합니다.
 
-> **Event가 ground truth이고, Graph는 materialized view입니다.**
+> **Event가 ground truth이고 Graph는 materialized view입니다.**
 
 <p align="center">
   <img src="docs/assets/codex.gif" alt="ExecWeave animated live demo" width="100%">
@@ -25,13 +25,13 @@ ExecWeave는 AI Agent 활동을 인터랙티브 execution graph로 변환하면�
 
 ## 설치
 
-PyPI에서 최신 공개 wheel/sdist를 설치합니다.
+PyPI에서 최신 wheel/sdist를 설치합니다.
 
 ```bash
 python -m pip install -U execweave
 ```
 
-현재 정식 릴리스는 **v0.6.9**입니다.
+현재 릴리스는 **v0.7.2** 입니다.
 
 개발 설치:
 
@@ -55,53 +55,57 @@ execweave live --open -- ollama serve
 execweave live --open -- python my_agent.py
 ```
 
-> **Hook 권한 요청이 표시되면 승인하세요.** 처음 provider-integrated run을 실행할 때 Agent/IDE가 ExecWeave의 로컬 Hook integration을 허용할지 물을 수 있습니다. **Allow / Yes**를 선택하세요. 승인하지 않아도 OS-runtime telemetry는 동작할 수 있지만 provider-level tool, model, supplied-content observability는 제한되거나 사용할 수 없게 됩니다.
+> **Hook 권한 요청이 나오면 승인하세요.** provider integration을 처음 사용할 때 Agent/IDE가 ExecWeave의 로컬 Hook 활성화를 허용할지 물을 수 있습니다. **Allow / Yes**를 선택하세요. 승인하지 않아도 OS-runtime telemetry는 동작할 수 있지만 provider-level tool, model, supplied-content observability는 제한됩니다.
 
-Google Antigravity는 현재 `agy` CLI를 사용합니다. ExecWeave는 `antigravity`를 friendly alias로 받아 `agy`로 해석합니다. Cursor의 `execweave live --open -- cursor`는 먼저 PATH launcher를 사용하고, 없으면 macOS/Windows의 표준 Cursor desktop application binary로 fallback합니다.
+Google Antigravity의 현재 CLI 명령은 `agy`입니다. ExecWeave는 `antigravity`도 friendly alias로 받아 `agy`로 해석합니다. Cursor의 `execweave live --open -- cursor`는 먼저 일반 PATH launcher를 찾고, 없으면 macOS/Windows의 표준 Cursor desktop application binary로 fallback합니다.
 
-또는 finalized artifact pipeline을 만듭니다.
+finalized artifact pipeline을 만들려면:
 
 ```bash
 execweave record --open -- python my_agent.py
 ```
 
-`execweave top -- codex`는 Agent를 시작 terminal에서 계속 대화 가능하게 유지하면서 호스트 환경에 따라 detached Top dashboard를 열거나 attach합니다.
+`execweave top -- codex`는 Agent를 시작 terminal에서 interactive 상태로 유지하면서 host 환경에 따라 detached Top dashboard를 열거나 attach합니다.
+
+**v0.7.2 — provider-neutral, agent-local multi-agent conversation.** ExecWeave는 provider가 실제로 노출한 conversation evidence를 각 agent의 dashboard thread에 투영하며, 동일한 전체 transcript를 모든 agent node에 복제하지 않습니다. provider가 authoritative identity / routing evidence를 제공하면 parent → child task assignment, inter-agent message, wait/result, child → parent final response를 보존합니다. Child agent에는 자신이 실제로 받은 task와 자신이 생성한 conversation만 남고 inherited parent history 및 sibling-private content는 제외됩니다. 공통 merge layer 역시 provider, raw thread identity, agent identity로 scope하므로 provider가 동일한 thread ID를 재사용해도 Agent 1과 Agent 2가 섞이지 않습니다.
+
+통합 dashboard는 execution graph, logs, conversation records를 하나의 inspection flow에서 제공합니다. Finalized run은 `conversations.md`와 `conversations.json`을 만들며, 검증된 provider transcript는 run-local SHA-256 content store로 복사됩니다. Claude Code, OpenAI Codex, Cursor, OpenCode, Google Antigravity는 각 integration이 실제로 노출하는 가장 강한 multi-agent evidence를 사용합니다. gateway나 local runtime이 root request/response만 노출하면 ExecWeave는 root conversation만 보여 주며 subagent나 hidden routing을 만들어내지 않습니다.
 
 ## v0.6.9: 명확한 evidence boundary를 가진 full-fidelity observability
 
-v0.6.9는 compact metadata에만 머물지 않습니다. 지원되는 integration point가 content를 명시적으로 제공하면 ExecWeave는 **그 source가 제공한 전체 값**을 로컬 SHA-256 content-addressed store에 보존하고 semantic event stream에는 reference만 남길 수 있습니다.
+v0.6.9부터 ExecWeave는 compact metadata를 넘어, 지원되는 integration point가 명시적으로 제공한 **완전한 값**을 로컬 SHA-256 content-addressed store에 저장할 수 있습니다. semantic event stream에는 reference만 남깁니다.
 
 ```text
 <run-root>/content/sha256/<sha256>.<json|txt|bin>
 ```
 
-Adapter와 upstream hook/API surface에 따라 prompt/message, model request/response object, tool input/result, 명시적으로 노출된 reasoning/thinking text, shell/MCP output, provider hook이 제공한 file content 등을 보존할 수 있습니다.
+adapter와 upstream hook/API surface에 따라 prompt/message, model request/response object, tool input/result, assistant response, 명시적으로 노출된 reasoning/thinking text, shell/MCP output, provider hook이 제공한 file content 등을 저장할 수 있습니다.
 
-`complete_from_source: true`는 해당 integration point가 제공한 값을 ExecWeave가 완전하게 저장했다는 뜻일 뿐입니다. hidden model state, provider가 노출하지 않은 내부 stage, 관측되지 않은 최종 wire request, 또는 intercept하지 않은 bytes까지 관측했다는 뜻은 아닙니다.
+`complete_from_source: true`는 해당 integration point가 전달한 값을 ExecWeave가 완전하게 저장했다는 뜻일 뿐입니다. hidden model state, 공개되지 않은 provider-side stage, 관측하지 못한 최종 wire request, 수집하지 않은 bytes까지 봤다는 뜻이 아닙니다.
 
-Full fidelity는 privacy boundary도 바꿉니다. Application-level secret이 content 안에 들어 있으면 그대로 보존됩니다. 알려진 transport credential은 adapter가 정의한 일부 provider-metadata projection에서만 제거되며, ExecWeave는 범용 secret scanner나 content redactor가 아닙니다.
+Full fidelity는 privacy boundary도 바꿉니다. content 안의 application-level secret도 그대로 저장될 수 있습니다. 알려진 transport credential은 adapter가 명시적으로 정의한 일부 provider-metadata projection에서만 필터링됩니다. ExecWeave는 범용 secret scanner나 content redactor가 아닙니다.
 
 ### 지원되는 semantic / inference surface
 
-| Integration | ExecWeave 아래에서 실행될 때 OS-runtime observation | Specialized evidence |
+| Integration | ExecWeave 아래에서 실행했을 때 OS-runtime observation | Specialized evidence |
 | --- | --- | --- |
-| Claude Code | Yes | native hooks + hook이 제공한 full-fidelity content |
-| OpenAI Codex | Yes | lifecycle hooks + hook이 제공한 full-fidelity content |
-| Google Antigravity / Antigravity CLI | Yes | passive native hooks for invocation/tool evidence + full-fidelity values explicitly supplied to those hooks |
-| Cursor | Yes | native hooks + hook이 제공한 full-fidelity content |
-| OpenCode | Yes | project plugin + plugin이 제공한 full-fidelity content |
+| Claude Code | Yes | native hooks + full-fidelity hook content + provider가 노출한 subagent result |
+| OpenAI Codex | Yes | lifecycle hooks + validated rollout transcript + agent-local task/message/final-response routing |
+| Google Antigravity / Antigravity CLI | Yes | passive native hooks + 검증 가능한 conversation/subagent routing |
+| Cursor | Yes | native hooks + 사용 가능한 exact subagent task/summary routing |
+| OpenCode | Yes | project plugin + session/task routing + full-fidelity plugin content |
 | Ollama | Yes | `execweave-model-runtime event/exchange/probe --runtime ollama` |
 | llama.cpp | Yes | `execweave-model-runtime event/exchange/probe --runtime llamacpp` |
 | vLLM | Yes | `execweave-model-runtime event/exchange/probe --runtime vllm` |
-| LM Studio | 로컬 process가 ExecWeave에서 실행된 경우만 | `execweave-model-runtime event/exchange/probe --runtime lmstudio` |
-| LiteLLM Proxy | 설정된 proxy를 ExecWeave 아래에서 실행하면 Yes | 현재 metadata-oriented gateway callback/event integration |
-| OpenRouter | remote service process가 아니라 local client를 관측 | `execweave-inference-gateway event/exchange/generation --gateway openrouter` |
+| LM Studio | 로컬 process를 ExecWeave가 실행한 경우에만 | `execweave-model-runtime event/exchange/probe --runtime lmstudio` |
+| LiteLLM Proxy | 설정된 proxy를 ExecWeave가 실행한 경우 Yes | metadata-oriented gateway callback/event integration |
+| OpenRouter | 원격 service process가 아니라 로컬 client를 관측 | `execweave-inference-gateway event/exchange/generation --gateway openrouter` |
 
-OpenRouter `exchange`는 caller-supplied request+response evidence이며 transparent wire interception이 아닙니다. LiteLLM Proxy는 현재 baseline에서 더 제한된 metadata-oriented integration입니다.
+OpenRouter `exchange`는 caller-supplied request+response evidence이며 transparent wire interception이 아닙니다. LiteLLM Proxy는 현재 baseline에서 더 제한된 metadata-oriented integration입니다. Provider-neutral conversation projection은 존재하지 않는 provider evidence를 가짜 agent relationship으로 승격하지 않습니다.
 
 ## Evidence layers
 
-ExecWeave는 모든 signal을 한 trace로 평탄화하지 않고 evidence layer를 분리합니다.
+ExecWeave는 모든 신호를 하나의 trace로 평탄화하지 않고 evidence layer를 분리해서 유지합니다.
 
 ```text
 Agent / IDE semantic + supplied content evidence
@@ -113,7 +117,7 @@ Model runtime / inference-server evidence
 OS runtime evidence: process / file / network
 ```
 
-Underlying telemetry가 causal claim을 지원할 때만 relationship이 causal입니다. Tool → Process bridge는 여전히 보수적인 derived evidence입니다.
+relationship을 causal로 표시하는 것은 underlying telemetry가 그 claim을 지원할 때뿐입니다. Tool → Process bridge는 보수적인 derived evidence로 유지됩니다.
 
 ```text
 inferred: true
@@ -147,11 +151,11 @@ execweave-opencode-plugin --install
 execweave-opencode-record --open -- opencode
 ```
 
-Provider-integrated recorder는 raw runtime, semantic, correlated artifact를 분리해서 보존합니다. Cursor `tool_use_id`나 OpenCode `sessionID + callID` 같은 stable provider identifier는 provider 내부 logical identity를 보여 주지만 OS PID는 아닙니다. Legacy Gemini CLI hook entry points는 기존 설치 호환성을 위해 남아 있지만 새로운 Google CLI 사용은 Antigravity (`agy`)를 사용해야 합니다.
+Provider-integrated recorder는 raw runtime, semantic, correlated, conversation artifacts를 분리해 저장합니다. Cursor `tool_use_id`, Codex rollout thread identity, OpenCode `sessionID + callID` 같은 stable provider identifier는 provider 내부 logical identity를 증명하지만 OS PID는 아닙니다. cross-agent content는 provider가 명시적인 route, delegation, result를 노출할 때만 표시됩니다. Legacy Gemini CLI hook entry point는 기존 설치 호환성을 위해 유지되지만 새로운 Google CLI 사용은 Antigravity (`agy`)를 권장합니다.
 
 ## Inference gateway와 model runtime
 
-OpenRouter / LiteLLM gateway evidence를 캡처합니다.
+OpenRouter 또는 LiteLLM gateway evidence를 수집합니다.
 
 ```bash
 execweave-inference-gateway event --gateway openrouter --sidecar gateway.jsonl
@@ -159,7 +163,7 @@ execweave-inference-gateway event --gateway litellm --sidecar gateway.jsonl
 execweave-inference-gateway exchange --gateway openrouter --sidecar gateway.jsonl
 ```
 
-Ollama, llama.cpp, vLLM, LM Studio model-runtime evidence를 캡처합니다.
+Ollama, llama.cpp, vLLM, LM Studio의 model-runtime evidence를 수집합니다.
 
 ```bash
 execweave-model-runtime event --runtime ollama --sidecar model-runtime.jsonl
@@ -167,7 +171,7 @@ execweave-model-runtime exchange --runtime ollama --sidecar model-runtime.jsonl
 execweave-model-runtime probe --runtime ollama --sidecar model-runtime.jsonl
 ```
 
-`event`는 response-only evidence입니다. `exchange`는 caller-supplied request+response object를 저장하며 transparent interception을 주장하지 않습니다. `LOADED_MODEL`, `SERVES_MODEL`, `ADVERTISES_MODEL`은 source-specific semantics를 가지므로 서로 바꿔 쓸 수 없습니다. LM Studio catalog visibility는 `ADVERTISES_MODEL`이며 weights가 memory resident라는 증거가 아닙니다.
+`event`는 response-only evidence입니다. `exchange`는 caller-supplied request+response object를 저장하지만 transparent interception을 주장하지 않습니다. Runtime catalog relation은 source별 의미를 유지하며 `LOADED_MODEL`, `SERVES_MODEL`, `ADVERTISES_MODEL`은 서로 바꿔 쓸 수 없습니다. LM Studio의 catalog visibility가 `ADVERTISES_MODEL`이어도 weights가 memory resident였다는 증거는 아닙니다.
 
 ## Security analysis, evidence grades, bounded rule packs
 
@@ -177,15 +181,17 @@ execweave-model-runtime probe --runtime ollama --sidecar model-runtime.jsonl
 execweave analyze run.graph.json --output analysis.json
 ```
 
-Finding은 severity와 독립된 evidence grade를 가집니다. 현재 grade는 `A`, `B`, `C`, `D`, `U`이며 direct syscall attribution부터 inferred/unknown provenance까지를 나타냅니다. 이는 evidence-strength category이지 **probability나 trust score가 아닙니다**.
+Finding은 severity와 별개의 evidence grade를 노출합니다. 현재 grade는 `A`, `B`, `C`, `D`, `U`이며 direct syscall attribution부터 inferred/unknown provenance까지를 표현합니다. probability나 trust score가 아닙니다.
 
-Local rule pack은 third-party code를 실행하지 않고 bounded하고 설명 가능한 **single-edge observation** policy를 추가합니다.
+Local rule pack은 third-party code를 실행하지 않고 bounded하고 설명 가능한 **single-edge observation** policy를 추가할 수 있습니다.
 
 ```bash
 execweave-rule-pack graph.json --rule-pack local-policy.json --output report.json
 ```
 
-Rule pack은 code 실행, regex/path program 정의, byte-level data flow 또는 exfiltration claim을 만들 수 없습니다. Rule-pack finding은 observation-only로 유지됩니다.
+Rule pack은 code 실행, regex/path program 정의, byte-level data flow 또는 exfiltration 단정을 할 수 없습니다. rule-pack finding은 observation-only로 유지됩니다.
+
+Security finding은 더 강한 claim을 하지 않는다는 점도 명시합니다.
 
 ```json
 {
@@ -196,48 +202,51 @@ Rule pack은 code 실행, regex/path program 정의, byte-level data flow 또는
 
 ## Run integrity
 
-완료된 run을 seal한 뒤 regular-file inventory가 seal 시점과 동일한지 검증합니다.
+완료된 run을 seal하고 나중에 regular-file inventory가 seal 시점과 달라지지 않았는지 검증할 수 있습니다.
 
 ```text
 execweave-integrity seal .execweave/runs/<run-id>
 execweave-integrity verify .execweave/runs/<run-id>
 ```
 
-Deterministic manifest는 file size/SHA-256을 기록하고 symbolic link를 거부합니다. Seal 이후 missing/modified/replaced/new regular file이 생기면 verification이 실패합니다.
+Deterministic manifest는 file size/SHA-256을 기록하고 symbolic link를 거부합니다. seal 후 regular file이 누락, 변경, 교체, 추가되면 검증에 실패합니다.
 
-이 local seal은 evidence와 manifest가 같은 writable trust boundary 안에 있을 때 adversary-resistant tamper evidence가 아닙니다. Manifest는 `malicious_writer_resistance: false`와 `external_trust_anchor: false`를 명시합니다. 더 강한 보장이 필요하면 manifest digest를 boundary 밖으로 복사/보호해야 합니다.
+이 local seal은 evidence와 manifest가 같은 writable trust boundary 안에 있을 때 adversary-resistant tamper evidence라고 설명하지 않습니다. Manifest에는 `malicious_writer_resistance: false`와 `external_trust_anchor: false`가 기록됩니다. 더 강한 trust anchor가 필요하면 manifest digest를 boundary 밖에 복사하거나 보호해야 합니다.
 
 ## Runtime evidence와 graph operations
 
-Portable collector는 Linux, macOS, Windows를 지원하며 Linux에는 syscall-backed `strace` reference backend도 있습니다.
+Portable collector는 Linux, macOS, Windows에서 동작합니다. Linux에는 syscall-backed `strace` reference backend도 있습니다.
 
 ```bash
 execweave doctor
 execweave run --backend portable -- your-command
 execweave run --backend strace -- your-command
 execweave graph-summary run.graph.json
+execweave graph-filter run.graph.json --causal-only --output causal.graph.json
 execweave graph-focus run.graph.json NODE_ID --hops 2 --output focused.graph.json
 execweave path run.graph.json SOURCE TARGET --causal-only
 ```
 
-Portable filesystem observation은 session-correlated이며 process-causal이 아닙니다. Polling은 충분히 짧은 activity를 놓칠 수 있습니다. Linux `strace`는 지원되는 execution에서 더 강한 process-attributed syscall evidence를 제공합니다. Linux eBPF, Windows ETW, macOS Endpoint Security native collector는 향후 계획입니다.
+Portable filesystem observation은 session-correlated이며 process-causal이 아닙니다. polling은 충분히 짧은 활동을 놓칠 수 있습니다. Linux `strace`는 지원 execution에서 더 강한 process-attributed syscall evidence를 제공합니다. Linux eBPF, Windows ETW, macOS Endpoint Security native collector는 향후 계획입니다.
 
 ## Performance와 large-run safety
 
-ExecWeave는 bounded filesystem/viewer protection, incremental Live JSONL tailing, large-graph safety guard, detached Top, configured provider integration용 provisional live sidecar를 포함합니다.
+ExecWeave에는 bounded filesystem/viewer protection, incremental Live JSONL tailing, large-graph safety guard, detached Top, configured provider integration용 provisional live sidecar가 포함됩니다.
 
-재현 가능한 incremental `GraphAccumulator` reference result는 문서화된 GitHub Actions workload에서 1M synthetic events 기준 **164,273 ev/s**입니다. 이는 graph accumulation benchmark이며 end-to-end collector/browser throughput이 아닙니다.
+재현 가능한 incremental `GraphAccumulator` reference result는 문서화된 GitHub Actions workload의 1M synthetic events에서 **164,273 ev/s**에 도달합니다. 이는 graph accumulation benchmark이며 end-to-end collector/browser throughput이 아닙니다.
+
+대표 host/workload에서 package-level overhead benchmark를 다시 실행할 수 있습니다.
 
 ```bash
 execweave-overhead --iterations 7 --strace auto --output-json benchmark-results.json
 execweave-scalability
 ```
 
-Reference data와 methodology: [`docs/benchmarks/`](docs/benchmarks/).
+Reference data와 methodology는 [`docs/benchmarks/`](docs/benchmarks/)에 있습니다.
 
 ## Layered artifacts
 
-Provider-integrated run에는 다음과 같은 artifact가 포함될 수 있습니다.
+Provider-integrated run에는 다음 artifact가 포함될 수 있습니다.
 
 ```text
 .execweave/runs/<run-id>/
@@ -246,26 +255,28 @@ Provider-integrated run에는 다음과 같은 artifact가 포함될 수 있습�
 ├── viewer.html
 ├── semantic.jsonl
 ├── content/sha256/...
+├── conversations.md
+├── conversations.json
 ├── events.semantic.jsonl
 ├── graph.semantic.json
 ├── viewer.semantic.html
 ├── events.correlated.jsonl
 ├── graph.correlated.json
 ├── viewer.correlated.html
-└── integrity.json            # explicit seal 후
+└── integrity.json            # explicit seal 이후
 ```
 
-Derived correlation은 raw runtime 또는 provider sidecar evidence를 다시 쓰지 않습니다.
+Derived correlation은 raw runtime이나 provider sidecar evidence를 다시 쓰지 않습니다.
 
 ## Privacy
 
-ExecWeave는 local-first이며 capture, content blob, graph, report, viewer는 기본적으로 로컬에 남습니다. **OS runtime collector**는 file content나 raw read/write byte buffer를 의도적으로 캡처하지 않습니다. 그러나 이 경계를 v0.6.9 **provider full-fidelity content store**와 혼동하면 안 됩니다. 지원되는 hook/API가 prompt, tool argument/result, model response, reasoning/thinking text, shell output, file content 등을 명시적으로 제공하면 ExecWeave가 이를 완전히 보존할 수 있습니다.
+ExecWeave는 local-first이며 capture, content blob, graph, report, viewer는 기본적으로 로컬에 남습니다. **OS runtime collector**는 file content나 raw read/write byte buffer를 의도적으로 수집하지 않습니다. 이 boundary를 v0.6.9에서 도입된 **provider full-fidelity content store**와 혼동하면 안 됩니다. 지원 hook/API가 prompt, tool argument/result, model response, reasoning/thinking text, shell output, file content 등을 명시적으로 제공하면 ExecWeave는 그 값을 완전하게 저장할 수 있습니다.
 
-Content가 secret-redacted되었다고 가정하지 마세요. Command, path, endpoint metadata, identifier, model metadata, prompt, tool value, content blob은 모두 sensitive할 수 있습니다. 공유하기 전에 run directory 전체를 검토하세요.
+Conversation isolation은 attribution/display 규칙이지 redaction boundary가 아닙니다. provider가 Agent 1의 내용을 Agent 2에게 명시적으로 보내면 해당 routed evidence는 참여 endpoint에 나타날 수 있습니다. content가 secret-redacted되었다고 가정하지 마세요. Command, path, endpoint metadata, identifier, model metadata, prompt, tool value, content blob은 모두 민감할 수 있습니다. 공유하기 전에 run directory 전체를 검토하세요.
 
 ## 현재 상태
 
-v0.6.9는 cross-platform runtime collection, materialized execution graph, standalone/live viewer, 보수적인 provider↔runtime correlation, content-addressed full-fidelity provider evidence, evidence grades, bounded rule packs, 명시적 runtime threat/fidelity contract, honest local run-integrity sealing을 결합합니다. Observed evidence와 inference는 설계상 분리됩니다.
+v0.7.2는 cross-platform runtime collection, materialized execution graph, standalone/live dashboard, 보수적인 provider↔runtime correlation, content-addressed full-fidelity provider evidence, attributable multi-agent execution trace, run-local conversation access, provider-neutral projection의 agent-local conversation isolation을 통합합니다. 각 integration은 provider가 실제로 노출한 가장 강한 identity/routing evidence만 보존하고 충분한 증거가 없으면 abstain합니다. Observed evidence와 inference는 설계상 계속 분리됩니다.
 
 ## 문서
 
@@ -289,8 +300,8 @@ v0.6.9는 cross-platform runtime collection, materialized execution graph, stand
 
 ## 기여
 
-특히 native OS collector, Agent/IDE adapter, inference gateway, model runtime, evidence/correlation method, privacy/redaction, graph UX, performance evaluation 관련 contribution을 환영합니다.
+native OS collector, Agent/IDE adapter, inference gateway, model runtime, evidence/correlation method, privacy/redaction, graph UX, multi-agent conversation attribution, performance evaluation에 대한 contribution을 환영합니다.
 
 ## License
 
-ExecWeave는 **PolyForm Noncommercial License 1.0.0**에 따라 제공됩니다. 비상업적 사용, 수정 및 재배포는 해당 조건에 따라 허용되며, 상업적 사용에는 라이선서의 별도 서면 상업용 라이선스가 필요합니다. [`LICENSE`](LICENSE)를 참조하세요.
+v0.6.8부터 ExecWeave는 **PolyForm Noncommercial License 1.0.0**을 사용합니다. 비상업적 사용, 수정, 재배포는 라이선스 조건에 따라 허용됩니다. 상업적 사용에는 licensor의 별도 서면 commercial license가 필요합니다. 자세한 내용은 [`LICENSE`](LICENSE)를 참고하세요.

@@ -34,10 +34,12 @@ DOCS = [
 
 README_REQUIRED_SNIPPETS = [
     "v0.6.9",
+    "v0.7.2",
     "execweave live --open -- cursor",
     "execweave live --open -- opencode",
     "execweave live --open -- ollama serve",
     "execweave top -- codex",
+    "conversations.json",
     "LM Studio",
     "LiteLLM Proxy",
     "164,273 ev/s",

@@ -31,7 +31,7 @@ Install the latest published wheel/sdist from PyPI:
 python -m pip install -U execweave
 ```
 
-The current release is **v0.7.1**.
+The current release is **v0.7.2**.
 
 For development:
 
@@ -67,9 +67,9 @@ execweave record --open -- python my_agent.py
 
 `execweave top -- codex` keeps the Agent interactive in the launch terminal while opening/attaching the detached Top dashboard according to the host environment.
 
-v0.7.0 extends ExecWeave from provider/runtime observability into attributable multi-agent execution traces. Where providers expose authoritative identity or lifecycle evidence, ExecWeave records parent/child relationships, delegated tasks, inter-agent messages, waits/results, tool ownership, and provider-supplied reasoning/content without promoting weak timing proximity into causal claims. Current provider coverage includes Claude Code, OpenAI Codex, Cursor, OpenCode, and Google Antigravity; missing or ambiguous evidence causes abstention rather than heuristic linkage.
+**v0.7.2 — provider-neutral, agent-local multi-agent conversations.** ExecWeave now projects provider-exposed conversation evidence into agent-scoped dashboard threads instead of duplicating one full transcript across every agent node. Parent → child task assignments, routed inter-agent messages, waits/results, and child → parent final responses are preserved when the provider exposes authoritative identity or routing evidence. A child agent keeps only its own visible task and conversation; inherited parent history and sibling-private content are excluded. The common merge layer also scopes by provider, raw thread identity, and agent identity, so even a reused provider thread ID cannot fold Agent 1 into Agent 2.
 
-Conversation evidence is now surfaced directly from each ExecWeave run. Existing provider content is indexed, validated provider transcripts that would otherwise require browsing Agent-specific folders are copied into the run-local SHA-256 content store, and finalized runs generate `conversations.md` plus `conversations.json`. Static and Live dashboards link directly to these run-local records. Live content serving is token-authenticated and restricted to validated run-local conversation indexes and SHA-256 content paths; arbitrary local files and path traversal are not exposed.
+The unified dashboard brings the execution graph, logs, and conversation records into the same inspection flow. Finalized runs generate `conversations.md` and `conversations.json`, while validated provider transcripts are copied into the run-local SHA-256 content store. Claude Code, OpenAI Codex, Cursor, OpenCode, and Google Antigravity use the strongest provider-exposed multi-agent evidence available to each integration. For gateways and local runtimes that expose only root request/response traffic, ExecWeave shows only that root conversation and does not invent subagents or hidden routing.
 
 ## v0.6.9: full-fidelity observability with explicit evidence boundaries
 
@@ -89,11 +89,11 @@ Full fidelity also changes the privacy boundary: application-level secrets embed
 
 | Integration | OS-runtime observation when launched under ExecWeave | Specialized evidence |
 | --- | --- | --- |
-| Claude Code | Yes | native hooks + full-fidelity supplied hook content |
-| OpenAI Codex | Yes | lifecycle hooks + full-fidelity supplied hook content |
-| Google Antigravity / Antigravity CLI | Yes | passive native hooks for invocation/tool evidence + full-fidelity values explicitly supplied to those hooks |
-| Cursor | Yes | native hooks + full-fidelity supplied hook content |
-| OpenCode | Yes | project plugin + full-fidelity supplied plugin content |
+| Claude Code | Yes | native hooks + full-fidelity supplied hook content + exact subagent results when exposed |
+| OpenAI Codex | Yes | lifecycle hooks + validated rollout transcripts + agent-local task/message/final-response routing |
+| Google Antigravity / Antigravity CLI | Yes | passive native hooks + validated conversation/subagent routing where exposed |
+| Cursor | Yes | native hooks + exact subagent task/summary routing when exposed |
+| OpenCode | Yes | project plugin + session/task routing + full-fidelity supplied plugin content |
 | Ollama | Yes | `execweave-model-runtime event/exchange/probe --runtime ollama` |
 | llama.cpp | Yes | `execweave-model-runtime event/exchange/probe --runtime llamacpp` |
 | vLLM | Yes | `execweave-model-runtime event/exchange/probe --runtime vllm` |
@@ -101,7 +101,7 @@ Full fidelity also changes the privacy boundary: application-level secrets embed
 | LiteLLM Proxy | Yes when the configured proxy is launched under ExecWeave | metadata-oriented gateway callback/event integration |
 | OpenRouter | Observe the local client, not the remote service process | `execweave-inference-gateway event/exchange/generation --gateway openrouter` |
 
-OpenRouter `exchange` is caller-supplied request+response evidence, not transparent wire interception. LiteLLM Proxy remains a narrower metadata-oriented integration in the current baseline.
+OpenRouter `exchange` is caller-supplied request+response evidence, not transparent wire interception. LiteLLM Proxy remains a narrower metadata-oriented integration in the current baseline. Provider-neutral conversation projection never upgrades missing provider evidence into a fabricated agent relationship.
 
 ## Evidence layers
 
@@ -151,7 +151,7 @@ execweave-opencode-plugin --install
 execweave-opencode-record --open -- opencode
 ```
 
-Provider-integrated recorders keep raw runtime, semantic, and correlated artifacts separate. Stable provider identifiers such as Cursor `tool_use_id` or OpenCode `sessionID + callID` prove logical provider identity; they are not OS PIDs. Legacy Gemini CLI hook entry points remain packaged for existing installations, but Gemini CLI is no longer advertised as a current integration; new Google CLI usage should use Antigravity (`agy`).
+Provider-integrated recorders keep raw runtime, semantic, correlated, and conversation artifacts separate. Stable provider identifiers such as Cursor `tool_use_id`, Codex rollout thread identity, or OpenCode `sessionID + callID` prove logical provider identity; they are not OS PIDs. Cross-agent content is shown only when the provider exposes an explicit route, delegation, or result. Legacy Gemini CLI hook entry points remain packaged for existing installations, but Gemini CLI is no longer advertised as a current integration; new Google CLI usage should use Antigravity (`agy`).
 
 ## Inference gateways and model runtimes
 
@@ -272,11 +272,11 @@ Derived correlation never rewrites the raw runtime or provider sidecar evidence.
 
 ExecWeave is local-first: captures, content blobs, graphs, reports, and viewers remain local by default. The **OS runtime collector** does not intentionally capture file contents or raw read/write byte buffers. That boundary must not be confused with the **provider full-fidelity content store introduced in v0.6.9**: supported hooks/APIs can explicitly supply prompts, tool arguments/results, model responses, reasoning/thinking text, shell output, file content, or other sensitive values, and ExecWeave can preserve those values completely.
 
-Do not assume content has been secret-redacted. Commands, paths, endpoint metadata, identifiers, model metadata, prompts, tool values, and content blobs can all be sensitive. Review the entire run directory before sharing it.
+Conversation isolation is an attribution/display rule, not a redaction boundary. If a provider explicitly sends Agent 1 content to Agent 2, that routed evidence can legitimately appear at the participating endpoints. Do not assume content has been secret-redacted. Commands, paths, endpoint metadata, identifiers, model metadata, prompts, tool values, and content blobs can all be sensitive. Review the entire run directory before sharing it.
 
 ## Current status
 
-v0.7.1 combines cross-platform runtime collection, materialized execution graphs, standalone/live viewing, conservative provider↔runtime correlation, full-fidelity content-addressed provider evidence, attributable multi-agent execution traces, direct run-local conversation access, evidence grades, bounded rule packs, an explicit runtime threat/fidelity contract, and honest local run-integrity sealing. Observed evidence and inference remain separate by design.
+v0.7.2 combines cross-platform runtime collection, materialized execution graphs, standalone/live dashboards, conservative provider↔runtime correlation, full-fidelity content-addressed provider evidence, attributable multi-agent execution traces, direct run-local conversation access, and agent-local conversation isolation across provider-neutral projections. Supported integrations preserve the strongest identity/routing evidence actually exposed by each provider and abstain when that evidence is unavailable. Observed evidence and inference remain separate by design.
 
 ## Documentation
 
@@ -300,7 +300,7 @@ v0.7.1 combines cross-platform runtime collection, materialized execution graphs
 
 ## Contributing
 
-Contributions are welcome, especially around native OS collectors, Agent/IDE adapters, inference gateways, model runtimes, evidence/correlation methods, privacy/redaction, graph UX, and performance evaluation.
+Contributions are welcome, especially around native OS collectors, Agent/IDE adapters, inference gateways, model runtimes, evidence/correlation methods, privacy/redaction, graph UX, multi-agent conversation attribution, and performance evaluation.
 
 ## License
 
