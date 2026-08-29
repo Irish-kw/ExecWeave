@@ -114,11 +114,11 @@ def test_all_readmes_use_current_release_dashboard_and_conversation_anchors() ->
         assert "v0.6.5" not in text, path
         assert "v0.6.6" not in text, path
         assert "v0.6.7" not in text, path
-        assert "v0.7.2" in text, path
+        assert f"v{__version__}" in text, path
         assert "conversations.json" in text, path
 
     readme = Path("README.md").read_text(encoding="utf-8")
-    assert "The current release is **v0.7.2**." in readme
+    assert f"The current release is **v{__version__}**." in readme
     assert "provider-neutral, agent-local multi-agent conversations" in readme
 
 

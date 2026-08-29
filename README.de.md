@@ -31,7 +31,7 @@ Installieren Sie das neueste veröffentlichte wheel/sdist von PyPI:
 python -m pip install -U execweave
 ```
 
-Die aktuelle Version ist **v0.7.2**.
+Die aktuelle Version ist **v0.7.3**.
 
 Für die Entwicklung:
 
@@ -67,7 +67,7 @@ execweave record --open -- python my_agent.py
 
 `execweave top -- codex` hält den Agent im Startterminal interaktiv und öffnet bzw. verbindet gleichzeitig das detached Top dashboard entsprechend der Host-Umgebung.
 
-**v0.7.2 — provider-neutral, agent-local multi-agent conversations.** ExecWeave projiziert die vom Provider tatsächlich offengelegte conversation evidence jetzt in agent-spezifische Dashboard-Threads, statt denselben vollständigen Transcript in jeden agent node zu kopieren. Wenn der Provider authoritative identity / routing evidence bereitstellt, werden parent → child task assignments, inter-agent messages, waits/results und child → parent final responses erhalten. Ein Child Agent enthält nur die Task, die er tatsächlich erhalten hat, sowie seine eigene Conversation; inherited parent history und sibling-private content werden ausgeschlossen. Die gemeinsame Merge-Schicht scoped zusätzlich nach Provider, raw thread identity und agent identity, sodass selbst ein wiederverwendeter Provider-thread-ID Agent 1 und Agent 2 nicht zusammenführen kann.
+**v0.7.3 — provider-neutral, agent-local multi-agent conversations.** ExecWeave projiziert die vom Provider tatsächlich offengelegte conversation evidence jetzt in agent-spezifische Dashboard-Threads, statt denselben vollständigen Transcript in jeden agent node zu kopieren. Wenn der Provider authoritative identity / routing evidence bereitstellt, werden parent → child task assignments, inter-agent messages, waits/results und child → parent final responses erhalten. Ein Child Agent enthält nur die Task, die er tatsächlich erhalten hat, sowie seine eigene Conversation; inherited parent history und sibling-private content werden ausgeschlossen. Die gemeinsame Merge-Schicht scoped zusätzlich nach Provider, raw thread identity und agent identity, sodass selbst ein wiederverwendeter Provider-thread-ID Agent 1 und Agent 2 nicht zusammenführen kann.
 
 Das vereinheitlichte Dashboard bringt execution graph, logs und conversation records in denselben Inspection-Flow. Finalisierte Runs erzeugen `conversations.md` und `conversations.json`; validierte Provider-Transcripts werden in den run-local SHA-256 content store kopiert. Claude Code, OpenAI Codex, Cursor, OpenCode und Google Antigravity verwenden jeweils die stärkste Multi-Agent-Evidence, die ihre Integration tatsächlich offenlegt. Wenn ein Gateway oder lokaler Runtime nur root request/response sichtbar macht, zeigt ExecWeave nur diese Root-Conversation und erfindet weder Subagents noch hidden routing.
 
@@ -276,7 +276,7 @@ Conversation isolation ist eine Attribution-/Display-Regel, keine Redaction Boun
 
 ## Aktueller Stand
 
-v0.7.2 kombiniert cross-platform runtime collection, materialized execution graphs, standalone/live dashboards, konservative provider↔runtime correlation, full-fidelity content-addressed provider evidence, attributable multi-agent execution traces, direkten run-local conversation access und agent-local conversation isolation in provider-neutralen Projektionen. Jede Integration bewahrt nur die stärkste identity/routing evidence, die der Provider tatsächlich offenlegt, und enthält sich, wenn diese Evidence fehlt. Observed evidence und inference bleiben konstruktiv getrennt.
+v0.7.3 kombiniert cross-platform runtime collection, materialized execution graphs, standalone/live dashboards, konservative provider↔runtime correlation, full-fidelity content-addressed provider evidence, attributable multi-agent execution traces, direkten run-local conversation access und agent-local conversation isolation in provider-neutralen Projektionen. Jede Integration bewahrt nur die stärkste identity/routing evidence, die der Provider tatsächlich offenlegt, und enthält sich, wenn diese Evidence fehlt. Observed evidence und inference bleiben konstruktiv getrennt.
 
 ## Dokumentation
 

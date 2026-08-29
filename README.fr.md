@@ -31,7 +31,7 @@ Installez le dernier wheel/sdist publié depuis PyPI :
 python -m pip install -U execweave
 ```
 
-La version courante est **v0.7.2**.
+La version courante est **v0.7.3**.
 
 Pour le développement :
 
@@ -67,7 +67,7 @@ execweave record --open -- python my_agent.py
 
 `execweave top -- codex` garde l’Agent interactif dans le terminal de lancement tout en ouvrant ou en attachant le dashboard Top détaché selon l’environnement hôte.
 
-**v0.7.2 — conversations multi-agent provider-neutral et agent-local.** ExecWeave projette désormais les conversation evidence réellement exposées par le provider dans des threads de dashboard propres à chaque agent, au lieu de dupliquer un transcript complet dans tous les agent nodes. Lorsque le provider expose une identity ou un routing faisant autorité, ExecWeave conserve les task assignments parent → child, les inter-agent messages, les waits/results et les final responses child → parent. Un child agent ne garde que la tâche qu’il a réellement reçue et sa propre conversation ; l’inherited parent history et le contenu privé des siblings sont exclus. La couche de merge commune scope également par provider, raw thread identity et agent identity, de sorte qu’un thread ID réutilisé ne puisse pas fusionner Agent 1 avec Agent 2.
+**v0.7.3 — conversations multi-agent provider-neutral et agent-local.** ExecWeave projette désormais les conversation evidence réellement exposées par le provider dans des threads de dashboard propres à chaque agent, au lieu de dupliquer un transcript complet dans tous les agent nodes. Lorsque le provider expose une identity ou un routing faisant autorité, ExecWeave conserve les task assignments parent → child, les inter-agent messages, les waits/results et les final responses child → parent. Un child agent ne garde que la tâche qu’il a réellement reçue et sa propre conversation ; l’inherited parent history et le contenu privé des siblings sont exclus. La couche de merge commune scope également par provider, raw thread identity et agent identity, de sorte qu’un thread ID réutilisé ne puisse pas fusionner Agent 1 avec Agent 2.
 
 Le dashboard unifié rassemble execution graph, logs et conversation records dans le même flux d’inspection. Les runs finalisés génèrent `conversations.md` et `conversations.json`, et les transcripts provider validés sont copiés dans le content store SHA-256 local au run. Claude Code, OpenAI Codex, Cursor, OpenCode et Google Antigravity exploitent chacun le niveau de multi-agent evidence réellement exposé par leur integration. Lorsqu’un gateway ou un local runtime n’expose que des request/response root, ExecWeave affiche uniquement cette root conversation et n’invente ni subagent ni hidden routing.
 
@@ -276,7 +276,7 @@ La conversation isolation est une règle d’attribution et d’affichage, pas u
 
 ## État actuel
 
-v0.7.2 combine cross-platform runtime collection, materialized execution graphs, standalone/live dashboards, conservative provider↔runtime correlation, full-fidelity content-addressed provider evidence, attributable multi-agent execution traces, accès direct aux conversations run-local et agent-local conversation isolation dans les projections provider-neutral. Chaque integration conserve uniquement la meilleure identity/routing evidence réellement exposée par le provider et s’abstient lorsque cette evidence manque. Observed evidence et inference restent séparées par conception.
+v0.7.3 combine cross-platform runtime collection, materialized execution graphs, standalone/live dashboards, conservative provider↔runtime correlation, full-fidelity content-addressed provider evidence, attributable multi-agent execution traces, accès direct aux conversations run-local et agent-local conversation isolation dans les projections provider-neutral. Chaque integration conserve uniquement la meilleure identity/routing evidence réellement exposée par le provider et s’abstient lorsque cette evidence manque. Observed evidence et inference restent séparées par conception.
 
 ## Documentation
 
