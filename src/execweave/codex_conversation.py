@@ -157,6 +157,16 @@ def _message(timestamp: object, ordinal: object, **fields: Any) -> dict[str, Any
     }
 
 
+def _parent_agent_path(identity: dict[str, Any], agent_path: str | None) -> str | None:
+    if identity.get("parent_thread_id") is None:
+        return None
+    if isinstance(agent_path, str) and agent_path.startswith("/root/"):
+        parent = agent_path.rsplit("/", 1)[0]
+        if parent:
+            return parent
+    return "/root"
+
+
 def codex_rollout_preview(path: str | Path) -> dict[str, Any] | None:
     """Extract visible conversation items without exposing hidden/system context."""
     source = Path(path).expanduser().resolve(strict=False)
@@ -168,6 +178,7 @@ def codex_rollout_preview(path: str | Path) -> dict[str, Any] | None:
     agent_path = identity.get("agent_path")
     if not isinstance(agent_path, str) or not agent_path:
         agent_path = "/root" if identity.get("parent_thread_id") is None else None
+    parent_agent_path = _parent_agent_path(identity, agent_path)
     messages: list[dict[str, Any]] = []
     try:
         with source.open("r", encoding="utf-8") as handle:
@@ -212,13 +223,18 @@ def codex_rollout_preview(path: str | Path) -> dict[str, Any] | None:
                     phase = payload.get("phase")
                     text = _content_text(payload.get("content"))
                     if role == "assistant" and text and phase in {"commentary", "final_answer"}:
+                        is_subagent_final = phase == "final_answer" and parent_agent_path is not None
                         messages.append(
                             _message(
                                 record.get("timestamp"),
                                 ordinal,
-                                kind="assistant_message",
+                                kind=(
+                                    "subagent_final_response"
+                                    if is_subagent_final
+                                    else "assistant_message"
+                                ),
                                 sender=agent_path,
-                                recipient=None,
+                                recipient=parent_agent_path if is_subagent_final else None,
                                 text=_trim_text(text),
                                 content_state="plaintext",
                                 phase=phase,
@@ -239,6 +255,24 @@ def codex_rollout_preview(path: str | Path) -> dict[str, Any] | None:
                                     text=_trim_text(text),
                                     content_state="plaintext",
                                     phase=None,
+                                    task_name=None,
+                                )
+                            )
+                        elif parent_agent_path is not None:
+                            # For subagent rollouts, inherited history is removed by
+                            # subagent_history_start_ordinal. A remaining provider-visible
+                            # user-role item without user.text metadata is the delegated
+                            # task from the parent agent, not a human prompt.
+                            messages.append(
+                                _message(
+                                    record.get("timestamp"),
+                                    ordinal,
+                                    kind="task",
+                                    sender=parent_agent_path,
+                                    recipient=agent_path,
+                                    text=_trim_text(text),
+                                    content_state="plaintext",
+                                    phase="assignment",
                                     task_name=None,
                                 )
                             )

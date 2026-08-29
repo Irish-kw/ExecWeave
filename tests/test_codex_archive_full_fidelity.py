@@ -51,6 +51,21 @@ def test_codex_archive_preserves_complete_rollout_bytes_and_dashboard_preview(
             "type": "response_item",
             "payload": {
                 "type": "message",
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": "找出今晚仍營業的宵夜候選，整理首選與備案回報給 root。",
+                    }
+                ],
+            },
+        },
+        {
+            "timestamp": "2026-08-28T00:00:02Z",
+            "ordinal": 2,
+            "type": "response_item",
+            "payload": {
+                "type": "message",
                 "role": "assistant",
                 "phase": "commentary",
                 "content": [
@@ -62,8 +77,8 @@ def test_codex_archive_preserves_complete_rollout_bytes_and_dashboard_preview(
             },
         },
         {
-            "timestamp": "2026-08-28T00:00:02Z",
-            "ordinal": 2,
+            "timestamp": "2026-08-28T00:00:03Z",
+            "ordinal": 3,
             "type": "response_item",
             "payload": {
                 "type": "agent_message",
@@ -82,8 +97,8 @@ def test_codex_archive_preserves_complete_rollout_bytes_and_dashboard_preview(
             },
         },
         {
-            "timestamp": "2026-08-28T00:00:03Z",
-            "ordinal": 3,
+            "timestamp": "2026-08-28T00:00:04Z",
+            "ordinal": 4,
             "type": "response_item",
             "payload": {
                 "type": "function_call",
@@ -98,8 +113,8 @@ def test_codex_archive_preserves_complete_rollout_bytes_and_dashboard_preview(
             },
         },
         {
-            "timestamp": "2026-08-28T00:00:04Z",
-            "ordinal": 4,
+            "timestamp": "2026-08-28T00:00:05Z",
+            "ordinal": 5,
             "type": "response_item",
             "payload": {
                 "type": "message",
@@ -130,7 +145,7 @@ def test_codex_archive_preserves_complete_rollout_bytes_and_dashboard_preview(
             "transcript_path": str(rollout),
         },
         store=store,
-        timestamp="2026-08-28T00:00:05Z",
+        timestamp="2026-08-28T00:00:06Z",
     )
 
     assert len(events) == 1
@@ -160,6 +175,14 @@ def test_codex_archive_preserves_complete_rollout_bytes_and_dashboard_preview(
     assert preview["agent_path"] == "/root/nightfood_b"
     assert preview["agent_nickname"] == "Banach"
     assert any(
+        message["kind"] == "task"
+        and message["sender"] == "/root"
+        and message["recipient"] == "/root/nightfood_b"
+        and message["phase"] == "assignment"
+        and message["text"] == "找出今晚仍營業的宵夜候選，整理首選與備案回報給 root。"
+        for message in preview["messages"]
+    )
+    assert any(
         message["sender"] == "/root/nightfood_a"
         and message["recipient"] == "/root/nightfood_b"
         and message["content_state"] == "provider_encrypted"
@@ -170,7 +193,9 @@ def test_codex_archive_preserves_complete_rollout_bytes_and_dashboard_preview(
         for message in preview["messages"]
     )
     assert any(
-        message["phase"] == "final_answer"
+        message["kind"] == "subagent_final_response"
+        and message["recipient"] == "/root"
+        and message["phase"] == "final_answer"
         and message["text"] == "已與顧問 A 收斂：首選小李子清粥小菜，備案東引小吃店。"
         for message in preview["messages"]
     )
@@ -179,6 +204,7 @@ def test_codex_archive_preserves_complete_rollout_bytes_and_dashboard_preview(
     html = viewer.read_text(encoding="utf-8")
     assert "/root/nightfood_b" in html
     assert "Banach" in html
+    assert "找出今晚仍營業的宵夜候選，整理首選與備案回報給 root。" in html
     assert "已與顧問 A 收斂：首選小李子清粥小菜，備案東引小吃店。" in html
     assert "Provider-encrypted payload" in html
 
