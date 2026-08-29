@@ -30,7 +30,6 @@ ExecWeave は Codex lifecycle-hook evidence を独立した OS runtime telemetry
 - `SubagentStart`
 - `SubagentStop`
 - `Stop`
-- `Interrupt`
 
 未知または利用できない upstream event は作りません。Hook schema と dispatch coverage は Codex version により変わる可能性があります。
 

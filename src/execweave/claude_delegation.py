@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from .agent_topology import EVIDENCE_SUBAGENT_LIFECYCLE_HOOK, subagent_topology
 
 
 def _entity(
@@ -36,6 +37,10 @@ def _subagent(payload: dict[str, Any]) -> dict[str, Any] | None:
         provider="claude",
         agent_id=agent_id,
         agent_type=name,
+        **subagent_topology(
+            evidence=EVIDENCE_SUBAGENT_LIFECYCLE_HOOK,
+            parent_scope_id=session,
+        ),
     )
 
 

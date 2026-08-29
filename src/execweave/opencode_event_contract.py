@@ -4,6 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 from typing import Any
+from .agent_topology import root_topology
 
 OPENCODE_EVENTS_REFERENCE = "https://opencode.ai/docs/plugins/"
 
@@ -85,6 +86,7 @@ def _session_agent(session_id: str) -> dict[str, Any]:
             "provider": "opencode",
             "session_id": session_id,
             "identity_semantics": "provider_session_id",
+            **root_topology(),
         },
     )
 

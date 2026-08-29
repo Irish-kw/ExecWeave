@@ -5,6 +5,7 @@ from typing import Any
 
 from .content_evidence import content_observation_event, filter_transport_credentials
 from .content_store import ContentReference, FullFidelityContentStore
+from .agent_topology import EVIDENCE_SUBAGENT_LIFECYCLE_HOOK, subagent_topology
 
 _CONTENT_FIELDS = frozenset(
     {
@@ -54,7 +55,15 @@ def _subagent(payload: dict[str, Any]) -> dict[str, Any]:
         "agent",
         f"agent:claude:{session}:subagent:{agent}",
         name=name,
-        attributes={"provider": "claude", "agent_id": agent, "agent_type": name},
+        attributes={
+            "provider": "claude",
+            "agent_id": agent,
+            "agent_type": name,
+            **subagent_topology(
+                evidence=EVIDENCE_SUBAGENT_LIFECYCLE_HOOK,
+                parent_scope_id=session,
+            ),
+        },
     )
 
 

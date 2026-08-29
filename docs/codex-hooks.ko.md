@@ -30,7 +30,6 @@ ExecWeave는 Codex 라이프사이클 훅 증거를 독립적인 OS 런타임 �
 - `SubagentStart`
 - `SubagentStop`
 - `Stop`
-- `Interrupt`
 
 업스트림에 없거나 사용할 수 없는 이벤트를 ExecWeave가 만들어내지는 않습니다. Codex 버전에 따라 훅 스키마와 디스패치 범위가 달라질 수 있습니다.
 

@@ -30,12 +30,22 @@ def main() -> int:
     }
     if not os.environ.get("EXECWEAVE_SEMANTIC_SIDECAR"):
         raise SystemExit("run-bound semantic sidecar environment was not inherited")
-    subprocess.run(
-        ["execweave-claude-hook"],
-        input=json.dumps(payload),
-        text=True,
-        check=True,
-    )
+
+    def send(body: dict) -> None:
+        subprocess.run(
+            ["execweave-claude-hook"], input=json.dumps(body), text=True, check=True
+        )
+
+    base = {key: payload[key] for key in ("session_id", "cwd", "permission_mode")}
+    # Conversation evidence, so the run materializes a conversations.json CI can check.
+    send({**base, "hook_event_name": "UserPromptSubmit", "prompt": "CI CLAUDE PROMPT"})
+    send(payload)
+    send({
+        **base,
+        "hook_event_name": "Stop",
+        "stop_hook_active": False,
+        "last_assistant_message": "CI CLAUDE FINAL ANSWER",
+    })
     child = subprocess.Popen(child_argv)
     # Keep the emitter alive while the child is running so the portable sampler
     # gets many observation opportunities on slower hosted runners.

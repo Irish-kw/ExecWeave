@@ -4,6 +4,12 @@ from pathlib import Path
 from typing import Any
 
 from .antigravity_subagent_linkage import validated_transcript_path as _antigravity_transcript_path
+from .agent_topology import (
+    EVIDENCE_ROLLOUT_SESSION_META,
+    EVIDENCE_VALIDATED_CHILD_TRANSCRIPT,
+    root_topology,
+    subagent_topology,
+)
 from .codex_conversation import codex_transcript_observed_field, validated_codex_transcript
 from .content_evidence import content_observation_event
 from .content_store import FullFidelityContentStore
@@ -127,7 +133,11 @@ def claude_conversation_archive_events(
             "agent",
             "agent:Claude Code",
             name="Claude Code",
-            attributes={"provider": "claude", "session_id": session_id},
+            attributes={
+                "provider": "claude",
+                "session_id": session_id,
+                **root_topology(),
+            },
         )
         return _archive(
             path=path,
@@ -162,6 +172,10 @@ def claude_conversation_archive_events(
                 "agent_id": agent_id,
                 "agent_type": name,
                 "identity_semantics": "provider_exposed_agent_id",
+                **subagent_topology(
+                    evidence=EVIDENCE_VALIDATED_CHILD_TRANSCRIPT,
+                    parent_scope_id=session_id,
+                ),
             },
         )
         return _archive(
@@ -222,10 +236,14 @@ def codex_conversation_archive_events(
                 "session_id": session_id,
                 "agent_id": agent_id,
                 "agent_type": agent_type,
-                "agent_path": agent_path,
                 "agent_nickname": nickname,
                 "parent_thread_id": identity.get("parent_thread_id"),
                 "identity_semantics": "provider_rollout_session_meta",
+                **subagent_topology(
+                    evidence=EVIDENCE_ROLLOUT_SESSION_META,
+                    parent_scope_id=session_id,
+                    agent_path=agent_path if isinstance(agent_path, str) else None,
+                ),
             },
         )
         return _archive(
@@ -256,8 +274,8 @@ def codex_conversation_archive_events(
             "provider": "codex",
             "session_id": session_id,
             "thread_id": identity.get("thread_id"),
-            "agent_path": "/root",
             "identity_semantics": "provider_rollout_session_meta",
+            **root_topology(evidence=EVIDENCE_ROLLOUT_SESSION_META),
         },
     )
     return _archive(
@@ -300,6 +318,7 @@ def antigravity_conversation_archive_events(
             "provider": "antigravity",
             "conversation_id": conversation_id,
             "identity_semantics": "provider_conversation_id",
+            **root_topology(),
         },
     )
     return _archive(

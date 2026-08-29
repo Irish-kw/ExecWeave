@@ -41,6 +41,8 @@ def main() -> int:
         "model_id": "ci-model-id",
     }
     _send({**base, "hook_event_name": "sessionStart"})
+    # Conversation evidence, so CI can assert the materialized conversations.json.
+    _send({**base, "hook_event_name": "beforeSubmitPrompt", "prompt": "CI CURSOR PROMPT"})
 
     child_argv, declared_command = _child_command()
     tool = {
@@ -57,6 +59,7 @@ def main() -> int:
     code = int(child.wait())
 
     _send({**tool, "hook_event_name": "postToolUse", "tool_output": "not persisted"})
+    _send({**base, "hook_event_name": "afterAgentResponse", "text": "CI CURSOR FINAL ANSWER"})
     return code
 
 

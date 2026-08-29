@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import execweave.live as live_module
+from execweave.agent_trace import cursor_subagent
 from execweave.conversation_records import conversation_record_entries, write_conversation_records
 from execweave.viewer_projection import write_graph_html
 
@@ -383,16 +384,16 @@ def test_subagent_preview_uses_same_parent_child_contract(tmp_path: Path) -> Non
         "name": "Cursor",
         "attributes": {"provider": "cursor"},
     }
-    child = {
-        "id": "agent:cursor:session-1:subagent:child-1",
-        "type": "agent",
-        "name": "Explore",
-        "attributes": {
-            "provider": "cursor",
+    # Built by the production constructor so the test exercises the real
+    # provider-evidence contract rather than a hand-shaped attribute bag.
+    child = cursor_subagent(
+        {
+            "session_id": "session-1",
             "subagent_id": "child-1",
             "subagent_type": "Explore",
-        },
-    }
+        }
+    )
+    assert child is not None
     _add_content(
         graph,
         tmp_path,
@@ -420,6 +421,10 @@ def test_subagent_preview_uses_same_parent_child_contract(tmp_path: Path) -> Non
     assert child_preview["parent_thread_id"] == "cursor:root"
     assert child_preview["agent_path"].startswith("/root/")
     assert child_preview["messages"][0]["recipient"] == "/root"
+    # The relationship is provider-reported; the path itself is ExecWeave's rendering.
+    assert child_preview["topology_state"] == "provider_reported"
+    assert child_preview["agent_path_source"] == "execweave_derived"
+    assert child_preview["parent_relation_source"] == "provider_subagent_lifecycle_hook"
 
 
 def test_dashboard_copy_and_root_detection_are_provider_neutral(tmp_path: Path) -> None:

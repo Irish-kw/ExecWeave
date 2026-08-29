@@ -30,7 +30,6 @@ ExecWeave records Codex lifecycle-hook evidence beside independent OS runtime te
 - `SubagentStart`
 - `SubagentStop`
 - `Stop`
-- `Interrupt`
 
 Unknown or unavailable upstream events are not invented. Hook schemas and dispatch coverage can change between Codex versions.
 

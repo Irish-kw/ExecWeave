@@ -30,7 +30,6 @@ ExecWeave zeichnet Evidenz aus Codex-Lifecycle-Hooks neben unabhängig erfasster
 - `SubagentStart`
 - `SubagentStop`
 - `Stop`
-- `Interrupt`
 
 Unbekannte oder upstream nicht verfügbare Ereignisse werden nicht erfunden. Hook-Schemata und Dispatch-Abdeckung können sich zwischen Codex-Versionen ändern.
 
