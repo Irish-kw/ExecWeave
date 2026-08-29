@@ -3,9 +3,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from .agent_topology import EVIDENCE_SUBAGENT_LIFECYCLE_HOOK, subagent_topology
 from .content_evidence import content_observation_event, filter_transport_credentials
 from .content_store import ContentReference, FullFidelityContentStore
-from .agent_topology import EVIDENCE_SUBAGENT_LIFECYCLE_HOOK, subagent_topology
 
 _CONTENT_FIELDS = frozenset({"prompt", "tool_input", "tool_response", "last_assistant_message"})
 
@@ -146,16 +146,46 @@ def _metadata_event(
     )
 
 
-def codex_hook_to_content_events(
+def codex_hook_to_metadata_events(
     payload: dict[str, Any],
     *,
     store: FullFidelityContentStore,
     timestamp: str | None = None,
 ) -> list[dict[str, Any]]:
+    """Persist provider hook metadata independently from optional content values.
+
+    This is deliberately a separate stage so a failure while storing a prompt,
+    tool result, or final assistant message cannot erase already-observed routing
+    metadata such as ``agent_transcript_path``.
+    """
+    hook_event = payload.get("hook_event_name")
+    if not isinstance(hook_event, str) or not hook_event:
+        raise ValueError("Codex hook payload requires hook_event_name")
+    observed_at = timestamp or _now()
+    event = _metadata_event(
+        payload,
+        store=store,
+        timestamp=observed_at,
+        hook_event=hook_event,
+    )
+    return [event] if event is not None else []
+
+
+def codex_hook_to_content_events(
+    payload: dict[str, Any],
+    *,
+    store: FullFidelityContentStore,
+    timestamp: str | None = None,
+    include_metadata: bool = True,
+) -> list[dict[str, Any]]:
     """Persist complete values exposed by the documented Codex hook contract.
 
     Completeness is limited to values Codex supplies to the hook. This function does not read
     transcript paths or claim access to hidden prompts, internal reasoning, or provider-side stages.
+
+    ``include_metadata`` defaults to true for backwards-compatible direct callers.
+    The CLI captures metadata in its own independent stage and passes false here so
+    optional content failures cannot discard metadata that was already observed.
     """
     hook_event = payload.get("hook_event_name")
     if not isinstance(hook_event, str) or not hook_event:
@@ -163,14 +193,14 @@ def codex_hook_to_content_events(
 
     observed_at = timestamp or _now()
     events: list[dict[str, Any]] = []
-    metadata_event = _metadata_event(
-        payload,
-        store=store,
-        timestamp=observed_at,
-        hook_event=hook_event,
-    )
-    if metadata_event is not None:
-        events.append(metadata_event)
+    if include_metadata:
+        events.extend(
+            codex_hook_to_metadata_events(
+                payload,
+                store=store,
+                timestamp=observed_at,
+            )
+        )
 
     if hook_event == "UserPromptSubmit" and isinstance(payload.get("prompt"), str):
         events.append(
