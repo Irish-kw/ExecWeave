@@ -11,6 +11,8 @@ from .agent_topology import (
     PATH_EXECWEAVE_DERIVED,
     PATH_PROVIDER_DECLARED,
     ROOT_PATH,
+    THREAD_ID_EXECWEAVE_DERIVED,
+    THREAD_ID_PROVIDER_NATIVE,
     TOPOLOGY_OBSERVED,
     TOPOLOGY_PROVIDER_REPORTED,
     resolve_agent_topology,
@@ -136,6 +138,7 @@ def _agent_identity(provider: str, source: dict[str, Any] | None) -> dict[str, A
 
     return {
         "thread_id": thread_id,
+        "thread_id_source": THREAD_ID_EXECWEAVE_DERIVED,
         "parent_thread_id": parent_thread_id,
         "agent_label": agent_label,
         "provider_label": provider_label,
@@ -618,6 +621,8 @@ def _codex_preview(
         "provider_label": _provider_label(provider),
         "agent_label": preview.get("agent_nickname") or identity["agent_label"],
     }
+    if preview.get("thread_id_source") is None and preview.get("thread_id"):
+        result["thread_id_source"] = THREAD_ID_PROVIDER_NATIVE
     if isinstance(agent_path, str) and agent_path:
         is_root = agent_path == ROOT_PATH
         result["agent_path"] = agent_path

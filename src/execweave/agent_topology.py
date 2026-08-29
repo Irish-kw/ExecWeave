@@ -85,6 +85,13 @@ def strongest_completeness(values: list[str]) -> str:
     return max(known, key=lambda value: _COMPLETENESS_RANK[value])
 
 
+# Where a conversation thread's identifier came from. A provider-native thread id is
+# authoritative; a synthesized one is ExecWeave's label for the same execution, and the
+# two must be reconcilable rather than producing two conversations for one agent.
+THREAD_ID_PROVIDER_NATIVE = "provider_native"
+THREAD_ID_EXECWEAVE_DERIVED = "execweave_derived"
+
+
 AGENT_ROLE_ROOT = "root"
 AGENT_ROLE_SUBAGENT = "subagent"
 

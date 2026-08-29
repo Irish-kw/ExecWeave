@@ -10,6 +10,7 @@ from .agent_topology import (
     EVIDENCE_CROSS_AGENT_ROUTING,
     PATH_PROVIDER_DECLARED,
     ROOT_PATH,
+    THREAD_ID_PROVIDER_NATIVE,
     TOPOLOGY_OBSERVED,
     strongest_completeness,
 )
@@ -190,21 +191,72 @@ def _cross_source_message_sort_key(message: dict[str, Any], index: int) -> tuple
     )
 
 
-def _conversation_scope(
+def _conversation_identity_keys(
     entry: dict[str, Any],
     preview: dict[str, Any],
-) -> tuple[str, str, str]:
+) -> tuple[str, str, set[tuple[str, str]]]:
+    """Return the positive evidence that identifies this record's agent execution.
+
+    Two records may be merged only when evidence establishes they describe the *same*
+    execution. Two kinds of positive evidence qualify:
+
+    ``graph_agent``
+        The same graph agent node. That id already encodes the provider-native
+        identity it was built from (``agent:codex:<session>:subagent:<agent_id>``), so
+        sharing it is a provider-grounded statement that this is one execution.
+
+    ``provider_thread``
+        The same raw thread identity, which is how incremental provider content for one
+        conversation has always been recognized.
+
+    Matching labels, nicknames, similar-looking thread ids, or both being children of
+    ``/root`` are deliberately absent: none of them establishes shared identity. The
+    agent path is carried in every key rather than being a key itself, so records for
+    two different agents can never merge no matter what else they share.
+    """
     provider = str(entry.get("provider") or "unknown").lower()
-    thread_id = str(
-        preview.get("thread_id") or f"{provider}:{entry.get('source_id') or 'unknown'}"
-    )
     agent_path = preview.get("agent_path")
     agent_scope = (
         str(agent_path)
         if isinstance(agent_path, str) and agent_path
         else str(entry.get("source_id") or "unknown")
     )
-    return provider, thread_id, agent_scope
+    keys: set[tuple[str, str]] = set()
+    source_id = entry.get("source_id")
+    if isinstance(source_id, str) and source_id:
+        keys.add(("graph_agent", source_id))
+    thread_id = preview.get("thread_id")
+    if isinstance(thread_id, str) and thread_id:
+        keys.add(("provider_thread", thread_id))
+    if not keys:
+        keys.add(("unidentified", str(id(entry))))
+    return provider, agent_scope, keys
+
+
+def _canonical_thread_id(previews: list[dict[str, Any]]) -> tuple[str | None, list[str]]:
+    """Pick the preferred thread id for one execution and keep every contributing id.
+
+    A provider-native id wins over an ExecWeave-synthesized one, so merging never
+    downgrades an identity the provider actually published, and a provider that exposes
+    no thread of its own keeps the synthesized id it has always had. Selection is
+    deterministic: sorted within each class.
+    """
+    native: set[str] = set()
+    derived: set[str] = set()
+    for preview in previews:
+        thread_id = preview.get("thread_id")
+        if not isinstance(thread_id, str) or not thread_id:
+            continue
+        if preview.get("thread_id_source") == THREAD_ID_PROVIDER_NATIVE:
+            native.add(thread_id)
+        else:
+            derived.add(thread_id)
+    evidence = sorted(native | derived)
+    if native:
+        return sorted(native)[0], evidence
+    if derived:
+        return sorted(derived)[0], evidence
+    return None, evidence
 
 
 def _parent_agent_path(agent_path: object) -> str | None:
@@ -215,33 +267,76 @@ def _parent_agent_path(agent_path: object) -> str | None:
 
 
 def _merge_conversation_previews(entries: list[dict[str, Any]]) -> None:
-    """Merge incremental provider content without crossing agent identity boundaries."""
-    grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
-    thread_agents: dict[tuple[str, str], set[str]] = {}
-    for entry in entries:
-        preview = entry.get("conversation_preview")
-        if not isinstance(preview, dict):
-            continue
-        scope = _conversation_scope(entry, preview)
-        grouped.setdefault(scope, []).append(entry)
-        thread_agents.setdefault(scope[:2], set()).add(scope[2])
+    """Merge evidence describing one agent execution, without crossing identities.
 
-    scoped_thread_ids: dict[tuple[str, str, str], str] = {}
-    for scope in grouped:
-        provider, raw_thread_id, agent_scope = scope
-        if len(thread_agents.get((provider, raw_thread_id), set())) > 1:
-            scoped_thread_ids[scope] = f"{raw_thread_id}::agent={agent_scope}"
-        else:
-            scoped_thread_ids[scope] = raw_thread_id
+    One execution can be observed through several kinds of evidence that name its
+    thread differently — a provider-native Codex rollout id on one record and a
+    synthesized ``<provider>:root`` on another. Grouping by raw thread alone published
+    those as two conversations for the same agent. Records are therefore grouped by the
+    transitive closure of positive identity evidence (see
+    :func:`_conversation_identity_keys`), which merges those records while still
+    keeping genuinely distinct agents and distinct conversations apart.
+    """
+    indexed_entries: list[dict[str, Any]] = [
+        entry for entry in entries if isinstance(entry.get("conversation_preview"), dict)
+    ]
+    if not indexed_entries:
+        return
 
-    merged_by_scope: dict[tuple[str, str, str], dict[str, Any]] = {}
-    for scope, group in grouped.items():
-        representative = max(group, key=_entry_rank)
-        previews = [
-            entry["conversation_preview"]
-            for entry in group
-            if isinstance(entry.get("conversation_preview"), dict)
-        ]
+    parents = list(range(len(indexed_entries)))
+
+    def find(node: int) -> int:
+        while parents[node] != node:
+            parents[node] = parents[parents[node]]
+            node = parents[node]
+        return node
+
+    def union(left: int, right: int) -> None:
+        left_root, right_root = find(left), find(right)
+        if left_root != right_root:
+            parents[max(left_root, right_root)] = min(left_root, right_root)
+
+    scopes: list[tuple[str, str]] = []
+    first_seen: dict[tuple[str, str, str, str], int] = {}
+    for index, entry in enumerate(indexed_entries):
+        provider, agent_scope, keys = _conversation_identity_keys(
+            entry, entry["conversation_preview"]
+        )
+        scopes.append((provider, agent_scope))
+        for kind, value in keys:
+            # The agent scope is part of every key, so evidence can never join records
+            # that belong to two different agents.
+            slot = (provider, agent_scope, kind, value)
+            union(index, first_seen.setdefault(slot, index))
+
+    components: dict[int, list[int]] = {}
+    for index in range(len(indexed_entries)):
+        components.setdefault(find(index), []).append(index)
+
+    # A provider can reuse one thread id across agents. Detect that before publishing,
+    # so a reused id still cannot fold Agent 1 into Agent 2.
+    canonical_owners: dict[tuple[str, str], set[str]] = {}
+    resolved: dict[int, tuple[str | None, list[str]]] = {}
+    for root, members in components.items():
+        previews = [indexed_entries[i]["conversation_preview"] for i in members]
+        canonical, evidence = _canonical_thread_id(previews)
+        resolved[root] = (canonical, evidence)
+        if canonical is not None:
+            provider, agent_scope = scopes[members[0]]
+            canonical_owners.setdefault((provider, canonical), set()).add(agent_scope)
+
+    thread_alias: dict[tuple[str, str, str], str] = {}
+    merged_by_root: dict[int, dict[str, Any]] = {}
+    for root, members in components.items():
+        group = [indexed_entries[i] for i in members]
+        provider, agent_scope = scopes[members[0]]
+        previews = [entry["conversation_preview"] for entry in group]
+        canonical, evidence_thread_ids = resolved[root]
+
+        published = canonical if canonical is not None else agent_scope
+        if canonical is not None and len(canonical_owners[(provider, canonical)]) > 1:
+            published = f"{canonical}::agent={agent_scope}"
+
         merged_messages: list[dict[str, Any]] = []
         for preview in previews:
             for message in preview.get("messages") or []:
@@ -264,7 +359,16 @@ def _merge_conversation_previews(entries: list[dict[str, Any]]) -> None:
         if truncated:
             deduped = deduped[:10] + deduped[-70:]
 
-        latest_preview = representative["conversation_preview"]
+        representative = max(group, key=_entry_rank)
+        canonical_preview = next(
+            (preview for preview in previews if preview.get("thread_id") == canonical),
+            None,
+        )
+        # The record that owns the canonical thread describes this agent directly, so
+        # its identity fields are preferred over one that inherited them from a parent.
+        search_order = [canonical_preview] if canonical_preview is not None else []
+        search_order += list(reversed(previews))
+
         merged_preview: dict[str, Any] = {}
         carried = (
             "parent_thread_id",
@@ -279,39 +383,50 @@ def _merge_conversation_previews(entries: list[dict[str, Any]]) -> None:
             "parent_agent_path",
             "parent_relation_source",
             "provider_native_id",
+            "thread_id_source",
         )
         for field in carried:
-            for preview in reversed(previews):
+            for preview in search_order:
                 value = preview.get(field)
                 if value is not None and value != "":
                     merged_preview[field] = value
                     break
         for field in carried:
-            merged_preview.setdefault(field, latest_preview.get(field))
+            merged_preview.setdefault(field, representative["conversation_preview"].get(field))
         merged_preview["conversation_completeness"] = strongest_completeness(
             [str(preview.get("conversation_completeness") or "") for preview in previews]
         )
-        merged_preview["thread_id"] = scoped_thread_ids[scope]
+        merged_preview["thread_id"] = published
+        merged_preview["evidence_thread_ids"] = evidence_thread_ids
         merged_preview["message_count"] = len(deduped)
         merged_preview["messages_truncated"] = truncated or any(
             bool(preview.get("messages_truncated")) for preview in previews
         )
         merged_preview["messages"] = deduped
 
+        for raw_thread_id in evidence_thread_ids:
+            thread_alias[(provider, raw_thread_id, agent_scope)] = published
+
         for entry in group:
             entry.pop("conversation_preview", None)
         representative["conversation_preview"] = merged_preview
-        merged_by_scope[scope] = merged_preview
+        merged_by_root[root] = merged_preview
 
-    for scope, preview in merged_by_scope.items():
+    # Parent links were recorded against a contributing thread id, which may not be the
+    # one published. Re-point them at the parent's canonical thread.
+    for root, preview in merged_by_root.items():
         parent_thread_id = preview.get("parent_thread_id")
-        parent_path = _parent_agent_path(preview.get("agent_path"))
-        if not isinstance(parent_thread_id, str) or not parent_thread_id or parent_path is None:
+        parent_path = preview.get("parent_agent_path") or _parent_agent_path(
+            preview.get("agent_path")
+        )
+        if not isinstance(parent_thread_id, str) or not parent_thread_id:
             continue
-        parent_scope = (scope[0], parent_thread_id, parent_path)
-        scoped_parent = scoped_thread_ids.get(parent_scope)
-        if scoped_parent is not None:
-            preview["parent_thread_id"] = scoped_parent
+        if not isinstance(parent_path, str) or not parent_path:
+            continue
+        provider = scopes[components[root][0]][0]
+        alias = thread_alias.get((provider, parent_thread_id, parent_path))
+        if alias is not None:
+            preview["parent_thread_id"] = alias
 
 
 def _derived_agent_entry_source_id(entry: dict[str, Any], preview: dict[str, Any]) -> str:
