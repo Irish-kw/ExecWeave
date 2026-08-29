@@ -33,8 +33,7 @@ DOCS = [
 ]
 
 README_REQUIRED_SNIPPETS = [
-    "v0.6.3",
-    "v0.6.4",
+    "v0.6.9",
     "execweave live --open -- cursor",
     "execweave live --open -- opencode",
     "execweave live --open -- ollama serve",
