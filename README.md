@@ -67,7 +67,7 @@ execweave record --open -- python my_agent.py
 
 `execweave top -- codex` keeps the Agent interactive in the launch terminal while opening/attaching the detached Top dashboard according to the host environment.
 
-## v0.7.1: unified provider conversation dashboard
+**v0.7.1 — unified provider conversation dashboard.**
 
 v0.7.1 makes the conversation experience provider-neutral instead of Codex-specific. Claude Code, OpenAI Codex, Cursor, OpenCode, Gemini-compatible evidence, Google Antigravity, Anthropic, OpenRouter, LiteLLM, supported local model runtimes, and OpenAI-compatible integrations now project provider-exposed conversation evidence into the same dashboard conversation schema and rooted timeline model.
 
