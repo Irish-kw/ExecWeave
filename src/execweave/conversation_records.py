@@ -165,18 +165,52 @@ def _message_sort_key(message: dict[str, Any], index: int) -> tuple[object, ...]
     )
 
 
+def _conversation_scope(
+    entry: dict[str, Any],
+    preview: dict[str, Any],
+) -> tuple[str, str, str]:
+    provider = str(entry.get("provider") or "unknown").lower()
+    thread_id = str(
+        preview.get("thread_id") or f"{provider}:{entry.get('source_id') or 'unknown'}"
+    )
+    agent_path = preview.get("agent_path")
+    agent_scope = (
+        str(agent_path)
+        if isinstance(agent_path, str) and agent_path
+        else str(entry.get("source_id") or "unknown")
+    )
+    return provider, thread_id, agent_scope
+
+
+def _parent_agent_path(agent_path: object) -> str | None:
+    if not isinstance(agent_path, str) or not agent_path.startswith("/root/"):
+        return None
+    parent = agent_path.rsplit("/", 1)[0]
+    return parent or "/root"
+
+
 def _merge_conversation_previews(entries: list[dict[str, Any]]) -> None:
-    """Merge incremental provider content into one latest rich preview per conversation thread."""
-    grouped: dict[str, list[dict[str, Any]]] = {}
+    """Merge incremental provider content without crossing agent identity boundaries."""
+    grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    thread_agents: dict[tuple[str, str], set[str]] = {}
     for entry in entries:
         preview = entry.get("conversation_preview")
         if not isinstance(preview, dict):
             continue
-        thread_id = preview.get("thread_id")
-        key = str(thread_id or f"{entry.get('provider')}:{entry.get('source_id')}")
-        grouped.setdefault(key, []).append(entry)
+        scope = _conversation_scope(entry, preview)
+        grouped.setdefault(scope, []).append(entry)
+        thread_agents.setdefault(scope[:2], set()).add(scope[2])
 
-    for group in grouped.values():
+    scoped_thread_ids: dict[tuple[str, str, str], str] = {}
+    for scope in grouped:
+        provider, raw_thread_id, agent_scope = scope
+        if len(thread_agents.get((provider, raw_thread_id), set())) > 1:
+            scoped_thread_ids[scope] = f"{raw_thread_id}::agent={agent_scope}"
+        else:
+            scoped_thread_ids[scope] = raw_thread_id
+
+    merged_by_scope: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for scope, group in grouped.items():
         representative = max(group, key=_entry_rank)
         previews = [
             entry["conversation_preview"]
@@ -206,7 +240,6 @@ def _merge_conversation_previews(entries: list[dict[str, Any]]) -> None:
         latest_preview = representative["conversation_preview"]
         merged_preview: dict[str, Any] = {}
         for field in (
-            "thread_id",
             "parent_thread_id",
             "agent_path",
             "agent_label",
@@ -219,7 +252,6 @@ def _merge_conversation_previews(entries: list[dict[str, Any]]) -> None:
                 if value is not None and value != "":
                     merged_preview[field] = value
                     break
-        merged_preview.setdefault("thread_id", latest_preview.get("thread_id"))
         for field in (
             "parent_thread_id",
             "agent_path",
@@ -229,6 +261,7 @@ def _merge_conversation_previews(entries: list[dict[str, Any]]) -> None:
             "is_root",
         ):
             merged_preview.setdefault(field, latest_preview.get(field))
+        merged_preview["thread_id"] = scoped_thread_ids[scope]
         merged_preview["message_count"] = len(deduped)
         merged_preview["messages_truncated"] = truncated or any(
             bool(preview.get("messages_truncated")) for preview in previews
@@ -238,6 +271,17 @@ def _merge_conversation_previews(entries: list[dict[str, Any]]) -> None:
         for entry in group:
             entry.pop("conversation_preview", None)
         representative["conversation_preview"] = merged_preview
+        merged_by_scope[scope] = merged_preview
+
+    for scope, preview in merged_by_scope.items():
+        parent_thread_id = preview.get("parent_thread_id")
+        parent_path = _parent_agent_path(preview.get("agent_path"))
+        if not isinstance(parent_thread_id, str) or not parent_thread_id or parent_path is None:
+            continue
+        parent_scope = (scope[0], parent_thread_id, parent_path)
+        scoped_parent = scoped_thread_ids.get(parent_scope)
+        if scoped_parent is not None:
+            preview["parent_thread_id"] = scoped_parent
 
 
 def conversation_record_entries(
