@@ -42,6 +42,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python -m pip install -q -e ".[dev]"
           python - <<'PY'
           from pathlib import Path
           import re
