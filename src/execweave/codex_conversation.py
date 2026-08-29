@@ -97,21 +97,51 @@ def codex_rollout_identity(path: str | Path) -> dict[str, Any] | None:
     return None
 
 
+def _transcript_candidate(payload: dict[str, Any]) -> tuple[Path, str, str] | None:
+    """Select the rollout a Codex hook payload actually describes.
+
+    Codex reports a subagent stop with two different rollouts on one payload:
+    ``agent_transcript_path`` is the spawned child rollout while ``transcript_path``
+    keeps pointing at the parent session rollout. Selecting the parent for a child
+    stop silently drops every subagent conversation, so pick by observed agent id.
+    """
+    agent_id = payload.get("agent_id")
+    if isinstance(agent_id, str) and agent_id:
+        for field in ("agent_transcript_path", "transcript_path"):
+            path = _canonical_absolute_path(payload.get(field))
+            if path is not None and path.stem.endswith(f"-{agent_id}"):
+                return path, agent_id, field
+        return None
+    session_id = payload.get("session_id")
+    if not isinstance(session_id, str) or not session_id:
+        return None
+    path = _canonical_absolute_path(payload.get("transcript_path"))
+    if path is None or not path.stem.endswith(f"-{session_id}"):
+        return None
+    return path, session_id, "transcript_path"
+
+
+def codex_transcript_observed_field(payload: dict[str, Any]) -> str | None:
+    """Name the payload field a validated Codex rollout was actually observed on."""
+    candidate = _transcript_candidate(payload)
+    return candidate[2] if candidate is not None else None
+
+
 def validated_codex_transcript(payload: dict[str, Any]) -> tuple[Path, dict[str, Any]] | None:
     """Validate a hook-supplied rollout path before ExecWeave reads or copies it."""
-    path = _canonical_absolute_path(payload.get("transcript_path"))
-    if path is None or path.suffix.lower() != ".jsonl" or not path.name.startswith("rollout-"):
+    candidate = _transcript_candidate(payload)
+    if candidate is None:
+        return None
+    path, expected, _field = candidate
+    if path.suffix.lower() != ".jsonl" or not path.name.startswith("rollout-"):
         return None
     if not _inside_codex_sessions(path) or not path.is_file():
-        return None
-    agent_id = payload.get("agent_id")
-    session_id = payload.get("session_id")
-    expected = agent_id if isinstance(agent_id, str) and agent_id else session_id
-    if not isinstance(expected, str) or not expected or not path.stem.endswith(f"-{expected}"):
         return None
     identity = codex_rollout_identity(path)
     if identity is None or identity.get("thread_id") != expected:
         return None
+    agent_id = payload.get("agent_id")
+    session_id = payload.get("session_id")
     if isinstance(agent_id, str) and agent_id and isinstance(session_id, str) and session_id:
         parent = identity.get("parent_thread_id")
         if isinstance(parent, str) and parent and parent != session_id:
@@ -183,19 +213,148 @@ def _rollout_ordinal(record: dict[str, Any], projected_ordinal: int) -> tuple[in
     return projected_ordinal, projected_ordinal + 1
 
 
-def codex_rollout_preview(path: str | Path) -> dict[str, Any] | None:
-    """Extract only thread-owned visible conversation items from a Codex rollout.
+def _spawn_target_path(output: object) -> str | None:
+    """Read the agent path Codex returns from a collaboration spawn tool call."""
+    if isinstance(output, str):
+        try:
+            output = json.loads(output)
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(output, dict):
+        return None
+    task_name = output.get("task_name")
+    if isinstance(task_name, str) and task_name.startswith("/root"):
+        return task_name
+    return None
 
-    Codex subagent rollouts can physically contain inherited parent history. Newer
-    paginated rollouts persist ordinals on each line, while older compatible rollouts
-    derive them from physical valid-line order. Apply Codex's own
-    subagent_history_start_ordinal boundary in either representation so inherited
-    history is never rendered as if it belonged to the child agent.
+
+def _subagent_activity(record: dict[str, Any]) -> dict[str, Any] | None:
+    """Return a Codex SubAgentActivity item, the exact agent id/agent path linkage."""
+    if record.get("type") != "event_msg":
+        return None
+    payload = record.get("payload")
+    if not isinstance(payload, dict) or payload.get("type") != "item_completed":
+        return None
+    item = payload.get("item")
+    if isinstance(item, dict) and item.get("type") == "SubAgentActivity":
+        return item
+    return None
+
+
+def _encrypted_message_argument(arguments: object) -> tuple[str | None, bool]:
+    """Split a spawn payload into visible text and Codex's encrypted-envelope marker."""
+    if isinstance(arguments, str):
+        try:
+            arguments = json.loads(arguments)
+        except json.JSONDecodeError:
+            return None, False
+    if not isinstance(arguments, dict):
+        return None, False
+    value = arguments.get("message")
+    if not isinstance(value, str) or not value:
+        return None, False
+    if value.startswith("gAAAAA"):
+        return None, True
+    return _trim_text(value), False
+
+
+class _DerivedThreads:
+    """Collect per-agent conversation records carried by explicit routing evidence.
+
+    A Codex parent rollout physically records the delegations it issues and the
+    returns its children send back. Those records are owned by the child agent's
+    execution context, so they materialize the child's own conversation instead of
+    being absorbed into the parent thread. Nothing is synthesized: an agent only
+    appears once the rollout names it on a real routing record.
+    """
+
+    def __init__(self, owner_thread_id: object, owner_agent_path: str | None) -> None:
+        self._owner_thread_id = owner_thread_id if isinstance(owner_thread_id, str) else None
+        self._owner_agent_path = owner_agent_path
+        self._delegated: set[str] = set()
+        self._messages: dict[str, list[dict[str, Any]]] = {}
+        self._thread_ids: dict[str, str] = {}
+        self._nicknames: dict[str, str] = {}
+
+    def delegate(self, agent_path: object, thread_id: object = None) -> None:
+        """Record that this rollout's own agent spawned ``agent_path``."""
+        if not isinstance(agent_path, str) or not agent_path.startswith("/root/"):
+            return
+        if agent_path == self._owner_agent_path:
+            return
+        self._delegated.add(agent_path)
+        if isinstance(thread_id, str) and thread_id:
+            self._thread_ids.setdefault(agent_path, thread_id)
+
+    def owns(self, agent_path: object) -> bool:
+        """Only an agent this rollout delegated to has a thread derivable from here.
+
+        A peer message merely names its sender. Treating that as the sender's thread
+        would invent an execution identity this rollout never observed, so inbound
+        peer routing stays a record of the receiving thread alone.
+        """
+        return isinstance(agent_path, str) and agent_path in self._delegated
+
+    def add(self, agent_path: object, message: dict[str, Any]) -> None:
+        if not self.owns(agent_path):
+            return
+        self._messages.setdefault(str(agent_path), []).append(message)
+
+    def previews(self) -> list[dict[str, Any]]:
+        results: list[dict[str, Any]] = []
+        for agent_path in sorted(self._messages):
+            messages = sorted(
+                self._messages[agent_path],
+                key=lambda message: (
+                    message.get("ordinal") if isinstance(message.get("ordinal"), int) else 2**63 - 1,
+                    str(message.get("timestamp") or ""),
+                ),
+            )
+            truncated = len(messages) > _MAX_PREVIEW_MESSAGES
+            if truncated:
+                messages = messages[:10] + messages[-(_MAX_PREVIEW_MESSAGES - 10) :]
+            thread_id = self._thread_ids.get(agent_path)
+            results.append(
+                {
+                    "thread_id": thread_id or f"{self._owner_thread_id or 'codex'}::{agent_path}",
+                    "parent_thread_id": self._owner_thread_id,
+                    "agent_id": thread_id,
+                    "agent_path": agent_path,
+                    "agent_nickname": self._nicknames.get(agent_path),
+                    "message_count": len(messages),
+                    "messages_truncated": truncated,
+                    "messages": messages,
+                    "evidence_scope": "cross_agent_routing",
+                }
+            )
+        return results
+
+
+def codex_rollout_preview(path: str | Path) -> dict[str, Any] | None:
+    """Extract only thread-owned visible conversation items from a Codex rollout."""
+    previews = codex_rollout_previews(path)
+    return previews[0] if previews else None
+
+
+def codex_rollout_previews(path: str | Path) -> list[dict[str, Any]]:
+    """Extract agent-local conversations a single Codex rollout provides evidence for.
+
+    The first result is the rollout's own thread. Codex subagent rollouts can
+    physically contain inherited parent history: newer paginated rollouts persist
+    ordinals on each line, while older compatible rollouts derive them from physical
+    valid-line order, so Codex's own subagent_history_start_ordinal boundary is
+    applied in either representation and inherited history is never rendered as if
+    it belonged to the child agent.
+
+    Any further results are agent-local threads for other agents this rollout carries
+    explicit routing evidence about — a delegation it issued, or a return it received.
+    Those records belong to the other agent's execution context, so they are attributed
+    there instead of being absorbed into this rollout's own conversation.
     """
     source = Path(path).expanduser().resolve(strict=False)
     identity = codex_rollout_identity(source)
     if identity is None:
-        return None
+        return []
     cutoff = identity.get("subagent_history_start_ordinal")
     min_ordinal = cutoff if isinstance(cutoff, int) else 0
     projected_ordinal = identity.get("history_base_end_ordinal")
@@ -205,7 +364,9 @@ def codex_rollout_preview(path: str | Path) -> dict[str, Any] | None:
     if not isinstance(agent_path, str) or not agent_path:
         agent_path = "/root" if identity.get("parent_thread_id") is None else None
     parent_agent_path = _parent_agent_path(identity, agent_path)
+    derived = _DerivedThreads(identity.get("thread_id"), agent_path)
     messages: list[dict[str, Any]] = []
+    pending_spawns: dict[str, dict[str, Any]] = {}
     try:
         with source.open("r", encoding="utf-8") as handle:
             for line in handle:
@@ -220,6 +381,12 @@ def codex_rollout_preview(path: str | Path) -> dict[str, Any] | None:
                 ordinal, projected_ordinal = _rollout_ordinal(record, projected_ordinal)
                 if ordinal < min_ordinal:
                     continue
+                activity = _subagent_activity(record)
+                if activity is not None:
+                    derived.delegate(
+                        activity.get("agent_path"), activity.get("agent_thread_id")
+                    )
+                    continue
                 if record.get("type") != "response_item":
                     continue
                 payload = record.get("payload")
@@ -233,19 +400,56 @@ def codex_rollout_preview(path: str | Path) -> dict[str, Any] | None:
                         isinstance(part, dict) and part.get("type") == "encrypted_content"
                         for part in content
                     )
-                    messages.append(
-                        _message(
-                            record.get("timestamp"),
-                            ordinal,
-                            kind=header.get("message_type", "agent_message").lower(),
-                            sender=payload.get("author") or header.get("sender"),
-                            recipient=payload.get("recipient"),
-                            text=None if encrypted else header.get("payload_text"),
-                            content_state="provider_encrypted" if encrypted else "plaintext",
-                            phase=None,
-                            task_name=header.get("task_name"),
-                        )
+                    sender = payload.get("author") or header.get("sender")
+                    recipient = payload.get("recipient") or header.get("task_name")
+                    routed = _message(
+                        record.get("timestamp"),
+                        ordinal,
+                        kind=header.get("message_type", "agent_message").lower(),
+                        sender=sender,
+                        recipient=recipient,
+                        text=None if encrypted else header.get("payload_text"),
+                        content_state="provider_encrypted" if encrypted else "plaintext",
+                        phase=None,
+                        task_name=header.get("task_name"),
                     )
+                    messages.append(routed)
+                    derived.add(sender, dict(routed))
+                elif payload_type == "function_call" and payload.get("name") == "spawn_agent":
+                    call_id = payload.get("call_id")
+                    if isinstance(call_id, str) and call_id:
+                        text, encrypted = _encrypted_message_argument(payload.get("arguments"))
+                        pending_spawns[call_id] = {
+                            "timestamp": record.get("timestamp"),
+                            "ordinal": ordinal,
+                            "text": text,
+                            "encrypted": encrypted,
+                        }
+                elif payload_type == "function_call_output" and isinstance(
+                    payload.get("call_id"), str
+                ):
+                    spawn = pending_spawns.pop(str(payload.get("call_id")), None)
+                    target = _spawn_target_path(payload.get("output"))
+                    if spawn is None or target is None:
+                        continue
+                    derived.delegate(target)
+                    if not derived.owns(target):
+                        continue
+                    delegation = _message(
+                        spawn["timestamp"],
+                        spawn["ordinal"],
+                        kind="task",
+                        sender=agent_path,
+                        recipient=target,
+                        text=spawn["text"],
+                        content_state=(
+                            "provider_encrypted" if spawn["encrypted"] else "plaintext"
+                        ),
+                        phase="assignment",
+                        task_name=target,
+                    )
+                    messages.append(delegation)
+                    derived.add(target, dict(delegation))
                 elif payload_type == "message":
                     role = payload.get("role")
                     phase = payload.get("phase")
@@ -332,11 +536,11 @@ def codex_rollout_preview(path: str | Path) -> dict[str, Any] | None:
                             )
                         )
     except (OSError, RuntimeError, UnicodeError):
-        return None
+        return []
     truncated = len(messages) > _MAX_PREVIEW_MESSAGES
     if truncated:
         messages = messages[:10] + messages[-(_MAX_PREVIEW_MESSAGES - 10) :]
-    return {
+    owner = {
         "thread_id": identity.get("thread_id"),
         "parent_thread_id": identity.get("parent_thread_id"),
         "agent_path": agent_path,
@@ -345,3 +549,4 @@ def codex_rollout_preview(path: str | Path) -> dict[str, Any] | None:
         "messages_truncated": truncated,
         "messages": messages,
     }
+    return [owner, *derived.previews()]

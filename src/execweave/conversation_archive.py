@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from .antigravity_subagent_linkage import validated_transcript_path as _antigravity_transcript_path
-from .codex_conversation import validated_codex_transcript
+from .codex_conversation import codex_transcript_observed_field, validated_codex_transcript
 from .content_evidence import content_observation_event
 from .content_store import FullFidelityContentStore
 
@@ -235,7 +235,7 @@ def codex_conversation_archive_events(
             provider="codex",
             source=source,
             content_kind="codex.conversation_transcript.subagent",
-            observed_field="transcript_path",
+            observed_field=codex_transcript_observed_field(payload) or "agent_transcript_path",
             attribution="codex_hook_plus_rollout",
             evidence_source="provider_hook_plus_validated_transcript",
             attributes={

@@ -165,6 +165,23 @@ def _message_sort_key(message: dict[str, Any], index: int) -> tuple[object, ...]
     )
 
 
+def _cross_source_message_sort_key(message: dict[str, Any], index: int) -> tuple[object, ...]:
+    """Order a thread assembled from several transcripts by observation time.
+
+    Ordinals are positions within one transcript, so they do not compare across
+    transcripts. A thread whose evidence spans more than one stored blob orders by
+    timestamp instead, and keeps the ordinal only as a tiebreak within one source.
+    """
+    timestamp = message.get("timestamp")
+    ordinal = message.get("ordinal")
+    return (
+        0 if isinstance(timestamp, str) and timestamp else 1,
+        str(timestamp or ""),
+        ordinal if isinstance(ordinal, int) else 2**63 - 1,
+        index,
+    )
+
+
 def _conversation_scope(
     entry: dict[str, Any],
     preview: dict[str, Any],
@@ -222,8 +239,10 @@ def _merge_conversation_previews(entries: list[dict[str, Any]]) -> None:
             for message in preview.get("messages") or []:
                 if isinstance(message, dict):
                     merged_messages.append(dict(message))
+        sources = {str(entry.get("sha256") or "") for entry in group}
+        sort_key = _cross_source_message_sort_key if len(sources) > 1 else _message_sort_key
         indexed = list(enumerate(merged_messages))
-        indexed.sort(key=lambda pair: _message_sort_key(pair[1], pair[0]))
+        indexed.sort(key=lambda pair: sort_key(pair[1], pair[0]))
         seen: set[tuple[object, ...]] = set()
         deduped: list[dict[str, Any]] = []
         for _, message in indexed:
@@ -282,6 +301,44 @@ def _merge_conversation_previews(entries: list[dict[str, Any]]) -> None:
         scoped_parent = scoped_thread_ids.get(parent_scope)
         if scoped_parent is not None:
             preview["parent_thread_id"] = scoped_parent
+
+
+def _derived_agent_entry_source_id(entry: dict[str, Any], preview: dict[str, Any]) -> str:
+    """Address a derived thread by the provider agent identity the graph also uses."""
+    provider = str(entry.get("provider") or "provider").lower()
+    agent_id = preview.get("agent_id")
+    parent_thread_id = preview.get("parent_thread_id")
+    if isinstance(agent_id, str) and agent_id and isinstance(parent_thread_id, str):
+        return f"agent:{provider}:{parent_thread_id}:subagent:{agent_id}"
+    return f"agent:{provider}:{preview.get('agent_path') or 'agent'}"
+
+
+def _derived_agent_entries(
+    entry: dict[str, Any],
+    previews: list[Any],
+) -> list[dict[str, Any]]:
+    """Materialize agent-local threads a transcript carries routing evidence about.
+
+    One provider transcript can be the only observable evidence for another agent's
+    conversation. Those records are published under that agent's own identity so a
+    parent thread never stands in for its children, while still referencing the same
+    stored evidence blob.
+    """
+    results: list[dict[str, Any]] = []
+    for preview in previews:
+        if not isinstance(preview, dict) or not preview.get("messages"):
+            continue
+        agent_path = preview.get("agent_path")
+        if not isinstance(agent_path, str) or not agent_path:
+            continue
+        derived_entry = dict(entry)
+        derived_entry.pop("conversation_preview", None)
+        derived_entry["source_id"] = _derived_agent_entry_source_id(entry, preview)
+        derived_entry["source_name"] = preview.get("agent_label") or agent_path
+        derived_entry["source_type"] = "agent"
+        derived_entry["conversation_preview"] = preview
+        results.append(derived_entry)
+    return results
 
 
 def conversation_record_entries(
@@ -345,9 +402,12 @@ def conversation_record_entries(
             "first_seen": edge.get("first_seen"),
             "last_seen": edge.get("last_seen"),
         }
+        derived = preview.pop("derived_agent_previews", None) if isinstance(preview, dict) else None
         if preview is not None:
             entry["conversation_preview"] = preview
         entries.append(entry)
+        if isinstance(derived, list):
+            entries.extend(_derived_agent_entries(entry, derived))
 
     entries.sort(
         key=lambda entry: (

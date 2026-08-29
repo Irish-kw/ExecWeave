@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .codex_conversation import codex_rollout_preview
+from .codex_conversation import codex_rollout_previews
 
 _MAX_PREVIEW_MESSAGES = 80
 _MAX_PREVIEW_TEXT_CHARS = 6000
@@ -618,6 +618,28 @@ def _generic_content_messages(
     return []
 
 
+def _codex_preview(
+    preview: dict[str, Any],
+    identity: dict[str, Any],
+    provider: str,
+) -> dict[str, Any]:
+    """Wrap one agent-local Codex thread in the shared dashboard conversation schema."""
+    agent_path = preview.get("agent_path")
+    result = {
+        **identity,
+        **preview,
+        "provider_label": _provider_label(provider),
+        "agent_label": preview.get("agent_nickname") or identity["agent_label"],
+        "is_root": agent_path == "/root" or preview.get("parent_thread_id") is None,
+    }
+    if not result["is_root"] and isinstance(agent_path, str) and agent_path:
+        result["agent_label"] = (
+            preview.get("agent_nickname") or agent_path.rsplit("/", 1)[-1] or agent_path
+        )
+    result["message_count"] = len(result.get("messages") or [])
+    return result
+
+
 def conversation_preview(
     path: str | Path,
     *,
@@ -631,19 +653,16 @@ def conversation_preview(
     source_path = Path(path).expanduser().resolve(strict=False)
 
     if content_kind.startswith("codex.conversation_transcript"):
-        preview = codex_rollout_preview(source_path)
-        if preview is None:
+        previews = codex_rollout_previews(source_path)
+        if not previews:
             return None
         identity = _agent_identity(provider, source)
-        result = {
-            **identity,
-            **preview,
-            "provider_label": _provider_label(provider),
-            "agent_label": preview.get("agent_nickname") or identity["agent_label"],
-            "is_root": preview.get("agent_path") == "/root"
-            or preview.get("parent_thread_id") is None,
-        }
-        result["message_count"] = len(result.get("messages") or [])
+        result = _codex_preview(previews[0], identity, provider)
+        derived = [
+            _codex_preview(preview, identity, provider) for preview in previews[1:]
+        ]
+        if derived:
+            result["derived_agent_previews"] = derived
         return result
 
     identity = _agent_identity(provider, source)
