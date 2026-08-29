@@ -54,6 +54,15 @@ def main() -> int:
     time.sleep(0.5)
     code = int(child.wait())
     _send({**before, "hook_event_name": "tool.execute.after", "output": "PRIVATE_OUTPUT"})
+    # Conversation evidence, so CI can assert the materialized conversations.json.
+    _send(
+        {
+            "hook_event_name": "experimental.text.complete",
+            "sessionID": session_id,
+            "text": "CI OPENCODE FINAL ANSWER",
+            "cwd": cwd,
+        }
+    )
     return code
 
 

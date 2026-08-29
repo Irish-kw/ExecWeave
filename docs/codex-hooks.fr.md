@@ -30,7 +30,6 @@ ExecWeave enregistre les preuves issues des hooks de cycle de vie Codex à côt�
 - `SubagentStart`
 - `SubagentStop`
 - `Stop`
-- `Interrupt`
 
 ExecWeave n'invente pas les événements absents ou indisponibles côté fournisseur. Les schémas et la couverture peuvent changer selon les versions de Codex.
 

@@ -29,7 +29,13 @@ class GraphNode:
         incoming = entity.get("attributes") or {}
         if isinstance(incoming, dict):
             for key, value in incoming.items():
-                self.attributes.setdefault(key, value)
+                # First non-null wins. A key written with None by an early event used
+                # to block the real value a later event carried, which silently froze
+                # agent identity at "unknown".
+                if value is None:
+                    self.attributes.setdefault(key, None)
+                elif self.attributes.get(key) is None:
+                    self.attributes[key] = value
         timestamp = event.get("timestamp")
         if isinstance(timestamp, str):
             self.first_seen = min(self.first_seen, timestamp) if self.first_seen else timestamp

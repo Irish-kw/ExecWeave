@@ -65,22 +65,16 @@ def main() -> int:
         check=True,
     )
     parsed = json.loads(config.stdout)
-    required = {
-        "PreToolUse",
-        "PermissionRequest",
-        "PostToolUse",
-        "PreCompact",
-        "PostCompact",
-        "SessionStart",
-        "SessionEnd",
-        "UserPromptSubmit",
-        "SubagentStart",
-        "SubagentStop",
-        "Stop",
-        "Interrupt",
-    }
+    # Bound to the shipped event set rather than a second hardcoded copy, which had
+    # drifted to expect an "Interrupt" hook ExecWeave does not register.
+    from execweave.codex_hook_lifecycle import OFFICIAL_CODEX_HOOK_EVENTS
+
+    required = set(OFFICIAL_CODEX_HOOK_EVENTS)
     if set(parsed.get("hooks", {})) != required:
-        raise SystemExit("generated Codex hook config is incomplete")
+        raise SystemExit(
+            "generated Codex hook config does not match the official event set: "
+            f"{sorted(set(parsed.get('hooks', {})) ^ required)}"
+        )
     for event_name in {"PreToolUse", "PermissionRequest", "PostToolUse"}:
         if parsed["hooks"][event_name][0].get("matcher") != "*":
             raise SystemExit(f"Codex {event_name} hook is not configured for all tools")

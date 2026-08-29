@@ -39,6 +39,8 @@ def main() -> int:
     emit({**base, "hook_event_name": "BeforeTool", "timestamp": now(), "tool_name": "run_shell_command", "tool_input": tool_input})
     subprocess.run(command, shell=True, check=True)
     emit({**base, "hook_event_name": "AfterTool", "timestamp": now(), "tool_name": "run_shell_command", "tool_input": tool_input, "tool_response": {"returnDisplay": "redacted by test", "error": None}})
+    # Conversation evidence, so CI can assert the materialized conversations.json.
+    emit({**base, "hook_event_name": "AfterAgent", "timestamp": now(), "prompt": "CI GEMINI PROMPT", "prompt_response": "CI GEMINI FINAL ANSWER"})
     return 0
 
 

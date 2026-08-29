@@ -150,6 +150,12 @@ jobs:
         run: python scripts/check_correlation_graph.py claude-record-smoke/graph.correlated.json
       - name: Check correlated standalone viewer JavaScript syntax
         run: python scripts/check_viewer_js.py claude-record-smoke/viewer.correlated.html --output claude-record-smoke/viewer.correlated.js
+      - name: Verify Claude materialized conversations
+        run: >
+          python scripts/check_conversation_records.py claude-record-smoke
+          --expect-agent /root
+          --expect-root-text "CI CLAUDE PROMPT"
+          --expect-root-text "CI CLAUDE FINAL ANSWER"
       - name: Gemini run-bound semantic and correlation smoke
         run: execweave-gemini-record --backend auto --no-files --no-network --output-dir gemini-record-smoke -- python scripts/emit_gemini_hook_smoke.py
       - name: Validate Gemini runtime stream
@@ -162,6 +168,12 @@ jobs:
         run: python scripts/check_correlation_graph.py gemini-record-smoke/graph.correlated.json
       - name: Check Gemini correlated viewer JavaScript syntax
         run: python scripts/check_viewer_js.py gemini-record-smoke/viewer.correlated.html --output gemini-record-smoke/viewer.correlated.js
+      - name: Verify Gemini materialized conversations
+        run: >
+          python scripts/check_conversation_records.py gemini-record-smoke
+          --expect-agent /root
+          --expect-root-text "CI GEMINI PROMPT"
+          --expect-root-text "CI GEMINI FINAL ANSWER"
       - name: Cursor run-bound semantic and correlation smoke
         run: execweave-cursor-record --backend auto --no-files --no-network --output-dir cursor-record-smoke -- python scripts/emit_cursor_hook_smoke.py
       - name: Validate Cursor runtime stream
@@ -174,6 +186,12 @@ jobs:
         run: python scripts/check_correlation_graph.py cursor-record-smoke/graph.correlated.json
       - name: Check Cursor correlated viewer JavaScript syntax
         run: python scripts/check_viewer_js.py cursor-record-smoke/viewer.correlated.html --output cursor-record-smoke/viewer.correlated.js
+      - name: Verify Cursor materialized conversations
+        run: >
+          python scripts/check_conversation_records.py cursor-record-smoke
+          --expect-agent /root
+          --expect-root-text "CI CURSOR PROMPT"
+          --expect-root-text "CI CURSOR FINAL ANSWER"
       - name: OpenCode plugin installer smoke
         run: execweave-opencode-plugin --install --root opencode-plugin-smoke
       - name: OpenCode run-bound semantic and correlation smoke
@@ -188,6 +206,40 @@ jobs:
         run: python scripts/check_correlation_graph.py opencode-record-smoke/graph.correlated.json
       - name: Check OpenCode correlated viewer JavaScript syntax
         run: python scripts/check_viewer_js.py opencode-record-smoke/viewer.correlated.html --output opencode-record-smoke/viewer.correlated.js
+      - name: Verify OpenCode materialized conversations
+        run: >
+          python scripts/check_conversation_records.py opencode-record-smoke
+          --expect-agent /root
+          --expect-root-text "CI OPENCODE FINAL ANSWER"
+          --forbid-agent /root/ci-opencode-session
+      - name: Codex hook command smoke
+        run: python scripts/check_codex_hook.py
+      - name: Codex run-bound semantic and correlation smoke
+        run: execweave-codex-record --backend auto --no-files --no-network --output-dir codex-record-smoke -- python scripts/emit_codex_hook_smoke.py
+      - name: Validate Codex runtime stream
+        run: execweave validate codex-record-smoke/events.jsonl
+      - name: Validate Codex merged stream
+        run: execweave validate codex-record-smoke/events.semantic.jsonl
+      - name: Validate Codex correlated stream
+        run: execweave validate codex-record-smoke/events.correlated.jsonl
+      - name: Verify Codex conservative correlation edge
+        run: python scripts/check_correlation_graph.py codex-record-smoke/graph.correlated.json
+      - name: Check Codex correlated viewer JavaScript syntax
+        run: python scripts/check_viewer_js.py codex-record-smoke/viewer.correlated.html --output codex-record-smoke/viewer.correlated.js
+      # Codex reports a subagent stop with the child rollout on agent_transcript_path
+      # and the parent rollout on transcript_path. Archiving the parent is the
+      # v0.7.2 regression, so assert the child conversation survives end to end.
+      - name: Verify Codex agent-local subagent conversations
+        run: >
+          python scripts/check_conversation_records.py codex-record-smoke
+          --min-entries 2
+          --expect-agent /root
+          --expect-agent /root/explorer
+          --expect-root-text "CI ROOT PROMPT"
+          --expect-root-text "CI ROOT FINAL ANSWER"
+          --expect-owned "/root=CI ROOT COMMENTARY"
+          --expect-owned "/root/explorer=CI CHILD PRIVATE REASONING"
+          --forbid-agent /root/01a04cea-67b2-7683-9f6b-cd644497b862
       - name: Model runtime CLI smoke
         run: python scripts/check_model_runtime_cli.py
       - name: Inference gateway CLI smoke

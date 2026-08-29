@@ -5,6 +5,14 @@ import re
 from pathlib import Path
 from typing import Any
 
+from .agent_topology import (
+    COMPLETENESS_ROUTING_ONLY,
+    EVIDENCE_CROSS_AGENT_ROUTING,
+    PATH_PROVIDER_DECLARED,
+    ROOT_PATH,
+    TOPOLOGY_OBSERVED,
+    strongest_completeness,
+)
 from .conversation_preview import conversation_preview
 
 _CONVERSATION_PATH_RE = re.compile(
@@ -258,28 +266,31 @@ def _merge_conversation_previews(entries: list[dict[str, Any]]) -> None:
 
         latest_preview = representative["conversation_preview"]
         merged_preview: dict[str, Any] = {}
-        for field in (
+        carried = (
             "parent_thread_id",
             "agent_path",
             "agent_label",
             "provider_label",
             "agent_nickname",
             "is_root",
-        ):
+            "agent_path_source",
+            "topology_state",
+            "topology_evidence",
+            "parent_agent_path",
+            "parent_relation_source",
+            "provider_native_id",
+        )
+        for field in carried:
             for preview in reversed(previews):
                 value = preview.get(field)
                 if value is not None and value != "":
                     merged_preview[field] = value
                     break
-        for field in (
-            "parent_thread_id",
-            "agent_path",
-            "agent_label",
-            "provider_label",
-            "agent_nickname",
-            "is_root",
-        ):
+        for field in carried:
             merged_preview.setdefault(field, latest_preview.get(field))
+        merged_preview["conversation_completeness"] = strongest_completeness(
+            [str(preview.get("conversation_completeness") or "") for preview in previews]
+        )
         merged_preview["thread_id"] = scoped_thread_ids[scope]
         merged_preview["message_count"] = len(deduped)
         merged_preview["messages_truncated"] = truncated or any(
@@ -331,6 +342,12 @@ def _derived_agent_entries(
         agent_path = preview.get("agent_path")
         if not isinstance(agent_path, str) or not agent_path:
             continue
+        preview.setdefault("agent_path_source", PATH_PROVIDER_DECLARED)
+        preview.setdefault("topology_state", TOPOLOGY_OBSERVED)
+        preview.setdefault("topology_evidence", EVIDENCE_CROSS_AGENT_ROUTING)
+        preview.setdefault("parent_agent_path", ROOT_PATH)
+        preview.setdefault("parent_relation_source", EVIDENCE_CROSS_AGENT_ROUTING)
+        preview.setdefault("conversation_completeness", COMPLETENESS_ROUTING_ONLY)
         derived_entry = dict(entry)
         derived_entry.pop("conversation_preview", None)
         derived_entry["source_id"] = _derived_agent_entry_source_id(entry, preview)

@@ -4,20 +4,21 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .agent_topology import (
+    COMPLETENESS_PROVIDER_TRANSCRIPT,
+    COMPLETENESS_ROUTING_ONLY,
+    EVIDENCE_CROSS_AGENT_ROUTING,
+    PATH_EXECWEAVE_DERIVED,
+    PATH_PROVIDER_DECLARED,
+    ROOT_PATH,
+    TOPOLOGY_OBSERVED,
+    TOPOLOGY_PROVIDER_REPORTED,
+    resolve_agent_topology,
+)
 from .codex_conversation import codex_rollout_previews
 
 _MAX_PREVIEW_MESSAGES = 80
 _MAX_PREVIEW_TEXT_CHARS = 6000
-
-_ROOT_AGENT_IDS = {
-    "agent:Claude Code",
-    "agent:OpenAI Codex",
-    "agent:Codex",
-    "agent:Cursor",
-    "agent:OpenCode",
-    "agent:Gemini CLI",
-    "agent:Antigravity",
-}
 
 _PROVIDER_LABELS = {
     "claude": "Claude Code",
@@ -94,43 +95,23 @@ def _source_attributes(source: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def _agent_identity(provider: str, source: dict[str, Any] | None) -> dict[str, Any]:
+    """Project one agent node into the conversation schema, provenance intact.
+
+    Root/child classification comes from :func:`resolve_agent_topology`, which
+    requires positive provider evidence before calling anything a child. An agent
+    ExecWeave cannot place is root, not a fabricated subagent.
+    """
     source = source if isinstance(source, dict) else {}
     attrs = _source_attributes(source)
     source_id = source.get("id")
     source_name = source.get("name")
-    source_type = source.get("type")
     source_id_text = source_id if isinstance(source_id, str) else ""
-    normalized_provider = provider.strip().lower()
     provider_label = _provider_label(provider)
+    provider_key = provider.lower() or "provider"
 
-    explicit_path = attrs.get("agent_path")
-    if isinstance(explicit_path, str) and explicit_path.strip():
-        agent_path = explicit_path.strip()
-        is_root = agent_path == "/root"
-    elif source_id_text in _ROOT_AGENT_IDS:
-        agent_path = "/root"
-        is_root = True
-    elif normalized_provider == "antigravity" and source_id_text.startswith(
-        "agent:antigravity:conversation:"
-    ):
-        # Antigravity exposes conversation routing IDs, but not a stable child
-        # execution identity/parentage on the observed hook surface.
-        agent_path = "/root"
-        is_root = True
-    elif source_type == "agent":
-        is_root = False
-        native_id = (
-            attrs.get("agent_id")
-            or attrs.get("subagent_id")
-            or attrs.get("conversation_id")
-            or attrs.get("session_id")
-        )
-        suffix = str(native_id or source_name or source_id_text or "agent").strip()
-        suffix = suffix.replace("/", "-")
-        agent_path = f"/root/{suffix}"
-    else:
-        agent_path = "/root"
-        is_root = True
+    topology = resolve_agent_topology(source)
+    agent_path = topology.agent_path
+    is_root = topology.is_root
 
     native_label = (
         attrs.get("agent_nickname")
@@ -147,16 +128,15 @@ def _agent_identity(provider: str, source: dict[str, Any] | None) -> dict[str, A
         agent_label = agent_path.rsplit("/", 1)[-1] or "Agent"
 
     if is_root:
-        thread_id = f"{provider.lower() or 'provider'}:root"
+        thread_id = f"{provider_key}:root"
         parent_thread_id = None
     else:
-        thread_id = f"{provider.lower() or 'provider'}:{source_id_text or agent_path}"
-        parent_thread_id = f"{provider.lower() or 'provider'}:root"
+        thread_id = f"{provider_key}:{source_id_text or agent_path}"
+        parent_thread_id = f"{provider_key}:root"
 
     return {
         "thread_id": thread_id,
         "parent_thread_id": parent_thread_id,
-        "agent_path": agent_path,
         "agent_label": agent_label,
         "provider_label": provider_label,
         "agent_nickname": (
@@ -164,7 +144,7 @@ def _agent_identity(provider: str, source: dict[str, Any] | None) -> dict[str, A
             if isinstance(attrs.get("agent_nickname"), str)
             else None
         ),
-        "is_root": is_root,
+        **topology.to_dict(),
     }
 
 
@@ -623,19 +603,44 @@ def _codex_preview(
     identity: dict[str, Any],
     provider: str,
 ) -> dict[str, Any]:
-    """Wrap one agent-local Codex thread in the shared dashboard conversation schema."""
+    """Wrap one agent-local Codex thread in the shared dashboard conversation schema.
+
+    Codex is the one provider that publishes agent paths itself, on rollout
+    ``session_meta`` and on ``SubAgentActivity``. Those paths are marked
+    provider-declared; a thread carried only by the parent's routing records is marked
+    routing-only so it cannot be read as the child's own transcript.
+    """
     agent_path = preview.get("agent_path")
+    routing_only = preview.get("evidence_scope") == EVIDENCE_CROSS_AGENT_ROUTING
     result = {
         **identity,
         **preview,
         "provider_label": _provider_label(provider),
         "agent_label": preview.get("agent_nickname") or identity["agent_label"],
-        "is_root": agent_path == "/root" or preview.get("parent_thread_id") is None,
     }
-    if not result["is_root"] and isinstance(agent_path, str) and agent_path:
-        result["agent_label"] = (
-            preview.get("agent_nickname") or agent_path.rsplit("/", 1)[-1] or agent_path
+    if isinstance(agent_path, str) and agent_path:
+        is_root = agent_path == ROOT_PATH
+        result["agent_path"] = agent_path
+        result["is_root"] = is_root
+        # Codex publishes child paths on session_meta and SubAgentActivity. The root
+        # rollout does not name itself, so "/root" there stays ExecWeave's rendering.
+        result["agent_path_source"] = (
+            PATH_EXECWEAVE_DERIVED if is_root else PATH_PROVIDER_DECLARED
         )
+        result["topology_state"] = (
+            TOPOLOGY_PROVIDER_REPORTED if is_root else TOPOLOGY_OBSERVED
+        )
+        result["parent_agent_path"] = None if is_root else ROOT_PATH
+        result["parent_relation_source"] = (
+            None if is_root else preview.get("evidence_scope") or identity.get("topology_evidence")
+        )
+        if not is_root:
+            result["agent_label"] = (
+                preview.get("agent_nickname") or agent_path.rsplit("/", 1)[-1] or agent_path
+            )
+    result["conversation_completeness"] = (
+        COMPLETENESS_ROUTING_ONLY if routing_only else COMPLETENESS_PROVIDER_TRANSCRIPT
+    )
     result["message_count"] = len(result.get("messages") or [])
     return result
 
@@ -698,6 +703,7 @@ def conversation_preview(
         messages = messages[:10] + messages[-(_MAX_PREVIEW_MESSAGES - 10) :]
     return {
         **identity,
+        "conversation_completeness": COMPLETENESS_PROVIDER_TRANSCRIPT,
         "message_count": len(messages),
         "messages_truncated": truncated,
         "messages": messages,

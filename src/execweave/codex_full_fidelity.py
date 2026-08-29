@@ -5,6 +5,7 @@ from typing import Any
 
 from .content_evidence import content_observation_event, filter_transport_credentials
 from .content_store import ContentReference, FullFidelityContentStore
+from .agent_topology import EVIDENCE_SUBAGENT_LIFECYCLE_HOOK, subagent_topology
 
 _CONTENT_FIELDS = frozenset({"prompt", "tool_input", "tool_response", "last_assistant_message"})
 
@@ -47,6 +48,10 @@ def _actor(payload: dict[str, Any]) -> dict[str, Any]:
                 "provider": "codex",
                 "agent_id": agent_id,
                 "agent_type": name,
+                **subagent_topology(
+                    evidence=EVIDENCE_SUBAGENT_LIFECYCLE_HOOK,
+                    parent_scope_id=scope,
+                ),
             },
         )
     return _main_agent()

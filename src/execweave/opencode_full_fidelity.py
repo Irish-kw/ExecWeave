@@ -7,6 +7,7 @@ from typing import Any
 
 from .content_evidence import content_observation_event, filter_transport_credentials
 from .content_store import FullFidelityContentStore
+from .agent_topology import root_topology
 
 _CONTENT_FIELDS = frozenset(
     {
@@ -39,6 +40,7 @@ def _agent(payload: dict[str, Any] | None = None) -> dict[str, Any]:
                 session_id=session_id,
                 native_agent_name=agent_name if isinstance(agent_name, str) else None,
                 identity_semantics="provider_session_id",
+                **root_topology(),
             )
     return _entity("agent", "agent:OpenCode", "OpenCode", provider="opencode")
 

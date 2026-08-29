@@ -27,6 +27,7 @@ from typing import Any
 
 import pytest
 
+from execweave.agent_topology import resolve_agent_topology
 from execweave.content_store import FullFidelityContentStore
 from execweave.conversation_archive import codex_conversation_archive_events
 from execweave.conversation_records import conversation_record_entries
@@ -77,8 +78,8 @@ def _child_rollout_records(agent_id: str, agent_path: str) -> list[dict[str, Any
         }
 
     inherited = [
-        message("user", "開五個agent討論台北明天會不會淹水", user=True),
-        message("assistant", "我會分成五個獨立觀點：即時降雨預報、河川／排水風險…", phase="commentary"),
+        message("user", "USER TASK: run five agents", user=True),
+        message("assistant", "ROOT COMMENTARY: splitting into independent views", phase="commentary"),
     ]
     own = [
         message("user", f"TASK FOR {leaf}"),
@@ -91,7 +92,7 @@ def _child_rollout_records(agent_id: str, agent_path: str) -> list[dict[str, Any
         "payload": {
             "id": agent_id,
             "session_id": agent_id,
-            "cwd": "C:\\Users\\weisting\\Desktop",
+            "cwd": "/workspace/execweave-fixture",
             "originator": "codex-tui",
             "cli_version": "0.150.1",
             "source": {
@@ -211,7 +212,11 @@ def test_subagent_stop_archives_the_child_rollout_not_the_parent(
     assert len(subagent_events) == 4
     for event in subagent_events:
         assert event["attributes"]["observed_field"] == "agent_transcript_path"
-        assert event["source"]["attributes"]["agent_path"] in CHILDREN.values()
+        topology = resolve_agent_topology(event["source"])
+        assert topology.is_root is False
+        assert topology.agent_path in CHILDREN.values()
+        # Codex publishes the child's path on its own rollout session_meta.
+        assert topology.agent_path_source == "provider_declared"
 
 
 def test_every_observable_codex_agent_gets_its_own_conversation(
@@ -232,9 +237,9 @@ def test_conversation_identities_agree_with_graph_agent_identities(
     """conversation agent paths must be a subset of observable graph agent paths."""
     graph = _graph(codex_run["events"])
     graph_paths = {
-        node["attributes"]["agent_path"]
+        resolve_agent_topology(node).agent_path
         for node in graph["nodes"]
-        if node["type"] == "agent" and node["attributes"].get("agent_path")
+        if node["type"] == "agent"
     }
     threads = _threads(codex_run)
     assert set(threads) <= graph_paths
@@ -267,7 +272,7 @@ def test_inherited_parent_history_is_not_child_owned_conversation(
 ) -> None:
     """fork_turns=all replays the parent's turns into the child rollout as context."""
     threads = _threads(codex_run)
-    inherited = "開五個agent討論台北明天會不會淹水"
+    inherited = "USER TASK: run five agents"
     assert inherited in _texts(threads["/root"])
     for path in CHILDREN.values():
         assert inherited not in _texts(threads[path])

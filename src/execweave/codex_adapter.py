@@ -8,6 +8,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from .agent_topology import EVIDENCE_SUBAGENT_LIFECYCLE_HOOK, subagent_topology
 
 _MAX_COMMAND_CHARS = 4096
 _MAX_LABEL_CHARS = 160
@@ -91,7 +92,15 @@ def _actor(payload: dict[str, Any]) -> dict[str, Any]:
             "agent",
             f"agent:codex:{scope}:subagent:{agent_id}",
             name=name,
-            attributes={"provider": "codex", "agent_id": agent_id, "agent_type": name},
+            attributes={
+                "provider": "codex",
+                "agent_id": agent_id,
+                "agent_type": name,
+                **subagent_topology(
+                    evidence=EVIDENCE_SUBAGENT_LIFECYCLE_HOOK,
+                    parent_scope_id=scope,
+                ),
+            },
         )
     return _main_agent()
 

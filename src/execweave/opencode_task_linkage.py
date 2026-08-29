@@ -4,6 +4,7 @@ from typing import Any
 
 from .content_evidence import content_observation_event
 from .content_store import FullFidelityContentStore
+from .agent_topology import EVIDENCE_PARENT_SESSION_ID, root_topology, subagent_topology
 
 
 def _string(value: object) -> str | None:
@@ -22,12 +23,32 @@ def _event_body(payload: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
     return "message.part.updated", properties
 
 
-def _agent(session_id: str, *, agent_name: str | None = None) -> dict[str, Any]:
+def _agent(
+    session_id: str,
+    *,
+    agent_name: str | None = None,
+    parent_session_id: str | None = None,
+) -> dict[str, Any]:
+    """Build an OpenCode session agent node.
+
+    A session is only a child when the task tool's own metadata names its
+    ``parentSessionId``. Without that, a session id is just a session id and the
+    agent stays root.
+    """
     attributes: dict[str, Any] = {
         "provider": "opencode",
         "session_id": session_id,
         "identity_semantics": "provider_session_id",
     }
+    if parent_session_id:
+        attributes.update(
+            subagent_topology(
+                evidence=EVIDENCE_PARENT_SESSION_ID,
+                parent_scope_id=parent_session_id,
+            )
+        )
+    else:
+        attributes.update(root_topology())
     if agent_name:
         attributes["native_agent_name"] = agent_name
     return {
@@ -151,7 +172,7 @@ def opencode_task_session_events(
     if isinstance(background, bool):
         attributes["background_requested"] = background
 
-    child = _agent(child_session, agent_name=agent_name)
+    child = _agent(child_session, agent_name=agent_name, parent_session_id=parent_session)
     events: list[dict[str, Any]] = [
         {
             "timestamp": timestamp,

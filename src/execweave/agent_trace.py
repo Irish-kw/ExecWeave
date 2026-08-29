@@ -6,6 +6,8 @@ from typing import Any
 
 from .content_evidence import content_observation_event
 from .content_store import FullFidelityContentStore
+from .agent_topology import EVIDENCE_SUBAGENT_LIFECYCLE_HOOK, subagent_topology
+from .agent_topology import root_topology
 
 _VISIBILITY: dict[str, dict[str, str]] = {
     "claude": {
@@ -134,6 +136,7 @@ def opencode_session_agent(
         session_id=session_id,
         native_agent_name=agent_name,
         identity_semantics="provider_session_id",
+        **root_topology(),
     )
 
 
@@ -885,6 +888,10 @@ def cursor_subagent(
         subagent_id=subagent_id,
         subagent_type=subagent_type,
         identity_semantics="provider_subagent_id",
+        **subagent_topology(
+            evidence=EVIDENCE_SUBAGENT_LIFECYCLE_HOOK,
+            parent_scope_id=scope,
+        ),
     )
 
 

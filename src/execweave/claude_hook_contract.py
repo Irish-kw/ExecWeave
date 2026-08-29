@@ -8,6 +8,7 @@ from typing import Any
 from .claude_full_fidelity import claude_hook_to_content_events as _legacy_content_events
 from .content_evidence import content_observation_event
 from .content_store import ContentReference, FullFidelityContentStore
+from .agent_topology import EVIDENCE_SUBAGENT_LIFECYCLE_HOOK, subagent_topology
 
 CLAUDE_HOOKS_REFERENCE = "https://code.claude.com/docs/en/hooks"
 
@@ -122,6 +123,10 @@ def _actor(payload: dict[str, Any]) -> dict[str, Any]:
             "agent_id": agent_id,
             "agent_type": name,
             "identity_source": "provider_exposed_agent_id",
+            **subagent_topology(
+                evidence=EVIDENCE_SUBAGENT_LIFECYCLE_HOOK,
+                parent_scope_id=session,
+            ),
         },
     )
 
