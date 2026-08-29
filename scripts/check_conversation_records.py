@@ -40,12 +40,25 @@ def _load(run_dir: Path) -> dict[str, Any]:
 
 def _previews(document: dict[str, Any]) -> dict[str, dict[str, Any]]:
     previews: dict[str, dict[str, Any]] = {}
+    seen: dict[str, int] = {}
     for entry in document.get("entries") or []:
         if not isinstance(entry, dict):
             continue
         preview = entry.get("conversation_preview")
         if isinstance(preview, dict) and preview.get("agent_path"):
-            previews[str(preview["agent_path"])] = preview
+            path = str(preview["agent_path"])
+            seen[path] = seen.get(path, 0) + 1
+            previews[path] = preview
+    # One agent can still be published as several threads when its evidence names the
+    # thread differently (a provider-native rollout id versus a synthesized one).
+    # Topology is identical in each, so this is not a fabrication and does not fail the
+    # check, but keying by agent path would otherwise hide it from the logs entirely.
+    for path, count in sorted(seen.items()):
+        if count > 1:
+            print(
+                f"note: {path} is published as {count} separate conversation entries "
+                "(same agent, differing thread identity)"
+            )
     return previews
 
 
