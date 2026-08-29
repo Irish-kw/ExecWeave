@@ -162,7 +162,6 @@ def main(argv: list[str] | None = None) -> int:
             configured = os.environ.get("EXECWEAVE_SEMANTIC_SIDECAR")
             sidecar = Path(configured) if configured else _default_sidecar(payload)
         sidecar = Path(sidecar).expanduser().resolve()
-        content_store = FullFidelityContentStore(sidecar.parent)
     except _CAPTURE_ERRORS as exc:
         _capture_warning("setup", exc)
         return 1 if args.strict else 0
@@ -189,6 +188,15 @@ def main(argv: list[str] | None = None) -> int:
             stage="summary_append",
             failures=failures,
         )
+
+    # The content store is itself optional telemetry infrastructure. If it is
+    # unavailable, the lifecycle/summary stream above must still survive.
+    try:
+        content_store = FullFidelityContentStore(sidecar.parent)
+    except _CAPTURE_ERRORS as exc:
+        failures.append("content_store")
+        _capture_warning("content_store", exc)
+        return 1 if args.strict and failures else 0
 
     # Provider hook metadata is persisted separately from optional content values. A
     # failure while storing a final response/tool payload therefore cannot erase the
