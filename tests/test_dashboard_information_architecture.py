@@ -77,17 +77,22 @@ def _mechanical_graph() -> dict[str, object]:
         unlinked_file,
     ]
     edges = [
-        _edge("spawn-agent", root["id"], child["id"], "SPAWNED_AGENT"),
-        _edge("spawn-process", root["id"], process["id"], "SPAWNED"),
-        _edge("connect", process["id"], endpoint["id"], "CONNECTED_TO"),
-        _edge("connect-repeat", process["id"], endpoint_repeat["id"], "CONNECTED_TO"),
-        _edge("cwd", process["id"], directory["id"], "USED_DIRECTORY"),
-        _edge("cwd-repeat", process["id"], directory_repeat["id"], "USED_DIRECTORY"),
-        _edge("model", root["id"], model["id"], "USED_MODEL"),
-        _edge("model-repeat", root["id"], model_repeat["id"], "USED_MODEL"),
-        _edge("capability", root["id"], capability["id"], "DECLARES_AGENT_TRACE_VISIBILITY"),
-        _edge("internal", process["id"], internal["id"], "WROTE"),
-        _edge("meaningful", root["id"], meaningful["id"], "WROTE_FILE"),
+        _edge("spawn-agent", str(root["id"]), str(child["id"]), "SPAWNED_AGENT"),
+        _edge("spawn-process", str(root["id"]), str(process["id"]), "SPAWNED"),
+        _edge("connect", str(process["id"]), str(endpoint["id"]), "CONNECTED_TO"),
+        _edge("connect-repeat", str(process["id"]), str(endpoint_repeat["id"]), "CONNECTED_TO"),
+        _edge("cwd", str(process["id"]), str(directory["id"]), "USED_DIRECTORY"),
+        _edge("cwd-repeat", str(process["id"]), str(directory_repeat["id"]), "USED_DIRECTORY"),
+        _edge("model", str(root["id"]), str(model["id"]), "USED_MODEL"),
+        _edge("model-repeat", str(root["id"]), str(model_repeat["id"]), "USED_MODEL"),
+        _edge(
+            "capability",
+            str(root["id"]),
+            str(capability["id"]),
+            "DECLARES_AGENT_TRACE_VISIBILITY",
+        ),
+        _edge("internal", str(process["id"]), str(internal["id"]), "WROTE"),
+        _edge("meaningful", str(root["id"]), str(meaningful["id"]), "WROTE_FILE"),
     ]
     return {
         "graph_schema_version": "0.2",
@@ -123,7 +128,6 @@ def test_low_level_dashboard_cleanup_remains_presentation_only() -> None:
     assert "node.type!=='file'||incident.has(node.id)" not in html
     assert "value.includes('.git/')" not in html
     assert "value.includes('.execweave/')" not in html
-    # Full raw evidence remains embedded even when the SVG canvas merges it.
     assert "git.exe" in html
     assert "104.18.25.195:443" in html
     assert ".github" in html
@@ -143,7 +147,6 @@ def test_process_model_directory_and_network_nodes_are_retained_but_canonicalize
     assert "attrs.host||attrs.hostname||attrs.address||attrs.ip||attrs.remote_host" in html
     assert "viewer_occurrence_ids" in html
     assert "viewer_edge_occurrence_ids" in html
-    # Raw duplicates still exist in the embedded graph and evidence contract.
     assert "network:github:repeat" in html
     assert "directory:.github:repeat" in html
     assert "model:codex:gpt:repeat" in html
@@ -156,21 +159,30 @@ def test_file_nodes_are_retained_except_execweave_atomic_staging() -> None:
     assert ".execweave-content-" in html
     assert "node.type!=='file'||incident.has(node.id)" not in html
     assert "hidden_orphan_file_node_count:0" in html
-    # Raw evidence remains embedded; only the presentation projection hides the temp file.
     assert "result.txt" in html
     assert "notes.txt" in html
     assert ".execweave-content-xn4uvhqy" in html
 
 
-def test_agent_labels_are_human_facing_without_mutating_raw_graph() -> None:
+def test_agent_labels_are_provider_neutral_without_mutating_raw_graph() -> None:
     raw = project_viewer_graph(_mechanical_graph())
     raw_by_id = {str(node["id"]): node for node in raw["nodes"]}
     assert raw_by_id["agent:OpenAI Codex"]["name"] == "OpenAI Codex"
     assert raw_by_id["agent:codex:session:subagent:abcdef123456"]["name"] == "default"
 
     html = render_graph_html(_mechanical_graph())
-    assert "node.id==='agent:OpenAI Codex'" in html
-    assert "isRoot?'/root'" in html
+    assert "providerRootIds=new Set(" in html
+    for root_id in (
+        "agent:Claude Code",
+        "agent:OpenAI Codex",
+        "agent:Codex",
+        "agent:Cursor",
+        "agent:OpenCode",
+        "agent:Gemini CLI",
+        "agent:Antigravity",
+    ):
+        assert root_id in html
+    assert "providerRootIds.has(String(node.id||''))" in html
     assert "subagent · ${agentId.slice(0,8)}" in html
 
 
@@ -182,25 +194,24 @@ def test_live_logs_are_vertically_resizable_without_expanding_log_retention() ->
     assert "Resize live logs" in html
     assert "pointerdown" in html
     assert "execweave.live.activity-height" in html
-    # The UI resizer is independent from the intentionally bounded dashboard log window.
     assert live_module.LIVE_RAW_EVENT_HISTORY == 320
 
 
-def test_live_conversation_panel_is_rooted_agent_tree() -> None:
+def test_live_conversation_panel_is_provider_neutral_rooted_agent_tree() -> None:
     html = live_module._LIVE_HTML
 
     assert "execweave-conversation-root-node" in html
     assert "execweave-conversation-children" in html
     assert "agent · waiting" in html
-    assert "node.id==='agent:OpenAI Codex'" in html
-    assert "isRoot?'/root'" in html
-    # Same-agent messages omit the repeated path; cross-agent routes remain explicit.
+    assert "conversationRootIds=new Set(" in html
+    assert "provider-neutral run-local record" in html
     assert "sender&&sender!==currentPath" in html
     assert "`${sender||currentPath} → ${recipient}`" in html
     assert (
-        "Provider-encrypted payload — plaintext is not exposed by the Codex rollout."
+        "Provider-encrypted payload — plaintext is not exposed by the observed provider surface."
         in html
     )
+    assert "not exposed by the Codex rollout" not in html
 
 
 def test_live_cleanup_preserves_raw_protocol_and_large_graph_guard() -> None:

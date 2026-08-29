@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from .codex_conversation import codex_rollout_preview
+from .conversation_preview import conversation_preview
 
 _CONVERSATION_PATH_RE = re.compile(
     r"^content/sha256/(?P<sha256>[0-9a-f]{64})\.(?P<suffix>json|txt|bin)$"
@@ -19,7 +19,12 @@ _CONVERSATION_TOKENS = (
     "assistant_display",
     "assistant_response",
     "assistant_final_response",
+    "assistant_messages",
+    "assistant_content_blocks",
+    "response_object",
+    "standard_logging_response",
     "completed_text",
+    "agent_response_candidate",
     "subtask_prompt",
     "subtask_description",
     "subagent_task",
@@ -28,6 +33,9 @@ _CONVERSATION_TOKENS = (
     "subagent_final_response",
     "prompt_submission_candidate",
     "inference_message",
+    "request_messages",
+    "request_prompt",
+    "request_input",
     "model_context_messages",
 )
 
@@ -37,6 +45,8 @@ def is_conversation_content_kind(content_kind: str) -> bool:
     if not isinstance(content_kind, str) or not content_kind:
         return False
     value = content_kind.lower()
+    if value == "inference_gateway.openrouter.response":
+        return True
     return any(token in value for token in _CONVERSATION_TOKENS)
 
 
@@ -74,10 +84,16 @@ def _provider(source: dict[str, Any] | None, content_kind: str) -> str:
     if isinstance(source, dict):
         attributes = source.get("attributes")
         if isinstance(attributes, dict):
-            value = attributes.get("provider")
-            if isinstance(value, str) and value:
-                return value
-    prefix = content_kind.split(".", 1)[0]
+            for key in ("provider", "provider_name"):
+                value = attributes.get(key)
+                if isinstance(value, str) and value:
+                    return value
+    parts = content_kind.split(".")
+    if len(parts) > 1 and parts[0] == "inference_gateway":
+        return parts[1]
+    if parts and parts[0] == "openai_compatible":
+        return "openai-compatible"
+    prefix = parts[0] if parts else ""
     return prefix if prefix else "unknown"
 
 
@@ -93,26 +109,142 @@ def _run_local_path(root: Path, relative: str) -> Path | None:
 def _conversation_preview(
     root: Path | None,
     reference: dict[str, Any],
+    *,
+    provider: str,
+    source: dict[str, Any] | None,
+    timestamp: object,
+    ordinal: object,
 ) -> dict[str, Any] | None:
     if root is None:
         return None
-    content_kind = reference.get("content_kind")
-    if not isinstance(content_kind, str) or not content_kind.startswith(
-        "codex.conversation_transcript"
-    ):
-        return None
     relative = reference.get("path")
-    if not isinstance(relative, str):
+    content_kind = reference.get("content_kind")
+    if not isinstance(relative, str) or not isinstance(content_kind, str):
         return None
     path = _run_local_path(root, relative)
-    return codex_rollout_preview(path) if path is not None else None
+    if path is None:
+        return None
+    return conversation_preview(
+        path,
+        content_kind=content_kind,
+        provider=provider,
+        source=source,
+        timestamp=timestamp,
+        ordinal=ordinal,
+    )
+
+
+def _entry_rank(entry: dict[str, Any]) -> tuple[int, int, str]:
+    last_sequence = entry.get("last_sequence")
+    sequence = last_sequence if isinstance(last_sequence, int) else -1
+    size = entry.get("size_bytes")
+    size_bytes = size if isinstance(size, int) else -1
+    return sequence, size_bytes, str(entry.get("path") or "")
+
+
+def _message_key(message: dict[str, Any]) -> tuple[object, ...]:
+    return (
+        message.get("ordinal"),
+        message.get("kind"),
+        message.get("sender"),
+        message.get("recipient"),
+        message.get("text"),
+        message.get("content_state"),
+        message.get("phase"),
+        message.get("task_name"),
+    )
+
+
+def _message_sort_key(message: dict[str, Any], index: int) -> tuple[object, ...]:
+    ordinal = message.get("ordinal")
+    return (
+        0 if isinstance(ordinal, int) else 1,
+        ordinal if isinstance(ordinal, int) else 2**63 - 1,
+        str(message.get("timestamp") or ""),
+        index,
+    )
+
+
+def _merge_conversation_previews(entries: list[dict[str, Any]]) -> None:
+    """Merge incremental provider content into one latest rich preview per conversation thread."""
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for entry in entries:
+        preview = entry.get("conversation_preview")
+        if not isinstance(preview, dict):
+            continue
+        thread_id = preview.get("thread_id")
+        key = str(thread_id or f"{entry.get('provider')}:{entry.get('source_id')}")
+        grouped.setdefault(key, []).append(entry)
+
+    for group in grouped.values():
+        representative = max(group, key=_entry_rank)
+        previews = [
+            entry["conversation_preview"]
+            for entry in group
+            if isinstance(entry.get("conversation_preview"), dict)
+        ]
+        merged_messages: list[dict[str, Any]] = []
+        for preview in previews:
+            for message in preview.get("messages") or []:
+                if isinstance(message, dict):
+                    merged_messages.append(dict(message))
+        indexed = list(enumerate(merged_messages))
+        indexed.sort(key=lambda pair: _message_sort_key(pair[1], pair[0]))
+        seen: set[tuple[object, ...]] = set()
+        deduped: list[dict[str, Any]] = []
+        for _, message in indexed:
+            key = _message_key(message)
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(message)
+
+        truncated = len(deduped) > 80
+        if truncated:
+            deduped = deduped[:10] + deduped[-70:]
+
+        latest_preview = representative["conversation_preview"]
+        merged_preview: dict[str, Any] = {}
+        for field in (
+            "thread_id",
+            "parent_thread_id",
+            "agent_path",
+            "agent_label",
+            "provider_label",
+            "agent_nickname",
+            "is_root",
+        ):
+            for preview in reversed(previews):
+                value = preview.get(field)
+                if value is not None and value != "":
+                    merged_preview[field] = value
+                    break
+        merged_preview.setdefault("thread_id", latest_preview.get("thread_id"))
+        for field in (
+            "parent_thread_id",
+            "agent_path",
+            "agent_label",
+            "provider_label",
+            "agent_nickname",
+            "is_root",
+        ):
+            merged_preview.setdefault(field, latest_preview.get(field))
+        merged_preview["message_count"] = len(deduped)
+        merged_preview["messages_truncated"] = truncated or any(
+            bool(preview.get("messages_truncated")) for preview in previews
+        )
+        merged_preview["messages"] = deduped
+
+        for entry in group:
+            entry.pop("conversation_preview", None)
+        representative["conversation_preview"] = merged_preview
 
 
 def conversation_record_entries(
     graph: dict[str, Any],
     run_root: str | Path | None = None,
 ) -> list[dict[str, Any]]:
-    """Build stable run-relative conversation references and safe visible previews."""
+    """Build stable run-relative conversation references and provider-neutral visible previews."""
     root = Path(run_root).expanduser().resolve() if run_root is not None else None
     nodes = [node for node in graph.get("nodes", []) if isinstance(node, dict)]
     edges = [edge for edge in graph.get("edges", []) if isinstance(edge, dict)]
@@ -134,14 +266,25 @@ def conversation_record_entries(
             continue
         source_id = edge.get("source")
         source = node_by_id.get(source_id) if isinstance(source_id, str) else None
-        preview = _conversation_preview(root, reference)
+        provider = _provider(source, str(reference["content_kind"]))
+        preview = _conversation_preview(
+            root,
+            reference,
+            provider=provider,
+            source=source,
+            timestamp=edge.get("first_seen"),
+            ordinal=edge.get("first_sequence"),
+        )
         source_name = source.get("name") if isinstance(source, dict) else None
         if isinstance(preview, dict):
+            agent_label = preview.get("agent_label")
             agent_path = preview.get("agent_path")
-            if isinstance(agent_path, str) and agent_path:
+            if isinstance(agent_label, str) and agent_label:
+                source_name = agent_label
+            elif isinstance(agent_path, str) and agent_path:
                 source_name = agent_path
         entry = {
-            "provider": _provider(source, str(reference["content_kind"])),
+            "provider": provider,
             "relation": edge.get("relation"),
             "source_id": source_id,
             "source_name": source_name,
@@ -161,6 +304,7 @@ def conversation_record_entries(
         if preview is not None:
             entry["conversation_preview"] = preview
         entries.append(entry)
+
     entries.sort(
         key=lambda entry: (
             entry["first_sequence"]
@@ -172,6 +316,7 @@ def conversation_record_entries(
             str(entry.get("path") or ""),
         )
     )
+    _merge_conversation_previews(entries)
     return entries
 
 
@@ -193,30 +338,13 @@ def _markdown_message_text(value: object) -> str:
 
 
 def _preview_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    latest: dict[str, dict[str, Any]] = {}
-    for entry in entries:
-        preview = entry.get("conversation_preview")
-        if not isinstance(preview, dict):
-            continue
-        thread_id = preview.get("thread_id")
-        key = str(thread_id or entry.get("source_id") or entry.get("path"))
-        current = latest.get(key)
-        if current is None:
-            latest[key] = entry
-            continue
-        current_sequence = current.get("last_sequence")
-        next_sequence = entry.get("last_sequence")
-        current_rank = current_sequence if isinstance(current_sequence, int) else -1
-        next_rank = next_sequence if isinstance(next_sequence, int) else -1
-        if next_rank > current_rank or (
-            next_rank == current_rank
-            and int(entry.get("size_bytes") or 0) > int(current.get("size_bytes") or 0)
-        ):
-            latest[key] = entry
+    rich = [entry for entry in entries if isinstance(entry.get("conversation_preview"), dict)]
     return sorted(
-        latest.values(),
+        rich,
         key=lambda entry: (
+            0 if (entry.get("conversation_preview") or {}).get("is_root") else 1,
             str((entry.get("conversation_preview") or {}).get("agent_path") or ""),
+            str(entry.get("provider") or ""),
             str(entry.get("source_id") or ""),
         ),
     )
@@ -226,7 +354,7 @@ def _render_markdown(entries: list[dict[str, Any]]) -> str:
     lines = [
         "# ExecWeave Conversation Records",
         "",
-        "This index uses run-local, content-addressed evidence. Provider-specific Agent folders are not required for inspection.",
+        "This index uses run-local, content-addressed evidence and a provider-neutral visible conversation projection. Provider-specific cache folders are not required for inspection.",
         "",
         f"Records: **{len(entries)}**",
         "",
@@ -239,6 +367,7 @@ def _render_markdown(entries: list[dict[str, Any]]) -> str:
             ]
         )
         return "\n".join(lines)
+
     lines.extend(
         [
             "| # | Provider | Source | Relation | Content | Bytes | Stored copy |",
@@ -268,20 +397,27 @@ def _render_markdown(entries: list[dict[str, Any]]) -> str:
         lines.extend(["", "## Visible conversation timeline", ""])
     for entry in rich_entries:
         preview = entry.get("conversation_preview") or {}
-        agent_path = preview.get("agent_path") or entry.get("source_name") or entry.get("source_id")
+        agent_label = (
+            preview.get("agent_label")
+            or preview.get("agent_path")
+            or entry.get("source_name")
+            or entry.get("source_id")
+        )
+        provider_label = preview.get("provider_label") or entry.get("provider")
+        heading = f"### {_markdown_text(provider_label)} · {_markdown_text(agent_label)}"
         nickname = preview.get("agent_nickname")
-        heading = f"### {_markdown_text(agent_path)}"
-        if isinstance(nickname, str) and nickname:
+        if isinstance(nickname, str) and nickname and nickname != agent_label:
             heading += f" ({_markdown_text(nickname)})"
         lines.extend([heading, ""])
+
         messages = preview.get("messages")
         if not isinstance(messages, list) or not messages:
-            lines.extend(["No user-visible messages were projected from this rollout.", ""])
+            lines.extend(["No user-visible messages were projected from this evidence.", ""])
             continue
         for message in messages:
             if not isinstance(message, dict):
                 continue
-            sender = message.get("sender") or agent_path
+            sender = message.get("sender") or agent_label
             recipient = message.get("recipient")
             direction = str(sender)
             if isinstance(recipient, str) and recipient:
@@ -296,7 +432,7 @@ def _render_markdown(entries: list[dict[str, Any]]) -> str:
             if message.get("content_state") == "provider_encrypted":
                 lines.append(
                     prefix
-                    + "*provider-encrypted payload; plaintext is not exposed by the Codex rollout*"
+                    + "*provider-encrypted payload; plaintext is not exposed by the observed provider surface*"
                 )
             else:
                 text = _markdown_message_text(message.get("text"))
@@ -305,7 +441,7 @@ def _render_markdown(entries: list[dict[str, Any]]) -> str:
 
     lines.extend(
         [
-            "Paths above are SHA-256-addressed copies inside this ExecWeave run. External Claude, Codex, Cursor, OpenCode, or Antigravity cache paths are intentionally not required for inspection.",
+            "Paths above are SHA-256-addressed copies inside this ExecWeave run. External provider cache paths are intentionally not required for inspection.",
             "",
         ]
     )
@@ -326,8 +462,8 @@ def write_conversation_records(
         if isinstance((preview := entry.get("conversation_preview")), dict)
     )
     payload = {
-        "schema_version": "0.2",
-        "scope": "run_local_content_references",
+        "schema_version": "0.3",
+        "scope": "run_local_provider_neutral_conversation_projection",
         "entry_count": len(entries),
         "visible_message_count": visible_message_count,
         "external_provider_folder_lookup_required": False,

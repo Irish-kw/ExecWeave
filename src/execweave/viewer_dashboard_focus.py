@@ -6,17 +6,17 @@ execweaveDashboardGraph=function(data){
   const projected=execweaveDashboardGraphBase(data);
   const hiddenTypes=new Set(['agent_trace_capability','session','command','inference_call','code_cell','agent_message']);
   const mergeTypes=new Set(['model','directory','network_endpoint']);
+  const providerRootIds=new Set(['agent:Claude Code','agent:OpenAI Codex','agent:Codex','agent:Cursor','agent:OpenCode','agent:Gemini CLI','agent:Antigravity']);
   const before=Array.isArray(projected.nodes)?projected.nodes:[];
   const prepared=before.filter(node=>node&&!hiddenTypes.has(String(node.type||''))).map(node=>{
     const attrs=node.attributes||{};
     let name=node.name;
     if(node.type==='agent'){
       const agentPath=typeof attrs.agent_path==='string'?attrs.agent_path.trim():'';
-      const agentId=String(attrs.agent_id||'');
-      const provider=String(attrs.provider||'').toLowerCase();
+      const agentId=String(attrs.agent_id||attrs.subagent_id||'');
       if(agentPath)name=agentPath;
-      else if(node.id==='agent:OpenAI Codex'||(provider==='codex'&&String(node.name||'')==='OpenAI Codex'))name='/root';
-      else if(agentId&&String(node.name||'').toLowerCase()==='default')name=`subagent · ${agentId.slice(0,8)}`;
+      else if(providerRootIds.has(String(node.id||'')))name='/root';
+      else if(agentId&&['default','agent','subagent'].includes(String(node.name||'').toLowerCase()))name=`subagent · ${agentId.slice(0,8)}`;
     }
     const occurrenceCount=Number(attrs.viewer_occurrence_count||0);
     if(node.type==='process'&&occurrenceCount>1&&!/\s×\d+$/.test(String(name||'')))name=`${name||node.id} ×${occurrenceCount}`;
@@ -44,7 +44,7 @@ execweaveDashboardGraph=function(data){
     nodes.push({...base,name:`${baseName} ×${group.length}`,first_seen:firstSeen||base.first_seen,last_seen:lastSeen||base.last_seen,attributes:{...(base.attributes||{}),viewer_canonicalized:true,viewer_occurrence_count:group.length,viewer_occurrence_ids:group.map(item=>item.id),viewer_occurrences:group.map(item=>({id:item.id,name:item.name||null,first_seen:item.first_seen||null,last_seen:item.last_seen||null}))}});
   }
   const ids=new Set(nodes.map(node=>node.id));
-  const remapped=[];for(const edge of (projected.edges||[])){
+  const remapped=[];for(const edge of(projected.edges||[])){
     if(!edge)continue;const source=canonicalId.get(edge.source)||edge.source,target=canonicalId.get(edge.target)||edge.target;
     if(!ids.has(source)||!ids.has(target)||source===target)continue;
     remapped.push(source===edge.source&&target===edge.target?edge:{...edge,source,target,viewer_canonicalized:true,viewer_original_source:edge.source,viewer_original_target:edge.target});
