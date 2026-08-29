@@ -4,7 +4,11 @@ import json
 import os
 from pathlib import Path
 from typing import Any
-from .agent_topology import EVIDENCE_CROSS_AGENT_ROUTING
+from .agent_topology import (
+    EVIDENCE_CROSS_AGENT_ROUTING,
+    THREAD_ID_EXECWEAVE_DERIVED,
+    THREAD_ID_PROVIDER_NATIVE,
+)
 
 _MAX_IDENTITY_SCAN_LINES = 64
 _MAX_PREVIEW_MESSAGES = 80
@@ -318,6 +322,9 @@ class _DerivedThreads:
             results.append(
                 {
                     "thread_id": thread_id or f"{self._owner_thread_id or 'codex'}::{agent_path}",
+                    "thread_id_source": (
+                        THREAD_ID_PROVIDER_NATIVE if thread_id else THREAD_ID_EXECWEAVE_DERIVED
+                    ),
                     "parent_thread_id": self._owner_thread_id,
                     "agent_id": thread_id,
                     "agent_path": agent_path,
@@ -543,6 +550,8 @@ def codex_rollout_previews(path: str | Path) -> list[dict[str, Any]]:
         messages = messages[:10] + messages[-(_MAX_PREVIEW_MESSAGES - 10) :]
     owner = {
         "thread_id": identity.get("thread_id"),
+        # Codex publishes this on rollout session_meta, so it is the agent's own id.
+        "thread_id_source": THREAD_ID_PROVIDER_NATIVE,
         "parent_thread_id": identity.get("parent_thread_id"),
         "agent_path": agent_path,
         "agent_nickname": identity.get("agent_nickname"),
