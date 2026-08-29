@@ -32,9 +32,10 @@ DOCS = [
     (Path("docs/run-integrity.md"), "docs/run-integrity"),
 ]
 
+
 def current_release_tag() -> str:
     pyproject = Path("pyproject.toml").read_text(encoding="utf-8")
-    match = re.search(r'(?m)^version\s*=\s*"([^"]+)"\s*$', pyproject)
+    match = re.search(r'(?m)^version\s*=\s*"([^\"]+)"\s*$', pyproject)
     if match is None:
         raise RuntimeError("project version not found in pyproject.toml")
     return f"v{match.group(1)}"
@@ -128,8 +129,9 @@ def audit_coverage() -> int:
                 print(f"FAIL missing {lang:5}: {path}")
                 failures += 1
 
-    for lang in ALL_LANGS:
-        path = Path(f"README.{lang}.md")
+    readmes = [("en", Path("README.md"))]
+    readmes.extend((lang, Path(f"README.{lang}.md")) for lang in ALL_LANGS)
+    for lang, path in readmes:
         if not path.exists():
             continue
         text = path.read_text(encoding="utf-8")
