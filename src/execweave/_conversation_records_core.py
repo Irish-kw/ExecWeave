@@ -640,10 +640,23 @@ def _render_markdown(entries: list[dict[str, Any]]) -> str:
             or entry.get("source_id")
         )
         provider_label = preview.get("provider_label") or entry.get("provider")
-        heading = f"### {_markdown_text(provider_label)} · {_markdown_text(agent_label)}"
-        nickname = preview.get("agent_nickname")
-        if isinstance(nickname, str) and nickname and nickname != agent_label:
-            heading += f" ({_markdown_text(nickname)})"
+        # Lead with the agent path. A provider nickname is often unrelated to the task
+        # the agent was given ("OpenAI Codex · Avicenna" for /root/ci_agent), so heading
+        # every section with provider plus nickname made six agents indistinguishable.
+        agent_path = preview.get("agent_path")
+        identity = (
+            agent_path if isinstance(agent_path, str) and agent_path else agent_label
+        )
+        heading = f"### {_markdown_text(identity)} · {_markdown_text(provider_label)}"
+        for annotation in (agent_label, preview.get("agent_nickname")):
+            if (
+                isinstance(annotation, str)
+                and annotation
+                and annotation != identity
+                and annotation != provider_label
+                and f"({_markdown_text(annotation)})" not in heading
+            ):
+                heading += f" ({_markdown_text(annotation)})"
         lines.extend([heading, ""])
 
         messages = preview.get("messages")
