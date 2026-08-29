@@ -27,7 +27,10 @@ from typing import Any
 
 import pytest
 
-from execweave.agent_topology import resolve_agent_topology
+from execweave.agent_topology import (
+    EVIDENCE_CROSS_AGENT_ROUTING,
+    resolve_agent_topology,
+)
 from execweave.content_store import FullFidelityContentStore
 from execweave.conversation_archive import codex_conversation_archive_events
 from execweave.conversation_records import conversation_record_entries
@@ -335,7 +338,7 @@ def test_main_rollout_alone_still_materializes_every_delegated_agent() -> None:
         child = by_path[path]
         assert child["thread_id"] == agent_id, "child thread identity must match the graph"
         assert child["parent_thread_id"] == SESSION_ID
-        assert child["evidence_scope"] == "cross_agent_routing"
+        assert child["evidence_scope"] == EVIDENCE_CROSS_AGENT_ROUTING
         senders = {message["sender"] for message in child["messages"]}
         assert senders <= {"/root", path}, f"{path} carries a foreign agent's messages"
 
@@ -442,3 +445,31 @@ def test_non_codex_providers_never_gain_derived_threads(tmp_path: Path) -> None:
         if preview is None:
             continue
         assert "derived_agent_previews" not in preview, content_kind
+
+
+def test_routing_only_child_is_not_labelled_a_full_transcript() -> None:
+    """The shipped run archived no child rollout, only the parent's routing records.
+
+    A thread carrying a delegation and a final answer looks like a complete short
+    conversation. Saying so would overclaim: the child's own work was never captured.
+    """
+    from execweave.codex_conversation import codex_rollout_previews
+
+    previews = codex_rollout_previews(FIXTURES / "rollout-main.jsonl")
+    by_path = {preview["agent_path"]: preview for preview in previews}
+    for path in CHILDREN.values():
+        assert by_path[path]["evidence_scope"] == EVIDENCE_CROSS_AGENT_ROUTING
+
+
+def test_routing_only_and_transcript_backed_threads_are_distinguishable(
+    codex_run: dict[str, Any],
+) -> None:
+    """When the child rollout IS archived, the merged thread earns the stronger label."""
+    from execweave.agent_topology import COMPLETENESS_PROVIDER_TRANSCRIPT
+
+    threads = _threads(codex_run)
+    assert threads["/root"]["conversation_completeness"] == COMPLETENESS_PROVIDER_TRANSCRIPT
+    for path in CHILDREN.values():
+        assert (
+            threads[path]["conversation_completeness"] == COMPLETENESS_PROVIDER_TRANSCRIPT
+        ), f"{path} archived its own rollout and should not read as routing-only"

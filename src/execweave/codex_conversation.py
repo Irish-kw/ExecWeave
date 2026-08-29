@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 from typing import Any
+from .agent_topology import EVIDENCE_CROSS_AGENT_ROUTING
 
 _MAX_IDENTITY_SCAN_LINES = 64
 _MAX_PREVIEW_MESSAGES = 80
@@ -324,7 +325,7 @@ class _DerivedThreads:
                     "message_count": len(messages),
                     "messages_truncated": truncated,
                     "messages": messages,
-                    "evidence_scope": "cross_agent_routing",
+                    "evidence_scope": EVIDENCE_CROSS_AGENT_ROUTING,
                 }
             )
         return results
