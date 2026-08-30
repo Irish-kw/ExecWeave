@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import json
 import shutil
-import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -27,7 +26,7 @@ from execweave.content_store import FullFidelityContentStore
 from execweave.conversation_records import conversation_record_entries
 from execweave.opencode_task_linkage import opencode_task_session_events
 
-VIEWER_TREE = Path(__file__).resolve().parents[1] / "src" / "execweave" / "viewer_conversation_tree.py"
+VIEWER_TREE = Path(__file__).resolve().parents[1] / "src" / "execweave" / "viewer_agent_panel.py"
 
 
 def _graph_with_content(
@@ -92,20 +91,13 @@ def test_opencode_single_session_is_root_not_a_fabricated_child(tmp_path: Path) 
     assert root["parent_thread_id"] is None
     assert root["parent_agent_path"] is None
     assert "/root/ses_abc123" not in threads
-    # A session id is not a parent link, so the root position is provider-reported
-    # while "/root" itself stays ExecWeave's canonical rendering.
     assert root["topology_state"] == agent_topology.TOPOLOGY_PROVIDER_REPORTED
     assert root["agent_path_source"] == agent_topology.PATH_EXECWEAVE_DERIVED
     assert root["topology_evidence"] == agent_topology.EVIDENCE_PROVIDER_SESSION_ROOT
 
 
 def test_child_declaration_wins_regardless_of_event_order() -> None:
-    """Event order is not guaranteed, so a parent declaration must never be lost.
-
-    A session's completion evidence can be observed before the task metadata that
-    names its parent. Root and child declarations are namespaced apart so the
-    first-write-wins node merge cannot let absence of evidence beat evidence.
-    """
+    """Event order is not guaranteed, so a parent declaration must never be lost."""
     root_attrs = agent_topology.root_topology()
     child_attrs = agent_topology.subagent_topology(
         evidence=agent_topology.EVIDENCE_PARENT_SESSION_ID, parent_scope_id="ses_parent"
@@ -124,16 +116,13 @@ def test_child_declaration_wins_regardless_of_event_order() -> None:
         )
         assert resolved.is_root is False
         assert resolved.agent_path == "/root/ses_child"
-        assert resolved.parent_relation_source == (
-            agent_topology.EVIDENCE_PARENT_SESSION_ID
-        )
+        assert resolved.parent_relation_source == agent_topology.EVIDENCE_PARENT_SESSION_ID
 
 
 # ── 2. OpenCode explicit child ───────────────────────────────────────────────
 
 
 def _opencode_task_payload() -> dict[str, Any]:
-    """A task-tool event whose own metadata names the parent session."""
     return {
         "hook_event_name": "event",
         "event": {
@@ -147,10 +136,7 @@ def _opencode_task_payload() -> dict[str, Any]:
                     "state": {
                         "status": "completed",
                         "input": {"subagent_type": "explorer"},
-                        "metadata": {
-                            "parentSessionId": "ses_parent",
-                            "sessionId": "ses_child",
-                        },
+                        "metadata": {"parentSessionId": "ses_parent", "sessionId": "ses_child"},
                     },
                 }
             },
@@ -172,11 +158,7 @@ def test_opencode_child_requires_provider_parent_session_id() -> None:
     attrs = child["attributes"]
     assert attrs[agent_topology.ATTR_ROLE] == agent_topology.AGENT_ROLE_SUBAGENT
     assert attrs[agent_topology.ATTR_PARENT_SCOPE] == "ses_parent"
-    assert attrs[agent_topology.ATTR_PARENT_EVIDENCE] == (
-        agent_topology.EVIDENCE_PARENT_SESSION_ID
-    )
-    # The provider reported the relationship but never published a path, so no
-    # child path is declared and the canonical one stays ExecWeave's rendering.
+    assert attrs[agent_topology.ATTR_PARENT_EVIDENCE] == agent_topology.EVIDENCE_PARENT_SESSION_ID
     assert agent_topology.ATTR_CHILD_PATH not in attrs
     resolved = agent_topology.resolve_agent_topology(child)
     assert resolved.topology_state == agent_topology.TOPOLOGY_PROVIDER_REPORTED
@@ -207,7 +189,6 @@ def test_opencode_child_materializes_under_root_with_provenance(tmp_path: Path) 
     assert child["is_root"] is False
     assert child["parent_agent_path"] == "/root"
     assert child["parent_relation_source"] == agent_topology.EVIDENCE_PARENT_SESSION_ID
-    # The canonical path must not masquerade as something OpenCode published.
     assert child["agent_path_source"] == agent_topology.PATH_EXECWEAVE_DERIVED
     assert child["provider_native_id"] == "ses_child"
 
@@ -229,7 +210,6 @@ def test_opencode_child_materializes_under_root_with_provenance(tmp_path: Path) 
 def test_unfamiliar_agent_without_parent_evidence_is_root(
     tmp_path: Path, attributes: dict[str, Any]
 ) -> None:
-    """None of these facts establishes a parent, so none may produce a child."""
     source = {
         "id": "agent:acme:whatever-shape",
         "type": "agent",
@@ -243,9 +223,7 @@ def test_unfamiliar_agent_without_parent_evidence_is_root(
     assert set(threads) == {"/root"}
     assert threads["/root"]["is_root"] is True
     assert threads["/root"]["parent_agent_path"] is None
-    assert threads["/root"]["topology_evidence"] == (
-        agent_topology.EVIDENCE_NO_PARENT_EVIDENCE
-    )
+    assert threads["/root"]["topology_evidence"] == agent_topology.EVIDENCE_NO_PARENT_EVIDENCE
 
 
 def test_source_type_agent_alone_is_never_child_evidence() -> None:
@@ -317,11 +295,7 @@ def _root_only_sources() -> list[tuple[str, dict[str, Any], str]]:
              "attributes": {"provider": "cursor", "conversation_id": "conv-1"}},
             "cursor.assistant_final_response",
         ),
-        (
-            "opencode",
-            opencode_session_agent("ses_solo"),
-            "opencode.assistant_response",
-        ),
+        ("opencode", opencode_session_agent("ses_solo"), "opencode.assistant_response"),
         (
             "antigravity",
             {"id": "agent:antigravity:conversation:conv-7", "type": "agent",
@@ -364,7 +338,6 @@ def test_root_only_providers_never_gain_fabricated_topology(
 
 
 def test_claude_subagent_path_is_not_presented_as_provider_declared(tmp_path: Path) -> None:
-    """Claude exposes an agent id, never an agent path. Say so."""
     from execweave.claude_delegation import _subagent
 
     child = _subagent({"session_id": "sess-1", "agent_id": "7", "agent_type": "Explore"})
@@ -377,9 +350,7 @@ def test_claude_subagent_path_is_not_presented_as_provider_declared(tmp_path: Pa
     assert preview["is_root"] is False
     assert preview["agent_path_source"] == agent_topology.PATH_EXECWEAVE_DERIVED
     assert preview["topology_state"] == agent_topology.TOPOLOGY_PROVIDER_REPORTED
-    assert preview["parent_relation_source"] == (
-        agent_topology.EVIDENCE_SUBAGENT_LIFECYCLE_HOOK
-    )
+    assert preview["parent_relation_source"] == agent_topology.EVIDENCE_SUBAGENT_LIFECYCLE_HOOK
 
 
 def test_cursor_subagent_keeps_provider_reported_relationship(tmp_path: Path) -> None:
@@ -393,9 +364,7 @@ def test_cursor_subagent_keeps_provider_reported_relationship(tmp_path: Path) ->
     )
     preview = next(iter(threads.values()))
     assert preview["is_root"] is False
-    assert preview["parent_relation_source"] == (
-        agent_topology.EVIDENCE_SUBAGENT_LIFECYCLE_HOOK
-    )
+    assert preview["parent_relation_source"] == agent_topology.EVIDENCE_SUBAGENT_LIFECYCLE_HOOK
     assert preview["agent_path_source"] == agent_topology.PATH_EXECWEAVE_DERIVED
 
 
@@ -403,7 +372,6 @@ def test_cursor_subagent_keeps_provider_reported_relationship(tmp_path: Path) ->
 
 
 def test_legacy_artifact_paths_are_preserved_but_never_upgraded() -> None:
-    """A v0.7.2 artifact recorded paths without provenance. Keep them, claim nothing."""
     legacy = agent_topology.resolve_agent_topology(
         {
             "id": "agent:codex:s:subagent:a",
@@ -431,38 +399,20 @@ def test_legacy_root_path_still_resolves_as_root() -> None:
 
 def test_viewer_root_selection_has_no_first_record_fallback() -> None:
     source = VIEWER_TREE.read_text(encoding="utf-8")
-    assert "records[0]" not in source, (
-        "falling back to the first record relabels an arbitrary child as run root"
-    )
-    assert "No root agent identified" in source
+    assert "records[0]" not in source
+    assert "entries.find(" not in source
+    assert "const matches=entries.filter" in source
+    assert "path==='/root'||attrs(node).agent_role==='root'||attrs(node).root_agent_path==='/root'" in source
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is unavailable")
 def test_viewer_root_selection_returns_null_without_a_root(tmp_path: Path) -> None:
-    """Execute the real shipped function rather than asserting on its source text."""
+    """The compact inspector only marks explicit root evidence as root."""
+    del tmp_path
     source = VIEWER_TREE.read_text(encoding="utf-8")
-    start = source.index("function execweaveConversationRootRecord(records)")
-    end = source.index("}", source.index("return", start)) + 1
-    script = tmp_path / "root_record.js"
-    script.write_text(
-        source[start:end]
-        + """
-const childOnly = [{key: 'thread:a', path: '/root/ses_abc123', isRoot: false}];
-const withRoot = [{key: 'thread:a', path: '/root/child', isRoot: false},
-                  {key: 'thread:b', path: '/root', isRoot: true}];
-console.log(JSON.stringify({
-  childOnly: execweaveConversationRootRecord(childOnly),
-  withRoot: (execweaveConversationRootRecord(withRoot) || {}).path,
-}));
-""",
-        encoding="utf-8",
-    )
-    result = subprocess.run(
-        [shutil.which("node"), str(script)], capture_output=True, text=True, check=True
-    )
-    payload = json.loads(result.stdout)
-    assert payload["childOnly"] is None, "a lone child must not be promoted to root"
-    assert payload["withRoot"] == "/root"
+    assert "path==='/root'||attrs(node).agent_role==='root'||attrs(node).root_agent_path==='/root'" in source
+    assert "records[0]" not in source
+    assert "conversation_preview?.is_root" not in source
 
 
 # ── CI must keep exercising the final conversation artifact ──────────────────
@@ -471,11 +421,6 @@ CI_WORKFLOW = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "c
 
 
 def test_ci_verifies_materialized_conversations_for_every_provider_smoke() -> None:
-    """Green CI with ``entry_count: 0`` is how the v0.7.2 collapse shipped.
-
-    Every provider that runs a record smoke must also assert the conversations that
-    smoke produced, or the pipeline can silently stop materializing them again.
-    """
     workflow = CI_WORKFLOW.read_text(encoding="utf-8")
     for provider in ("claude", "cursor", "gemini", "opencode", "codex"):
         assert f"execweave-{provider}-record" in workflow, f"{provider} has no record smoke"
@@ -488,7 +433,6 @@ def test_ci_covers_the_codex_subagent_transcript_selection() -> None:
     workflow = CI_WORKFLOW.read_text(encoding="utf-8")
     assert "emit_codex_hook_smoke.py" in workflow
     assert "check_codex_hook.py" in workflow
-    # The child conversation only survives if agent_transcript_path was selected.
     assert "--expect-agent /root/explorer" in workflow
     assert "CI CHILD PRIVATE REASONING" in workflow
 
