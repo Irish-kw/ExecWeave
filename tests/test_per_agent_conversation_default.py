@@ -125,7 +125,9 @@ def test_an_entry_without_messages_does_not_become_a_second_agent(tmp_path: Path
     html = render_static_dashboard_html(_graph(), conversation_entries=entries)
     assert html.count('"source_id":"agent:codex:S:subagent:one"') == 2
     assert "function recordFor(node)" in html
-    assert "entries.find(entry=>String(entry?.source_id||'')===String(node?.id||''))" in html
+    assert "const matches=entries.filter" in html
+    assert "messages:ordered.map(item=>item.message)" in html
+    assert "entries.find(entry=>String(entry?.source_id||'')" not in html
     assert "execweave-conversation-agent-section" not in html
 
 
