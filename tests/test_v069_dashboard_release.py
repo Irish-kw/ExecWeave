@@ -97,10 +97,16 @@ def test_live_gif_export_uses_reset_bounded_lzw_and_emits_a_gif() -> None:
 
 
 def test_release_version_and_noncommercial_license_metadata_are_078() -> None:
-    assert __version__ == "0.7.8"
+    """Release metadata agrees with the package version and the license stays noncommercial.
+
+    The name carries the release it was written for and is kept because the
+    stage-integrity node-ID floor refuses renames; the assertions below are the
+    current release.
+    """
+    assert __version__ == "0.7.9"
     pyproject = Path("pyproject.toml").read_text(encoding="utf-8")
-    assert 'version = "0.7.8"' in pyproject
-    assert "ExecWeave v0.7.8 release metadata" in pyproject
+    assert 'version = "0.7.9"' in pyproject
+    assert "ExecWeave v0.7.9 release metadata" in pyproject
     assert "License :: Other/Proprietary License" in pyproject
     assert "License :: OSI Approved :: MIT License" not in pyproject
 

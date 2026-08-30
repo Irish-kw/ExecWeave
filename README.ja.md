@@ -31,7 +31,7 @@ PyPI から最新の wheel/sdist をインストールします。
 python -m pip install -U execweave
 ```
 
-現在のリリースは **v0.7.8** です。
+現在のリリースは **v0.7.9** です。
 
 開発環境では次のようにインストールできます。
 
@@ -67,7 +67,7 @@ execweave record --open -- python my_agent.py
 
 `execweave top -- codex` は Agent を起動 terminal 上でインタラクティブなまま保ち、ホスト環境に応じて detached Top dashboard を開くか既存のものに attach します。
 
-**v0.7.8 — conversation は agent のものであり、それは人がクリックできるすべての場所で成り立つ。** agent ではない node の選択は、何も選ばれていない状態と同じものに解決されていたため、network endpoint や process がすべての agent の conversation を描いていました。選択の種類は焦点の agent とは別に追跡され、agent でないものはそう述べます。provider がすべての subagent の前に付ける同一の数キロバイトのブロックは各 agent 自身の assignment の位置に記録されており、四つの兄弟が同じプラグイン一覧の四つの複製として描かれていました。二つ以上の agent の下に一字一句同じ形で現れるテキストは、どの agent の assignment でもありません。折りたたまれ、実態どおりに名付けられます。複数の agent が一つの rollout から読まれている場合 — Codex は child の委任と返答を親のファイルに記録します — 生のバイト列を提供するのはそれを所有する agent だけで、他は自分の turn がどの記録から読まれたかを示すため、child のセクション内のリンクが run 全体を開くことはありません。各 agent が保持する provider-neutral かつ agent-local な multi-agent conversation は、実行が終わったあとだけでなく実行中にも投影されます。リリース前の検査は実物のブラウザで両方の viewer を、人が行えるあらゆる選択にわたって駆動するため、agent が自分のものでないものを見る状態は release に届く前にビルドを失敗させます。
+**v0.7.9 — 実行中も実行後も、ひとつの Dashboard。** Live、完了後の画面、viewer.html は同じ証拠の三つの描画であり、完了時には別の文書を取得して読者が見ているページに上書きしていました。いまはひとつの shell だけです。完了は開いている画面の状態を変えるだけで、viewer.html はその同じ Dashboard のオフライン保存です。agent を選ぶとひとつの問いに答えて止まります。root は Prompt と Final response を、subagent は Task、provider が平文を公開した場合の Thinking、そして Response を示します。process、file、network endpoint、model は conversation をまったく示しません。conversation は agent のものだからです。provider が暗号化した turn は「観測済みだが平文は非公開」と読まれ、記録されなかったとは読まれません。provider がすべての subagent に前置きするブロックが、ある agent の assignment として示されることはありません。routing の語を引用した回答もそのまま残ります。各 agent が保持する provider-neutral かつ agent-local な multi-agent conversation は、その実行が書き出したすべてのアーカイブを横断して集約されるため、何度も記録された agent も自分が述べたことを示せます。リリース前の検査は、出荷される Dashboard を live と finished の両方の状態で、実物のブラウザで人が行えるあらゆる選択にわたって駆動します。
 
 統合 dashboard では execution graph、logs、conversation records を同じ inspection flow で確認できます。Finalized run は `conversations.md` と `conversations.json` を生成し、検証済み provider transcript は run-local SHA-256 content store にコピーされます。Claude Code、OpenAI Codex、Cursor、OpenCode、Google Antigravity は、それぞれが実際に公開する最も強い multi-agent evidence を利用します。gateway や local runtime が root request/response しか公開しない場合、ExecWeave は root conversation だけを表示し、subagent や hidden routing を捏造しません。
 
@@ -276,7 +276,7 @@ Conversation isolation は attribution/display の規則であり redaction boun
 
 ## 現在の状態
 
-v0.7.8 は cross-platform runtime collection、materialized execution graph、standalone/live dashboard、保守的な provider↔runtime correlation、content-addressed full-fidelity provider evidence、attributable multi-agent execution trace、run-local conversation access、provider-neutral projection 上の agent-local conversation isolation、standalone および live dashboard での per-agent conversation focus を統合します。各 integration は provider が実際に公開した最も強い identity/routing evidence のみを保持し、不足する場合は abstain します。Observed evidence と inference は設計上分離されたままです。
+v0.7.9 は cross-platform runtime collection、materialized execution graph、standalone/live dashboard、保守的な provider↔runtime correlation、content-addressed full-fidelity provider evidence、attributable multi-agent execution trace、run-local conversation access、provider-neutral projection 上の agent-local conversation isolation、standalone および live dashboard での per-agent conversation focus を統合します。各 integration は provider が実際に公開した最も強い identity/routing evidence のみを保持し、不足する場合は abstain します。Observed evidence と inference は設計上分離されたままです。
 
 ## ドキュメント
 

@@ -31,7 +31,7 @@ PyPI에서 최신 wheel/sdist를 설치합니다.
 python -m pip install -U execweave
 ```
 
-현재 릴리스는 **v0.7.8** 입니다.
+현재 릴리스는 **v0.7.9** 입니다.
 
 개발 설치:
 
@@ -67,7 +67,7 @@ execweave record --open -- python my_agent.py
 
 `execweave top -- codex`는 Agent를 시작 terminal에서 interactive 상태로 유지하면서 host 환경에 따라 detached Top dashboard를 열거나 attach합니다.
 
-**v0.7.8 — conversation 은 agent 의 것이며, 사람이 클릭할 수 있는 모든 곳에서 그렇다.** agent 가 아닌 node 를 선택하면 아무것도 선택하지 않은 상태와 같은 값으로 해석되어, network endpoint 나 process 가 모든 agent 의 conversation 을 그렸습니다. 이제 선택의 종류를 초점이 맞춰진 agent 와 분리해 추적하며, agent 가 아닌 것은 그렇다고 말합니다. provider 가 모든 subagent 앞에 붙이는 동일한 수 킬로바이트 블록이 각 agent 자신의 assignment 자리에 기록되어, 네 형제가 같은 플러그인 목록의 사본 넷으로 그려졌습니다. 둘 이상의 agent 아래에 한 글자도 다르지 않게 나타나는 텍스트는 어느 agent 의 assignment 도 아니므로, 접히고 실제 그대로 이름 붙습니다. 여러 agent 가 하나의 rollout 에서 읽힌 경우 — Codex 는 child 의 위임과 반환을 부모의 파일에 기록합니다 — 원본 바이트를 제공하는 것은 그것을 소유한 agent 뿐이며, 나머지는 자신의 turn 이 누구의 기록에서 읽혔는지 밝히므로 child 섹션의 링크가 run 전체를 열지 않습니다. 각 agent 가 소유한 provider-neutral, agent-local multi-agent conversation 은 실행이 끝난 뒤가 아니라 실행 중에도 투영됩니다. 릴리스 검사는 실제 브라우저로 두 viewer 를 사람이 할 수 있는 모든 선택에 걸쳐 구동하므로, agent 가 자기 것이 아닌 것을 보는 상태는 release 에 도달하는 대신 빌드를 실패시킵니다.
+**v0.7.9 — 실행 중에도 실행 후에도, 하나의 Dashboard.** Live, 완료된 화면, viewer.html 은 같은 증거의 세 가지 렌더링이었고, 완료 시점에는 별도의 문서를 가져와 읽는 사람이 보고 있던 페이지 위에 덮어썼습니다. 이제 shell 은 하나입니다. 완료는 열려 있는 화면의 상태를 바꿀 뿐이고, viewer.html 은 바로 그 Dashboard 의 오프라인 저장본입니다. agent 를 선택하면 하나의 질문에 답하고 멈춥니다. root 는 Prompt 와 Final response 를, subagent 는 Task 와, provider 가 평문을 노출한 경우의 Thinking, 그리고 Response 를 보여 줍니다. process, file, network endpoint, model 은 conversation 을 전혀 보여 주지 않습니다. conversation 은 agent 의 것이기 때문입니다. provider 가 암호화한 turn 은 기록되지 않은 것이 아니라 관측되었으나 평문이 노출되지 않은 것으로 읽힙니다. provider 가 모든 subagent 앞에 붙이는 블록이 어느 agent 의 assignment 로 제시되는 일도 없습니다. routing 어휘를 인용한 답변도 온전히 남습니다. 각 agent 가 소유한 provider-neutral, agent-local multi-agent conversation 은 그 실행이 남긴 모든 아카이브에 걸쳐 집계되므로, 여러 번 기록된 agent 도 자신이 말한 것을 보여 줍니다. 릴리스 검사는 출시되는 Dashboard 를 live 와 finished 두 상태 모두에서 실제 브라우저로, 사람이 할 수 있는 모든 선택에 걸쳐 구동합니다.
 
 통합 dashboard는 execution graph, logs, conversation records를 하나의 inspection flow에서 제공합니다. Finalized run은 `conversations.md`와 `conversations.json`을 만들며, 검증된 provider transcript는 run-local SHA-256 content store로 복사됩니다. Claude Code, OpenAI Codex, Cursor, OpenCode, Google Antigravity는 각 integration이 실제로 노출하는 가장 강한 multi-agent evidence를 사용합니다. gateway나 local runtime이 root request/response만 노출하면 ExecWeave는 root conversation만 보여 주며 subagent나 hidden routing을 만들어내지 않습니다.
 
@@ -276,7 +276,7 @@ Conversation isolation은 attribution/display 규칙이지 redaction boundary가
 
 ## 현재 상태
 
-v0.7.8는 cross-platform runtime collection, materialized execution graph, standalone/live dashboard, 보수적인 provider↔runtime correlation, content-addressed full-fidelity provider evidence, attributable multi-agent execution trace, run-local conversation access, provider-neutral projection의 agent-local conversation isolation, standalone 및 live dashboard의 per-agent conversation focus를 통합합니다. 각 integration은 provider가 실제로 노출한 가장 강한 identity/routing evidence만 보존하고 충분한 증거가 없으면 abstain합니다. Observed evidence와 inference는 설계상 계속 분리됩니다.
+v0.7.9는 cross-platform runtime collection, materialized execution graph, standalone/live dashboard, 보수적인 provider↔runtime correlation, content-addressed full-fidelity provider evidence, attributable multi-agent execution trace, run-local conversation access, provider-neutral projection의 agent-local conversation isolation, standalone 및 live dashboard의 per-agent conversation focus를 통합합니다. 각 integration은 provider가 실제로 노출한 가장 강한 identity/routing evidence만 보존하고 충분한 증거가 없으면 abstain합니다. Observed evidence와 inference는 설계상 계속 분리됩니다.
 
 ## 문서
 

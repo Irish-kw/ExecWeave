@@ -31,7 +31,7 @@ ExecWeave — source-available, local-first проект наблюдаемос�
 python -m pip install -U execweave
 ```
 
-Текущая версия — **v0.7.8**.
+Текущая версия — **v0.7.9**.
 
 Для разработки:
 
@@ -67,7 +67,7 @@ execweave record --open -- python my_agent.py
 
 `execweave top -- codex` оставляет Agent интерактивным в стартовом terminal и одновременно открывает либо подключает detached Top dashboard в зависимости от host environment.
 
-**v0.7.8 — conversation принадлежит agent, в каждом месте, куда человек может кликнуть.** Выбор node, который не является agent, разрешался в ту же пустую выборку, что и невыбранный граф, поэтому сетевая конечная точка или процесс рисовали conversation всех agents; вид выборки теперь отслеживается отдельно от сфокусированного agent, а то, что не является agent, так и говорит. Многокилобайтный блок, который provider добавляет перед каждым subagent, записывался там, где находится собственное задание каждого agent, и четыре брата отображались как четыре копии одного каталога плагинов: текст, появляющийся дословно под двумя и более agents, не является заданием ни одного из них — он сворачивается и называется тем, что он есть. Там, где несколько agents были прочитаны из одного rollout — Codex записывает делегирование ребёнка и его возврат в файл родителя — сырые байты предлагает только тот agent, которому файл принадлежит, а остальные называют, из чьей записи прочитаны их turns, поэтому ссылка внутри секции ребёнка больше не открывает весь прогон. Provider-neutral, agent-local multi-agent conversations, которыми владеет каждый agent, теперь проецируются во время прогона, а не только после его завершения. Релизная проверка ведёт оба поставляемых viewers в настоящем браузере через каждый выбор, который может сделать человек: agent, видящий не своё, роняет сборку вместо того, чтобы попасть в release.
+**v0.7.9 — одна панель, во время прогона и после него.** Live, завершённый прогон и viewer.html были тремя отрисовками одних и тех же свидетельств, а завершение забирало отдельный документ и записывало его поверх страницы, которую читатель уже смотрел. Теперь оболочка одна: завершение меняет состояние на месте, а viewer.html — это та же панель, сохранённая офлайн. Выбор agent отвечает на один вопрос и останавливается: корень показывает свой Prompt и итоговый ответ, subagent — свою задачу, своё рассуждение там, где provider раскрыл открытый текст, и свой ответ, тогда как процесс, файл, сетевая конечная точка или модель не показывают conversation вовсе, потому что conversation принадлежит agent. Turn, зашифрованный provider, читается как наблюдавшийся без открытого текста, а не как никогда не записанный; блок, который provider добавляет перед каждым subagent, никогда не подаётся как задание какого-либо agent; ответ, цитирующий слова маршрутизации, остаётся целым. Provider-neutral, agent-local multi-agent conversations, которыми владеет каждый agent, собираются по всем архивам, записанным прогоном, поэтому agent, записанный много раз, по-прежнему показывает сказанное им. Релизные проверки ведут поставляемую панель в настоящем браузере через каждый выбор, который может сделать человек, и в live-, и в завершённой форме.
 
 Единый dashboard объединяет execution graph, logs и conversation records в одном inspection flow. Finalized runs создают `conversations.md` и `conversations.json`, а проверенные provider transcripts копируются в run-local SHA-256 content store. Claude Code, OpenAI Codex, Cursor, OpenCode и Google Antigravity используют наиболее сильную multi-agent evidence, которую реально раскрывает соответствующая integration. Если gateway или local runtime показывает только root request/response, ExecWeave отображает только root conversation и не выдумывает subagents или hidden routing.
 
@@ -276,7 +276,7 @@ Conversation isolation — это правило attribution/display, а не re
 
 ## Текущий статус
 
-v0.7.8 объединяет cross-platform runtime collection, materialized execution graphs, standalone/live dashboards, conservative provider↔runtime correlation, full-fidelity content-addressed provider evidence, attributable multi-agent execution traces, прямой run-local conversation access agent-local conversation isolation в provider-neutral projections и per-agent conversation focus в standalone и live dashboards. Каждая integration сохраняет только наиболее сильную identity/routing evidence, реально раскрытую provider, и abstain-ит при её отсутствии. Observed evidence и inference по-прежнему разделены архитектурно.
+v0.7.9 объединяет cross-platform runtime collection, materialized execution graphs, standalone/live dashboards, conservative provider↔runtime correlation, full-fidelity content-addressed provider evidence, attributable multi-agent execution traces, прямой run-local conversation access agent-local conversation isolation в provider-neutral projections и per-agent conversation focus в standalone и live dashboards. Каждая integration сохраняет только наиболее сильную identity/routing evidence, реально раскрытую provider, и abstain-ит при её отсутствии. Observed evidence и inference по-прежнему разделены архитектурно.
 
 ## Документация
 
