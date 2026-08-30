@@ -1,8 +1,8 @@
 # ExecWeave 0.7.5 → 0.8.0 實作規劃書
 
 > 本文件是交給實作者（Codex）逐階段執行的規格。
-> 每個階段開一個獨立 branch、開一個獨立 PR、**不自行 merge**，最後統一送審。
-> 基準 commit：`main` @ `80e23d5`（v0.7.4）。
+> **嚴格循序交付**：一個階段 merge 進 `main` 之後，下一個階段才從新的 `main` 開分支。
+> 基準：`main` @ `80e23d5`（v0.7.4）。
 
 ---
 
@@ -14,25 +14,35 @@
 Provider-encrypted payload — plaintext is not exposed by the observed provider surface.
 ```
 
-目標是把**實際拿得到**的 input / thinking / output / tool token 全部收進來，並且把**拿不到的部分誠實標記**，而不是用猜測填滿。
+目標是把**實際觀察得到**的 input / reasoning / output / tool 內容與 usage 收進來，並且把**觀察不到的部分誠實標記原因**，而不是用猜測填滿。
 
-### 加密分三層，決定了什麼做得到
+### 三個層次，決定了什麼做得到
 
 | 層 | 定義 | 本輪立場 |
 |---|---|---|
-| **L1 傳輸層 TLS** | client ↔ provider 之間的 HTTPS | **不碰**。不做 MITM，不做 eBPF |
-| **L2 應用層封裝** | client 自己在 JSON 欄位再加密（Fernet `gAAAAA`） | 金鑰在本地才處理 |
-| **L3 服務端加密** | provider 回傳即為密文，金鑰只在 provider | **放棄**，標記為不可得 |
+| **傳輸層 TLS** | client ↔ provider 之間的 HTTPS | **不碰**。不做 MITM，不做 eBPF |
+| **應用層封裝** | client 在 JSON 欄位再包一層加密 | 只有本機確實存在解密器時才處理 |
+| **服務端加密** | 金鑰不在本機 | **不嘗試取得明文**，記錄為不可觀察並註明依據 |
 
-**本輪只走 provider 官方表面與使用者自有端點。** 破 L1 的手段（TLS MITM、eBPF uprobe）一律不做，理由見 §2。
+**本輪只走 provider 官方表面與使用者自有端點。**
 
 ---
 
-## 1. 不可違反的架構紅線
+## 1. 不可違反的核心原則
 
-以下是現有版本的既定設計，**任何階段都不得改變**：
+以下適用於**每一個階段**，不因任何理由放寬：
 
-### 1.1 不做 TLS MITM
+1. **不做 TLS MITM。**
+2. **不使用 eBPF / uprobe / kprobe / ptrace / `LD_PRELOAD` / memory scraping / 核心模組。**
+3. **不破解 provider encryption。**
+4. **provider 沒有明確曝露的內容不得猜測。**
+5. **evidence 與 inference 必須分離。**
+6. **能取得多少就宣稱多少**，不多報。
+7. **拿不到的內容必須明確標示原因。**
+8. **不得弱化既有測試、checker 或 evidence semantics。**
+9. **provider-specific logic 不得污染共用層。**
+
+### 1.1 不做 TLS MITM 的具體約束
 
 `src/execweave/http_proxy.py:321-322` 是刻意的設計決定：
 
@@ -43,306 +53,571 @@ def do_CONNECT(self) -> None:
 
 - 這行**必須保留原樣**。
 - `tests/test_http_proxy.py:252`（`assert response.status == 405`）**必須永遠綠**。
-- 0.7.9 階段要為它補上更明確的不變式測試，但**只能加強、不能放寬**。
+- 0.7.9 會為它補上更明確的不變式測試，**只能加強、不能放寬**。
 
-### 1.2 證據與推論分離
+### 1.2 既有證據詞彙只能擴充
 
-ExecWeave 的信譽建立在「從不宣稱超過底層證據所支持的內容」。既有詞彙定義在 `src/execweave/agent_topology.py`：
+定義在 `src/execweave/agent_topology.py`：
 
-- 路徑來源：`provider_declared` / `execweave_derived` / `legacy_unknown`
-- 對話完整度：`provider_transcript` / `routing_only` / `unavailable`
+- 路徑來源：`provider_declared` / `execweave_derived` / `legacy_unknown`（`:51-53`）
+- 對話完整度：`provider_transcript` / `routing_only` / `unavailable`（`:57-71`）
 - 拓樸證據：`EVIDENCE_*` 常數（`:123-130`）
 
-**只能擴充，不能重寫、不能改名、不能改語意。**
+**只能擴充，不能重寫、改名或改語意。**
 
-### 1.3 provider 中立
+### 1.3 Evidence contract（每個階段都適用）
 
-不得為了讓某一家好看而在共用層寫特例。provider 專屬邏輯留在該 provider 的模組內。
+所有 schema / UI / Markdown 都必須讓以下五者**在資料上可區分**，不得互相塌縮：
+
+```
+provider-observed fact
+≠ ExecWeave-derived interpretation
+≠ estimate
+≠ unknown
+≠ unavailable
+```
+
+**Absence of evidence 不等於 negative evidence。** 不得因為 dashboard 想呈現得完整，就把 unknown 填成 `0`、`false`、空字串或推測值。
 
 ---
 
-## 2. 政策紅線：不得違反 provider 政策
+## 2. 政策紅線
 
-### 2.1 正當 vs 不正當的界線
+### 2.1 正當 vs 不正當
 
-**核心區分：使用者主動重新設定自己的 client，不等於攔截。**
+**核心區分：使用者主動重新設定自己的 client 端點，不等於攔截。**
 
-| 做法 | 判定 | 理由 |
-|---|---|---|
-| 讀 provider 官方 hook / rollout / 本地 transcript | ✅ 正當 | provider 主動提供的介面 |
-| 使用者自己把 `base_url` 指向自己的 gateway | ✅ 正當 | 每家 provider 都支援的標準設定 |
-| 擷取本地 runtime（Ollama 等）的 HTTP 流量 | ✅ 正當 | 沒有第三方服務、沒有加密 |
-| 偽造 CA 憑證做 TLS MITM | ❌ 禁止 | 多數 provider ToS 禁止攔截或逆向其服務通訊 |
-| eBPF uprobe 掛 `SSL_write` / `SSL_read` | ❌ 禁止 | 使用者明確排除；且需 root、Linux only |
-| 逆向 provider 的加密封裝 | ❌ 禁止 | 同上 |
+| 做法 | 判定 |
+|---|---|
+| 讀 provider 官方 hook / rollout / 本地 transcript | ✅ 正當 |
+| 使用者**自行**把 client endpoint 指向 ExecWeave 端點 | ✅ 正當（需 opt-in） |
+| 擷取本地 runtime（Ollama 等）的 HTTP 往返 | ✅ 正當 |
+| 偽造 CA 憑證做 TLS MITM | ❌ 禁止 |
+| eBPF uprobe 掛 `SSL_write` / `SSL_read` | ❌ 禁止 |
+| 逆向或破解 provider 的加密封裝 | ❌ 禁止 |
+| 自動改寫使用者的 client 設定 | ❌ 禁止 |
+| 透明代理 / 未經設定即攔截 | ❌ 禁止 |
 
-### 2.2 拿不到就放棄
+### 2.2 關於 endpoint 可設定性：不得過度宣稱
 
-**這是明確指示：拿不到的就算了，不要用技術手段硬取。**
+**不得寫「每家 provider 都支援 custom base_url」這種敘述。** 實際支援度依 client、client 版本、provider、auth mode、feature surface 而異。例如同一個 client：
 
-具體而言，**Codex 的 `reasoning.encrypted_content` 屬於 L3，本輪放棄取得明文**，改為在 0.7.9 用可驗證的方式標記為不可得，並記錄「為什麼拿不到」。
+- Agent mode 可能支援 custom endpoint
+- autocomplete / Tab 補全可能不支援
+- API-key auth 與 subscription auth 的行為可能不同
+
+因此 endpoint 可設定性是 **0.7.5 要逐一實測的欄位**，不是預設前提。
+
+### 2.3 拿不到就放棄
+
+拿不到的內容不得用技術手段硬取。改為在 0.7.9 用可驗證的方式標記為不可觀察，並記錄依據。
 
 ---
 
 ## 3. 絕對禁止事項（防作弊）
 
-以下任何一項出現在 PR 中，該 PR 直接退回，不進行後續審查。
+任一項出現在 PR 中，該 PR 直接退回，不進行後續審查。
 
 ### 3.1 測試相關
 
 1. **不得刪除或修改既有測試來讓自己通過。**
-   - 基準：`pytest -q --collect-only` = **757 collected**。
-   - 每個階段結束後，收集數只能**增加**。
-   - 若某個既有測試因為新功能而必須調整，**必須在 PR 說明中單獨列出、說明為什麼原本的斷言不再正確**，並附上該測試在 `main` 上通過、在新分支上為何不再適用的推理。不得默默改掉。
 
-2. **不得使用 `pytest.mark.skip` / `xfail` / `pytest.skip()` 繞過失敗。**
-   - 現有 6 個 skip 是環境相依（如 `node` 不存在），新增 skip 必須是同性質的環境相依，且要在 PR 說明。
+   **baseline test node ID 保存**（不是只看數量）：階段開始前記錄
+
+   ```bash
+   pytest -q --collect-only -q | grep "::" | sort > .baseline-test-ids.txt
+   ```
+
+   驗收條件：
+
+   ```
+   baseline_test_ids ⊆ current_test_ids
+   ```
+
+   任何 baseline node ID 消失即 **FAIL**，除非該項是**經審查核可的合法 migration**（例如測試被改名或拆分，但斷言內容等價或更嚴格），且在 PR 說明中逐一列出「舊 ID → 新 ID → 為什麼等價或更嚴格」。
+
+   > 只看 `collected count` 不足以防守：刪 20 個舊測試、加 25 個新測試，數量仍會上升。
+
+2. **不得使用 `pytest.mark.skip` / `xfail` / `pytest.skip()` 繞過失敗。** 現有 6 個 skip 是環境相依（如 `node` 不存在），新增 skip 必須同性質且在 PR 說明。
 
 3. **不得放寬既有 checker 的門檻。**
-   - `scripts/check_conversation_records.py` 的重複偵測預設 FAIL，**不得改成 warning**。
-   - **不得用 `--allow-duplicate-agent` 之類的逃生門掩蓋真實缺陷。** 該旗標只為「一個 agent 真的跑了多段獨立對話」的 fixture 而存在。
+   - `scripts/check_conversation_records.py` 的重複偵測預設 FAIL，不得改成 warning。
+   - 不得用 `--allow-duplicate-agent` 之類的逃生門掩蓋真實缺陷。
    - `scripts/audit_i18n_parity.py` 的 `0.62` 比例門檻不得調低。
 
-4. **不得在測試中寫死期望值來製造通過。**
-   - 測試必須驗證行為，不是驗證「我剛剛寫進去的字串」。
-   - 新功能的測試**必須在未套用修改的程式碼上失敗**。PR 說明要寫出「這些測試在 main 上會怎麼失敗」。
+4. **不得在測試中寫死期望值來製造通過。** 測試必須驗證行為，不是驗證「我剛剛寫進去的字串」。
+
+5. **新測試的有效性要求，依測試類型區分：**
+
+   | 類型 | 要求 |
+   |---|---|
+   | **Feature behavior test** | 必須在**套用修改前的 main** 上失敗。PR 說明要寫出會怎麼失敗 |
+   | **Regression / invariant guard** | **不要求**在 main 上失敗。這類測試（`do_CONNECT` 回 405、TLS MITM 維持關閉、credential sanitization 成立）在 main 上本來就該通過，它們的價值是鎖住不變式 |
+
+   PR 說明必須**標明每個新測試屬於哪一類**。把 feature test 偽裝成 invariant guard 以規避「必須在 main 上失敗」的要求，視同作弊。
 
 ### 3.2 證據誠信相關
 
-5. **不得捏造證據。**
-   - 沒有 provider 明確給出的東西，不得標記為 `provider_transcript`、`provider_declared`、`observed`。
-   - 不確定的一律走 `unavailable` / `execweave_derived` / `unresolved`。
-   - **寧可少報，不可多報。**
+6. **不得捏造證據。** 沒有 provider 明確給出的東西，不得標記為 `provider_transcript`、`provider_declared`、`observed`、`reported`。不確定的一律走 `unavailable` / `unknown` / `execweave_derived`。**寧可少報，不可多報。**
 
-6. **不得用推測填補缺口。** 拿不到 thinking 就標記拿不到，不得用 output 反推、不得用其他 agent 的內容代替。
+7. **不得把 observation 升級成 fact。** 詳見 §4。「本機找不到解密器」是 observation，不得升級成「金鑰只存在 provider server」這種 fact。
 
-7. **不得偽造 fixture。** 新增的測試 fixture 若宣稱來自真實 provider 輸出，就必須真的是（可經過去識別化處理，但結構欄位必須保留原樣）。去識別化範圍：使用者名稱、本機絕對路徑、無關檔名、金鑰、私人內容。
+8. **不得用推測填補缺口。** 拿不到 reasoning 就標記拿不到，不得用 output 反推、不得用其他 agent 的內容代替。
+
+9. **不得偽造 fixture。** 宣稱來自真實 provider 輸出的 fixture 就必須真的是。可去識別化（使用者名稱、本機絕對路徑、無關檔名、金鑰、私人內容），但結構欄位必須保留原樣。
+
+10. **credentials 不得進入任何 artifact。** API key、`Authorization` header、token、cookie 一律不得寫入 events、content store、graph、viewer、conversations。既有的 `filter_transport_credentials`（`content_evidence.py`）與 `_sanitize_metadata`（`inference_gateway_full_fidelity.py:146`）必須沿用，不得繞過。
 
 ### 3.3 技術手段相關
 
-8. **不得啟用 TLS MITM。** 不得修改 `do_CONNECT`、不得加入憑證產生、不得修改系統 trust store。
+11. **不得啟用 TLS MITM。** 不得修改 `do_CONNECT`、不得加入憑證產生、不得修改系統 trust store。
+12. **不得使用 eBPF / uprobe / kprobe / 核心模組 / `LD_PRELOAD` / `ptrace` / 記憶體讀取。**
+13. **不得關閉 TLS 驗證，不得 unset `HTTPS_PROXY`。**
+14. **不得引入需要 root / `CAP_BPF` / 管理員權限的功能。**
 
-9. **不得使用 eBPF / uprobe / kprobe / 核心模組 / `LD_PRELOAD` / `ptrace` 注入 / 記憶體讀取。**
+### 3.4 架構相關
 
-10. **不得關閉 TLS 驗證，不得 unset `HTTPS_PROXY`。**
+15. **不得建立第二套 full-fidelity schema。** 既有的 `FullFidelityContentStore`、`content_observation_event`、`*_to_content_events` 系列是唯一的 full-fidelity 路徑。
+16. **不得建立平行的 conversation ingestion pipeline。**
+17. **provider-specific logic 不得污染共用層。** provider 專屬邏輯留在該 provider 的模組內。
 
-11. **不得引入需要 root / `CAP_BPF` / 管理員權限的功能。**
+### 3.5 流程相關
 
-### 3.4 流程相關
-
-12. **不得自行 bump 版本、打 tag、建 release。** 版本元資料由審查後統一處理（見 §7）。
-
-13. **不得 merge 自己的 PR，不得 push 到 `main`，不得 force push，不得改寫既有歷史。**
-
-14. **不得跨階段混合。** 一個 branch 只做該階段的事。發現其他問題就記錄下來，不要順手改。
-
-15. **不得把新文件加入 `scripts/audit_i18n_parity.py` 的 `DOCS` 清單**，除非同時提供 7 種語言翻譯（`zh-TW` `zh-CN` `ja` `ko` `fr` `de` `ru`）。新增規劃/內部文件放在不受該清單管轄的路徑。
-
-16. **不得修改 8 個 README 的版本錨點。** README 由版本發布流程統一處理。
+18. **不得自行 bump 版本、打 tag、建 release。**
+19. **不得 merge 自己的 PR，不得直接 push `main`，不得 force push，不得改寫既有歷史。**
+20. **不得跨階段混合。** 一個 branch 只做該階段的事。發現其他問題就記錄，不要順手改。
+21. **不得把新文件加入 `scripts/audit_i18n_parity.py` 的 `DOCS` 清單**，除非同時提供 7 種語言翻譯（`zh-TW` `zh-CN` `ja` `ko` `fr` `de` `ru`）。
+22. **不得修改 8 個 README 的版本錨點。** README 由版本發布流程統一處理。
 
 ---
 
-## 4. 每個階段的共通交付規則
+## 4. Capability taxonomy：observation-based，不得過度宣稱
 
-每個 branch 都必須滿足：
+這是 0.7.5 的核心產出，也是後續所有階段的詞彙基礎。
 
-- [ ] 從**最新的 `main`** 開分支（`git fetch origin main && git checkout -b <branch> origin/main`）
+### 4.1 為什麼不能用 `L3_server_side`
+
+先前的草案把 Codex 的 `reasoning.encrypted_content` 直接標成 `L3_server_side`。**這違反 ExecWeave 自己的 evidence discipline。**
+
+目前實際掌握的證據只有：
+
+- ciphertext 外觀符合 Fernet（`gAAAAA` 前綴）
+- 本機目前找不到解密器
+- rollout 中其他欄位有類似封裝
+
+這些**都不足以證明**「金鑰一定只存在 provider server」。因此 taxonomy 必須把**觀察到什麼**與**能不能解密**分成兩個獨立維度。
+
+### 4.2 `visibility`：觀察到的內容形態
+
+| 值 | 意義 |
+|---|---|
+| `plaintext` | 內容以明文出現在觀察表面 |
+| `opaque_encrypted` | 出現的是密文，內容不可讀 |
+| `opaque_signed` | 出現的是簽章/雜湊之類的不可逆表示 |
+| `redacted` | provider 主動遮蔽（例如 `[redacted]` 標記） |
+| `summary_only` | 只有摘要，沒有完整內容 |
+| `not_exposed` | 該表面根本沒有這個欄位 |
+| `not_observed` | 這次觀察沒看到，但不代表不存在 |
+| `unknown` | 尚未判定 |
+
+### 4.3 `decryptability`：能不能在本機解開
+
+| 值 | 意義 |
+|---|---|
+| `locally_decryptable` | 本機存在可用的解密器，且已驗證 |
+| `no_local_decryptor_observed` | **本機沒有觀察到解密器**（這是 observation，不是結論） |
+| `provider_documented_unavailable` | **provider 官方文件明確說明不提供**（這才是 fact） |
+| `unknown` | 尚未判定 |
+
+### 4.4 升級規則
+
+**只有在下列其中一種情況下，才允許使用比 `no_local_decryptor_observed` 更強的宣稱：**
+
+1. provider 官方文件明確說明 → `provider_documented_unavailable`，並記錄文件出處
+2. 有直接可驗證的證據
+
+**「沒有在本機找到 key」只能記錄成 `no_local_decryptor_observed`，永遠不得自動升級成 server-side fact。**
+
+具體到 Codex：`reasoning.encrypted_content` 目前應記為
+`visibility: opaque_encrypted` + `decryptability: no_local_decryptor_observed`，
+並在 `notes` 記錄 Fernet 外觀與同 scheme 觀察。**不得寫成 server-side-only。**
+
+### 4.5 Capability matrix 的粒度
+
+**不得只做 `provider × field`。** 同一個 client 的不同 surface 行為可能完全不同，矩陣必須以**實際 surface** 為單位，至少包含：
+
+| 欄位 | 說明 |
+|---|---|
+| `client` | 例如 codex-cli、claude-code、cursor |
+| `client_version` | 實測時的版本 |
+| `provider` | 上游 provider |
+| `auth_mode` | api_key / subscription / oauth / local |
+| `surface` | agent mode / autocomplete / chat / background task |
+| `transport_mode` | direct / user_routed_gateway / local_runtime |
+| `field` | 觀察的欄位 |
+| `visibility` | 見 §4.2 |
+| `decryptability` | 見 §4.3 |
+| `evidence_source` | 這筆判定來自哪裡 |
+| `evidence_strength` | 直接觀察 / 文件 / 推論 |
+| `notes` | 補充 |
+
+---
+
+## 5. 交付順序：嚴格循序
+
+**不使用六個平行、互不相依的 branch。** 後面的階段依賴前面建立的 schema 與能力：
+
+- 0.7.8 依賴 0.7.5 建立的 capability / evidence taxonomy
+- 0.7.9 消費 0.7.6–0.7.8 建立的 capture / evidence semantics
+- 0.8.0 的 usage ledger 依賴 0.7.6–0.7.9 的結果
+
+因此流程固定為：
+
+```
+0.7.5 branch (from latest main)
+  → tests / CI / review
+  → merge main
+0.7.6 branch (from NEW main)
+  → tests / CI / review
+  → merge main
+0.7.7 branch (from NEW main)
+  → ...
+```
+
+**每一階段開始前都必須重新 fetch 最新 `main`：**
+
+```bash
+git fetch origin main
+git checkout -b <branch> origin/main
+```
+
+前一階段尚未 merge 進 `main` 之前，**不得開始下一階段**。
+
+---
+
+## 6. 每個階段的共通交付規則
+
+- [ ] 從**最新的 `main`** 開分支
+- [ ] 階段開始前記錄 baseline test node IDs
 - [ ] `ruff check .` 全綠
-- [ ] `pytest -q` 全綠，且 collected 數 ≥ 上一階段
+- [ ] `pytest -q` 全綠，且 `baseline_test_ids ⊆ current_test_ids`
 - [ ] `python scripts/audit_i18n_parity.py` → `failures=0`
-- [ ] 新功能有對應測試，且該測試在 `main` 上會失敗
-- [ ] 新的擷取路徑一律 **opt-in**（預設不啟用，需明確旗標或環境變數）
-- [ ] PR 說明包含：做了什麼、為什麼、哪些測試新增、哪些既有測試被動到（若有）及原因
+- [ ] 新功能有對應測試，且**標明是 feature test 還是 invariant guard**
+- [ ] 新的擷取路徑一律 **opt-in**（預設不啟用）
+- [ ] 未啟用時行為與前一版**完全相同**
+- [ ] PR 說明包含：做了什麼、為什麼、新增哪些測試（分類）、動到哪些既有測試及原因
 - [ ] **不 merge**，等待審查
 
 ---
 
-## 5. 階段規劃
+## 7. 階段規劃
 
-### 0.7.5 — Provider 能力探測與真相表
+### 0.7.5 — Capability & Evidence Matrix
 
-**Branch：`feat/provider-capability-probe`**
+**Branch：`feat/provider-capability-matrix`**
 
 #### 目標
-用**實測**取代猜測，建立每個 provider 到底拿得到什麼的機器可讀矩陣。這一階段**不新增任何擷取能力**，只做量測與記錄。
+只做**探測與 taxonomy**，不新增任何 capture 能力。
 
 #### 為什麼放第一個
-目前對 Codex `reasoning.encrypted_content` 是否為 L3，結論是**強推論但未經證明**（依據：rollout 中 reasoning CoT 與 `spawn_agent` 參數使用相同 Fernet scheme、timestamp 型態一致，指向金鑰在 server 側）。後面四個階段的範圍取決於這個答案，必須先解掉。
+後續四個階段的範圍完全取決於這裡的量測結果。目前對 Codex `reasoning.encrypted_content` 的判斷是推論而非證明，不該讓四個版本建在未驗證的假設上。
 
 #### 交付
-- `scripts/probe_provider_capability.py` — 對每個 provider 的**既有本地產物**（rollout / transcript / hook 輸出）做欄位盤點，輸出機器可讀矩陣
-- 矩陣欄位：provider、欄位名稱、是否存在、是否明文、若非明文則加密層級（`L2_local_key` / `L3_server_side` / `unknown`）、判定依據
-- `tests/test_provider_capability_probe.py`
-- 一份內部文件記錄 Codex Fernet 取證的結論（**放在不受 i18n 清單管轄的路徑**）
+- `visibility` / `decryptability` 兩組常數與升級規則（§4.2–4.4），實作為可測試的模組
+- `scripts/probe_provider_capability.py` — 對每個 provider 的**既有本地產物**（rollout / transcript / hook 輸出）做欄位盤點
+- 機器可讀的 capability matrix，欄位依 §4.5，**以 surface 為粒度**
+- 對應測試
+- 內部文件記錄判定依據（放在**不受 i18n `DOCS` 清單管轄**的路徑）
 
 #### 明確不做
 - 不新增任何網路擷取
 - 不嘗試解密任何內容
 - 不修改任何既有 provider adapter
+- 不對 endpoint 可設定性做未經實測的宣稱
 
 #### 驗收
-- [ ] 矩陣對六個 provider（codex / claude / gemini / cursor / opencode / ollama）都有明確判定，未知就寫 `unknown`，不得猜
-- [ ] Codex `reasoning.encrypted_content` 的層級判定有明確依據記錄
+- [ ] 矩陣對每個 client × surface × auth_mode 組合都有明確判定，未知寫 `unknown`，不得猜
+- [ ] Codex `reasoning.encrypted_content` 記為 `opaque_encrypted` + `no_local_decryptor_observed`，**不得**出現 server-side-only 的宣稱
+- [ ] 有測試驗證「升級規則」：沒有官方文件或直接證據時，不允許產生 `provider_documented_unavailable`
 - [ ] 探測器對缺少產物的 provider 回報「無資料」而非空矩陣
 
 ---
 
-### 0.7.6 — 本地 runtime 完整擷取
+### 0.7.6 — Local Runtime Live Capture + Streaming Reconstruction
 
-**Branch：`feat/local-runtime-full-capture`**
+**Branch：`feat/local-runtime-live-capture`**
 
-#### 目標
-本地模型 runtime（Ollama / LM Studio / llama.cpp / vLLM）走的是 **localhost 明文 HTTP**，沒有加密、沒有第三方服務、沒有 ToS 問題。這是最乾淨、最完整的一條路，拿完整的 input + thinking + output + tool tokens。
+#### 這一階段**不是**從零做本地擷取
 
-#### 基礎
-既有模組：`model_runtime.py`、`model_runtime_full_fidelity.py`、`openai_compatible.py`、`openai_compatible_full_fidelity.py`、`http_proxy.py` 的明文 relay 路徑（`do_GET` / `do_POST` → `_relay()`）。
+`main` 上已經存在的能力（**必須重用，不得重造**）：
 
-**擴充既有模組，不要另起一套平行實作。**
+| 既有實作 | 已具備 |
+|---|---|
+| `model_runtime_full_fidelity.py:291` `runtime_exchange_to_content_events()` | request / request messages / prompt / input / system / tools / tool result messages / provider-facing config / response / assistant tool calls，並標記 `caller_supplied_exchange: True`、`wire_interception_asserted: False` |
+| 同檔 `:447-501` | ollama / llamacpp / vllm / lmstudio 各自的 helper |
+| `http_proxy.py:172` `record_exchange_fail_open()` | 已有 live relay，已標記 `transport_relay_observed: True` |
+| `http_proxy.py:91` `_stream_items()` | 已解析 `text/event-stream` 與 ndjson，原始分片保存在 `stream_chunks` |
 
-#### 交付
-- 完整 request / response 保真擷取，含 tool call 與 tool result
-- 支援 streaming 回應的重組（串流分片必須還原成完整訊息才入庫）
-- 每個欄位帶 provenance，寫進既有 `FullFidelityContentStore`
-- `scripts/check_local_runtime_capture.py` + CI 步驟
-- 對應測試
+#### 真正的缺口
 
-#### 明確不做
-- 不碰 HTTPS、不碰 `do_CONNECT`
-- 不為了本地 runtime 修改共用的 conversation 合併層語意
-
-#### 驗收
-- [ ] 一次本地 runtime 執行的 input / thinking（若模型輸出）/ output / tool token 全部進入 `conversations.json`
-- [ ] streaming 與非 streaming 的結果一致
-- [ ] 未啟用時行為與 v0.7.4 完全相同
-
----
-
-### 0.7.7 — 使用者自有 gateway 全保真
-
-**Branch：`feat/gateway-full-fidelity`**
-
-#### 目標
-使用者**主動**把 client 的 `base_url` 指向自己架的 gateway（LiteLLM proxy 或自架 OpenAI-compatible endpoint）。這是每家 provider 都支援的標準設定方式，**不是攔截**。
-
-#### 界線（務必遵守）
-- ✅ 使用者自己設定 `base_url` / `OPENAI_BASE_URL` 之類的環境變數
-- ✅ ExecWeave 提供 gateway、記錄流經自己的請求
-- ❌ 不得自動改寫使用者的 client 設定
-- ❌ 不得攔截未經使用者設定就流向 provider 的流量
-- ❌ 不得做任何形式的透明代理
-
-#### 基礎
-`inference_gateway.py`、`inference_gateway_full_fidelity.py`。
-
-#### 交付
-- gateway 模式下的完整 request / response 保真擷取
-- 文件明確說明「這需要使用者自己設定，ExecWeave 不會替你改」
-- `scripts/check_gateway_full_fidelity.py` + CI 步驟
-- 對應測試
-
-#### 驗收
-- [ ] 未設定 `base_url` 時，ExecWeave 完全不介入
-- [ ] 擷取到的內容標記為 `provider_transcript` 僅在真的拿到完整往返時
-- [ ] 憑證、API key 不得寫入任何產物（要有測試守）
-
----
-
-### 0.7.8 — 官方表面的 reasoning 擷取
-
-**Branch：`feat/sanctioned-reasoning-capture`**
-
-#### 目標
-對 provider **主動回傳給呼叫端**的 reasoning / thinking 欄位做擷取。範圍由 0.7.5 的矩陣決定。
-
-預期涵蓋：Claude 的 thinking blocks、Gemini 的 reasoning 欄位 —— 前提是 0.7.5 證實這些欄位在官方表面就是明文。
-
-#### 明確不做
-- **不處理 Codex 的 `reasoning.encrypted_content`**（L3，本輪放棄）
-- 不嘗試任何解密
-- 若 0.7.5 顯示某 provider 的 reasoning 不在官方表面，**該 provider 直接跳過**，寫進矩陣，不要想辦法繞
-
-#### 交付
-- reasoning 內容納入 conversation record，與一般訊息**在型別上可區分**
-- viewer 與 Markdown 對 reasoning 有明確標示
-- 對應測試
-
-#### 驗收
-- [ ] reasoning 與 output 在資料上分開，不混為一談
-- [ ] 沒有 reasoning 的 provider 不會產生空殼或假造的 reasoning 欄位
-
----
-
-### 0.7.9 — 不可得證據的標記模型
-
-**Branch：`feat/unavailable-evidence-taxonomy`**
-
-#### 目標
-把「這裡有東西但我們看不到，原因是 X」變成**一等公民、可測試、不可偽造**的狀態。這是整個規劃裡對產品信譽最重要的一環。
-
-#### 做法
-**擴充** `agent_topology.py` 既有詞彙，不是取代。現有：
+`http_proxy.py:189`：
 
 ```python
-COMPLETENESS_PROVIDER_TRANSCRIPT = "provider_transcript"
-COMPLETENESS_ROUTING_ONLY = "routing_only"
-COMPLETENESS_UNAVAILABLE = "unavailable"
+response = chunks[-1] if chunks and isinstance(chunks[-1], dict) else _json(response_body)
 ```
 
-新增的是**原因**維度：內容存在但被 provider 加密（Codex L3）、provider 根本不曝露該欄位、使用者未啟用擷取 —— 這三種在目前都塌縮成同一個 `unavailable`，使用者無法分辨。
+canonical `response` 直接取**最後一個 chunk**。OpenAI 式串流的最後一片通常是空 delta（`{"choices":[{"delta":{},"finish_reason":"stop"}]}`），因此**串流內容目前並未進入 canonical record**；原始分片雖然保留在 `stream_chunks`，但從未被重組。
+
+**這一階段要補的就是 canonical stream assembler。**
+
+#### 目標架構
+
+```
+client
+  → ExecWeave-owned local relay
+  → forward to Ollama / LM Studio / llama.cpp / vLLM
+  → observe streaming or non-streaming response
+  → canonical stream assembler          ← 本階段新增
+  → 既有 FullFidelityContentStore / evidence emitters
+```
+
+#### 明確要求
+- **擴充現有模組**，不建立第二套 full-fidelity schema
+- **不建立平行的 conversation ingestion pipeline**
+- streaming 與 non-streaming 最終必須產生**相同的 canonical semantics**
+- 原始 raw stream evidence 可以保留，但 **canonical conversation 不得被 chunk fragmentation 污染**
+- 不碰 HTTPS、不碰 `do_CONNECT`
+
+#### Streaming reconstruction semantics（驗收標準）
+
+驗收標準是 **canonical semantic equivalence**，不是模糊的「結果一致」。至少必須覆蓋：
+
+| # | 情境 |
+|---|---|
+| 1 | text / content delta 累積 |
+| 2 | reasoning / thinking delta 累積 |
+| 3 | 跨 chunk 分片的 tool call **name** |
+| 4 | 跨 chunk 分片的 tool call **arguments** |
+| 5 | 多個平行 tool calls（依 index 正確歸位） |
+| 6 | `finish_reason` |
+| 7 | 只帶 usage 的最終 chunk |
+| 8 | multi-choice 回應 |
+| 9 | UTF-8 字元被切在 chunk 邊界 |
+| 10 | 格式錯誤的 chunk |
+| 11 | 不完整的串流（沒有終止標記） |
+| 12 | 連線中斷 |
+
+**tool arguments 跨 chunk 的具體例子：**
+
+```
+chunk 1: {"pa
+chunk 2: th":"
+chunk 3: foo"}
+```
+
+**不得逐 chunk 當成完整 tool call 入庫。** 必須先重組成 `{"path":"foo"}` 再產生 canonical record。
+
+情境 10–12（錯誤與截斷）**不得靜默吞掉**：必須產生明確的不完整標記，走 §4 的 taxonomy，不得假裝拿到完整內容。
+
+#### 驗收
+- [ ] 12 個 streaming 情境各有測試
+- [ ] 同一組語意內容，streaming 與 non-streaming 產生等價的 canonical record（欄位級比對）
+- [ ] canonical record 中不存在未重組的分片
+- [ ] `stream_chunks` 原始證據仍保留
+- [ ] 未啟用時行為與 v0.7.5 完全相同
+
+---
+
+### 0.7.7 — User-Routed Live Gateway Capture
+
+**Branch：`feat/user-routed-gateway-capture`**
+
+#### 這一階段**不是**從零做 gateway full fidelity
+
+`main` 上已經存在的能力（**必須重用**）：
+
+`inference_gateway_full_fidelity.py` 已支援 OpenRouter exchange、request messages、prompt / input、tool definitions、tool results、tool calls、provider-facing parameters、response，以及 metadata credential filtering（`_sanitize_metadata:146`、`_secret_metadata_key:137`）。
+`inference_gateway.py:289` 已有 LiteLLM 支援，`litellm_callback_cli.py` 已有 callback 安裝路徑。
+
+#### 真正的缺口
+
+現有的是**事後 exchange 記錄**與 **callback**。缺的是使用者明確把 client endpoint 指向 ExecWeave 自有端點的 **live route**：
+
+```
+client
+  → ExecWeave-owned gateway     ← 本階段
+  → provider / upstream
+```
+
+ExecWeave 記錄自己實際收到與送出的內容。
+
+#### 明確要求
+- **重用現有 gateway full-fidelity emitters**，不建立第二套 schema
+- **不自動修改 client 設定** —— 使用者自己設 endpoint，ExecWeave 不代勞
+- **不做 transparent interception**
+- **未 opt-in 時 ExecWeave 完全不介入**
+- **API key / `Authorization` / credentials 不得進入任何 artifact**
+- 沿用 0.7.6 的 canonical stream assembler，不另寫一套
+
+#### 驗收
+- [ ] 未設定 endpoint 指向時，ExecWeave 完全不介入（有測試）
+- [ ] credential 過濾有測試守住，涵蓋 header、body、metadata 三處
+- [ ] 只有真的拿到完整往返時才標記為完整；部分失敗走 §4 taxonomy
+- [ ] streaming 走 0.7.6 的同一個 assembler，不重複實作
+
+---
+
+### 0.7.8 — Provider-Exposed Reasoning
+
+**Branch：`feat/provider-exposed-reasoning`**
+
+#### 目標
+只擷取 provider **明確曝露**的 reasoning / thinking。範圍**完全由 0.7.5 的矩陣決定**。
+
+#### reasoning state 必須可區分
+
+不得把不同形態的 reasoning 塌縮成同一種：
+
+| 值 | 意義 |
+|---|---|
+| `full` | 完整 reasoning 內容 |
+| `summary` | 只有摘要 |
+| `redacted` | provider 主動遮蔽 |
+| `opaque_encrypted` | 密文 |
+| `signature_only` | 只有簽章 |
+| `not_exposed` | 該表面沒有這個欄位 |
+| `unknown` | 尚未判定 |
+
+**不得宣稱「完整 CoT」，除非底層 evidence 真的是完整內容（`full`）。**
+
+#### 明確不做
+- 不嘗試任何解密
+- 不處理 `opaque_encrypted` 的內容還原
+- 若 0.7.5 顯示某 provider 的 reasoning 不在官方表面，**該 provider 直接跳過**，寫進矩陣，不要想辦法繞
+
+#### 驗收
+- [ ] reasoning 與 output 在資料型別上分開，不混為一談
+- [ ] 每筆 reasoning 都帶 reasoning state
+- [ ] 沒有 reasoning 的 provider 不會產生空殼或假造的 reasoning 欄位
+- [ ] 有測試驗證 `summary` 不會被呈現成 `full`
+
+---
+
+### 0.7.9 — Evidence Availability Taxonomy
+
+**Branch：`feat/evidence-availability-taxonomy`**
+
+#### 目標
+把「這裡有東西但我們看不到，原因是 X」變成**一等公民、可測試、不可偽造**的狀態。這是整輪對產品信譽最重要的一環。
+
+#### 做法
+**擴充** `agent_topology.py` 既有詞彙，不取代。現有三個 completeness 值把不同原因塌縮成同一個 `unavailable`，使用者無法分辨：
+
+- 內容存在但被 provider 加密
+- provider 根本不曝露該欄位
+- 使用者未啟用擷取
+- 擷取中斷 / 串流不完整
 
 #### 交付
-- 不可得原因的列舉常數 + 對應的 `_RANK` 處理
-- viewer 與 Markdown 顯示具體原因，取代現在單一那句 `Provider-encrypted payload —`
-- **強化 MITM 不變式測試**：明確斷言 `do_CONNECT` 回 405、斷言原始碼中不存在憑證產生或 eBPF 相關呼叫
-- `scripts/check_conversation_records.py` 增加檢查：宣稱 `provider_transcript` 的 entry 必須真的有 messages
-- 對應測試
+- unavailable reason 列舉 + evidence strength，與 §4 taxonomy 對齊
+- viewer 與 Markdown 顯示**具體原因**，取代目前單一那句 `Provider-encrypted payload —`
+- **anti-overclaim checks**：
+  - 宣稱 `provider_transcript` 的 entry 必須真的有 messages
+  - 宣稱 `full` reasoning 的必須真的有完整內容
+  - `unavailable` 必須帶得出原因，不得留空
+- **強化 MITM 不變式測試**：明確斷言 `do_CONNECT` 回 405、斷言原始碼不存在憑證產生與禁用技術的呼叫
+- `scripts/check_conversation_records.py` 增加對應檢查
 
 #### 明確不做
 - 不改既有三個 completeness 常數的名稱或語意
 - 不降低任何既有檢查的嚴格度
 
 #### 驗收
-- [ ] 使用者能分辨「provider 加密了」vs「provider 沒提供」vs「你沒開擷取」
-- [ ] 每個 `unavailable` 都帶得出原因，不得留空
-- [ ] MITM 不變式有測試守住
+- [ ] 使用者能分辨「provider 加密了」/「provider 沒提供」/「你沒開擷取」/「擷取中斷」
+- [ ] 每個 `unavailable` 都帶原因
+- [ ] anti-overclaim checks 有測試，且會對刻意造假的輸入 FAIL
+- [ ] MITM 不變式有測試守住（invariant guard 類）
 
 ---
 
-### 0.8.0 — 統一 token 帳本
+### 0.8.0 — Usage Ledger + Dashboard
 
-**Branch：`release/0.8.0-token-ledger`**
+**Branch：`release/0.8.0-usage-ledger`**
 
-#### 目標
-跨 provider 的統一 token 帳本：input / thinking / output / tool，每一欄都帶來源與可信度，拿不到的明確標記為拿不到。這是整輪的收束。
+#### 為什麼不能直接分成 input / thinking / output / tool
+
+不同 provider 的 usage schema 差異很大，可能提供 `input_tokens`、`output_tokens`、`total_tokens`、`reasoning_tokens`、`cached_input_tokens`、`cache_read_input_tokens`、`cache_creation_input_tokens`、`audio_tokens` 等。
+
+而且 **tool tokens 通常不是獨立的計費類別**：
+
+- tool definitions 可能已包含在 input
+- tool results 在下一輪可能已包含在 input
+- tool call arguments 可能已包含在 output
+
+**若再獨立加一個 tool tokens 進 total，會 double counting。**
+
+#### 雙層模型
+
+**第一層 — Native Usage**
+
+完整保留 provider 原始 usage schema，**不丟失任何欄位**、不改名、不重新詮釋。
+
+**第二層 — Normalized Ledger**
+
+可提供：`input` / `output` / `reasoning` / `cache_read` / `cache_write` / `tool_input_estimate` / `tool_output_estimate` / `other`
+
+每個 normalized field **必須攜帶**：
+
+| 屬性 | 說明 |
+|---|---|
+| `value` | 數值 |
+| `unit` | 單位 |
+| `status` | 見下 |
+| `provenance` | 來源 |
+| `confidence` | 可信度 |
+| `native_field` | 對應的原始欄位 |
+| `included_in_total` | 是否已計入 total（防重複加總） |
+| `model` | 模型 |
+| `tokenizer` | 使用的 tokenizer（若為估算） |
+
+`status` 至少區分：`reported` / `derived` / `estimated` / `not_reported` / `not_applicable` / `unavailable`
+
+#### 禁止
+- **`unavailable` 填 `0`**
+- **`estimated` 偽裝成 provider-reported**
+- **tool estimate 與 input/output 重複計入 total**
+- **provider usage 與 ExecWeave tokenizer estimate 混成同一個數字**
 
 #### 交付
-- 統一 token ledger 資料結構，每個計數帶 provenance（來自 provider 回報 vs ExecWeave 計算 vs 不可得）
-- dashboard 呈現
-- **完整的能力矩陣文件**：每個 provider 各欄位拿不拿得到、為什麼
-- 8 語言 README 更新（由審查後統一處理，見 §7）
+- Native usage 保存 + normalized ledger（含上述完整 metadata）
+- dashboard 呈現，provider-reported 與 ExecWeave-estimated **視覺上與資料上都分開**
+- 完整能力矩陣文件，與 0.7.5 探測器的實際輸出一致
+- 8 語言 README 更新（由版本發布流程統一處理，見 §9）
 
 #### 驗收
-- [ ] provider 回報的 token 數與 ExecWeave 自算的數字**分開呈現**，不得混用
-- [ ] 缺漏欄位明確標記，不得補 0 充數
-- [ ] 矩陣文件與 0.7.5 探測器的實際輸出一致
+- [ ] 有測試驗證 double counting 不會發生（`included_in_total` 生效）
+- [ ] 有測試驗證 `unavailable` 不會被填成 0
+- [ ] provider-reported 與 estimated 在資料上可區分，且 dashboard 不混用
+- [ ] native usage 欄位無遺失（對照原始 payload 逐欄比對）
 
 ---
 
-## 6. 最終審查會檢查什麼
-
-每個 branch 送審時，會逐項核對：
+## 8. 最終審查會檢查什麼
 
 | 項目 | 如何驗證 |
 |---|---|
-| 測試數未減少 | `pytest -q --collect-only`，對照 757 基準 |
+| baseline 測試未消失 | `baseline_test_ids ⊆ current_test_ids`，逐一核對缺失項 |
 | 沒有偷改既有測試 | `git diff origin/main --stat -- tests/`，逐一檢視被動到的既有測試 |
 | 沒有 skip/xfail 繞過 | `grep -rn "skip\|xfail" tests/` 差異比對 |
-| 新測試真的有效 | 在 `main` 上套用新測試，確認會失敗 |
-| MITM 紅線未破 | `http_proxy.py:321-322` 原封不動；`tests/test_http_proxy.py` 405 測試綠 |
-| 無禁用技術 | `grep -rn "ebpf\|uprobe\|LD_PRELOAD\|ptrace\|ssl_write"` 應為空 |
-| 證據未膨脹 | 檢查所有新的 `provider_transcript` / `provider_declared` 標記是否有實據 |
+| feature test 真的有效 | 在 pre-change `main` 上套用，確認會失敗 |
+| invariant guard 分類正確 | 檢查被標為 invariant 的測試是否真的是不變式，而非規避 |
+| MITM 紅線未破 | `http_proxy.py:321-322` 原封不動；405 測試綠 |
+| 無禁用技術 | `grep -rniE "ebpf\|uprobe\|kprobe\|LD_PRELOAD\|ptrace\|SSL_write\|SSL_read"` 應為空 |
+| 證據未膨脹 | 檢查所有新的 `provider_transcript` / `provider_declared` / `reported` / `full` 標記是否有實據 |
+| observation 未升級成 fact | 檢查是否出現未經文件佐證的 server-side-only 宣稱 |
+| 無第二套 schema | 檢查是否重用既有 full-fidelity emitters |
 | checker 未被放寬 | `git diff origin/main -- scripts/` 逐行看門檻 |
-| 無金鑰外洩 | 檢查產物與 fixture 是否含 API key、路徑、使用者名稱 |
+| 無 credential 外洩 | 檢查產物與 fixture 是否含 API key、Authorization、路徑、使用者名稱 |
 | i18n 未受影響 | `python scripts/audit_i18n_parity.py` |
 | opt-in | 未啟用時行為與前一版一致 |
 
@@ -350,7 +625,7 @@ COMPLETENESS_UNAVAILABLE = "unavailable"
 
 ---
 
-## 7. 版本發布流程（審查通過後才執行）
+## 9. 版本發布流程（審查通過後才執行）
 
 版本 bump 由審查方統一處理，實作者不要碰。記錄在此供參考：
 
@@ -363,16 +638,32 @@ COMPLETENESS_UNAVAILABLE = "unavailable"
 
 強制檢查：
 - `scripts/audit_i18n_parity.py` 的 `README_REQUIRED_SNIPPETS` 含 `current_release_tag()`，8 個 README 都必須出現新版本號
-- `.github/workflows/publish.yml` 會驗 tag 與 `pyproject.toml` 版本一致，不一致直接失敗
+- `.github/workflows/publish.yml` 會驗 tag 與 `pyproject.toml` 版本一致
 
 發布順序：
-1. workflow_dispatch 跑 CI full matrix（tag push 會展開 3 OS × Python 3.10/3.12，不要讓 tag CI 當第一次 3.10 測試）
+1. workflow_dispatch 跑 CI full matrix（tag push 會展開 3 OS × Python 3.10/3.12）
 2. bump commit → push `main` → 等 CI 綠
 3. GitHub UI 建 release、tag `vX.Y.Z`、target `main`
 4. `publish.yml` 自動觸發 → PyPI
 
 ---
 
-## 8. 一句話總結
+## 10. 尚未解決的設計問題
 
-**能從官方表面拿到的，全部拿完整；拿不到的，誠實說拿不到並說明原因。不繞過加密、不違反政策、不動既有測試。**
+以下問題**在對應階段開始前必須先有答案**，不得邊做邊猜：
+
+1. **0.7.5 的實測涵蓋範圍** — client × surface × auth_mode 的組合數量可能很大。哪些組合是必測、哪些可標 `not_observed`？需要在 0.7.5 開始前定義最小必測集。
+
+2. **0.7.8 的範圍可能塌縮** — 若 0.7.5 顯示多數 provider 的 reasoning 不在官方表面，0.7.8 可能幾乎沒有可做的內容。**那時候應該重排階段而不是硬做。** 這個決策點必須在 0.7.5 review 時處理。
+
+3. **normalized ledger 的 tool estimate 是否值得做** — 若 `included_in_total` 對所有 provider 都是 false（代表 tool tokens 一律已含在 input/output），那 `tool_input_estimate` / `tool_output_estimate` 的價值需要重新評估。建議 0.8.0 開始前依 0.7.5 矩陣決定。
+
+4. **tokenizer 來源** — normalized ledger 的 `estimated` 值需要 tokenizer。使用哪一個、如何處理 tokenizer 與 provider 實際計算不一致，尚未決定。不得預設「用某個 tokenizer 算出來的就是對的」。
+
+5. **0.7.6 / 0.7.7 的 assembler 共用邊界** — canonical stream assembler 應該放在哪一層才不會變成共用層裡的 provider 特例？0.7.6 實作時必須先確定，0.7.7 直接沿用。
+
+---
+
+## 11. 一句話總結
+
+**能從官方表面觀察到的，完整收進來；觀察不到的，誠實記錄看到什麼、為什麼解不開。不繞過加密、不違反政策、不動既有測試、不重造已有能力。**
