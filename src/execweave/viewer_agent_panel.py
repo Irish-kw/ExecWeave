@@ -6,6 +6,7 @@ _AGENT_PANEL_CSS = r"""
 #inspector .raw-toggle{display:none!important}
 #open-final{display:none!important}
 #conversation-records,#execweave-conversation-panel{display:none!important}
+#inspector .inspector-section:has(>#conversation-records),#inspector .inspector-section:has(>#execweave-conversation-panel){display:none!important}
 .execweave-agent-view{display:grid;gap:12px}
 .execweave-agent-card{border:1px solid var(--border);border-radius:10px;background:var(--panel2);overflow:hidden}
 .execweave-agent-label{padding:9px 11px;border-bottom:1px solid var(--border);font-size:10px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:var(--muted)}
@@ -17,6 +18,7 @@ _AGENT_PANEL_JS = r"""
 (()=>{
 const details=document.getElementById('details'),detailsEmpty=document.getElementById('details-empty');
 if(!details||!detailsEmpty)return;
+for(const id of ['conversation-records','execweave-conversation-panel']){const obsolete=document.getElementById(id);if(obsolete)obsolete.closest('.inspector-section')?.setAttribute('hidden','')}
 let entries=Array.isArray(window.__execweaveStaticConversations)?window.__execweaveStaticConversations:[];
 let selectedNode=null,refreshing=false;
 const attrs=node=>node&&typeof node.attributes==='object'&&node.attributes?node.attributes:{};
