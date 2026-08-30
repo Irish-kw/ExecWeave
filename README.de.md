@@ -31,7 +31,7 @@ Installieren Sie das neueste veröffentlichte wheel/sdist von PyPI:
 python -m pip install -U execweave
 ```
 
-Die aktuelle Version ist **v0.7.7**.
+Die aktuelle Version ist **v0.7.8**.
 
 Für die Entwicklung:
 
@@ -67,7 +67,7 @@ execweave record --open -- python my_agent.py
 
 `execweave top -- codex` hält den Agent im Startterminal interaktiv und öffnet bzw. verbindet gleichzeitig das detached Top dashboard entsprechend der Host-Umgebung.
 
-**v0.7.7 — die eigene Conversation jedes Agents, während der Run noch offen ist.** Das Live-Dashboard zeigte jedem Agent den ganzen Run über die Conversation jedes anderen Agents und wurde erst korrekt, nachdem der Agent beendet war: Es holte den Conversation-Index erst bei der Finalisierung, sodass das Per-Agent-Scoping nie lief und stattdessen eine flache Liste aller gespeicherten Datensätze gezeichnet wurde — dieselbe Liste, gleich welcher Node ausgewählt war. Dieser Index wird nun aus dem aktuellen Graphen des Runs projiziert und während des Runs ausgeliefert, durch denselben Builder, aus dem die finalisierte Datei geschrieben wird; ein Live-Dashboard und ein aufgezeichneter Viewer können sich daher nicht darüber uneinig sein, was zu einem Agent gehört, und das Einzige, was beide zeichnen, sind die provider-neutralen, agent-lokalen Multi-Agent-Conversations, die jeder Agent besitzt. Keiner der beiden Viewer behält einen Fallback, der einen Conversation-Datensatz außerhalb dieser Per-Agent-Projektion rendert. Eine Release-Prüfung öffnet nun beide ausgelieferten Viewer in einem echten Browser und liest zurück, was jeder Agent zeigt: Ein Agent, der die Conversation eines anderen sieht, lässt den Build scheitern, statt in ein Release zu gelangen.
+**v0.7.8 — eine Conversation gehört einem Agent, überall wo eine Person klicken kann.** Die Auswahl eines Nodes, der kein Agent ist, löste sich zur selben leeren Auswahl auf wie ein nicht ausgewählter Graph, sodass ein Netzwerk-Endpunkt oder ein Prozess die Conversation jedes Agents zeichnete; die Art der Auswahl wird nun getrennt vom fokussierten Agent verfolgt, und was kein Agent ist, sagt das auch. Der mehrere Kilobyte große Block, den ein Provider jedem Subagent voranstellt, war dort aufgezeichnet, wo die eigene Zuweisung jedes Agents hingehört, sodass vier Geschwister als vier Kopien eines Plugin-Katalogs erschienen: Ein Text, der wortgleich unter zwei oder mehr Agents auftaucht, ist die Zuweisung keines von ihnen, wird gefaltet und benannt, was er ist. Wo mehrere Agents aus einem Rollout gelesen wurden — Codex hält die Delegation eines Kindes und dessen Rückgabe in der Datei des Elternteils fest — bietet nur der Agent, dem sie gehört, die Rohbytes an, und die übrigen nennen, aus wessen Aufzeichnung ihre Turns gelesen wurden, sodass ein Link in der Sektion eines Kindes nicht mehr den ganzen Run öffnet. Die provider-neutralen, agent-lokalen Multi-Agent-Conversations, die jeder Agent besitzt, werden nun während eines Runs projiziert, nicht erst wenn er endet. Eine Release-Prüfung führt beide ausgelieferten Viewer in einem echten Browser durch jede Auswahl, die eine Person treffen kann: Ein Agent, der sieht, was ihm nicht gehört, lässt den Build scheitern, statt in ein Release zu gelangen.
 
 Das vereinheitlichte Dashboard bringt execution graph, logs und conversation records in denselben Inspection-Flow. Finalisierte Runs erzeugen `conversations.md` und `conversations.json`; validierte Provider-Transcripts werden in den run-local SHA-256 content store kopiert. Claude Code, OpenAI Codex, Cursor, OpenCode und Google Antigravity verwenden jeweils die stärkste Multi-Agent-Evidence, die ihre Integration tatsächlich offenlegt. Wenn ein Gateway oder lokaler Runtime nur root request/response sichtbar macht, zeigt ExecWeave nur diese Root-Conversation und erfindet weder Subagents noch hidden routing.
 
@@ -276,7 +276,7 @@ Conversation isolation ist eine Attribution-/Display-Regel, keine Redaction Boun
 
 ## Aktueller Stand
 
-v0.7.7 kombiniert cross-platform runtime collection, materialized execution graphs, standalone/live dashboards, konservative provider↔runtime correlation, full-fidelity content-addressed provider evidence, attributable multi-agent execution traces, direkten run-local conversation access agent-local conversation isolation in provider-neutralen Projektionen und per-agent conversation focus in den Standalone- und Live-Dashboards. Jede Integration bewahrt nur die stärkste identity/routing evidence, die der Provider tatsächlich offenlegt, und enthält sich, wenn diese Evidence fehlt. Observed evidence und inference bleiben konstruktiv getrennt.
+v0.7.8 kombiniert cross-platform runtime collection, materialized execution graphs, standalone/live dashboards, konservative provider↔runtime correlation, full-fidelity content-addressed provider evidence, attributable multi-agent execution traces, direkten run-local conversation access agent-local conversation isolation in provider-neutralen Projektionen und per-agent conversation focus in den Standalone- und Live-Dashboards. Jede Integration bewahrt nur die stärkste identity/routing evidence, die der Provider tatsächlich offenlegt, und enthält sich, wenn diese Evidence fehlt. Observed evidence und inference bleiben konstruktiv getrennt.
 
 ## Dokumentation
 
