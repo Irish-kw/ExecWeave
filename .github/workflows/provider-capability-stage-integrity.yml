@@ -40,6 +40,7 @@ jobs:
         run: >-
           python scripts/check_release_stage_integrity.py
           --baseline-ref "${{ github.event.pull_request.base.sha || inputs.baseline_ref }}"
+          --allow-test-change "tests/multi_agent_run_fixture.py=v0.7.9 checks four inspector contracts in the browser that were only asserted against source text, so the shared run fixture gains the shapes they need: a second archive owned by the same agent carrying nothing usable, one provider-encrypted delegation, and one answer that quotes routing words as prose. This module is the fixture builder and declares no test node IDs; no existing shape or assertion is removed"
           --allow-test-change "tests/test_agent_message_viewer.py=v0.7.9 removes the standalone Message Evidence inspector; the same test IDs now assert that exact message-stage relations and payload references survive in the unified static snapshot without the removed panel"
           --allow-test-change "tests/test_agent_node_labels.py=v0.7.9 removes the standalone conversation fallback; the same test ID now verifies that namespaced agent paths and authenticated conversation refresh are owned by the unified selected-agent inspector without creating a second conversation DOM"
           --allow-test-change "tests/test_agent_said_panel.py=v0.7.9 replaces the who-said-what transcript renderer with compact Prompt/Final-response and Task/Thinking/Response cards; the same test IDs now pin plaintext, encrypted, and ownership boundaries in that replacement inspector"
