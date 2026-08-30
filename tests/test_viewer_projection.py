@@ -262,8 +262,9 @@ def test_projected_renderer_embeds_expandable_cluster_without_changing_raw_graph
     html = render_graph_html(raw)
 
     assert raw == before
-    marker = '<script type="application/json" id="graph-data">'
-    embedded = html.split(marker, 1)[1].split("</script>", 1)[0]
+    embedded = html.split("window.__execweaveStaticGraph=", 1)[1].split(
+        ";window.__execweaveStaticConversations=", 1
+    )[0]
     payload = json.loads(embedded)
     assert payload["viewer_projection"]["viewer_only"] is True
     assert any(node["type"] == "network_endpoint_cluster" for node in payload["nodes"])
