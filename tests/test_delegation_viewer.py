@@ -48,7 +48,7 @@ def _content(
     }
 
 
-def test_cursor_subtask_viewer_preserves_exact_child_linkage_and_payloads() -> None:
+def test_cursor_subtask_viewer_marks_exact_child_linkage_and_payloads() -> None:
     root = {
         "id": "agent:Cursor",
         "type": "agent",
@@ -174,7 +174,7 @@ def test_opencode_subtask_viewer_does_not_invent_child_session_join() -> None:
     assert "Delegation Evidence" not in html
 
 
-def test_payload_helper_preserves_direct_observed_content_peer() -> None:
+def test_payload_helper_links_direct_observed_content_peer() -> None:
     content = _content("cursor.agent_result", "d" * 64)
     agent = {
         "id": "agent:cursor:subagent:child-1",
