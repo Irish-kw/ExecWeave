@@ -1,59 +1,60 @@
-# ExecWeave 0.8.1 實作規劃書
+# ExecWeave 0.8.1 implementation plan
 
-> 基準：0.8.0 合併後的 `main`。
-> 本輪要動**收集層**，是這幾輪裡唯一會改變 `.execweave` 包內容的一次。
+> Baseline: `main` after 0.8.0 lands.
+> This round changes the **collection layer**. It is the only round in this series that
+> changes what an `.execweave` package contains.
 
 ---
 
-## 0. 為什麼要做
+## 0. Why
 
-目前 `filesystem.py` 從來沒有讀取被監看檔案的內容（唯一的 `read_text` 是去讀
-inotify 的系統限制值）。`file` 節點零屬性，只有一條邊寫著 created / modified /
-deleted。
+`filesystem.py` has never read the contents of a watched file — its only `read_text`
+reads the inotify limit from sysfs. A `file` node carries no attributes at all, just an
+edge saying created, modified or deleted.
 
-這造成一個具體的觀測盲點：
-
-```
-寫 run.sh  →  bash run.sh  →  刪掉 run.sh
-```
-
-這條路徑下，`process.cmdline` 只有 `['bash', 'run.sh']`，內容在檔案裡，而檔案已經
-不在了。今天能看到的只有：
+That leaves a concrete blind spot:
 
 ```
-17:35  run.sh   建立
+write run.sh  →  bash run.sh  →  delete run.sh
+```
+
+`process.cmdline` holds only `['bash', 'run.sh']`. The content was in the file, and the
+file is gone. All that survives is:
+
+```
+17:35  run.sh   created
 17:35  process  bash run.sh
-17:36  run.sh   刪除
+17:36  run.sh   deleted
 ```
 
-**中間執行了什麼，完全不可知。**
+**What ran is unknowable.**
 
-對照之下，`bash -c "整段腳本"` 這種 inline 執行，內容今天就完整存在 `cmdline` 裡
-（0.8.0 會把它顯示出來）。所以盲點只在「寫檔 → 執行 → 刪檔」這一種，而那正好是最
-需要看見的一種。
+By contrast, inline execution such as `bash -c "<script>"` already has its full text in
+`cmdline` today (0.8.0 renders it). The blind spot is specifically
+write-then-execute-then-delete, which is the case that most needs to be visible.
 
 ---
 
-## 1. 擷取
+## 1. Capture
 
-在偵測到 create / modify 的**當下立即讀取**，不排隊等下一輪輪詢。刪除事件前若已有
-前一次快照，用它算出刪除的內容。
+Read at the moment a create or modify is detected, without waiting for the next poll. A
+delete uses the previous snapshot to determine what was removed.
 
-### 硬上限（卡在擷取階段，不是只卡在畫面）
+### Limits belong in the capture stage, not only in the renderer
 
-只卡畫面的話，run 目錄本身會被撐爆。
+Capping only the view still lets the run directory grow without bound.
 
-| 限制 | 值 | 超過時 |
+| limit | value | on exceeding |
 |---|---|---|
-| 單檔大小 | 1 MB | 不讀內容，只記大小變化 |
-| 二進位判定 | 含 NUL 或非 UTF-8 | 不讀內容，記為 binary |
-| 單行長度 | 2000 字元 | 該行截斷並標記 |
-| 單一 run 的 diff 總量 | 給定預算 | 停止擷取並如實標記「已達上限」 |
+| file size | 1 MB | no content; record the size change only |
+| binary | contains NUL or is not UTF-8 | no content; record as binary |
+| line length | 2000 characters | truncate that line and mark it |
+| per-run diff budget | fixed | stop capturing and record that the budget was reached |
 
-### 排除自我觀測
+### Exclude self-observation
 
-不加這條，這個功能大部分時間都在顯示 ExecWeave 監看自己。實測一個 run 的三個
-file 節點是：
+Without this the feature spends most of its time showing the tool watching itself. A real
+run's three file nodes were:
 
 ```
 .execweave-content-hyyj8gcj    created
@@ -61,97 +62,103 @@ file 節點是：
 semantic.jsonl.lock            deleted
 ```
 
-排除：run 目錄本身、`.execweave/` 之下、content store、`*.lock`。
+Exclude the run directory itself, anything under `.execweave/`, the content store, and
+`*.lock`.
 
 ---
 
-## 2. 競態，以及必須誠實的地方
+## 2. The race, and what has to stay honest
 
-portable backend 是輪詢式的（`attributions: ["polling"]`）。建立 → 執行 → 刪除若
-發生在一個輪詢間隔之內，內容會整個錯過。
+The portable backend polls (`attributions: ["polling"]`). A create, execute and delete
+that all happen inside one poll interval loses the content entirely.
 
-這不能靠設計消除，只能縮小：Linux 走 inotify、macOS 走 FSEvents，事件驅動比輪詢
-窄得多。
+No design removes that. It can only be narrowed: inotify on Linux, FSEvents on macOS.
 
-**錯過時必須記為「內容未擷取」，絕對不得顯示為「無變更」。** 兩者在面板上要能一眼
-分辨：
-
-```
-17:35  run.sh   建立   +42
-17:36  run.sh   刪除   −42
-```
-
-對比
+**A miss must be recorded as content not captured, never as no change.** The two have to
+be distinguishable at a glance:
 
 ```
-17:35  run.sh   建立   內容未擷取（建立與刪除相距 0.3 秒，短於輪詢間隔）
-17:36  run.sh   刪除
+17:35  run.sh   created   +42
+17:36  run.sh   deleted    −42
 ```
 
-把未擷取顯示成無變更，會製造假的安全感，比沒有這個功能更糟。
+versus
+
+```
+17:35  run.sh   created   content not captured (created and deleted 0.3 s apart,
+                          shorter than the poll interval)
+17:36  run.sh   deleted
+```
+
+Showing a miss as no change manufactures false confidence, which is worse than not having
+the feature at all.
 
 ---
 
-## 3. 呈現
+## 3. Presentation
 
-### 節點層只顯示形狀
+### The node shows the shape of each change
 
-等寬字，數字靠右對齊。綠色只上在增加的數字，紅色只上在減少的數字；動詞與檔名維持
-一般字色。
-
-```
-17:35  report.md            建立    +18
-17:36  report.md                    +18   −3
-17:38  src/viewer.py                 +2  −47
-17:41  .env                 刪除          −6
-18:02  data.csv             建立    +12.4 KB binary · 內容未擷取
-```
-
-同一天只顯示時間，跨日補 `08-31` 前綴。
-
-### 展開顯示 hunk，不是整個檔案
-
-只給變更的行加少量上下文，上限 3 個 hunk / 40 行，超過顯示
+Monospaced, counts right-aligned. Green applies only to the additions figure and red only
+to the deletions figure; the verb and the filename stay in the normal colour.
 
 ```
-… 還有 12 處變更
+17:35  report.md            created    +18
+17:36  report.md                       +18   −3
+17:38  src/viewer.py                    +2  −47
+17:41  .env                 deleted           −6
+18:02  data.csv             created    +12.4 KB binary · content not captured
 ```
 
-### 多次寫入照輪次摺疊
+Time only within a single day; a `08-31` style prefix appears when a run crosses midnight.
 
-沿用 0.8.0 的規則，最新展開、較舊摺疊：
+### Expanding shows hunks, not the file
+
+Changed lines with a little context, capped at three hunks or forty lines, then:
+
+```
+… 12 more changes
+```
+
+### Repeated writes fold by round
+
+Following the 0.8.0 rules — newest expanded, older folded:
 
 ```
 ▸ 17:23  +4 −0
 ▸ 17:24  +1 −9
-▾ 17:26  +18 −3      ← 最新
+▾ 17:26  +18 −3      ← newest
 ```
 
 ---
 
-## 4. 預設開啟
+## 4. On by default
 
-隱私控制放在**監看哪個目錄**，而不是**要不要看內容**。一個以「看見 agent 在你機器
-上實際做了什麼」為目的的工具，把這條路徑預設關掉，等於預設放過最需要看見的那一種。
-
----
-
-## 5. 不可違反
-
-1. 不得顯示未實際讀到的內容。
-2. 「內容未擷取」與「無變更」必須分開，不得互相冒充。
-3. 上限要卡在擷取階段。
-4. 沿用 0.7.9 / 0.8.0 的全部紅線：單一 renderer、完成不替換 DOM、對話屬於 agent、
-   主 Dashboard 不得回歸舊控制項。
-5. 每一項都要有 Chromium 行為驗證。
+The privacy control belongs on **which directory is watched**, not on **whether contents
+are read**. A tool whose purpose is to show what agents actually did on your machine
+should not ship with the case that most needs watching turned off.
 
 ---
 
-## 6. 驗證
+## 5. Red lines
 
-- 建構一個 fixture：建立檔案、修改三次、刪除
-- 建構一個競態 fixture：建立與刪除相距短於輪詢間隔
-- 瀏覽器：節點面板的每一行格式、顏色、對齊
-- 瀏覽器：多次寫入只有最新展開
-- 瀏覽器：「內容未擷取」與「無變更」在畫面上可分辨
-- 反向：移除上限，斷言 run 目錄大小超出預算時擷取會停止
+1. Never show content that was not actually read.
+2. "Not captured" and "no change" must stay distinct and must never stand in for each
+   other.
+3. Limits belong in the capture stage.
+4. All v0.7.9 and v0.8.0 boundaries continue to apply: one renderer, completion never
+   replaces the DOM, a conversation belongs to an agent, the main dashboard does not
+   regain the retired controls.
+5. Every item needs a Chromium behaviour check.
+
+---
+
+## 6. Verification
+
+- a fixture that creates a file, modifies it three times, and deletes it
+- a race fixture where creation and deletion are closer together than the poll interval
+- browser: the format, colour and alignment of each row in the node panel
+- browser: repeated writes show only the newest expanded
+- browser: "content not captured" and "no change" are distinguishable on the page
+- reverted: remove the limits and assert that capture stops once the run directory exceeds
+  its budget
