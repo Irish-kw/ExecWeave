@@ -193,6 +193,16 @@ def _agent_message_header(text: str) -> dict[str, str]:
     return result
 
 
+def _agent_message_visible_text(text: str, header: dict[str, str]) -> str | None:
+    """Return plaintext body without mistaking Codex routing metadata for content."""
+    payload = header.get("payload_text")
+    if isinstance(payload, str) and payload:
+        return _trim_text(payload)
+    if any(key in header for key in ("message_type", "task_name", "sender")):
+        return None
+    return _trim_text(text) if text else None
+
+
 def _message(timestamp: object, ordinal: object, **fields: Any) -> dict[str, Any]:
     return {
         "timestamp": timestamp if isinstance(timestamp, str) else None,
@@ -403,7 +413,8 @@ def codex_rollout_previews(path: str | Path) -> list[dict[str, Any]]:
                 payload_type = payload.get("type")
                 if payload_type == "agent_message":
                     content = payload.get("content")
-                    header = _agent_message_header(_content_text(content))
+                    text = _content_text(content)
+                    header = _agent_message_header(text)
                     encrypted = isinstance(content, list) and any(
                         isinstance(part, dict) and part.get("type") == "encrypted_content"
                         for part in content
@@ -416,7 +427,11 @@ def codex_rollout_previews(path: str | Path) -> list[dict[str, Any]]:
                         kind=header.get("message_type", "agent_message").lower(),
                         sender=sender,
                         recipient=recipient,
-                        text=None if encrypted else header.get("payload_text"),
+                        text=(
+                            None
+                            if encrypted
+                            else _agent_message_visible_text(text, header)
+                        ),
                         content_state="provider_encrypted" if encrypted else "plaintext",
                         phase=None,
                         task_name=header.get("task_name"),
