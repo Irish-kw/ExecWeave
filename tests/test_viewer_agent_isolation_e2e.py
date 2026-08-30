@@ -132,9 +132,9 @@ def _visible_page_text(page: Any) -> str:
 
 
 def _assert_no_dashboard_clutter(page: Any) -> None:
-    visible = _visible_page_text(page)
+    visible = _visible_page_text(page).casefold()
     for text in FORBIDDEN_VISIBLE_COPY:
-        assert text not in visible, f"obsolete dashboard copy is visible: {text!r}"
+        assert text.casefold() not in visible, f"obsolete dashboard copy is visible: {text!r}"
 
 
 def _audit(page: Any, graph: dict[str, Any]) -> dict[str, tuple[list[str], list[str]]]:
