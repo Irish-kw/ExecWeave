@@ -268,7 +268,9 @@ def test_projected_renderer_embeds_expandable_cluster_without_changing_raw_graph
     payload = json.loads(embedded)
     assert payload["viewer_projection"]["viewer_only"] is True
     assert any(node["type"] == "network_endpoint_cluster" for node in payload["nodes"])
-    assert "Expand cluster" in html
+    assert payload["expansion"]["clusters"]
+    assert "window.__execweaveStaticGraph=" in html
+    assert "Expand cluster" not in html
 
 
 def _network_event(sequence: int, address: str) -> dict[str, object]:
