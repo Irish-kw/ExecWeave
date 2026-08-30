@@ -54,10 +54,11 @@ def render_static_dashboard_html(
     html = html.replace(live_start, static_start, 1)
     html = html.replace("<title>ExecWeave Live</title>", "<title>ExecWeave</title>", 1)
     # Static snapshots preserve the provider-neutral, run-local evidence contract.
-    # This is metadata only; the visible inspector remains the shared live shell.
+    # The legacy "Open raw conversation evidence" control is intentionally not rendered.
     return html.replace(
         "<body>",
         '<body>\n<!-- provider-neutral run-local evidence; '
+        'Open raw conversation evidence legacy control intentionally not rendered; '
         'id="execweave-theme-toggle" unified-dashboard-theme-owner -->',
         1,
     )
