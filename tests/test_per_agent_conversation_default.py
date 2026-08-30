@@ -106,11 +106,10 @@ def test_a_message_authored_by_another_agent_is_not_shown_as_ones_own() -> None:
     tree = TREE.read_text(encoding="utf-8")
     for symbol in ("execweaveOwnConversationMessage", "ownConversationMessage"):
         assert symbol in tree
-    # A sender that is another agent path is excluded; 'user' and own turns stay.
-    # An agent-authored message belongs to its sender; anything else follows its
-    # recipient, so a user prompt addressed to root never reaches a child.
-    assert tree.count("if(sender.startsWith('/'))return sender===own") == 2
-    assert tree.count("if(recipient.startsWith('/'))return recipient===own") == 2
+    # An agent's own conversation is what it sent plus what was addressed to it.
+    # A message between two other agents belongs to neither of this agent's sides.
+    assert tree.count("if(sender===own||recipient===own)return true") == 2
+    assert tree.count("if(sender.startsWith('/')||recipient.startsWith('/'))return false") == 2
 
 
 # ── execute the shipped page, not just grep it ───────────────────────────────
@@ -190,7 +189,7 @@ def test_an_entry_without_messages_does_not_become_a_second_agent(tmp_path: Path
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is unavailable")
 def test_each_agent_section_carries_only_messages_it_authored(tmp_path: Path) -> None:
-    """Root must not replay a child's answer, and a child must not carry a sibling's."""
+    """An agent sees what it sent and what was addressed to it — nothing between others."""
     shared = [
         {"sender": "user", "recipient": "/root", "text": "ROOT PROMPT"},
         {"sender": "/root", "recipient": "/root/alpha", "text": "ALPHA TASK"},
@@ -205,10 +204,16 @@ def test_each_agent_section_carries_only_messages_it_authored(tmp_path: Path) ->
     by_path = {s["path"]: s for s in _run_render([], entries, tmp_path)}
 
     root = by_path["/root"]["texts"]
-    assert "ROOT PROMPT" in root
-    assert "ALPHA TASK" in root, "root authored the assignment, so it stays with root"
-    assert "ALPHA ANSWER" not in root, "root must not replay a child's answer"
-    assert "BETA ANSWER" not in root
+    assert "ROOT PROMPT" in root, "the user addressed root"
+    assert "ALPHA TASK" in root, "root wrote the assignment"
+    assert "ALPHA ANSWER" in root, "root received the answer, so it is root's own turn"
 
     alpha = by_path["/root/alpha"]["texts"]
-    assert alpha == ["ALPHA ANSWER"], alpha
+    assert "ALPHA TASK" in alpha, "a child must see what it was assigned"
+    assert "ALPHA ANSWER" in alpha, "a child keeps what it produced"
+    assert "BETA ANSWER" not in alpha, "a sibling's answer must never appear"
+    assert "ROOT PROMPT" not in alpha, "the user's prompt to root is not the child's"
+
+    beta = by_path["/root/beta"]["texts"]
+    assert "ALPHA TASK" not in beta, "a sibling's assignment must never appear"
+    assert "ALPHA ANSWER" not in beta
