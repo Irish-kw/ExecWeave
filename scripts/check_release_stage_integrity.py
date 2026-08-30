@@ -144,9 +144,38 @@ def _assert_test_identity_floor(baseline_ref: str) -> tuple[int, int]:
     return len(baseline), len(current)
 
 
-def _assert_existing_tests_untouched(baseline_ref: str) -> list[str]:
+def _parse_test_change_allowances(values: list[str]) -> dict[str, str]:
+    """Read PATH=REASON allowances for editing an existing test.
+
+    An allowance has to name the file and say why at the call site, so it lands in
+    the workflow diff and in this checker's output. It cannot be used quietly, and
+    it is never a way to remove a test: deletions and renames stay refused, and the
+    node-ID floor still requires every baseline test to survive, so an allowed edit
+    can only change what a test asserts.
+    """
+
+    allowances: dict[str, str] = {}
+    for value in values:
+        path, separator, reason = value.partition("=")
+        path, reason = path.strip(), reason.strip()
+        if not separator or not path or not reason:
+            raise RuntimeError(
+                f"--allow-test-change needs PATH=REASON, got {value!r}. "
+                "State why the existing assertion is no longer correct."
+            )
+        if path in allowances:
+            raise RuntimeError(f"duplicate --allow-test-change for {path}")
+        allowances[path] = reason
+    return allowances
+
+
+def _assert_existing_tests_untouched(
+    baseline_ref: str, allowances: dict[str, str] | None = None
+) -> tuple[list[str], list[dict[str, str]]]:
+    allowed = allowances or {}
     completed = _git("diff", "--name-status", f"{baseline_ref}...HEAD", "--", "tests")
     added: list[str] = []
+    permitted: list[dict[str, str]] = []
     violations: list[str] = []
     for line in completed.stdout.splitlines():
         if not line.strip():
@@ -154,13 +183,26 @@ def _assert_existing_tests_untouched(baseline_ref: str) -> list[str]:
         status, *paths = line.split("\t")
         if status == "A" and len(paths) == 1:
             added.append(paths[0])
+        elif status == "M" and len(paths) == 1 and paths[0] in allowed:
+            permitted.append({"path": paths[0], "reason": allowed[paths[0]]})
         else:
             violations.append(line)
     if violations:
         raise RuntimeError(
-            "existing tests were modified, deleted, or renamed:\n" + "\n".join(violations)
+            "existing tests were modified, deleted, or renamed:\n"
+            + "\n".join(violations)
+            + "\n\nA test may only be edited with an explicit "
+            "--allow-test-change PATH=REASON naming the file and why its assertion is "
+            "no longer correct. Deletions and renames are never permitted."
         )
-    return added
+    unused = sorted(set(allowed) - {item["path"] for item in permitted})
+    if unused:
+        raise RuntimeError(
+            "--allow-test-change was granted for files this branch does not modify: "
+            + ", ".join(unused)
+            + ". Remove the stale allowance rather than leaving it open."
+        )
+    return added, permitted
 
 
 def _assert_no_new_skip_or_xfail(baseline_ref: str) -> None:
@@ -429,6 +471,17 @@ def _parser() -> argparse.ArgumentParser:
         required=True,
         help="immutable base commit/ref used to reconstruct baseline test node IDs",
     )
+    parser.add_argument(
+        "--allow-test-change",
+        action="append",
+        default=[],
+        metavar="PATH=REASON",
+        help=(
+            "permit one existing test file to be modified, naming why its assertion is "
+            "no longer correct. Repeatable. Deletions and renames are never permitted, "
+            "and the node-ID floor still requires every baseline test to survive."
+        ),
+    )
     return parser
 
 
@@ -437,7 +490,9 @@ def main() -> int:
     _git("cat-file", "-e", f"{args.baseline_ref}^{{commit}}")
 
     baseline_count, current_count = _assert_test_identity_floor(args.baseline_ref)
-    added_tests = _assert_existing_tests_untouched(args.baseline_ref)
+    added_tests, allowed_test_changes = _assert_existing_tests_untouched(
+        args.baseline_ref, _parse_test_change_allowances(args.allow_test_change)
+    )
     _assert_no_new_skip_or_xfail(args.baseline_ref)
     _assert_critical_files_unchanged(args.baseline_ref)
     tls_status = _assert_no_tls_mitm(args.baseline_ref)
@@ -454,6 +509,7 @@ def main() -> int:
                 "current_test_node_ids": current_count,
                 "baseline_subset_current": True,
                 "added_test_files": added_tests,
+                "allowed_test_changes": allowed_test_changes,
                 "new_skip_or_xfail": False,
                 "critical_release_files_unchanged": True,
                 "tls_mitm_invariant": tls_status,

@@ -183,7 +183,13 @@ def test_agent_labels_are_provider_neutral_without_mutating_raw_graph() -> None:
     ):
         assert root_id in html
     assert "providerRootIds.has(String(node.id||''))" in html
-    assert "subagent · ${agentId.slice(0,8)}" in html
+    # The label must identify the agent. An eight-character slice of a
+    # time-ordered id is a timestamp siblings share, so it named two agents the
+    # same; the projection resolves the namespaced topology path instead and
+    # falls back to the provider's nickname.
+    assert "attrs.agent_path||attrs.child_agent_path||attrs.root_agent_path" in html
+    assert "subagent · ${nickname}" in html
+    assert "subagent · ${agentId.slice(0,8)}" not in html
 
 
 def test_live_logs_are_vertically_resizable_without_expanding_log_retention() -> None:

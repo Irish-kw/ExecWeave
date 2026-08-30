@@ -12,11 +12,20 @@ execweaveDashboardGraph=function(data){
     const attrs=node.attributes||{};
     let name=node.name;
     if(node.type==='agent'){
-      const agentPath=typeof attrs.agent_path==='string'?attrs.agent_path.trim():'';
+      // Topology attributes are namespaced apart: a subagent carries
+      // child_agent_path and a root carries root_agent_path. Reading agent_path
+      // alone finds nothing and falls through to an id fragment.
+      const agentPath=String(attrs.agent_path||attrs.child_agent_path||attrs.root_agent_path||'').trim();
       const agentId=String(attrs.agent_id||attrs.subagent_id||'');
+      const nickname=String(attrs.agent_nickname||'').trim();
       if(agentPath)name=agentPath;
       else if(providerRootIds.has(String(node.id||'')))name='/root';
-      else if(agentId&&['default','agent','subagent'].includes(String(node.name||'').toLowerCase()))name=`subagent · ${agentId.slice(0,8)}`;
+      else if(['default','agent','subagent'].includes(String(node.name||'').toLowerCase())){
+        // Never label by a timestamp-ordered id prefix: siblings spawned in the
+        // same millisecond share it and render as the same node.
+        if(nickname)name=`subagent · ${nickname}`;
+        else if(agentId)name=`subagent · ${agentId.slice(0,13)}`;
+      }
     }
     const occurrenceCount=Number(attrs.viewer_occurrence_count||0);
     if(node.type==='process'&&occurrenceCount>1&&!/\s×\d+$/.test(String(name||'')))name=`${name||node.id} ×${occurrenceCount}`;

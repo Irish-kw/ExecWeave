@@ -108,7 +108,7 @@ input,select{border:1px solid var(--border);border-radius:7px;padding:7px 9px;ba
 .timeline{display:flex;align-items:center;gap:7px;width:100%;padding-top:2px;color:var(--muted);font-size:12px}.timeline input[type=range]{flex:1;min-width:120px;padding:0;accent-color:var(--selected)}#sequence-label{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:nowrap}
 #canvas-wrap{position:relative;min-width:0;min-height:0;overflow:hidden}#graph{width:100%;height:100%;display:block;cursor:grab;user-select:none}#graph.panning{cursor:grabbing}
 aside{overflow:auto;border-left:1px solid var(--border);background:var(--panel);padding:16px}aside h2{margin:0 0 12px;font-size:15px}aside h3{margin:18px 0 8px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
-#details pre{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.empty{color:var(--muted)}.detail-actions{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0 8px}.identity-note{margin:10px 0;padding:8px 10px;border:1px solid var(--identity);border-radius:7px;color:var(--text);background:var(--panel2);font-size:12px}
+#details pre{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.empty{color:var(--muted)}.execweave-said{margin:10px 0;padding:11px;border:1px solid var(--border);border-radius:9px;background:var(--panel2)}.execweave-said-head{padding-bottom:8px;margin-bottom:9px;border-bottom:1px solid var(--border)}.execweave-said-title{font-size:13px;font-weight:700;color:var(--text);overflow-wrap:anywhere}.execweave-said-count{font-size:11px;color:var(--muted);margin-top:2px}.execweave-said-turn{display:grid;grid-template-columns:88px 1fr;gap:10px;padding:7px 0;border-top:1px solid var(--border)}.execweave-said-turn:first-of-type{border-top:0}.execweave-said-who{font-size:10px;color:var(--muted);overflow-wrap:anywhere}.execweave-said-who.self{color:var(--selected)}.execweave-said-body{font-size:12px;color:var(--text);white-space:pre-wrap;overflow-wrap:anywhere}.execweave-said-body.quiet{color:var(--muted);font-style:italic}.execweave-said-ctx summary{cursor:pointer;color:var(--muted);font-size:11px;font-style:italic}.execweave-said-ctx .execweave-said-body{margin-top:6px;padding:8px;background:rgba(0,0,0,.14);border-radius:6px;max-height:200px;overflow:auto}.execweave-raw-node{margin-top:10px}.execweave-raw-node summary{cursor:pointer;color:var(--muted);font-size:11px}@media(max-width:620px){.execweave-said-turn{grid-template-columns:1fr;gap:2px}}.detail-actions{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0 8px}.identity-note{margin:10px 0;padding:8px 10px;border:1px solid var(--identity);border-radius:7px;color:var(--text);background:var(--panel2);font-size:12px}
 .correlation-summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.correlation-stat{border:1px solid var(--border);border-radius:7px;background:var(--panel2);padding:7px 9px;color:var(--muted);font-size:11px}.correlation-stat strong{display:block;color:var(--text);font-size:16px;line-height:1.2;margin-top:2px}
 button{border:1px solid var(--border);background:var(--panel);color:var(--text);border-radius:7px;padding:6px 9px;cursor:pointer}button:hover{border-color:var(--selected)}button:disabled{opacity:.45;cursor:default}
 .controls{position:absolute;top:12px;left:12px;z-index:5;display:flex;gap:6px;flex-wrap:wrap}
@@ -254,8 +254,104 @@ function applyTransform(){viewport.setAttribute('transform',`translate(${transfo
 function anchor(id,right){const p=positions.get(id)||{x:0,y:0};return{x:p.x+(right?170:0),y:p.y+29}}
 function edgePath(e){const a=anchor(e.source,true),b=anchor(e.target,false),bend=Math.max(45,Math.abs(b.x-a.x)*.45);return `M ${a.x} ${a.y} C ${a.x+bend} ${a.y}, ${b.x-bend} ${b.y}, ${b.x} ${b.y}`}
 function setFocus(nodeId,hops){focusState={anchor:nodeId,hops};details.textContent=`Focused ${hops}-hop runtime neighborhood around ${nodeId}.`;applyGraphFilters()}
+function execweaveInjectedContext(text){
+  // Providers prepend the same multi-kilobyte plugin and environment preamble to every
+  // subagent, so three different agents open with an identical wall of text. It is real
+  // evidence and is kept, folded, rather than leading the panel.
+  const value=String(text||'');
+  return value.startsWith('<recommended_plugins>')||value.startsWith('<environment_context>');
+}
+function execweaveGroupSaidTurns(messages){
+  // Consecutive turns the provider did not expose collapse into one line. They are
+  // grouped by sender only: a run of assignments root wrote to three different
+  // children is one line that still names all three, so nothing about who was
+  // dispatched is lost to the fold.
+  const groups=[];
+  for(const message of messages){
+    const encrypted=message?.content_state==='provider_encrypted',
+          sender=String(message?.sender||''),recipient=String(message?.recipient||''),
+          last=groups[groups.length-1];
+    if(encrypted&&last&&last.encrypted&&last.sender===sender){
+      last.count+=1;
+      if(recipient&&!last.recipients.includes(recipient))last.recipients.push(recipient);
+      continue;
+    }
+    groups.push({encrypted,count:1,sender,recipients:recipient?[recipient]:[],message});
+  }
+  return groups;
+}
+function execweaveAppendSaidGroup(box,group,path){
+  if(group.count===1){execweaveAppendSaidTurn(box,group.message,path);return}
+  const row=document.createElement('div');row.className='execweave-said-turn';
+  const who=document.createElement('div');who.className='execweave-said-who';
+  if(group.sender===path){who.classList.add('self');who.textContent='this agent'}
+  else who.textContent=group.sender||'\u2014';
+  const others=group.recipients.filter(value=>value!==path);
+  if(others.length)who.textContent+=' \u2192';
+  row.appendChild(who);
+  const body=document.createElement('div');body.className='execweave-said-body quiet';
+  body.textContent=`${group.count} turns the provider did not expose`
+    +(others.length?` \u2192 ${others.join(', ')}`:'');
+  row.appendChild(body);box.appendChild(row);
+}
+function execweaveAppendSaidTurn(box,message,path){
+  const row=document.createElement('div');row.className='execweave-said-turn';
+  const sender=String(message?.sender||''),recipient=String(message?.recipient||'');
+  const who=document.createElement('div');who.className='execweave-said-who';
+  if(sender===path){who.classList.add('self');who.textContent='this agent'}
+  else who.textContent=sender||'\u2014';
+  if(recipient&&recipient!==path)who.textContent+=' \u2192';
+  const body=document.createElement('div');const text=String(message?.text||'');
+  if(message?.content_state==='provider_encrypted'){
+    body.className='execweave-said-body quiet';
+    body.textContent='provider-encrypted \u2014 the provider did not expose this text';
+  }else if(execweaveInjectedContext(text)){
+    body.className='execweave-said-body';
+    const fold=document.createElement('details');fold.className='execweave-said-ctx';
+    const label=document.createElement('summary');
+    label.textContent=`injected task context \u00b7 ${text.length} characters`;
+    const full=document.createElement('div');full.className='execweave-said-body';full.textContent=text;
+    fold.append(label,full);body.appendChild(fold);
+  }else if(text){body.className='execweave-said-body';body.textContent=text}
+  else{body.className='execweave-said-body quiet';body.textContent='(no plaintext body exposed)'}
+  row.append(who,body);box.appendChild(row);
+}
+function execweaveAgentSaid(node){
+  // Clicking an agent asks one question: what did this agent say? Answer that first,
+  // before identity, capability and trace machinery.
+  if(!node||node.type!=='agent'||typeof execweaveConversationAgentRecords!=='function')return null;
+  let record=null;
+  try{
+    const records=execweaveConversationAgentRecords(execweaveEmbeddedConversationEntries());
+    record=records.find(item=>item.nodeId&&String(item.nodeId)===String(node.id))||null;
+  }catch(_){return null}
+  if(!record)return null;
+  const own=execweaveOwnConversationEntry(record),messages=own?.conversation_preview?.messages||[];
+  const box=document.createElement('div');box.className='execweave-said';
+  const head=document.createElement('div');head.className='execweave-said-head';
+  const title=document.createElement('div');title.className='execweave-said-title';
+  title.textContent=record.path||record.label;
+  const count=document.createElement('div');count.className='execweave-said-count';
+  const authored=messages.filter(message=>String(message?.sender||'')===record.path).length;
+  count.textContent=`${messages.length} turn${messages.length===1?'':'s'} \u00b7 ${authored} written by this agent`;
+  head.append(title,count);box.appendChild(head);
+  if(!messages.length){
+    const none=document.createElement('div');none.className='execweave-said-body quiet';
+    none.textContent='No conversation evidence is available for this agent.';box.appendChild(none);
+    return box;
+  }
+  for(const group of execweaveGroupSaidTurns(messages))execweaveAppendSaidGroup(box,group,record.path||record.label);
+  return box;
+}
 function showDetails(kind,value){
-  details.classList.remove('empty');details.replaceChildren();const t=document.createElement('strong');t.textContent=kind;const p=document.createElement('pre');p.textContent=JSON.stringify(value,null,2);details.append(t,document.createElement('br'));
+  details.classList.remove('empty');details.replaceChildren();const t=document.createElement('strong');t.textContent=kind;let p=document.createElement('pre');p.textContent=JSON.stringify(value,null,2);details.append(t,document.createElement('br'));
+  const said=kind==='Node'?execweaveAgentSaid(value):null;
+  if(said){
+    details.append(said);
+    const fold=document.createElement('details');fold.className='execweave-raw-node';
+    const label=document.createElement('summary');label.textContent='Raw node evidence';
+    fold.append(label,p);p=fold;
+  }
   if(kind==='Node'){
     const actions=document.createElement('div');actions.className='detail-actions';
     [1,2].forEach(hops=>{const button=document.createElement('button');button.textContent=`Focus ${hops} ${hops===1?'hop':'hops'}`;button.addEventListener('click',()=>setFocus(value.id,hops));actions.appendChild(button)});
