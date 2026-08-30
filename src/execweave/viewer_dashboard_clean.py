@@ -148,6 +148,9 @@ _LIVE_APPLY_DELTA_CLEAN = "function applyDelta(update){if(update.live_payload_co
 _LIVE_CORE_EXPORT = "window.__execweaveCore={getActivities:()=>activities.slice(),getGraph:()=>graph,getPositions:()=>new Map(positions),selectEdge,selectNode,focusNode,markLatest,setCameraMode};"
 _LIVE_CORE_EXPORT_CLEAN = "window.__execweaveCore={getActivities:()=>activities.slice(),getGraph:()=>graph,getDisplayGraph:()=>({...graph,nodes:[...nodeById.values()],edges:[...edgeById.values()],node_count:nodeById.size,edge_count:edgeById.size}),getPositions:()=>new Map(positions),selectEdge,selectNode,focusNode,markLatest,setCameraMode};"
 
+_LIVE_NOOP_STATS = "else if(data.kind==='noop'){liveSequence=Number(data.sequence)||liveSequence;updateStats(data);}"
+_LIVE_NOOP_STATS_CLEAN = "else if(data.kind==='noop'){liveSequence=Number(data.sequence)||liveSequence;updateStats(protectedMode?data:{...data,node_count:nodeById.size,edge_count:edgeById.size});}"
+
 
 def _replace_function(html: str, start: str, following: str, replacement: str) -> str:
     begin = html.find(start)
@@ -187,6 +190,7 @@ def inject_live_dashboard_clean(html: str) -> str:
         _LIVE_APPLY_DELTA_CLEAN + "\n",
     )
     html = html.replace(_LIVE_CORE_EXPORT, _LIVE_CORE_EXPORT_CLEAN, 1)
+    html = html.replace(_LIVE_NOOP_STATS, _LIVE_NOOP_STATS_CLEAN, 1)
     html = html.replace(
         "const graph=core.getGraph(),positions=core.getPositions(),steps=sortedGifSteps(graph);",
         "const graph=core.getDisplayGraph?.()||core.getGraph(),positions=core.getPositions(),steps=sortedGifSteps(graph);",
