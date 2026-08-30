@@ -31,7 +31,7 @@ PyPI から最新の wheel/sdist をインストールします。
 python -m pip install -U execweave
 ```
 
-現在のリリースは **v0.7.4** です。
+現在のリリースは **v0.7.5** です。
 
 開発環境では次のようにインストールできます。
 
@@ -67,7 +67,7 @@ execweave record --open -- python my_agent.py
 
 `execweave top -- codex` は Agent を起動 terminal 上でインタラクティブなまま保ち、ホスト環境に応じて detached Top dashboard を開くか既存のものに attach します。
 
-**v0.7.4 — dashboard での per-agent conversation focus。** v0.7.3 で materialize された provider-neutral かつ agent-local な multi-agent conversation を土台に、agent node を選択すると conversation panel がその agent だけに絞り込まれ、表示項目数と全体ツリーに戻すコントロールが付きます。クリックは label の一致ではなく graph agent node identity で thread に解決されるため、同じ provider nickname を共有する agent どうしも混ざりません。Markdown の conversation セクションは provider nickname ではなく agent path で始まるようになり、各セクションがどの agent のものかを明示します。standalone viewer と live dashboard の両方が対象で、conversation materialization 自体は変更していません。
+**v0.7.5 — 既定で per-agent conversation isolation、そして evidence availability matrix。** run を開くと各 agent が独立したセクションを持ち、その agent が送った turn と宛てられた turn だけを含みます。child は自身の assignment と answer を保持し、sibling 同士のやり取りは現れません。field-level availability は conversation completeness と分けて記録されるため、reasoning フィールドが暗号化されていても、完全に保存された transcript が一緒に降格されることはありません。オフラインの capability probe は client と surface ごとに provider が実際に公開したものを報告し、読み取れないものは理由を断定せずに記録します。
 
 統合 dashboard では execution graph、logs、conversation records を同じ inspection flow で確認できます。Finalized run は `conversations.md` と `conversations.json` を生成し、検証済み provider transcript は run-local SHA-256 content store にコピーされます。Claude Code、OpenAI Codex、Cursor、OpenCode、Google Antigravity は、それぞれが実際に公開する最も強い multi-agent evidence を利用します。gateway や local runtime が root request/response しか公開しない場合、ExecWeave は root conversation だけを表示し、subagent や hidden routing を捏造しません。
 
@@ -276,7 +276,7 @@ Conversation isolation は attribution/display の規則であり redaction boun
 
 ## 現在の状態
 
-v0.7.4 は cross-platform runtime collection、materialized execution graph、standalone/live dashboard、保守的な provider↔runtime correlation、content-addressed full-fidelity provider evidence、attributable multi-agent execution trace、run-local conversation access、provider-neutral projection 上の agent-local conversation isolation、standalone および live dashboard での per-agent conversation focus を統合します。各 integration は provider が実際に公開した最も強い identity/routing evidence のみを保持し、不足する場合は abstain します。Observed evidence と inference は設計上分離されたままです。
+v0.7.5 は cross-platform runtime collection、materialized execution graph、standalone/live dashboard、保守的な provider↔runtime correlation、content-addressed full-fidelity provider evidence、attributable multi-agent execution trace、run-local conversation access、provider-neutral projection 上の agent-local conversation isolation、standalone および live dashboard での per-agent conversation focus を統合します。各 integration は provider が実際に公開した最も強い identity/routing evidence のみを保持し、不足する場合は abstain します。Observed evidence と inference は設計上分離されたままです。
 
 ## ドキュメント
 

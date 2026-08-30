@@ -59,11 +59,17 @@ COMPLETENESS_NAMES = (
     "CONVERSATION_COMPLETENESS",
     "_COMPLETENESS_RANK",
 )
+# A test may not be switched off to make a stage pass. The one accepted form is the
+# environment probe already used in this suite — a skipif guarding an optional tool
+# such as node — because that test is skipped only where it could not run at all.
+# Everything else, including an unconditional skip and any other skipif condition, is
+# a test being turned off.
 SKIP_MARKERS = (
     "pytest.mark.skip",
     "pytest.mark.xfail",
     "pytest.skip(",
 )
+ENVIRONMENT_PROBE_SKIP = "pytest.mark.skipif(shutil.which("
 
 
 def _run(
@@ -162,6 +168,8 @@ def _assert_no_new_skip_or_xfail(baseline_ref: str) -> None:
     offenders = []
     for line in diff.splitlines():
         if not line.startswith("+") or line.startswith("+++"):
+            continue
+        if ENVIRONMENT_PROBE_SKIP in line and "is None" in line:
             continue
         if any(marker in line for marker in SKIP_MARKERS):
             offenders.append(line)
