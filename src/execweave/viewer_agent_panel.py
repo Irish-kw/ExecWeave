@@ -35,7 +35,8 @@ function rootFields(messages,path){
   return{prompt:messageText(prompts[0]),response:messageText(finals.at(-1)||fallback.at(-1))};
 }
 function childFields(messages,path){
-  const tasks=messages.filter(message=>isPlain(message)&&String(message?.recipient||'')===path&&String(message?.sender||'')!==path&&!isInjected(messageText(message))&&(/task|assign/i.test(String(message?.kind||''))||String(message?.phase||'')==='assignment'||String(message?.sender||'')==='user'||String(message?.sender||'').startsWith('/root')));
+  const parent=path.includes('/')?(path.slice(0,path.lastIndexOf('/'))||'/root'):'/root';
+  const tasks=messages.filter(message=>{const sender=String(message?.sender||'');return isPlain(message)&&String(message?.recipient||'')===path&&sender!==path&&!isInjected(messageText(message))&&(/task|assign/i.test(String(message?.kind||''))||String(message?.phase||'')==='assignment')&&(!sender||sender==='user'||sender===parent)});
   const thoughts=messages.filter(message=>isPlain(message)&&own(message,path)&&(/reason|think|commentary/i.test(`${message?.kind||''} ${message?.phase||''}`)));
   let responses=messages.filter(message=>isPlain(message)&&own(message,path)&&(String(message?.phase||'')==='final_answer'||/final[_ -]?response|agent_result|result/i.test(String(message?.kind||''))));
   if(!responses.length)responses=messages.filter(message=>isPlain(message)&&own(message,path)&&!thoughts.includes(message)&&String(message?.recipient||'')!==path&&!/task|assign/i.test(String(message?.kind||'')));
