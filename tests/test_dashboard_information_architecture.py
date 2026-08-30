@@ -205,8 +205,8 @@ def test_live_conversation_panel_is_provider_neutral_rooted_agent_tree() -> None
     # Historical test identity retained: v0.7.9 intentionally removes the rooted
     # conversation tree. Provider-neutral selection is now one compact inspector.
     assert "window.__execweaveAgentPanel" in html
-    assert "function rootFields(messages,path)" in html
-    assert "function childFields(messages,path)" in html
+    assert "function rootRounds(messages,path)" in html
+    assert "function childRounds(messages,path)" in html
     assert "execweave-conversation-root-node" not in html
     assert "execweave-conversation-children" not in html
     assert "Show all agents" not in html

@@ -125,7 +125,7 @@ def test_an_entry_without_messages_does_not_become_a_second_agent(tmp_path: Path
     html = render_static_dashboard_html(_graph(), conversation_entries=entries)
     assert html.count('"source_id":"agent:codex:S:subagent:one"') == 2
     assert "function recordFor(node)" in html
-    assert "const matches=entries.filter" in html
+    assert "return aggregate(entries.filter(" in html
     assert "messages:ordered.map(item=>item.message)" in html
     assert "entries.find(entry=>String(entry?.source_id||'')" not in html
     assert "execweave-conversation-agent-section" not in html
@@ -149,7 +149,7 @@ def test_each_agent_section_carries_only_messages_it_authored(tmp_path: Path) ->
     assert "ALPHA TASK" in html
     assert "ALPHA ANSWER" in html
     assert "BETA ANSWER" in html
-    assert "function childFields(messages,path)" in html
-    assert "const tasks=messages.filter" in html
-    assert "let responses=messages.filter" in html
+    assert "function childRounds(messages,path)" in html
+    assert "const isTask=message=>{const sender" in html
+    assert "let responses=inside.filter" in html
     assert inject_agent_panel(html) == html
