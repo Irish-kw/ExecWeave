@@ -81,10 +81,10 @@ def test_finished_dashboard_supports_replay_and_gif_export() -> None:
 
 
 def test_replay_final_fetch_keeps_live_authentication() -> None:
+    # Historical test name retained. v0.7.9 no longer fetches /final or replaces
+    # the document at completion; authentication remains on the live data channel.
     assert "window.__execweaveToken=liveAuthToken" in _AUTHENTICATED_LIVE_HTML
-    assert (
-        "fetch('/final',{cache:'no-store',headers:{"
-        "'X-ExecWeave-Token':window.__execweaveToken||''}})"
-        in _AUTHENTICATED_LIVE_HTML
-    )
+    assert "X-ExecWeave-Token':liveAuthToken" in _AUTHENTICATED_LIVE_HTML
+    assert "fetch('/final'" not in _AUTHENTICATED_LIVE_HTML
     assert "location.href='/final'" not in _AUTHENTICATED_LIVE_HTML
+    assert "document.write(finalHtml)" not in _AUTHENTICATED_LIVE_HTML
