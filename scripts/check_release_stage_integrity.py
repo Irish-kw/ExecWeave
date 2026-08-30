@@ -64,7 +64,7 @@ def _pytest_node_ids(tree: Path) -> set[str]:
     existing = env.get("PYTHONPATH")
     env["PYTHONPATH"] = source if not existing else os.pathsep.join((source, existing))
     completed = _run(
-        [sys.executable, "-m", "pytest", "-q", "--collect-only", "-q"],
+        [sys.executable, "-m", "pytest", "--collect-only", "-q"],
         cwd=tree,
         env=env,
     )
@@ -81,6 +81,11 @@ def _assert_test_identity_floor(baseline_ref: str) -> tuple[int, int]:
         baseline_tree = Path(tmp)
         _extract_git_tree(baseline_ref, baseline_tree)
         baseline = _pytest_node_ids(baseline_tree)
+    if not baseline or not current:
+        raise RuntimeError(
+            "test node-ID collection returned an empty set; refusing a vacuous subset check: "
+            f"baseline={len(baseline)} current={len(current)}"
+        )
     missing = sorted(baseline - current)
     if missing:
         preview = "\n".join(missing[:25])
