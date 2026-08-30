@@ -227,4 +227,54 @@ def test_the_live_server_serves_the_same_index_the_file_would_carry(tmp_path: Pa
         thread.join(timeout=5)
 
     assert served == conversation_index_payload(graph, tmp_path)
-    assert served["entry_count"] == 5
+    paths = {
+        (entry.get("conversation_preview") or {}).get("agent_path")
+        for entry in served["entries"]
+    }
+    assert {"/root", *MARKERS} <= paths, paths
+
+def test_no_agent_hands_over_a_transcript_that_is_not_its_own(tmp_path: Path) -> None:
+    """The raw evidence a section offers must not open another agent's conversation.
+
+    Codex records a child's delegation and return in the parent's rollout, so a child
+    has no file of its own and every agent cited the parent's whole transcript as its
+    raw evidence. The link inside a child's section opened the entire run — four agents
+    and four answers — one click from a panel that had just shown one agent's turns.
+    """
+    from execweave.viewer_projection import write_graph_html
+
+    graph = build_run(tmp_path, per_agent_rollouts=False)
+    viewer = tmp_path / "viewer.html"
+    write_graph_html(graph, viewer)
+
+    manager, executable = _browser()
+    with manager as playwright:
+        browser = _launch(playwright, executable)
+        try:
+            page = browser.new_page()
+            page.goto(viewer.as_uri())
+            page.wait_for_selector(
+                "#execweave-conversation-panel .execweave-conversation-agent-section",
+                timeout=15000,
+            )
+            offered = page.eval_on_selector_all(
+                "#execweave-conversation-panel .execweave-conversation-agent-section",
+                """sections=>sections.map(section=>[
+                    (section.querySelector('.execweave-conversation-agent-scope')?.textContent||'')
+                        .split(' \\u00b7 ')[0].trim(),
+                    [...section.querySelectorAll('a')].map(anchor=>anchor.getAttribute('href')||''),
+                ])""",
+            )
+        finally:
+            browser.close()
+
+    assert offered, "the panel drew no agent sections"
+    for path, hrefs in offered:
+        allowed = ALL_MARKERS if path == "/root" else {MARKERS.get(path, "")}
+        for href in hrefs:
+            target = tmp_path / href
+            if not target.is_file():
+                continue
+            content = target.read_text(encoding="utf-8", errors="replace")
+            leaked = sorted(marker for marker in ALL_MARKERS - allowed if marker in content)
+            assert not leaked, f"{path} offers {href}, which carries {leaked}"

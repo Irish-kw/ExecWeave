@@ -740,6 +740,46 @@ def _mark_shared_injected_context(entries: list[dict[str, Any]]) -> None:
                 message["content_role"] = SHARED_INJECTED_CONTEXT
 
 
+# One rollout can be the evidence for several agents: Codex records a delegation and
+# the return it receives in the parent's file, so a child's turns are read from the
+# parent's record rather than from one of its own. Every agent then cited that file as
+# its own raw evidence, and the link inside a child's section opened the whole run.
+#
+# The file is still the evidence and has to stay inspectable, so it is attributed
+# instead of hidden: the agent highest in the path hierarchy among those citing it owns
+# it, and the others say whose record their turns were read from.
+EVIDENCE_SHARED_WITH_OWNER = "evidence_shared_with_owner"
+
+
+def _mark_shared_evidence(entries: list[dict[str, Any]]) -> None:
+    agents_by_path: dict[str, set[str]] = {}
+    for entry in entries:
+        preview = entry.get("conversation_preview")
+        relative = entry.get("path")
+        if not isinstance(preview, dict) or not isinstance(relative, str) or not relative:
+            continue
+        agent_path = preview.get("agent_path")
+        if isinstance(agent_path, str) and agent_path:
+            agents_by_path.setdefault(relative, set()).add(agent_path)
+
+    owners = {
+        relative: min(agents, key=lambda path: (path.count("/"), len(path), path))
+        for relative, agents in agents_by_path.items()
+        if len(agents) > 1
+    }
+    if not owners:
+        return
+    for entry in entries:
+        preview = entry.get("conversation_preview")
+        relative = entry.get("path")
+        if not isinstance(preview, dict) or not isinstance(relative, str):
+            continue
+        owner = owners.get(relative)
+        if owner is None or preview.get("agent_path") == owner:
+            continue
+        entry[EVIDENCE_SHARED_WITH_OWNER] = owner
+
+
 def conversation_index_payload(
     graph: dict[str, Any],
     run_root: str | Path,
@@ -754,6 +794,7 @@ def conversation_index_payload(
     root = Path(run_root).expanduser().resolve()
     entries = conversation_record_entries(graph, root)
     _mark_shared_injected_context(entries)
+    _mark_shared_evidence(entries)
     visible_message_count = sum(
         len(preview.get("messages") or [])
         for entry in entries

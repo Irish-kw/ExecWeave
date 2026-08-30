@@ -49,7 +49,7 @@ def _root_rollout() -> str:
             "arguments": json.dumps({"message": f"answer question {index + 1}"})}))
         ordinal += 1
         lines.append(_line(ordinal, {"type": "function_call_output", "call_id": call_id,
-            "output": json.dumps({"agent_path": path, "thread_id": thread})}))
+            "output": json.dumps({"task_name": path, "thread_id": thread})}))
     for thread, path, nickname, marker in CHILDREN:
         ordinal += 1
         lines.append(_line(ordinal, {"type": "agent_message", "author": path,
@@ -86,7 +86,14 @@ def _child_rollout(thread: str, path: str, nickname: str, marker: str, index: in
     return "\n".join(lines) + "\n"
 
 
-def build_run(root: Path) -> dict[str, Any]:
+def build_run(root: Path, *, per_agent_rollouts: bool = True) -> dict[str, Any]:
+    """Build the run. With ``per_agent_rollouts`` off, only the root rollout exists.
+
+    That is what a real Codex run looks like: the parent's file records the delegations
+    it issued and the returns it received, so every child's turns are read from it.
+    Each agent then cited the parent's whole transcript as its own raw evidence, and
+    the link inside a child's section opened the entire run.
+    """
     store = root / "content" / "sha256"
     store.mkdir(parents=True, exist_ok=True)
     nodes: list[dict[str, Any]] = [{"id": "agent:OpenAI Codex", "type": "agent",
@@ -100,7 +107,8 @@ def build_run(root: Path) -> dict[str, Any]:
             "attributes": {"provider": "codex", "agent_role": "subagent",
                 "subagent_id": thread, "agent_nickname": nickname,
                 "child_agent_path": path, "parent_agent_path": "/root"}})
-        documents.append((node_id, _child_rollout(thread, path, nickname, marker, index)))
+        if per_agent_rollouts:
+            documents.append((node_id, _child_rollout(thread, path, nickname, marker, index)))
     # A run graph is mostly not agents. Selecting one of these used to resolve to the
     # same empty selection an unselected graph does, so a process or a network endpoint
     # drew every agent's conversation.
