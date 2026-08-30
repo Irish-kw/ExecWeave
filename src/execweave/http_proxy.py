@@ -16,6 +16,13 @@ from .content_store import FullFidelityContentStore
 from .model_runtime_full_fidelity import runtime_exchange_to_content_events
 from .openai_compatible import append_openai_compatible_records
 from .openai_compatible_full_fidelity import exchange_to_content_events
+from .stream_assembly import (
+    OLLAMA_NDJSON,
+    OPENAI_CHAT_DELTA,
+    arguments_parse_cleanly,
+    assemble_stream,
+    assembled_tool_calls,
+)
 
 _HOP_BY_HOP = frozenset(
     {
@@ -138,6 +145,11 @@ def _tool_calls(value: Any) -> list[Any]:
     return calls
 
 
+def _has_relation(events: list[dict[str, Any]], relation: str) -> bool:
+    """Whether the full-fidelity emitter already published this relation."""
+    return any(event.get("relation") == relation for event in events)
+
+
 def _raw_event(
     store: FullFidelityContentStore,
     source: dict[str, Any],
@@ -186,7 +198,19 @@ def record_exchange_fail_open(
         if not isinstance(request, dict):
             request = {}
         chunks = _stream_items(response_body, response_content_type, request)
-        response = chunks[-1] if chunks and isinstance(chunks[-1], dict) else _json(response_body)
+        # A streamed response must be reassembled. Taking one frame loses the body:
+        # the final frame of an OpenAI-style stream carries an empty delta, so the
+        # assistant text, the reasoning and every fragmented tool call would be
+        # dropped from the canonical record while surviving only as raw frames.
+        assembled = (
+            assemble_stream(
+                chunks,
+                wire_format=OLLAMA_NDJSON if config.mode == "ollama" else OPENAI_CHAT_DELTA,
+            )
+            if chunks
+            else None
+        )
+        response = assembled.response if assembled is not None else _json(response_body)
         if not isinstance(response, dict):
             response = {}
         store = FullFidelityContentStore(config.sidecar.parent)
@@ -229,6 +253,11 @@ def record_exchange_fail_open(
                     "inferred": False,
                 }
             )
+            if assembled is not None:
+                attrs.update(assembled.attributes())
+                attrs["stream_tool_arguments_parse_cleanly"] = arguments_parse_cleanly(response)
+                if assembled.notes:
+                    attrs["stream_assembly_notes"] = assembled.notes
         source = events[0]["source"]
         source.setdefault("attributes", {})["observed_at"] = events[0]["timestamp"]
         events.extend(
@@ -255,8 +284,17 @@ def record_exchange_fail_open(
                 ),
             ]
         )
-        if chunks and config.mode == "ollama":
-            reference = store.put_json(chunks, content_kind="http_proxy.ollama_stream_chunks")
+        # Raw frames stay archived for both modes. The assembled response is the
+        # canonical record; these are the evidence it was rebuilt from. The
+        # OpenAI-compatible emitter already archives frames handed to it through
+        # ``stream_chunks``, so only supplement what it did not publish.
+        if chunks and not _has_relation(events, "OBSERVED_INFERENCE_STREAM_CHUNKS"):
+            kind = (
+                "http_proxy.ollama_stream_chunks"
+                if config.mode == "ollama"
+                else "http_proxy.stream_chunks"
+            )
+            reference = store.put_json(chunks, content_kind=kind)
             events.append(
                 content_observation_event(
                     timestamp=events[0]["timestamp"],
@@ -271,7 +309,18 @@ def record_exchange_fail_open(
                     attributes={"causal": False, "inferred": False},
                 )
             )
-        calls = _tool_calls(chunks if chunks else response)
+        # Tool calls come from the assembled response, never from raw frames: one
+        # call split across frames would otherwise be published as several partial
+        # calls, each carrying a slice of its JSON arguments. Once assembled they
+        # live in the response, so the full-fidelity emitter may already have
+        # published them; only supplement when it did not.
+        calls = (
+            []
+            if _has_relation(events, "OBSERVED_ASSISTANT_TOOL_CALLS")
+            else assembled_tool_calls(response)
+            if assembled is not None
+            else _tool_calls(response)
+        )
         if calls:
             reference = store.put_json(calls, content_kind="http_proxy.response_tool_calls")
             events.append(
