@@ -39,12 +39,17 @@ def _unpack_fixed_9bit_codes(payload: bytes) -> list[int]:
 
 
 def test_final_graph_opens_separately_and_save_view_does_not_overlap_theme() -> None:
-    assert "window.open('about:blank','_blank')" in LIVE_HTML
-    assert "document.open();document.write(finalHtmlCache);document.close()" not in LIVE_HTML
+    # Historical test name retained. v0.7.9 keeps the finished run in the same
+    # Dashboard DOM instead of opening or injecting a second final renderer.
+    assert "fetch('/final'" not in LIVE_HTML
+    assert "window.open('about:blank','_blank')" not in LIVE_HTML
+    assert "document.write(" not in LIVE_HTML
+    assert 'id="open-final"' not in LIVE_HTML
 
-    themed = _inject_final_theme("<html><head><style></style></head><body></body></html>")
-    assert "#execweave-theme-toggle{position:fixed;right:14px;top:14px;" in themed
-    assert "#save-preset{position:fixed;right:14px;top:58px;" in themed
+    themed = _inject_final_theme(LIVE_HTML)
+    assert themed == LIVE_HTML
+    assert 'id="theme-toggle"' in themed
+    assert 'id="execweave-theme-toggle"' not in themed
 
 
 def test_live_gif_export_uses_reset_bounded_lzw_and_emits_a_gif() -> None:
