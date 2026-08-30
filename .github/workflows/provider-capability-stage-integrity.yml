@@ -1,0 +1,38 @@
+name: Provider Capability Stage Integrity
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/provider-capability-stage-integrity.yml"
+      - "docs/internal/provider-capability-matrix.md"
+      - "scripts/probe_provider_capability.py"
+      - "scripts/check_release_stage_integrity.py"
+      - "src/execweave/evidence_availability.py"
+      - "src/execweave/provider_capability.py"
+      - "tests/test_provider_capability.py"
+
+permissions:
+  contents: read
+
+jobs:
+  integrity:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out pull request
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: python -m pip install -e ".[dev]"
+
+      - name: Validate stage integrity
+        run: >-
+          python scripts/check_release_stage_integrity.py
+          --baseline-ref "${{ github.event.pull_request.base.sha }}"
