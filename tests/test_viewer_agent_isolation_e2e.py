@@ -2,7 +2,7 @@
 
 The product contract is deliberately small: root shows Prompt + Final response;
 a subagent shows Task + Thinking + Response; a non-agent shows no conversation.
-Live and viewer.html must render the same inspector for the same graph evidence.
+Live and viewer.html must render the same inspector and counts for the same graph evidence.
 """
 
 from __future__ import annotations
@@ -212,15 +212,19 @@ def test_the_recorded_viewer_shows_each_agent_only_its_own_conversation(tmp_path
 def test_the_live_dashboard_isolates_agents_before_the_run_finishes(tmp_path: Path) -> None:
     """The live page must match viewer.html before the run reaches finalization."""
     from execweave import live as live_module
-    from execweave.viewer_projection import write_graph_html
+    from execweave.viewer_projection import project_viewer_graph, write_graph_html
 
     graph = build_run(tmp_path)
+    projected_graph = project_viewer_graph(graph)
     viewer = tmp_path / "viewer.html"
     write_graph_html(graph, viewer)
     event_path = tmp_path / "events.jsonl"
     event_path.write_text("", encoding="utf-8")
     state = live_module._LiveState("e2e", event_path)
-    state._projected_graph_locked = lambda: dict(graph)  # type: ignore[method-assign]
+    state._projected_graph_locked = lambda: dict(projected_graph)  # type: ignore[method-assign]
+    # The real projection path sets this when it emits viewer-only graph counts. The
+    # fixture supplies the projected graph directly, so mirror that production state.
+    state._viewer_projection_ever_active = True
     token = "e2e-token"
     server = live_module._LocalThreadingHTTPServer(
         ("127.0.0.1", 0), live_module._handler_factory(state, token)
@@ -239,13 +243,20 @@ def test_the_live_dashboard_isolates_agents_before_the_run_finishes(tmp_path: Pa
                 static_page.goto(viewer.as_uri())
                 static_page.wait_for_selector(".node", timeout=15000)
                 static_result = _audit(static_page, graph)
+                static_stats = static_page.locator("#stats").inner_text().strip()
 
                 live_page = browser.new_page(viewport={"width": 1440, "height": 1000})
                 live_page.goto(f"http://{host}:{port}/?t={token}")
                 live_page.wait_for_selector(".node", timeout=15000)
+                live_page.wait_for_function(
+                    "expected=>(document.getElementById('stats')?.innerText||'').trim()===expected",
+                    arg=static_stats,
+                    timeout=15000,
+                )
                 assert not state._finished, "this test only means something mid-run"
                 live_result = _audit(live_page, graph)
                 assert live_result == static_result
+                assert live_page.locator("#stats").inner_text().strip() == static_stats
 
                 _click_id(live_page, _agent_id(graph, "/root"))
                 _wait_for_text(live_page, "spawn four agents")
