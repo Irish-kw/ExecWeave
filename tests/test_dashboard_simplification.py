@@ -204,3 +204,11 @@ def test_live_dashboard_uses_client_side_summary_without_changing_protocol() -> 
     assert "execweave.live.activity-height" in html
     assert "pointermove" in html
     assert "provider_hook_metadata" not in html
+    assert (
+        "updateStats(protectedMode?data:{...data,node_count:nodeById.size,edge_count:edgeById.size})"
+        in html
+    )
+    assert (
+        "else if(data.kind==='noop'){liveSequence=Number(data.sequence)||liveSequence;"
+        "updateStats(data);}" not in html
+    )
