@@ -12,7 +12,6 @@ relationship that does exist carries the provenance of the fact that established
 
 from __future__ import annotations
 
-import json
 import shutil
 from pathlib import Path
 from typing import Any
