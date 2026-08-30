@@ -85,16 +85,14 @@ def test_antigravity_assignment_exact_identity_survives_graph_materialization() 
     assert child["attributes"]["execution_observed"] is False
 
 
-def test_antigravity_viewer_surfaces_exact_linkage_without_transcript_paths() -> None:
+def test_antigravity_viewer_preserves_exact_linkage_without_legacy_inspector() -> None:
     html = render_graph_html(_graph())
 
-    assert "Antigravity Transcript Linkage" in html
-    assert "Validated transcript identity" in html
+    assert "ASSIGNED_AGENT_TASK" in html
+    assert "DECLARES_AGENT_TRACE_VISIBILITY" in html
     assert _IDENTITY_METHOD in html
-    assert "No timing join" in html
-    assert "Child hooks authoritative" in html
-    assert "Validated transcript child identity" in html
-    assert "Request + validated assignment only" in html
-    assert "parent transcript does not establish child execution" in html
+    assert "child_provider_hooks" in html
+    assert '"execution_observed":false' in html
+    assert "Antigravity Transcript Linkage" not in html
     assert "transcriptPath" not in html
     assert "logAbsoluteUri" not in html
