@@ -48,7 +48,7 @@ def _content(
     }
 
 
-def test_cursor_subtask_viewer_marks_exact_child_linkage_and_payloads() -> None:
+def test_cursor_subtask_viewer_preserves_exact_child_linkage_and_payloads() -> None:
     root = {
         "id": "agent:Cursor",
         "type": "agent",
@@ -101,15 +101,14 @@ def test_cursor_subtask_viewer_marks_exact_child_linkage_and_payloads() -> None:
 
     html = render_graph_html(graph)
 
-    assert "Delegation Evidence" in html
-    assert "Exact child linkage" in html
-    assert "ASSIGNED_AGENT_TASK edge" in html
-    assert "Inspect requester" in html
-    assert "Inspect child" in html
-    assert "Subtask Prompt" in html
-    assert "Subtask Description" in html
+    assert "REQUESTED_SUBTASK" in html
+    assert "ASSIGNED_AGENT_TASK" in html
+    assert "HAS_SUBTASK_PROMPT" in html
+    assert "HAS_SUBTASK_DESCRIPTION" in html
+    assert '"exact_child_agent_linkage":true' in html
     assert f"content/sha256/{'a' * 64}.txt" in html
     assert f"content/sha256/{'b' * 64}.txt" in html
+    assert "Delegation Evidence" not in html
 
 
 def test_opencode_subtask_viewer_does_not_invent_child_session_join() -> None:
@@ -167,16 +166,15 @@ def test_opencode_subtask_viewer_does_not_invent_child_session_join() -> None:
 
     html = render_graph_html(graph)
 
-    assert "Delegation Evidence" in html
-    assert "Linkage not asserted" in html
-    assert "target agent profile or separate parent/child session relation" in html.lower()
+    assert "REQUESTED_SUBTASK" in html
     assert "TARGETS_AGENT_PROFILE" in html
-    assert "Inspect target profile" in html
-    assert "Subtask Prompt" in html
-    assert "exact?'Exact child linkage':'Linkage not asserted'" in html
+    assert "HAS_SUBTASK_PROMPT" in html
+    assert "HAS_CHILD_AGENT_SESSION" in html
+    assert "ASSIGNED_AGENT_TASK" not in html
+    assert "Delegation Evidence" not in html
 
 
-def test_payload_helper_links_direct_observed_content_peer() -> None:
+def test_payload_helper_preserves_direct_observed_content_peer() -> None:
     content = _content("cursor.agent_result", "d" * 64)
     agent = {
         "id": "agent:cursor:subagent:child-1",
@@ -204,6 +202,8 @@ def test_payload_helper_links_direct_observed_content_peer() -> None:
 
     html = render_graph_html(graph)
 
-    assert "Agent Result" in html
-    assert "current&&current.type==='observed_content'" in html
-    assert "execweaveAppendPayloadLinks(row,peerId,nodeMap)" in html
+    assert "HAS_AGENT_RESULT_PAYLOAD" in html
+    assert "cursor.agent_result" in html
+    assert f"content/sha256/{'d' * 64}.txt" in html
+    assert "window.__execweaveStaticGraph=" in html
+    assert "execweaveAppendPayloadLinks" not in html
