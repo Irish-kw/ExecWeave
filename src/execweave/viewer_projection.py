@@ -6,14 +6,6 @@ from typing import Any
 from . import viewer_projection_base as _base
 from .conversation_records import conversation_index_payload, write_conversation_records
 from .dashboard_shell import render_static_dashboard_html
-from .viewer import render_graph_html as _legacy_base_render_graph_html
-from .viewer_antigravity_linkage_inspector import inject_standalone_antigravity_linkage_inspector
-from .viewer_content_inspector import inject_standalone_content_inspector
-from .viewer_conversation_panel import inject_standalone_conversation_panel
-from .viewer_conversation_tree import inject_standalone_conversation_tree
-from .viewer_dashboard_clean import inject_standalone_dashboard_clean
-from .viewer_dashboard_focus import inject_standalone_dashboard_focus
-from .viewer_execution_inspector import inject_standalone_execution_inspector
 
 VIEWER_MAX_DOM_ELEMENTS = _base.VIEWER_MAX_DOM_ELEMENTS
 VIEWER_MAX_EDGES = _base.VIEWER_MAX_EDGES
@@ -52,33 +44,15 @@ def _conversation_entries(
     return entries if isinstance(entries, list) else []
 
 
-def _legacy_contract_html(
-    graph: dict[str, Any],
-    entries: list[dict[str, Any]],
-) -> str:
-    """Keep pre-0.7.9 source contracts inert while the visible renderer is unified."""
-    html = inject_standalone_content_inspector(
-        _legacy_base_render_graph_html(project_viewer_graph(graph))
-    )
-    html = inject_standalone_execution_inspector(html)
-    html = inject_standalone_antigravity_linkage_inspector(html)
-    html = inject_standalone_conversation_panel(html, entries=entries)
-    html = inject_standalone_conversation_tree(html)
-    html = inject_standalone_dashboard_clean(html)
-    return inject_standalone_dashboard_focus(html)
-
-
 def _render_unified_dashboard(
     graph: dict[str, Any],
     entries: list[dict[str, Any]],
 ) -> str:
-    visible = render_static_dashboard_html(
+    """Render exactly one product shell for both live and finalized runs."""
+    return render_static_dashboard_html(
         project_viewer_graph(graph),
         conversation_entries=entries,
     )
-    legacy = _legacy_contract_html(graph, entries)
-    contract = '<template id="execweave-legacy-contract" hidden>' + legacy + "</template>\n"
-    return visible.replace("</body>", contract + "</body>", 1)
 
 
 def render_graph_html(graph: dict[str, Any]) -> str:
