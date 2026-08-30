@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from . import viewer_projection_base as _base
-from .conversation_records import conversation_record_entries, write_conversation_records
+from .conversation_records import conversation_index_payload, write_conversation_records
 from .viewer_antigravity_linkage_inspector import inject_standalone_antigravity_linkage_inspector
 from .viewer_conversation_panel import inject_standalone_conversation_panel
 from .viewer_conversation_tree import inject_standalone_conversation_tree
@@ -53,8 +53,9 @@ def write_graph_html(
     output.parent.mkdir(parents=True, exist_ok=True)
     if output.exists() and output.stat().st_size > 0:
         raise FileExistsError(f"ExecWeave viewer output already exists: {output}")
-    write_conversation_records(graph, output.parent)
-    entries = conversation_record_entries(graph, output.parent)
+    payload = conversation_index_payload(graph, output.parent)
+    entries = payload["entries"]
+    write_conversation_records(graph, output.parent, payload=payload)
     output.write_text(
         _render_enriched_graph_html(graph, conversation_entries=entries),
         encoding="utf-8",

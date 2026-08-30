@@ -63,10 +63,22 @@ def _root_rollout() -> str:
     return "\n".join(lines) + "\n"
 
 
+# Codex prepends the same multi-kilobyte plugin catalogue and environment block to
+# every subagent, and the rollout records it where that agent's own assignment
+# belongs. Read literally, four siblings were each handed the same enormous task and
+# the four panels are indistinguishable. The fixture carries it verbatim-identical
+# across the children so a viewer that presents it as the agent's assignment fails.
+INJECTED_CONTEXT = "<recommended_plugins>\n" + "\n".join(
+    f"- Plugin {index:03d} (plugin-{index:03d}@curated-remote)" for index in range(120)
+) + "\n</recommended_plugins>\n<environment_context><cwd>/workspace</cwd></environment_context>"
+
+
 def _child_rollout(thread: str, path: str, nickname: str, marker: str, index: int) -> str:
     lines = [json.dumps({"type": "session_meta", "payload": {
         "id": thread, "agent_path": path, "agent_nickname": nickname,
         "parent_thread_id": ROOT_THREAD}}, ensure_ascii=False)]
+    lines.append(_line(0, {"type": "message", "role": "user",
+        "content": [{"type": "input_text", "text": INJECTED_CONTEXT}]}))
     lines.append(_line(1, {"type": "message", "role": "user",
         "content": [{"type": "input_text", "text": f"answer question {index + 1}"}]}))
     lines.append(_line(2, {"type": "message", "role": "assistant", "phase": "final_answer",
@@ -89,6 +101,18 @@ def build_run(root: Path) -> dict[str, Any]:
                 "subagent_id": thread, "agent_nickname": nickname,
                 "child_agent_path": path, "parent_agent_path": "/root"}})
         documents.append((node_id, _child_rollout(thread, path, nickname, marker, index)))
+    # A run graph is mostly not agents. Selecting one of these used to resolve to the
+    # same empty selection an unselected graph does, so a process or a network endpoint
+    # drew every agent's conversation.
+    nodes.append({"id": "process:codex", "type": "process", "name": "codex",
+        "attributes": {"pid": 4242}})
+    nodes.append({"id": "endpoint:203.0.113.7:443", "type": "network_endpoint",
+        "name": "203.0.113.7:443", "attributes": {"port": 443}})
+    edges.append({"source": "agent:OpenAI Codex", "target": "process:codex",
+        "relation": "OBSERVED_PROCESS"})
+    edges.append({"source": "process:codex", "target": "endpoint:203.0.113.7:443",
+        "relation": "OBSERVED_CONNECTION"})
+
     for sequence, (source_id, text) in enumerate(documents):
         raw = text.encode("utf-8")
         digest = hashlib.sha256(raw).hexdigest()

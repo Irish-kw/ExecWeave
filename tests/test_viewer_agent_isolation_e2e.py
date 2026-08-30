@@ -100,6 +100,43 @@ def _assert_each_agent_sees_only_itself(sections: dict[str, str]) -> None:
     )
 
 
+def _click(page: Any, label: str) -> None:
+    page.locator(".node", has_text=label).first.click()
+    page.wait_for_timeout(300)
+
+
+def _panel_text(page: Any, panel_selector: str) -> str:
+    return page.eval_on_selector(panel_selector, "element=>element.innerText")
+
+
+def _audit_panel(page: Any, panel_selector: str) -> None:
+    """Everything a person can do to this panel, checked in one pass."""
+    _assert_each_agent_sees_only_itself(_sections(page, panel_selector))
+
+    # A run graph is mostly not agents, and a conversation belongs to an agent.
+    for label in ("203.0.113.7:443", "codex"):
+        _click(page, label)
+        text = _panel_text(page, panel_selector)
+        leaked = sorted(marker for marker in ALL_MARKERS if marker in text)
+        assert not leaked, f"selecting {label!r}, which is not an agent, showed {leaked}"
+        assert "is not an agent" in text, f"selecting {label!r} left the panel unexplained: {text[:200]!r}"
+
+    # Selecting one agent shows that agent, and the block the provider prepends to
+    # every subagent is folded rather than presented as this agent's assignment.
+    for path, marker in MARKERS.items():
+        _click(page, path)
+        text = _panel_text(page, panel_selector)
+        leaked = sorted(other for other in ALL_MARKERS - {marker} if other in text)
+        assert not leaked, f"selecting {path} showed {leaked}"
+        assert marker in text, f"selecting {path} lost its own answer"
+        assert "Show injected context" in text, (
+            f"{path} presents the block every agent receives as its own turn"
+        )
+        assert "Plugin 042" not in text, (
+            f"{path} renders the injected block expanded; it must be folded away"
+        )
+
+
 # ── the finalized viewer ──────────────────────────────────────────────────────
 
 
@@ -116,7 +153,7 @@ def test_the_recorded_viewer_shows_each_agent_only_its_own_conversation(tmp_path
         try:
             page = browser.new_page()
             page.goto(viewer.as_uri())
-            _assert_each_agent_sees_only_itself(_sections(page, "#execweave-conversation-panel"))
+            _audit_panel(page, "#execweave-conversation-panel")
         finally:
             browser.close()
 
@@ -151,7 +188,7 @@ def test_the_live_dashboard_isolates_agents_before_the_run_finishes(tmp_path: Pa
                 page = browser.new_page()
                 page.goto(f"http://{host}:{port}/?t={token}")
                 assert not state._finished, "this test only means something mid-run"
-                _assert_each_agent_sees_only_itself(_sections(page, "#conversation-records"))
+                _audit_panel(page, "#conversation-records")
             finally:
                 browser.close()
     finally:

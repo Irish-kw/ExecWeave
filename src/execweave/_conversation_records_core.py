@@ -697,6 +697,49 @@ def _render_markdown(entries: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+# A provider may prepend the same block to every subagent it spawns — Codex sends a
+# plugin catalogue and an environment context, several kilobytes of it, recorded in the
+# rollout exactly where that agent's own assignment belongs. Read literally, every
+# sibling was handed an identical multi-kilobyte task and the panel shows four agents
+# that look the same.
+#
+# Nothing about the provider needs to be recognised to see that this is wrong. A text
+# that appears verbatim under two or more agents is, by that fact alone, not any one
+# agent's own assignment. It is marked here, once, in the index both viewers read, so
+# neither has to detect it and they cannot disagree about it.
+SHARED_INJECTED_CONTEXT = "shared_injected_context"
+_MIN_SHARED_CONTEXT_LENGTH = 400
+
+
+def _mark_shared_injected_context(entries: list[dict[str, Any]]) -> None:
+    agents_by_text: dict[str, set[str]] = {}
+    for entry in entries:
+        preview = entry.get("conversation_preview")
+        if not isinstance(preview, dict):
+            continue
+        agent_path = preview.get("agent_path")
+        if not isinstance(agent_path, str) or not agent_path:
+            continue
+        for message in preview.get("messages") or []:
+            if not isinstance(message, dict):
+                continue
+            text = message.get("text")
+            if not isinstance(text, str) or len(text) < _MIN_SHARED_CONTEXT_LENGTH:
+                continue
+            agents_by_text.setdefault(text, set()).add(agent_path)
+
+    shared = {text for text, agents in agents_by_text.items() if len(agents) > 1}
+    if not shared:
+        return
+    for entry in entries:
+        preview = entry.get("conversation_preview")
+        if not isinstance(preview, dict):
+            continue
+        for message in preview.get("messages") or []:
+            if isinstance(message, dict) and message.get("text") in shared:
+                message["content_role"] = SHARED_INJECTED_CONTEXT
+
+
 def conversation_index_payload(
     graph: dict[str, Any],
     run_root: str | Path,
@@ -710,6 +753,7 @@ def conversation_index_payload(
     """
     root = Path(run_root).expanduser().resolve()
     entries = conversation_record_entries(graph, root)
+    _mark_shared_injected_context(entries)
     visible_message_count = sum(
         len(preview.get("messages") or [])
         for entry in entries
@@ -728,11 +772,19 @@ def conversation_index_payload(
 def write_conversation_records(
     graph: dict[str, Any],
     run_root: str | Path,
+    *,
+    payload: dict[str, Any] | None = None,
 ) -> tuple[Path, Path]:
-    """Write deterministic JSON + Markdown indexes beside the viewer artifacts."""
+    """Write deterministic JSON + Markdown indexes beside the viewer artifacts.
+
+    A caller that already built the index passes it in rather than letting a second
+    projection run: the standalone viewer embeds these same entries, and a viewer
+    built from its own projection is free to disagree with the file beside it.
+    """
     root = Path(run_root).expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True)
-    payload = conversation_index_payload(graph, root)
+    if payload is None:
+        payload = conversation_index_payload(graph, root)
     entries = payload["entries"]
     json_path = root / "conversations.json"
     markdown_path = root / "conversations.md"
