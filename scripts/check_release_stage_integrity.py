@@ -14,11 +14,37 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CRITICAL_UNCHANGED = (
-    "src/execweave/http_proxy.py",
     "tests/test_http_proxy.py",
     "scripts/audit_i18n_parity.py",
     "pyproject.toml",
     "src/execweave/__init__.py",
+)
+
+# The relay module itself has to keep changing — 0.7.6 rebuilds streamed responses
+# inside it — so freezing the whole file would block the staged work it is meant to
+# protect. What must never move is the refusal to terminate TLS. The handler body is
+# compared against the baseline verbatim, and MITM machinery is refused anywhere in
+# the package, which a single-file freeze never covered.
+PROXY_MODULE = "src/execweave/http_proxy.py"
+CONNECT_HANDLER = "do_CONNECT"
+TLS_MITM_MARKERS = (
+    "ssl.wrap_socket",
+    "wrap_socket(",
+    "load_cert_chain",
+    "SSLContext(",
+    "create_default_context",
+    "x509.CertificateBuilder",
+    "generate_private_key",
+)
+FORBIDDEN_CAPTURE_MARKERS = (
+    "ebpf",
+    "uprobe",
+    "kprobe",
+    "ld_preload",
+    "ptrace",
+    "ssl_write",
+    "ssl_read",
+    "process_vm_readv",
 )
 
 # Conversation completeness describes how much evidence a whole agent thread rests on.
@@ -154,6 +180,74 @@ def _assert_critical_files_unchanged(baseline_ref: str) -> None:
     changed = [line for line in completed.stdout.splitlines() if line.strip()]
     if changed:
         raise RuntimeError("release red-line files changed:\n" + "\n".join(changed))
+
+
+def _connect_handler_source(source: str, origin: str) -> str:
+    module = ast.parse(source)
+    for node in ast.walk(module):
+        if isinstance(node, ast.FunctionDef) and node.name == CONNECT_HANDLER:
+            segment = ast.get_source_segment(source, node)
+            if segment is None:
+                raise RuntimeError(f"{origin}: unable to read the {CONNECT_HANDLER} handler")
+            return segment
+    raise RuntimeError(f"{origin}: {CONNECT_HANDLER} handler is missing")
+
+
+def _assert_no_tls_mitm(baseline_ref: str) -> str:
+    """The relay must keep refusing CONNECT, and no MITM machinery may appear."""
+
+    current_source = (ROOT / PROXY_MODULE).read_text(encoding="utf-8")
+    baseline_source = _git("show", f"{baseline_ref}:{PROXY_MODULE}").stdout
+
+    current = _connect_handler_source(current_source, "current")
+    baseline = _connect_handler_source(baseline_source, f"baseline {baseline_ref}")
+    if current != baseline:
+        raise RuntimeError(
+            f"the {CONNECT_HANDLER} handler changed; ExecWeave does not terminate TLS:\n"
+            f"--- baseline\n{baseline}\n--- current\n{current}"
+        )
+    if "405" not in current:
+        raise RuntimeError(f"{CONNECT_HANDLER} no longer refuses the request")
+
+    # Compare marker sites against the baseline rather than scanning absolutely. The
+    # package already discusses eBPF and ETW in prose where it explains what an
+    # observation cannot prove, and that documentation is not interception. What must
+    # not happen is a stage introducing a marker where there was none.
+    offenders = sorted(_marker_sites(_current_sources()) - _marker_sites(_baseline_sources(baseline_ref)))
+    if offenders:
+        raise RuntimeError(
+            "TLS interception or forbidden capture machinery introduced:\n" + "\n".join(offenders)
+        )
+    return "CONNECT refused; no new TLS interception or forbidden capture machinery"
+
+
+def _current_sources() -> dict[str, str]:
+    sources: dict[str, str] = {}
+    for path in sorted((ROOT / "src" / "execweave").rglob("*.py")):
+        if "__pycache__" in path.parts:
+            continue
+        sources[path.relative_to(ROOT).as_posix()] = path.read_text(encoding="utf-8")
+    return sources
+
+
+def _baseline_sources(baseline_ref: str) -> dict[str, str]:
+    listing = _git("ls-tree", "-r", "--name-only", baseline_ref, "--", "src/execweave").stdout
+    sources: dict[str, str] = {}
+    for name in listing.splitlines():
+        if name.endswith(".py"):
+            sources[name] = _git("show", f"{baseline_ref}:{name}").stdout
+    return sources
+
+
+def _marker_sites(sources: dict[str, str]) -> set[str]:
+    """Every (file, marker) pair present, so a new site stands out against baseline."""
+    sites: set[str] = set()
+    for name, text in sources.items():
+        lowered = text.lower()
+        for marker in TLS_MITM_MARKERS + FORBIDDEN_CAPTURE_MARKERS:
+            if marker.lower() in lowered:
+                sites.add(f"{name}: {marker}")
+    return sites
 
 
 def _completeness_vocabulary(source: str, origin: str) -> dict[str, object]:
@@ -338,6 +432,7 @@ def main() -> int:
     added_tests = _assert_existing_tests_untouched(args.baseline_ref)
     _assert_no_new_skip_or_xfail(args.baseline_ref)
     _assert_critical_files_unchanged(args.baseline_ref)
+    tls_status = _assert_no_tls_mitm(args.baseline_ref)
     completeness = _assert_conversation_completeness_unchanged(args.baseline_ref)
     i18n_status = _assert_i18n_audit()
     tier_a_rows, total_rows = _assert_explicit_capability_matrix()
@@ -353,6 +448,7 @@ def main() -> int:
                 "added_test_files": added_tests,
                 "new_skip_or_xfail": False,
                 "critical_release_files_unchanged": True,
+                "tls_mitm_invariant": tls_status,
                 "conversation_completeness_unchanged": completeness,
                 "i18n_audit": i18n_status,
                 "tier_a_explicit_rows": tier_a_rows,
