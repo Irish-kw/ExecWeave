@@ -85,7 +85,7 @@ def test_antigravity_assignment_exact_identity_survives_graph_materialization() 
     assert child["attributes"]["execution_observed"] is False
 
 
-def test_antigravity_viewer_preserves_exact_linkage_without_legacy_inspector() -> None:
+def test_antigravity_viewer_surfaces_exact_linkage_without_transcript_paths() -> None:
     html = render_graph_html(_graph())
 
     assert "ASSIGNED_AGENT_TASK" in html
