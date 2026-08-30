@@ -7,11 +7,7 @@ from collections import deque
 
 from . import live_core as _core
 from .conversation_records import conversation_index_payload
-from .viewer_conversation_panel import inject_live_conversation_panel
-from .viewer_conversation_tree import inject_live_conversation_tree
-from .viewer_dashboard_clean import inject_live_dashboard_clean
-from .viewer_dashboard_focus import inject_live_dashboard_focus
-from .viewer_live_layout import inject_live_dashboard_layout
+from .dashboard_shell import DASHBOARD_HTML
 from .viewer_projection import (
     internal_hook_process_ids_in_event,
     project_viewer_graph,
@@ -35,13 +31,7 @@ VIEWER_MAX_NODES = _core.VIEWER_MAX_NODES
 VIEWER_MAX_EDGES = _core.VIEWER_MAX_EDGES
 VIEWER_MAX_DOM_ELEMENTS = _core.VIEWER_MAX_DOM_ELEMENTS
 _BASE_LIVE_HTML = _core._LIVE_HTML
-_LIVE_HTML = inject_live_dashboard_layout(
-    inject_live_dashboard_focus(
-        inject_live_dashboard_clean(
-            inject_live_conversation_tree(inject_live_conversation_panel(_BASE_LIVE_HTML))
-        )
-    )
-)
+_LIVE_HTML = DASHBOARD_HTML
 render_graph_html = _projected_render_graph_html
 write_graph_html = _projected_write_graph_html
 
@@ -65,7 +55,7 @@ def _within_live_payload_budget(node_count: int, edge_count: int) -> bool:
 
 def _inject_live_auth(html: str) -> str:
     authenticated = _base_inject_live_auth(html)
-    authenticated = authenticated.replace(
+    return authenticated.replace(
         "const liveAuthToken=new URLSearchParams(location.search).get('t')||'';"
         "if(liveAuthToken)",
         "const liveAuthToken=new URLSearchParams(location.search).get('t')||'';"
@@ -73,28 +63,11 @@ def _inject_live_auth(html: str) -> str:
         "if(liveAuthToken)",
         1,
     )
-    authenticated = authenticated.replace(
-        "fetch('/final',{cache:'no-store'})",
-        "fetch('/final',{cache:'no-store',headers:{"
-        "'X-ExecWeave-Token':window.__execweaveToken||''}})",
-        1,
-    )
-    return authenticated
 
 
 def _inject_final_theme(html: str) -> str:
-    themed = _base_inject_final_theme(html)
-    themed = themed.replace(
-        "#execweave-theme-toggle{position:fixed;right:14px;bottom:14px;",
-        "#execweave-theme-toggle{position:fixed;right:14px;top:14px;",
-        1,
-    )
-    return themed.replace(
-        "</style>",
-        "#save-preset{position:fixed;right:14px;top:58px;z-index:9998;"
-        "box-shadow:0 4px 18px rgba(15,23,42,.12)}\n</style>",
-        1,
-    )
+    """Honor the dashboard's built-in theme owner without injecting legacy controls."""
+    return _base_inject_final_theme(html)
 
 
 def _build_execution_graph_without_internal_hooks(*args, **kwargs):
@@ -158,10 +131,6 @@ def _handler_factory(state, token: str):
                 self._send(b"Not found", "text/plain; charset=utf-8", 404)
                 return
             if not target.is_file():
-                # conversations.json is written at finalization. Until then the
-                # panel would fall back to an unscoped list of every stored
-                # record, so project the same index from the run's current graph
-                # and serve that instead.
                 payload = (
                     self._live_conversation_index()
                     if request_path == "/conversations.json"
@@ -306,12 +275,7 @@ class _LiveState(_BaseLiveState):
         return self._projected_snapshot_locked()
 
     def conversation_index(self, run_root: Path) -> dict[str, object]:
-        """Project the conversation index from the graph observed so far.
-
-        Finalization writes this exact payload to conversations.json. Building it
-        from the same function during the run is what keeps the live dashboard
-        and the finalized viewer showing an agent the same conversation.
-        """
+        """Project the conversation index from the graph observed so far."""
         with self._lock:
             graph = self._projected_graph_locked()
         return conversation_index_payload(graph, run_root)
@@ -334,7 +298,6 @@ class _LiveState(_BaseLiveState):
             )
 
     def _append_update_locked(self, update: dict[str, object]) -> None:
-        # Preserve monkeypatch behavior for the established live delta limits.
         _core.LIVE_DELTA_HISTORY = LIVE_DELTA_HISTORY
         _core.LIVE_DELTA_HISTORY_BYTES = LIVE_DELTA_HISTORY_BYTES
         update.setdefault("raw_events_added", list(self._pending_raw_events))
