@@ -704,11 +704,33 @@ def _render_markdown(entries: list[dict[str, Any]]) -> str:
 # that look the same.
 #
 # Nothing about the provider needs to be recognised to see that this is wrong. A text
-# that appears verbatim under two or more agents is, by that fact alone, not any one
-# agent's own assignment. It is marked here, once, in the index both viewers read, so
-# neither has to detect it and they cannot disagree about it.
+# handed to two or more agents is, by that fact alone, not any one agent's own
+# assignment. It is marked here, once, in the index both viewers read, so neither has to
+# detect it and they cannot disagree about it.
+#
+# The rule reaches inbound messages only. A child reports its answer back to its parent,
+# so that answer appears both in the child's record and in the parent's; judged on
+# repetition alone it looked like a shared preamble and the child lost its own answer.
 SHARED_INJECTED_CONTEXT = "shared_injected_context"
 _MIN_SHARED_CONTEXT_LENGTH = 400
+
+
+def _inbound_assignment_text(message: object, agent_path: str) -> str | None:
+    """Return the text of a message handed *to* this agent, if it is long enough.
+
+    Only what an agent was handed can be a shared preamble. What the agent wrote is
+    its own, however often it is repeated elsewhere in the run.
+    """
+    if not isinstance(message, dict):
+        return None
+    if str(message.get("recipient") or "") != agent_path:
+        return None
+    if str(message.get("sender") or "") == agent_path:
+        return None
+    text = message.get("text")
+    if not isinstance(text, str) or len(text) < _MIN_SHARED_CONTEXT_LENGTH:
+        return None
+    return text
 
 
 def _mark_shared_injected_context(entries: list[dict[str, Any]]) -> None:
@@ -721,12 +743,9 @@ def _mark_shared_injected_context(entries: list[dict[str, Any]]) -> None:
         if not isinstance(agent_path, str) or not agent_path:
             continue
         for message in preview.get("messages") or []:
-            if not isinstance(message, dict):
-                continue
-            text = message.get("text")
-            if not isinstance(text, str) or len(text) < _MIN_SHARED_CONTEXT_LENGTH:
-                continue
-            agents_by_text.setdefault(text, set()).add(agent_path)
+            text = _inbound_assignment_text(message, agent_path)
+            if text is not None:
+                agents_by_text.setdefault(text, set()).add(agent_path)
 
     shared = {text for text, agents in agents_by_text.items() if len(agents) > 1}
     if not shared:
@@ -735,8 +754,11 @@ def _mark_shared_injected_context(entries: list[dict[str, Any]]) -> None:
         preview = entry.get("conversation_preview")
         if not isinstance(preview, dict):
             continue
+        agent_path = preview.get("agent_path")
+        if not isinstance(agent_path, str) or not agent_path:
+            continue
         for message in preview.get("messages") or []:
-            if isinstance(message, dict) and message.get("text") in shared:
+            if _inbound_assignment_text(message, agent_path) in shared:
                 message["content_role"] = SHARED_INJECTED_CONTEXT
 
 
