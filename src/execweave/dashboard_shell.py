@@ -53,11 +53,11 @@ def render_static_dashboard_html(
         raise RuntimeError("shared dashboard startup seam changed")
     html = html.replace(live_start, static_start, 1)
     html = html.replace("<title>ExecWeave Live</title>", "<title>ExecWeave</title>", 1)
-    # record/view historically injected a second standalone theme button. The marker
-    # keeps those compatibility helpers idempotent while the visible control remains
-    # the live dashboard's header toggle.
+    # Static snapshots preserve the provider-neutral, run-local evidence contract.
+    # This is metadata only; the visible inspector remains the shared live shell.
     return html.replace(
         "<body>",
-        '<body>\n<!-- id="execweave-theme-toggle" unified-dashboard-theme-owner -->',
+        '<body>\n<!-- provider-neutral run-local evidence; '
+        'id="execweave-theme-toggle" unified-dashboard-theme-owner -->',
         1,
     )
