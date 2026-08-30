@@ -199,7 +199,8 @@ def test_live_dashboard_uses_client_side_summary_without_changing_protocol() -> 
     assert "execweaveDashboardGraphBase" in html
     assert "hidden_context_node_count" in html
     assert "mergeTypes=new Set(['model','directory','network_endpoint'])" in html
-    assert "execweave-conversation-root-node" in html
+    assert "window.__execweaveAgentPanel" in html
+    assert "execweave-conversation-root-node" not in html
     assert "id=\"activity-resizer\"" in html
     assert "execweave.live.activity-height" in html
     assert "pointermove" in html
