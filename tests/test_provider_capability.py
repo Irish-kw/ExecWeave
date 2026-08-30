@@ -47,6 +47,15 @@ def _row(rows, *, client: str, auth_mode: str, surface: str, field: str):
     return matches[0]
 
 
+def _probe_codex(path: Path):
+    return probe_artifact(
+        inventory_entry("codex-cli"),
+        path,
+        auth_mode="subscription",
+        surface="agent",
+    )
+
+
 def test_field_availability_is_separate_from_conversation_completeness() -> None:
     assert set(FIELD_AVAILABILITY).isdisjoint(CONVERSATION_COMPLETENESS)
     assert "provider_transcript" in CONVERSATION_COMPLETENESS
@@ -123,6 +132,47 @@ def test_codex_encrypted_reasoning_never_claims_server_side_key() -> None:
     assert "server" not in (reasoning.notes or "").lower()
 
 
+def test_developer_role_is_not_upgraded_to_system_evidence(tmp_path: Path) -> None:
+    artifact = tmp_path / "developer.json"
+    artifact.write_text(
+        json.dumps({"role": "developer", "content": "provider developer instruction"}),
+        encoding="utf-8",
+    )
+    rows = _probe_codex(artifact)
+    system = next(row for row in rows if row.field == "system")
+    messages = next(row for row in rows if row.field == "messages")
+    assert system.availability == NOT_OBSERVED
+    assert messages.availability == AVAILABLE
+
+
+def test_nested_encrypted_reasoning_is_not_upgraded_to_available(tmp_path: Path) -> None:
+    artifact = tmp_path / "reasoning.json"
+    artifact.write_text(
+        json.dumps({"reasoning": {"encrypted_content": "gAAAAA-test-ciphertext"}}),
+        encoding="utf-8",
+    )
+    reasoning = next(row for row in _probe_codex(artifact) if row.field == "reasoning")
+    assert reasoning.availability == OPAQUE_ENCRYPTED
+
+
+def test_unscoped_arguments_key_is_not_claimed_as_tool_arguments(tmp_path: Path) -> None:
+    artifact = tmp_path / "arguments.json"
+    artifact.write_text(json.dumps({"arguments": {"ordinary": "metadata"}}), encoding="utf-8")
+    tool_arguments = next(row for row in _probe_codex(artifact) if row.field == "tool_arguments")
+    assert tool_arguments.availability == NOT_OBSERVED
+
+
+def test_evidence_source_does_not_expose_supplied_absolute_path(tmp_path: Path) -> None:
+    private_dir = tmp_path / "private-user-path"
+    private_dir.mkdir()
+    artifact = private_dir / "artifact.json"
+    artifact.write_text(json.dumps({"prompt": "hello"}), encoding="utf-8")
+    prompt = next(row for row in _probe_codex(artifact) if row.field == "prompt")
+    assert prompt.availability == AVAILABLE
+    assert "artifact.json" in prompt.evidence_source
+    assert str(tmp_path) not in prompt.evidence_source
+
+
 def test_missing_artifact_is_no_data_not_an_empty_matrix(tmp_path: Path) -> None:
     rows = probe_artifact(
         inventory_entry("gemini-cli"),
@@ -134,6 +184,7 @@ def test_missing_artifact_is_no_data_not_an_empty_matrix(tmp_path: Path) -> None
     assert {row.field for row in rows} == set(REQUIRED_FIELDS)
     assert all(row.availability == NOT_OBSERVED for row in rows)
     assert all("artifact not found" in (row.notes or "") for row in rows)
+    assert all(str(tmp_path) not in (row.notes or "") for row in rows)
 
 
 def test_probe_cli_emits_full_matrix_and_codex_observation() -> None:
