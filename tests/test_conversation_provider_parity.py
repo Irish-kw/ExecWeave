@@ -384,8 +384,6 @@ def test_subagent_preview_uses_same_parent_child_contract(tmp_path: Path) -> Non
         "name": "Cursor",
         "attributes": {"provider": "cursor"},
     }
-    # Built by the production constructor so the test exercises the real
-    # provider-evidence contract rather than a hand-shaped attribute bag.
     child = cursor_subagent(
         {
             "session_id": "session-1",
@@ -421,7 +419,6 @@ def test_subagent_preview_uses_same_parent_child_contract(tmp_path: Path) -> Non
     assert child_preview["parent_thread_id"] == "cursor:root"
     assert child_preview["agent_path"].startswith("/root/")
     assert child_preview["messages"][0]["recipient"] == "/root"
-    # The relationship is provider-reported; the path itself is ExecWeave's rendering.
     assert child_preview["topology_state"] == "provider_reported"
     assert child_preview["agent_path_source"] == "execweave_derived"
     assert child_preview["parent_relation_source"] == "provider_subagent_lifecycle_hook"
@@ -439,8 +436,10 @@ def test_dashboard_copy_and_root_detection_are_provider_neutral(tmp_path: Path) 
         "agent:Antigravity",
     ):
         assert root_id in html
-    assert "provider-neutral run-local record" in html
-    assert "Open raw conversation evidence" in html
+    # Provider neutrality is a data/index contract, not visible dashboard copy.
+    assert "window.__execweaveAgentPanel" in html
+    assert "Open raw conversation evidence" not in html
+    assert "provider-neutral run-local record" not in html
     assert "not exposed by the Codex rollout" not in html
 
     graph = _graph()
@@ -461,8 +460,10 @@ def test_dashboard_copy_and_root_detection_are_provider_neutral(tmp_path: Path) 
     viewer = tmp_path / "viewer.html"
     write_graph_html(graph, viewer)
     rendered = viewer.read_text(encoding="utf-8")
-    assert "provider-neutral run-local evidence" in rendered
-    assert "Open raw conversation evidence" in rendered
+    assert "window.__execweaveStaticConversations=" in rendered
+    assert "window.__execweaveAgentPanel" in rendered
+    assert "Open raw conversation evidence" not in rendered
+    assert "provider-neutral run-local evidence" not in rendered
     assert "not exposed by the Codex rollout" not in rendered
 
 
