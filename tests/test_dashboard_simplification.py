@@ -148,7 +148,8 @@ def test_static_dashboard_cleans_only_canvas_and_keeps_embedded_evidence() -> No
     assert "execweaveDashboardGraphBase" in html
     assert "'agent_trace_capability','session','command'" in html
     assert "mergeTypes=new Set(['model','directory','network_endpoint'])" in html
-    assert "execweave-conversation-root-node" in html
+    assert "window.__execweaveStaticGraph=" in html
+    assert "execweave-conversation-root-node" not in html
     assert "tool-call:a" in html
     assert "content:hook-meta" in html
     assert "agent-trace-capability:codex" in html
