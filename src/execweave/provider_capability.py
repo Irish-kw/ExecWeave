@@ -189,6 +189,10 @@ _AVAILABILITY_PRIORITY = {
     UNKNOWN: 0,
 }
 
+_TOOL_CALL_TYPES = frozenset(
+    {"function_call", "tool_call", "tool_use", "function", "custom_tool_call"}
+)
+
 
 def inventory_as_dict() -> dict[str, object]:
     return {
@@ -212,8 +216,10 @@ def _records(path: Path) -> tuple[list[Any], list[str]]:
         values: list[Any] = []
         try:
             lines = path.read_text(encoding="utf-8").splitlines()
-        except (OSError, UnicodeDecodeError) as exc:
-            return [], [str(exc)]
+        except OSError as exc:
+            return [], [f"{type(exc).__name__}: unable to read artifact"]
+        except UnicodeDecodeError:
+            return [], ["UnicodeDecodeError: artifact is not UTF-8"]
         for number, line in enumerate(lines, start=1):
             if not line.strip():
                 continue
@@ -223,9 +229,15 @@ def _records(path: Path) -> tuple[list[Any], list[str]]:
                 errors.append(f"line {number}: {exc.msg}")
         return values, errors
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        return [], [str(exc)]
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return [], [f"{type(exc).__name__}: unable to read artifact"]
+    except UnicodeDecodeError:
+        return [], ["UnicodeDecodeError: artifact is not UTF-8"]
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError as exc:
+        return [], [f"JSONDecodeError: {exc.msg}"]
     return [value], errors
 
 
@@ -259,12 +271,73 @@ def _match(field: str, path: str, value: Any) -> _Match:
     return _Match(field, availability, DECRYPTABILITY_UNKNOWN, path)
 
 
+def _reasoning_matches(path: str, payload: Any) -> list[_Match]:
+    if not _nonempty(payload):
+        return []
+    if not isinstance(payload, dict):
+        return [_match("reasoning", path, payload)]
+
+    matches: list[_Match] = []
+    encrypted = payload.get("encrypted_content")
+    if isinstance(encrypted, str) and encrypted:
+        matches.append(
+            _Match(
+                "reasoning",
+                OPAQUE_ENCRYPTED,
+                DECRYPTABILITY_UNKNOWN,
+                f"{path}.encrypted_content",
+                notes="encrypted reasoning payload observed",
+            )
+        )
+    summary = payload.get("summary")
+    if _nonempty(summary):
+        matches.append(
+            _Match(
+                "reasoning",
+                SUMMARY,
+                DECRYPTABILITY_UNKNOWN,
+                f"{path}.summary",
+                notes="provider-exposed reasoning summary observed",
+            )
+        )
+    signature = payload.get("signature")
+    if _nonempty(signature):
+        matches.append(
+            _Match(
+                "reasoning",
+                OPAQUE_SIGNED,
+                DECRYPTABILITY_UNKNOWN,
+                f"{path}.signature",
+                notes="reasoning signature observed",
+            )
+        )
+    for key in ("content", "text", "thinking"):
+        if key in payload and _nonempty(payload[key]):
+            matches.append(_match("reasoning", f"{path}.{key}", payload[key]))
+
+    # A readable container with an unknown provider-specific shape is still directly
+    # observable, but only use the weak ``available`` state when no more precise form
+    # (encrypted, summary, signature, or plaintext field) was identified.
+    return matches or [_match("reasoning", path, payload)]
+
+
+def _has_tool_call_context(value: dict[str, Any], item_type: object) -> bool:
+    return (
+        item_type in _TOOL_CALL_TYPES
+        or ("name" in value and "arguments" in value)
+        or ("call_id" in value and "arguments" in value)
+        or ("tool_call_id" in value and "arguments" in value)
+    )
+
+
 def _matches_for_object(path: str, value: dict[str, Any]) -> list[_Match]:
     matches: list[_Match] = []
     role = value.get("role")
     item_type = value.get("type")
 
-    if role in {"system", "developer"} and _nonempty(value.get("content")):
+    # Preserve provider role semantics. A provider-declared developer message is a
+    # message, not evidence that a system-role field existed.
+    if role == "system" and _nonempty(value.get("content")):
         matches.append(_match("system", f"{path}.content", value["content"]))
     if role in {"user", "assistant", "system", "developer", "tool", "function"}:
         if "content" in value:
@@ -286,9 +359,17 @@ def _matches_for_object(path: str, value: dict[str, Any]) -> list[_Match]:
     for key in ("tools", "functions", "tool_definitions", "toolDeclarations"):
         if key in value and _nonempty(value[key]):
             matches.append(_match("tool_definitions", f"{path}.{key}", value[key]))
-    for key in ("arguments", "tool_input", "function_args", "functionArguments"):
+
+    for key in ("tool_input", "function_args", "functionArguments"):
         if key in value and _nonempty(value[key]):
             matches.append(_match("tool_arguments", f"{path}.{key}", value[key]))
+    if (
+        "arguments" in value
+        and _nonempty(value["arguments"])
+        and _has_tool_call_context(value, item_type)
+    ):
+        matches.append(_match("tool_arguments", f"{path}.arguments", value["arguments"]))
+
     for key in ("tool_response", "tool_result", "function_response", "functionResponse"):
         if key in value and _nonempty(value[key]):
             matches.append(_match("tool_results", f"{path}.{key}", value[key]))
@@ -297,46 +378,11 @@ def _matches_for_object(path: str, value: dict[str, Any]) -> list[_Match]:
             matches.append(_match("assistant_output", f"{path}.{key}", value[key]))
 
     if item_type in {"reasoning", "thinking"}:
-        encrypted = value.get("encrypted_content")
-        if isinstance(encrypted, str) and encrypted:
-            matches.append(
-                _Match(
-                    "reasoning",
-                    OPAQUE_ENCRYPTED,
-                    DECRYPTABILITY_UNKNOWN,
-                    f"{path}.encrypted_content",
-                    notes="encrypted reasoning payload observed",
-                )
-            )
-        summary = value.get("summary")
-        if _nonempty(summary):
-            matches.append(
-                _Match(
-                    "reasoning",
-                    SUMMARY,
-                    DECRYPTABILITY_UNKNOWN,
-                    f"{path}.summary",
-                    notes="provider-exposed reasoning summary observed",
-                )
-            )
-        for key in ("content", "text", "thinking"):
-            if key in value and _nonempty(value[key]):
-                matches.append(_match("reasoning", f"{path}.{key}", value[key]))
-        signature = value.get("signature")
-        if _nonempty(signature):
-            matches.append(
-                _Match(
-                    "reasoning",
-                    OPAQUE_SIGNED,
-                    DECRYPTABILITY_UNKNOWN,
-                    f"{path}.signature",
-                    notes="reasoning signature observed",
-                )
-            )
-
+        matches.extend(_reasoning_matches(path, value))
     for key in ("reasoning", "thinking"):
-        if key in value and _nonempty(value[key]):
-            matches.append(_match("reasoning", f"{path}.{key}", value[key]))
+        if key in value:
+            matches.extend(_reasoning_matches(f"{path}.{key}", value[key]))
+
     if "usage" in value and _nonempty(value["usage"]):
         matches.append(_match("usage", f"{path}.usage", value["usage"]))
     token_keys = {
@@ -376,6 +422,18 @@ def _best_match(matches: list[_Match]) -> _Match | None:
     return max(matches, key=lambda match: _AVAILABILITY_PRIORITY.get(match.availability, 0))
 
 
+def _artifact_label(path: Path | None) -> str:
+    if path is None:
+        return "no_data"
+    return path.name or "artifact"
+
+
+def _append_note(existing: str | None, extra: str | None) -> str | None:
+    if not extra:
+        return existing
+    return f"{existing}; {extra}" if existing else extra
+
+
 def _observation(
     entry: CapabilityInventoryEntry,
     *,
@@ -386,10 +444,12 @@ def _observation(
     match: _Match | None,
     artifact: Path | None,
     reason: str | None,
+    parse_warning: str | None,
     codex_no_local_decryptor_observed: bool,
 ) -> CapabilityObservation:
+    label = _artifact_label(artifact)
     if match is None:
-        source = "probe:no_data" if artifact is None else f"artifact:{artifact.as_posix()}"
+        source = "probe:no_data" if artifact is None else f"artifact:{label}"
         return CapabilityObservation(
             client=entry.client,
             client_version=client_version,
@@ -403,11 +463,11 @@ def _observation(
             evidence_source=source,
             evidence_strength=EVIDENCE_NO_DATA,
             tier=entry.tier,
-            notes=reason or "field not observed in supplied artifact",
+            notes=_append_note(reason or "field not observed in supplied artifact", parse_warning),
         )
 
     decryptability = match.decryptability
-    notes = match.notes
+    notes = _append_note(match.notes, parse_warning)
     if (
         entry.client == "codex-cli"
         and field == "reasoning"
@@ -415,8 +475,10 @@ def _observation(
         and codex_no_local_decryptor_observed
     ):
         decryptability = NO_LOCAL_DECRYPTOR_OBSERVED
-        extra = "no local Codex decryptor observed by repository source audit"
-        notes = f"{notes}; {extra}" if notes else extra
+        notes = _append_note(
+            notes,
+            "no ExecWeave Codex decryptor marker observed by repository source audit",
+        )
     return CapabilityObservation(
         client=entry.client,
         client_version=client_version,
@@ -427,7 +489,7 @@ def _observation(
         field=field,
         availability=match.availability,
         decryptability=decryptability,
-        evidence_source=f"artifact:{artifact.as_posix()}#{match.path}",
+        evidence_source=f"artifact:{label}#{match.path}",
         evidence_strength=EVIDENCE_DIRECT_OBSERVATION,
         tier=entry.tier,
         notes=notes,
@@ -449,7 +511,7 @@ def probe_artifact(
 
     path = Path(artifact).expanduser() if artifact is not None else None
     if path is None or not path.is_file():
-        reason = "artifact not supplied" if path is None else f"artifact not found: {path}"
+        reason = "artifact not supplied" if path is None else "artifact not found"
         return [
             _observation(
                 entry,
@@ -460,6 +522,7 @@ def probe_artifact(
                 match=None,
                 artifact=path,
                 reason=reason,
+                parse_warning=None,
                 codex_no_local_decryptor_observed=codex_no_local_decryptor_observed,
             )
             for field in entry.required_fields
@@ -467,11 +530,10 @@ def probe_artifact(
 
     records, errors = _records(path)
     matches, version = _collect_matches(records)
-    error_note = "; ".join(errors) if errors else None
+    parse_warning = f"artifact parse warning: {'; '.join(errors)}" if errors else None
     observations: list[CapabilityObservation] = []
     for field in entry.required_fields:
         match = _best_match(matches[field])
-        reason = error_note if match is None and error_note else None
         observations.append(
             _observation(
                 entry,
@@ -481,7 +543,8 @@ def probe_artifact(
                 client_version=version,
                 match=match,
                 artifact=path,
-                reason=reason,
+                reason=None,
+                parse_warning=parse_warning,
                 codex_no_local_decryptor_observed=codex_no_local_decryptor_observed,
             )
         )
