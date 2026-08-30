@@ -172,6 +172,9 @@ def _render(messages: list[dict[str, Any]], path: str, tmp_path: Path) -> list[d
         env=env,
         capture_output=True,
         text=True,
+        # Node writes UTF-8. Without this, Windows decodes its stdout with the
+        # locale codepage and turns the arrow and separator into mojibake.
+        encoding="utf-8",
         check=True,
     )
     return json.loads(result.stdout)
