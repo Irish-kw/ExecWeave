@@ -31,7 +31,7 @@ Install the latest published wheel/sdist from PyPI:
 python -m pip install -U execweave
 ```
 
-The current release is **v0.7.6**.
+The current release is **v0.7.7**.
 
 For development:
 
@@ -67,7 +67,7 @@ execweave record --open -- python my_agent.py
 
 `execweave top -- codex` keeps the Agent interactive in the launch terminal while opening/attaching the detached Top dashboard according to the host environment.
 
-**v0.7.6 — an agent panel that answers what the agent said, and streamed responses rebuilt into one record.** Selecting an agent now opens with that agent's own turns, read as who said what, keeping the provider-neutral, agent-local multi-agent conversations each agent already owned. Consecutive turns a provider did not expose collapse into one line that still names the agents they were addressed to, and the multi-kilobyte preamble a provider prepends to every subagent is folded rather than leading the panel; the node evidence and trace stay one disclosure away. Graph labels resolve each agent's declared path, so siblings spawned in the same millisecond no longer render as the same fragment of a time-ordered id. Underneath, a streamed response is reassembled into the same canonical record its non-streamed twin would produce — text, reasoning and tool calls split across frames are rejoined before anything is materialized, and a stream that ended early is recorded as interrupted rather than completed.
+**v0.7.7 — each agent's own conversation, while the run is still open.** The live dashboard showed every agent every other agent's conversation for the whole run and only became correct once the agent exited: it fetched the conversation index only at finalization, so the per-agent scoping never ran and a flat list of every stored record was drawn in its place — the same list whichever node was selected. That index is now projected from the run's current graph and served during the run, through the same builder the finalized file is written from, so a live dashboard and a recorded viewer cannot disagree about what belongs to an agent; the provider-neutral, agent-local multi-agent conversations each agent owns are the only thing either one draws. Neither viewer keeps a fallback that renders a conversation record outside that per-agent projection. A release check now opens both shipped viewers in a real browser and reads back what each agent shows, so an agent seeing another agent's conversation fails the build instead of reaching a release.
 
 The unified dashboard brings the execution graph, logs, and conversation records into the same inspection flow. Finalized runs generate `conversations.md` and `conversations.json`, while validated provider transcripts are copied into the run-local SHA-256 content store. Claude Code, OpenAI Codex, Cursor, OpenCode, and Google Antigravity use the strongest provider-exposed multi-agent evidence available to each integration. For gateways and local runtimes that expose only root request/response traffic, ExecWeave shows only that root conversation and does not invent subagents or hidden routing.
 
@@ -276,7 +276,7 @@ Conversation isolation is an attribution/display rule, not a redaction boundary.
 
 ## Current status
 
-v0.7.6 combines cross-platform runtime collection, materialized execution graphs, standalone/live dashboards, conservative provider↔runtime correlation, full-fidelity content-addressed provider evidence, attributable multi-agent execution traces, direct run-local conversation access, agent-local conversation isolation across provider-neutral projections, and per-agent conversation focus in the standalone and live dashboards. Supported integrations preserve the strongest identity/routing evidence actually exposed by each provider and abstain when that evidence is unavailable. Observed evidence and inference remain separate by design.
+v0.7.7 combines cross-platform runtime collection, materialized execution graphs, standalone/live dashboards, conservative provider↔runtime correlation, full-fidelity content-addressed provider evidence, attributable multi-agent execution traces, direct run-local conversation access, agent-local conversation isolation across provider-neutral projections, and per-agent conversation focus in the standalone and live dashboards. Supported integrations preserve the strongest identity/routing evidence actually exposed by each provider and abstain when that evidence is unavailable. Observed evidence and inference remain separate by design.
 
 ## Documentation
 
