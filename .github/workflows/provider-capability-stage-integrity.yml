@@ -40,3 +40,4 @@ jobs:
         run: >-
           python scripts/check_release_stage_integrity.py
           --baseline-ref "${{ github.event.pull_request.base.sha || inputs.baseline_ref }}"
+          --allow-test-change "tests/test_viewer_agent_isolation_e2e.py=v0.7.9 replaces the two rendered viewer surfaces with one live dashboard shell; the same four browser test node IDs now assert the stricter visible product contract and live/viewer parity instead of the removed conversation-tree UI"
