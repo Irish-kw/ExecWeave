@@ -31,7 +31,7 @@ Install the latest published wheel/sdist from PyPI:
 python -m pip install -U execweave
 ```
 
-The current release is **v0.7.5**.
+The current release is **v0.7.6**.
 
 For development:
 
@@ -67,7 +67,7 @@ execweave record --open -- python my_agent.py
 
 `execweave top -- codex` keeps the Agent interactive in the launch terminal while opening/attaching the detached Top dashboard according to the host environment.
 
-**v0.7.5 — per-agent conversation isolation by default, and an evidence availability matrix.** Building on the provider-neutral, agent-local multi-agent conversations materialized in earlier releases, opening a run now shows one self-contained section per agent: each holds the turns that agent sent and the turns addressed to it, so a child keeps its own assignment and answer while a sibling's exchange never appears. Field-level availability is recorded separately from conversation completeness, so an encrypted reasoning field no longer drags an otherwise archived transcript down. An offline capability probe reports, per client and surface, what each provider actually exposes, and records what cannot be read without claiming to know why.
+**v0.7.6 — an agent panel that answers what the agent said, and streamed responses rebuilt into one record.** Selecting an agent now opens with that agent's own turns, read as who said what, keeping the provider-neutral, agent-local multi-agent conversations each agent already owned. Consecutive turns a provider did not expose collapse into one line that still names the agents they were addressed to, and the multi-kilobyte preamble a provider prepends to every subagent is folded rather than leading the panel; the node evidence and trace stay one disclosure away. Graph labels resolve each agent's declared path, so siblings spawned in the same millisecond no longer render as the same fragment of a time-ordered id. Underneath, a streamed response is reassembled into the same canonical record its non-streamed twin would produce — text, reasoning and tool calls split across frames are rejoined before anything is materialized, and a stream that ended early is recorded as interrupted rather than completed.
 
 The unified dashboard brings the execution graph, logs, and conversation records into the same inspection flow. Finalized runs generate `conversations.md` and `conversations.json`, while validated provider transcripts are copied into the run-local SHA-256 content store. Claude Code, OpenAI Codex, Cursor, OpenCode, and Google Antigravity use the strongest provider-exposed multi-agent evidence available to each integration. For gateways and local runtimes that expose only root request/response traffic, ExecWeave shows only that root conversation and does not invent subagents or hidden routing.
 
@@ -276,7 +276,7 @@ Conversation isolation is an attribution/display rule, not a redaction boundary.
 
 ## Current status
 
-v0.7.5 combines cross-platform runtime collection, materialized execution graphs, standalone/live dashboards, conservative provider↔runtime correlation, full-fidelity content-addressed provider evidence, attributable multi-agent execution traces, direct run-local conversation access, agent-local conversation isolation across provider-neutral projections, and per-agent conversation focus in the standalone and live dashboards. Supported integrations preserve the strongest identity/routing evidence actually exposed by each provider and abstain when that evidence is unavailable. Observed evidence and inference remain separate by design.
+v0.7.6 combines cross-platform runtime collection, materialized execution graphs, standalone/live dashboards, conservative provider↔runtime correlation, full-fidelity content-addressed provider evidence, attributable multi-agent execution traces, direct run-local conversation access, agent-local conversation isolation across provider-neutral projections, and per-agent conversation focus in the standalone and live dashboards. Supported integrations preserve the strongest identity/routing evidence actually exposed by each provider and abstain when that evidence is unavailable. Observed evidence and inference remain separate by design.
 
 ## Documentation
 

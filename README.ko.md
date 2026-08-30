@@ -31,7 +31,7 @@ PyPI에서 최신 wheel/sdist를 설치합니다.
 python -m pip install -U execweave
 ```
 
-현재 릴리스는 **v0.7.5** 입니다.
+현재 릴리스는 **v0.7.6** 입니다.
 
 개발 설치:
 
@@ -67,7 +67,7 @@ execweave record --open -- python my_agent.py
 
 `execweave top -- codex`는 Agent를 시작 terminal에서 interactive 상태로 유지하면서 host 환경에 따라 detached Top dashboard를 열거나 attach합니다.
 
-**v0.7.5 — 기본값이 된 per-agent conversation isolation, 그리고 evidence availability matrix.** run을 열면 각 agent가 독립된 섹션을 가지며, 그 agent가 보낸 turn과 그 agent에게 전달된 turn만 포함합니다. child는 자신의 assignment와 answer를 유지하고 sibling 간의 교환은 나타나지 않습니다. field-level availability는 conversation completeness와 분리되어 기록되므로 reasoning 필드가 암호화되어도 완전히 보관된 transcript가 함께 강등되지 않습니다. 오프라인 capability probe는 client와 surface별로 provider가 실제 노출한 것을 보고하고, 읽을 수 없는 것은 이유를 단정하지 않고 기록합니다.
+**v0.7.6 — 그 agent가 무엇을 말했는지에 답하는 agent panel, 그리고 하나의 레코드로 재조립되는 streamed response.** agent를 선택하면 그 agent 자신의 turn이 '누가 무엇을 말했는가'로 가장 먼저 표시되며, 각 agent가 이미 보유하던 provider-neutral, agent-local multi-agent conversation을 그대로 이어갑니다. provider가 노출하지 않은 연속된 turn은 한 줄로 접히지만 수신한 agent들은 그대로 나열됩니다. provider가 모든 subagent 앞에 붙이는 수 킬로바이트 서두는 접혀서 패널 머리를 차지하지 않고, node evidence와 trace도 한 번의 펼침 거리에 있습니다. Graph label은 각 agent가 선언한 path를 해석하므로 같은 밀리초에 생성된 형제가 동일한 time-ordered id 조각으로 그려지지 않습니다. 내부적으로 streamed response는 비스트리밍 버전과 동일한 canonical record로 재조립되어, frame을 가로질러 나뉜 텍스트·reasoning·tool call이 materialize 전에 이어 붙고, 일찍 끝난 스트림은 완료가 아니라 중단으로 기록됩니다.
 
 통합 dashboard는 execution graph, logs, conversation records를 하나의 inspection flow에서 제공합니다. Finalized run은 `conversations.md`와 `conversations.json`을 만들며, 검증된 provider transcript는 run-local SHA-256 content store로 복사됩니다. Claude Code, OpenAI Codex, Cursor, OpenCode, Google Antigravity는 각 integration이 실제로 노출하는 가장 강한 multi-agent evidence를 사용합니다. gateway나 local runtime이 root request/response만 노출하면 ExecWeave는 root conversation만 보여 주며 subagent나 hidden routing을 만들어내지 않습니다.
 
@@ -276,7 +276,7 @@ Conversation isolation은 attribution/display 규칙이지 redaction boundary가
 
 ## 현재 상태
 
-v0.7.5는 cross-platform runtime collection, materialized execution graph, standalone/live dashboard, 보수적인 provider↔runtime correlation, content-addressed full-fidelity provider evidence, attributable multi-agent execution trace, run-local conversation access, provider-neutral projection의 agent-local conversation isolation, standalone 및 live dashboard의 per-agent conversation focus를 통합합니다. 각 integration은 provider가 실제로 노출한 가장 강한 identity/routing evidence만 보존하고 충분한 증거가 없으면 abstain합니다. Observed evidence와 inference는 설계상 계속 분리됩니다.
+v0.7.6는 cross-platform runtime collection, materialized execution graph, standalone/live dashboard, 보수적인 provider↔runtime correlation, content-addressed full-fidelity provider evidence, attributable multi-agent execution trace, run-local conversation access, provider-neutral projection의 agent-local conversation isolation, standalone 및 live dashboard의 per-agent conversation focus를 통합합니다. 각 integration은 provider가 실제로 노출한 가장 강한 identity/routing evidence만 보존하고 충분한 증거가 없으면 abstain합니다. Observed evidence와 inference는 설계상 계속 분리됩니다.
 
 ## 문서
 
