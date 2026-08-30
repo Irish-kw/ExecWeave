@@ -14,7 +14,6 @@ _AGENT_PANEL_CSS = r"""
 """.strip()
 
 _AGENT_PANEL_JS = r"""
-<script>
 (()=>{
 const details=document.getElementById('details'),detailsEmpty=document.getElementById('details-empty');
 if(!details||!detailsEmpty)return;
@@ -62,7 +61,6 @@ if(!window.__execweaveStaticMode)setInterval(()=>{if(selectedNode)refresh()},800
 const previous=window.__execweaveDashboard||{};window.__execweaveDashboard={...previous,onPayload(data){previous.onPayload?.(data);if(selectedNode)refresh()},onFinished(){previous.onFinished?.();if(selectedNode)refresh()}};
 window.__execweaveAgentPanel={render,setEntries,refresh};
 })();
-</script>
 """.strip()
 
 
@@ -70,4 +68,7 @@ def inject_agent_panel(html: str) -> str:
     if "window.__execweaveAgentPanel" in html:
         return html
     html = html.replace("</style>", _AGENT_PANEL_CSS + "\n</style>", 1)
-    return html.replace("</body>", _AGENT_PANEL_JS + "\n</body>", 1)
+    marker = html.rfind("</script>")
+    if marker < 0:
+        raise RuntimeError("dashboard script seam changed")
+    return html[:marker] + _AGENT_PANEL_JS + "\n" + html[marker:]
