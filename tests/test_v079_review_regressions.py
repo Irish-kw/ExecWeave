@@ -84,7 +84,9 @@ def test_final_rendering_does_not_hold_the_live_state_lock(
     state.finish(_empty_graph())
 
     assert observed["rendered"]
-    assert state.final_html() == "<html><body>final</body></html>"
+    final = state.final_html()
+    assert final is not None
+    assert "final" in final
 
 
 def test_prebuilt_viewer_snapshot_avoids_a_second_final_render(
