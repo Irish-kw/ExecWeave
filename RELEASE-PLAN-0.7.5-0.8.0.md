@@ -195,6 +195,24 @@ provider-observed fact
 
 這是 0.7.5 的核心產出，也是後續所有階段的詞彙基礎。
 
+### 4.0 兩層責任邊界：conversation-level vs field-level
+
+**這兩層必須分開，且必須能同時存在。**
+
+| 層級 | 描述的是 | 放在哪 | 值 |
+|---|---|---|---|
+| **Conversation-level completeness** | 一個 agent conversation **整體**有多少 conversational evidence | `agent_topology.py`（**語意不得更動**） | `provider_transcript` / `routing_only` / `unavailable` |
+| **Content / field-level availability** | **某一個 content field 或 observation** 的可得性 | `content_evidence.py`，或新增 `evidence_availability.py` | 見 §4.2 |
+
+以下組合是**完全合理**的，必須支援：
+
+```
+conversation_completeness = provider_transcript
+reasoning_availability    = opaque_encrypted
+```
+
+**不得因為 reasoning 看不到，就把整個 conversation 降成 `unavailable`。** 一個 agent 的 transcript 被完整存下來，就是 `provider_transcript`，其中某個欄位是密文是另一回事。
+
 ### 4.1 為什麼不能用 `L3_server_side`
 
 先前的草案把 Codex 的 `reasoning.encrypted_content` 直接標成 `L3_server_side`。**這違反 ExecWeave 自己的 evidence discipline。**
@@ -207,18 +225,25 @@ provider-observed fact
 
 這些**都不足以證明**「金鑰一定只存在 provider server」。因此 taxonomy 必須把**觀察到什麼**與**能不能解密**分成兩個獨立維度。
 
-### 4.2 `visibility`：觀察到的內容形態
+### 4.2 Field-level availability：單一欄位的可得性
+
+**這是欄位層唯一的可得性詞彙**，由 0.7.5 定義、0.7.9 正式落地。放在 `content_evidence.py` 或新增的 `evidence_availability.py`，**不得放進 `agent_topology.py`**。
 
 | 值 | 意義 |
 |---|---|
-| `plaintext` | 內容以明文出現在觀察表面 |
+| `available` | 該欄位可得 |
+| `complete_from_surface` | 該表面實際曝露的內容被完整保存（宣稱邊界見 §4.6） |
+| `summary` | 只有摘要，沒有完整內容 |
+| `redacted` | provider 主動遮蔽（例如 `[redacted]` 標記） |
 | `opaque_encrypted` | 出現的是密文，內容不可讀 |
 | `opaque_signed` | 出現的是簽章/雜湊之類的不可逆表示 |
-| `redacted` | provider 主動遮蔽（例如 `[redacted]` 標記） |
-| `summary_only` | 只有摘要，沒有完整內容 |
 | `not_exposed` | 該表面根本沒有這個欄位 |
 | `not_observed` | 這次觀察沒看到，但不代表不存在 |
+| `capture_disabled` | 使用者未啟用擷取 |
+| `capture_interrupted` | 擷取中斷 / 串流不完整 |
 | `unknown` | 尚未判定 |
+
+命名不強制與上表完全一致，但**責任邊界必須清楚**：這些值描述單一 field，**不描述整個 conversation**。
 
 ### 4.3 `decryptability`：能不能在本機解開
 
@@ -239,7 +264,7 @@ provider-observed fact
 **「沒有在本機找到 key」只能記錄成 `no_local_decryptor_observed`，永遠不得自動升級成 server-side fact。**
 
 具體到 Codex：`reasoning.encrypted_content` 目前應記為
-`visibility: opaque_encrypted` + `decryptability: no_local_decryptor_observed`，
+`availability: opaque_encrypted` + `decryptability: no_local_decryptor_observed`，
 並在 `notes` 記錄 Fernet 外觀與同 scheme 觀察。**不得寫成 server-side-only。**
 
 ### 4.5 Capability matrix 的粒度
@@ -255,11 +280,32 @@ provider-observed fact
 | `surface` | agent mode / autocomplete / chat / background task |
 | `transport_mode` | direct / user_routed_gateway / local_runtime |
 | `field` | 觀察的欄位 |
-| `visibility` | 見 §4.2 |
+| `availability` | 見 §4.2 |
 | `decryptability` | 見 §4.3 |
 | `evidence_source` | 這筆判定來自哪裡 |
 | `evidence_strength` | 直接觀察 / 文件 / 推論 |
 | `notes` | 補充 |
+
+### 4.6 `complete_from_surface` 的宣稱邊界
+
+ExecWeave 能證明的是：**它完整保存了 provider surface 實際曝露給它的 payload**。ExecWeave **無法**從 API / hook / transcript 證明那等於模型內部的全部 reasoning 或隱藏階段。
+
+這與 `main` 上既有的 `ContentReference.complete_from_source` 語意一致（`content_store.py:20-21`）：
+
+> `complete_from_source` means ExecWeave stored the complete value supplied by the integration point. It does not claim the provider exposed hidden stages.
+
+viewer 也已經如此措辭（`viewer_content_inspector.py:212`）：
+
+> "Complete from source: the selected integration supplied this complete value. **This does not imply visibility into hidden model/provider state.**"
+
+因此 `complete_from_surface` 的定義固定為：
+
+> **ExecWeave 完整保存 provider surface 實際曝露的 payload；不宣稱這是模型內部的全部 reasoning。**
+
+**全文件、UI、Markdown 一律禁止使用**：`full reasoning`、`Full CoT`、`complete chain of thought`、「完整思維鏈」。
+**建議措辭**：`Provider-exposed reasoning`。
+
+例外：provider 官方 surface 本身明確如此定義，且有直接證據 —— 此時必須在 `notes` 記錄文件出處。
 
 ---
 
@@ -322,8 +368,36 @@ git checkout -b <branch> origin/main
 #### 為什麼放第一個
 後續四個階段的範圍完全取決於這裡的量測結果。目前對 Codex `reasoning.encrypted_content` 的判斷是推論而非證明，不該讓四個版本建在未驗證的假設上。
 
+#### Required Capability Inventory
+
+**驗收對象是這份 inventory，不是理論上的 Cartesian product。** 不要求把所有 client × surface × auth_mode 組合測完。
+
+**Tier A — Required / release-blocking**
+
+涵蓋 ExecWeave 目前主要宣稱支援、或必須明確知道其 capability 的 client：
+
+| client | provider | auth_mode | surface | transport_mode |
+|---|---|---|---|---|
+| Codex CLI | OpenAI | api_key / subscription | agent | direct |
+| Claude Code | Anthropic | api_key / subscription | agent | direct |
+| Gemini CLI | Google | api_key | agent | direct |
+| Cursor Agent | Cursor / 上游 | subscription | agent | direct |
+| OpenCode | 依設定 | api_key | agent | direct |
+| Ollama | 本地 | local | chat / generate | local_runtime |
+
+每個 Tier A row 都必須明確指定：`client`、實測的 `client_version`（或最低版本）、`provider`、`auth_mode`、`surface`、`transport_mode`、以及 **required fields to probe**（至少：system / prompt / messages、tool definitions、tool arguments、tool results、assistant output、reasoning、usage）。
+
+**若某 row 在測試環境無法取得，不得刪除該 row**，必須標 `not_observed` 並在 `notes` 寫明原因（例如「無此 client 授權」「環境無 GPU」）。
+
+**Tier B — Optional / environment-dependent**
+
+Cursor autocomplete / Tab、background agent surfaces、其他 auth modes、其他本地 runtime（LM Studio / llama.cpp / vLLM）、其他 gateway 組合。
+
+依環境測試，**不阻塞 0.7.5 release**，但結果仍可進 matrix。
+
 #### 交付
-- `visibility` / `decryptability` 兩組常數與升級規則（§4.2–4.4），實作為可測試的模組
+- field-level availability / `decryptability` 兩組常數與升級規則（§4.2–4.4），實作為可測試的模組，**放在 `content_evidence.py` 或新增的 `evidence_availability.py`，不得放進 `agent_topology.py`**
+- Required Capability Inventory（Tier A / Tier B）的機器可讀定義
 - `scripts/probe_provider_capability.py` — 對每個 provider 的**既有本地產物**（rollout / transcript / hook 輸出）做欄位盤點
 - 機器可讀的 capability matrix，欄位依 §4.5，**以 surface 為粒度**
 - 對應測試
@@ -334,11 +408,14 @@ git checkout -b <branch> origin/main
 - 不嘗試解密任何內容
 - 不修改任何既有 provider adapter
 - 不對 endpoint 可設定性做未經實測的宣稱
+- **不修改 `agent_topology.py` 的 conversation completeness**
 
 #### 驗收
-- [ ] 矩陣對每個 client × surface × auth_mode 組合都有明確判定，未知寫 `unknown`，不得猜
+- [ ] **Required Capability Inventory 中每個 Tier A（release-blocking）row 都有明確結果**；未觀察到就標 `not_observed` 並寫原因，**不得刪除該 row，不得猜測**
+- [ ] Tier B row 若未測，明確標示為未測，不得留白
 - [ ] Codex `reasoning.encrypted_content` 記為 `opaque_encrypted` + `no_local_decryptor_observed`，**不得**出現 server-side-only 的宣稱
 - [ ] 有測試驗證「升級規則」：沒有官方文件或直接證據時，不允許產生 `provider_documented_unavailable`
+- [ ] 有測試驗證 field-level availability **不會**被寫入 conversation completeness
 - [ ] 探測器對缺少產物的 provider 回報「無資料」而非空矩陣
 
 ---
@@ -456,13 +533,50 @@ ExecWeave 記錄自己實際收到與送出的內容。
 - **不自動修改 client 設定** —— 使用者自己設 endpoint，ExecWeave 不代勞
 - **不做 transparent interception**
 - **未 opt-in 時 ExecWeave 完全不介入**
-- **API key / `Authorization` / credentials 不得進入任何 artifact**
 - 沿用 0.7.6 的 canonical stream assembler，不另寫一套
+
+#### Credential filtering 的責任邊界（務必精確）
+
+**這是最容易做錯的一項。** 先前寫成「涵蓋 header、body、metadata 三處」是危險的敘述，容易讓實作者做出一個對整份 payload 遞迴清洗的 sanitizer。
+
+`main` 上既有的原則已經寫在 `content_evidence.py:26-29`：
+
+> Remove transport credentials **from provider metadata only**.
+> **Do not apply this to prompts, completions, tool input/output, or file content.**
+> Those are full-fidelity evidence and remain unredacted.
+
+**這個原則正式納入 roadmap，必須遵守。**
+
+**必須移除的 —— transport envelope / integration metadata credentials：**
+
+`Authorization`、`Proxy-Authorization`、`Cookie` / `Set-Cookie`、`x-api-key`、`api-key`、gateway authentication metadata、`access_token`、`refresh_token`、`client_secret`。這些**不得進入任何 artifact**。
+
+**不得因 key 名稱自動刪除的 —— semantic payload：**
+
+prompt、completion、reasoning content、tool arguments、tool results、file content、provider-visible message content。
+
+**具體風險（已驗證存在）**：`content_evidence.py` 的 `_TRANSPORT_CREDENTIAL_KEYS`（`:7-22`）**包含 `"password"`**，而 `filter_transport_credentials` 是**任意深度的遞迴 key-name walker**（`:34-47`）。若把它套到 semantic payload，下列合法證據會被靜默刪除：
+
+```json
+{"role": "user", "content": "The JSON field is called password"}
+```
+
+```json
+{"password": "example test fixture value"}
+```
+
+第二例是 tool argument。**不能因為 key 名稱叫 `password` 就被 generic transport sanitizer 刪掉**，否則 full fidelity 就破了。目前唯一的防線只有那句 docstring，**沒有機制性強制** —— 本階段要補上測試。
+
+責任描述固定為：
+
+> **transport envelope / integration metadata credentials must be removed；semantic payload must not be recursively redacted by transport credential filters.**
 
 #### 驗收
 - [ ] 未設定 endpoint 指向時，ExecWeave 完全不介入（有測試）
-- [ ] credential 過濾有測試守住，涵蓋 header、body、metadata 三處
-- [ ] 只有真的拿到完整往返時才標記為完整；部分失敗走 §4 taxonomy
+- [ ] **transport credential leakage test**：`Authorization` / `x-api-key` / `Cookie` / `access_token` 等不得出現在任何 artifact
+- [ ] **semantic fidelity preservation test**：prompt / tool arguments / tool results 中出現 `password`、`token`、`api_key` 這類**欄位名或字樣**時，**不得**被 transport sanitizer 刪除
+  - 註：此測試不要求保存真實秘密，fixture 用明顯的假值即可。驗證目標是「transport sanitization 不得誤傷 semantic evidence」
+- [ ] 只有真的拿到完整往返時才標記為完整；部分失敗走 §4.2 field-level availability
 - [ ] streaming 走 0.7.6 的同一個 assembler，不重複實作
 
 ---
@@ -476,19 +590,26 @@ ExecWeave 記錄自己實際收到與送出的內容。
 
 #### reasoning state 必須可區分
 
-不得把不同形態的 reasoning 塌縮成同一種：
+沿用 §4.2 的 field-level availability 詞彙，不另立一套：
 
 | 值 | 意義 |
 |---|---|
-| `full` | 完整 reasoning 內容 |
+| `complete_from_surface` | **ExecWeave 完整保存 provider surface 實際曝露的 reasoning payload；不宣稱這是模型內部的全部 reasoning** |
 | `summary` | 只有摘要 |
 | `redacted` | provider 主動遮蔽 |
 | `opaque_encrypted` | 密文 |
-| `signature_only` | 只有簽章 |
+| `opaque_signed` | 只有簽章 |
 | `not_exposed` | 該表面沒有這個欄位 |
 | `unknown` | 尚未判定 |
 
-**不得宣稱「完整 CoT」，除非底層 evidence 真的是完整內容（`full`）。**
+**先前草案用 `full` 表示「完整 reasoning」，這是過強宣稱，已移除。** ExecWeave 從 API / hook / transcript 無法證明所觀察到的等於模型內部的全部 reasoning 或隱藏階段；它只能證明自己完整保存了 surface 給出的東西。這與既有的 `ContentReference.complete_from_source`（`content_store.py:20-21`）語意一致。
+
+#### 用語規定
+
+**禁止**（程式碼、schema、dashboard、Markdown、文件一律適用）：
+`full reasoning`、`Full CoT`、`complete chain of thought`、「完整思維鏈」、「完整 CoT」
+
+**使用**：`Provider-exposed reasoning`
 
 #### 明確不做
 - 不嘗試任何解密
@@ -497,9 +618,11 @@ ExecWeave 記錄自己實際收到與送出的內容。
 
 #### 驗收
 - [ ] reasoning 與 output 在資料型別上分開，不混為一談
-- [ ] 每筆 reasoning 都帶 reasoning state
+- [ ] 每筆 reasoning 都帶 reasoning state（§4.2 詞彙）
 - [ ] 沒有 reasoning 的 provider 不會產生空殼或假造的 reasoning 欄位
-- [ ] 有測試驗證 `summary` 不會被呈現成 `full`
+- [ ] 有測試驗證 `summary` 不會被呈現成 `complete_from_surface`
+- [ ] **有測試或檢查驗證全文件與 UI 不出現禁用的 full-CoT 措辭**
+- [ ] reasoning 的 availability 為 `opaque_encrypted` 時，該 agent 的 `conversation_completeness` **不因此被降級**
 
 ---
 
@@ -510,31 +633,50 @@ ExecWeave 記錄自己實際收到與送出的內容。
 #### 目標
 把「這裡有東西但我們看不到，原因是 X」變成**一等公民、可測試、不可偽造**的狀態。這是整輪對產品信譽最重要的一環。
 
-#### 做法
-**擴充** `agent_topology.py` 既有詞彙，不取代。現有三個 completeness 值把不同原因塌縮成同一個 `unavailable`，使用者無法分辨：
+#### 做法：兩層分開，不得混用
 
-- 內容存在但被 provider 加密
-- provider 根本不曝露該欄位
-- 使用者未啟用擷取
-- 擷取中斷 / 串流不完整
+**這一階段最容易做錯的是把 field-level 的原因塞進 conversation-level 的 completeness。禁止這麼做。**
+
+| 層級 | 檔案 | 本階段可否更動 |
+|---|---|---|
+| Conversation-level completeness（`provider_transcript` / `routing_only` / `unavailable`） | `agent_topology.py` | **不得新增值、不得改語意、不得改 `_COMPLETENESS_RANK`** |
+| Field-level availability（§4.2） | `content_evidence.py` 或 `evidence_availability.py` | 本階段正式落地 |
+
+**明確禁止：**
+
+- 不得把 `capture_disabled`、`capture_interrupted`、`opaque_encrypted`、`not_exposed` 之類的 **field-level reason 加進 conversation completeness 的列舉或其 rank**
+- 不得因為某個 field 不可得，就把整個 conversation 降級
+
+以下組合必須成立且有測試：
+
+```
+conversation_completeness = provider_transcript   # transcript 完整存下來了
+reasoning_availability    = opaque_encrypted      # 其中 reasoning 欄位是密文
+```
+
+現況問題在 **field 層**：目前不同原因都塌縮成同一句 `Provider-encrypted payload —`，使用者無法分辨「provider 加密了」/「provider 沒曝露」/「你沒開擷取」/「擷取中斷」。這要在 field 層解決，不是在 conversation 層。
 
 #### 交付
-- unavailable reason 列舉 + evidence strength，與 §4 taxonomy 對齊
+- field-level availability 正式落地（0.7.5 定義、此處接上實際 pipeline），含 reason 與 evidence strength
 - viewer 與 Markdown 顯示**具體原因**，取代目前單一那句 `Provider-encrypted payload —`
 - **anti-overclaim checks**：
   - 宣稱 `provider_transcript` 的 entry 必須真的有 messages
-  - 宣稱 `full` reasoning 的必須真的有完整內容
-  - `unavailable` 必須帶得出原因，不得留空
+  - 宣稱 `complete_from_surface` 的必須真的有保存到 surface 給出的內容
+  - 每個不可得的 field 必須帶得出原因，不得留空
+  - **不得出現 §4.6 禁用的 full-CoT 措辭**
 - **強化 MITM 不變式測試**：明確斷言 `do_CONNECT` 回 405、斷言原始碼不存在憑證產生與禁用技術的呼叫
 - `scripts/check_conversation_records.py` 增加對應檢查
 
 #### 明確不做
-- 不改既有三個 completeness 常數的名稱或語意
+- 不改既有三個 completeness 常數的名稱、語意或 rank
+- 不把 field-level reason 併入 conversation completeness
 - 不降低任何既有檢查的嚴格度
 
 #### 驗收
 - [ ] 使用者能分辨「provider 加密了」/「provider 沒提供」/「你沒開擷取」/「擷取中斷」
-- [ ] 每個 `unavailable` 都帶原因
+- [ ] 每個不可得的 field 都帶原因
+- [ ] **有測試驗證 `provider_transcript` + `opaque_encrypted` 可同時成立**，且 conversation 不被降級
+- [ ] **有測試驗證 field-level reason 不會出現在 conversation completeness 的列舉或 rank 中**
 - [ ] anti-overclaim checks 有測試，且會對刻意造假的輸入 FAIL
 - [ ] MITM 不變式有測試守住（invariant guard 類）
 
@@ -613,8 +755,11 @@ ExecWeave 記錄自己實際收到與送出的內容。
 | invariant guard 分類正確 | 檢查被標為 invariant 的測試是否真的是不變式，而非規避 |
 | MITM 紅線未破 | `http_proxy.py:321-322` 原封不動；405 測試綠 |
 | 無禁用技術 | `grep -rniE "ebpf\|uprobe\|kprobe\|LD_PRELOAD\|ptrace\|SSL_write\|SSL_read"` 應為空 |
-| 證據未膨脹 | 檢查所有新的 `provider_transcript` / `provider_declared` / `reported` / `full` 標記是否有實據 |
+| 證據未膨脹 | 檢查所有新的 `provider_transcript` / `provider_declared` / `reported` / `complete_from_surface` 標記是否有實據 |
 | observation 未升級成 fact | 檢查是否出現未經文件佐證的 server-side-only 宣稱 |
+| 兩層未混用 | `git diff origin/main -- src/execweave/agent_topology.py`；不得有新的 completeness 值或 rank 變動 |
+| 無過強 reasoning 宣稱 | `grep -rniE "full[ _-]?cot\|complete chain of thought\|full reasoning\|完整思維鏈\|完整 ?CoT"` 應為空 |
+| semantic payload 未被誤刪 | 檢查 `filter_transport_credentials` 是否被套用到 prompt / tool IO / file content |
 | 無第二套 schema | 檢查是否重用既有 full-fidelity emitters |
 | checker 未被放寬 | `git diff origin/main -- scripts/` 逐行看門檻 |
 | 無 credential 外洩 | 檢查產物與 fixture 是否含 API key、Authorization、路徑、使用者名稱 |
@@ -652,7 +797,7 @@ ExecWeave 記錄自己實際收到與送出的內容。
 
 以下問題**在對應階段開始前必須先有答案**，不得邊做邊猜：
 
-1. **0.7.5 的實測涵蓋範圍** — client × surface × auth_mode 的組合數量可能很大。哪些組合是必測、哪些可標 `not_observed`？需要在 0.7.5 開始前定義最小必測集。
+1. ~~**0.7.5 的實測涵蓋範圍**~~ — **已解決**。由 §7 的 Required Capability Inventory 定義：Tier A 六個 client 為 release-blocking，Tier B 依環境。驗收對象是 inventory 中的 row，不是理論組合。實作者不需要、也不得自行決定最小必測集。
 
 2. **0.7.8 的範圍可能塌縮** — 若 0.7.5 顯示多數 provider 的 reasoning 不在官方表面，0.7.8 可能幾乎沒有可做的內容。**那時候應該重排階段而不是硬做。** 這個決策點必須在 0.7.5 review 時處理。
 
