@@ -65,19 +65,22 @@ def test_a_run_of_unexposed_turns_collapses_but_still_names_its_recipients(
 ) -> None:
     del tmp_path
     source = _AGENT_PANEL_JS
-    assert "String(message?.content_state||'plaintext')!=='provider_encrypted'" in source
-    assert "isPlain(message)" in source
-    assert "provider-encrypted" not in source.lower()
+    assert "const ENCRYPTED_NOTICE='Observed — plaintext not exposed by provider.';" in source
+    assert "const isEncrypted=" in source
+    assert "const isObserved=" in source
+    assert "displayText(message)" in source
     assert "card('Task',fields.task)" in source
+    assert "isPlain(message)" not in source
 
 
 def test_a_lone_unexposed_turn_is_not_reworded_as_a_run(tmp_path: Path) -> None:
     del tmp_path
     source = _AGENT_PANEL_JS
-    assert "const isPlain=" in source
-    assert "content_state" in source
+    assert "content_state||''" in source
     assert "provider_encrypted" in source
+    assert "Observed — plaintext not exposed by provider." in source
     assert "turns the provider did not expose" not in source
+    assert "Not observed." in source
 
 
 def test_unexposed_turns_from_different_senders_do_not_merge(tmp_path: Path) -> None:
