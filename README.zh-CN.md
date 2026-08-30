@@ -31,7 +31,7 @@ ExecWeave 是一个 source-available、local-first 的可观测性项目，把 A
 python -m pip install -U execweave
 ```
 
-当前正式版本是 **v0.7.3**。
+当前正式版本是 **v0.7.4**。
 
 开发安装：
 
@@ -67,7 +67,7 @@ execweave record --open -- python my_agent.py
 
 `execweave top -- codex` 会让 Agent 保持在启动 terminal 中交互，并根据主机环境打开或附加 detached Top dashboard。
 
-**v0.7.3 — provider-neutral、agent-local 的 multi-agent conversation。** ExecWeave 现在会把 provider 真正暴露的 conversation evidence 投影到各自 agent 的 dashboard thread，而不是把同一份完整 transcript 复制到每个 agent node。当 provider 提供权威的 identity / routing evidence 时，会保留 parent → child task assignment、inter-agent message、wait/result，以及 child → parent final response。Child agent 只保留自己实际收到的 task 与自己生成的 conversation；继承的 parent history 与 sibling-private content 会被排除。公共 merge layer 还会同时按 provider、raw thread identity 与 agent identity 做 scope，因此即使 provider 重复使用同一个 thread ID，也不会把 Agent 1 和 Agent 2 混到一起。
+**v0.7.4 — dashboard 的 per-agent conversation focus。** 延续 v0.7.3 已经 materialize 的 provider-neutral、agent-local multi-agent conversation，现在点选某个 agent node，conversation panel 只会显示该 agent 自己的 thread，并附带可见项目数与还原完整树状视图的控件。点击是以 graph agent node identity 对应到 thread，而不是比对 label，因此即使多个 agent 共用同一个 provider nickname 也不会被混在一起。Markdown 的 conversation 章节现在以 agent path 开头，而不是 provider nickname，每个章节都能明确指出自己属于哪一个 agent。standalone viewer 与 live dashboard 都覆盖；conversation materialization 本身没有变动。
 
 统一 dashboard 把 execution graph、logs 与 conversation records 放进同一条 inspection flow。Finalized run 会生成 `conversations.md` 与 `conversations.json`，经过验证的 provider transcript 也会复制进 run-local SHA-256 content store。Claude Code、OpenAI Codex、Cursor、OpenCode 与 Google Antigravity 都依据各自实际暴露的 evidence 强度建立 multi-agent trace；如果 gateway 或 local runtime 只提供 root request/response，ExecWeave 就只显示 root conversation，不会虚构 subagent 或 hidden routing。
 
@@ -276,7 +276,7 @@ Conversation isolation 是 attribution/display 规则，而不是 redaction boun
 
 ## 当前状态
 
-v0.7.3 组合 cross-platform runtime collection、materialized execution graph、standalone/live dashboard、保守的 provider↔runtime correlation、content-addressed full-fidelity provider evidence、可归属的 multi-agent execution trace、run-local conversation access，以及 provider-neutral projection 上的 agent-local conversation isolation。各 integration 只保留 provider 实际暴露的最强 identity/routing evidence，证据不足时选择 abstain。Observed evidence 与 inference 从设计上保持分离。
+v0.7.4 组合 cross-platform runtime collection、materialized execution graph、standalone/live dashboard、保守的 provider↔runtime correlation、content-addressed full-fidelity provider evidence、可归属的 multi-agent execution trace、run-local conversation access，provider-neutral projection 上的 agent-local conversation isolation，以及 standalone 与 live dashboard 上的 per-agent conversation focus。各 integration 只保留 provider 实际暴露的最强 identity/routing evidence，证据不足时选择 abstain。Observed evidence 与 inference 从设计上保持分离。
 
 ## 文档
 

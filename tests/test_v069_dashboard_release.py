@@ -91,11 +91,11 @@ def test_live_gif_export_uses_reset_bounded_lzw_and_emits_a_gif() -> None:
     assert len(gif) > 800
 
 
-def test_release_version_and_noncommercial_license_metadata_are_073() -> None:
-    assert __version__ == "0.7.3"
+def test_release_version_and_noncommercial_license_metadata_are_074() -> None:
+    assert __version__ == "0.7.4"
     pyproject = Path("pyproject.toml").read_text(encoding="utf-8")
-    assert 'version = "0.7.3"' in pyproject
-    assert "ExecWeave v0.7.3 release metadata" in pyproject
+    assert 'version = "0.7.4"' in pyproject
+    assert "ExecWeave v0.7.4 release metadata" in pyproject
     assert "License :: Other/Proprietary License" in pyproject
     assert "License :: OSI Approved :: MIT License" not in pyproject
 

@@ -31,7 +31,7 @@ PyPI から最新の wheel/sdist をインストールします。
 python -m pip install -U execweave
 ```
 
-現在のリリースは **v0.7.3** です。
+現在のリリースは **v0.7.4** です。
 
 開発環境では次のようにインストールできます。
 
@@ -67,7 +67,7 @@ execweave record --open -- python my_agent.py
 
 `execweave top -- codex` は Agent を起動 terminal 上でインタラクティブなまま保ち、ホスト環境に応じて detached Top dashboard を開くか既存のものに attach します。
 
-**v0.7.3 — provider-neutral かつ agent-local な multi-agent conversation。** ExecWeave は provider が実際に公開した conversation evidence を agent ごとの dashboard thread に投影し、同じ完全 transcript をすべての agent node に複製しません。provider が権威ある identity / routing evidence を公開している場合、parent → child の task assignment、inter-agent message、wait/result、child → parent final response を保持します。Child agent には、その agent が実際に受け取った task と自身の conversation だけを残し、継承された parent history や sibling-private content は除外します。共通 merge layer も provider、raw thread identity、agent identity を組み合わせて scope するため、provider が同じ thread ID を再利用しても Agent 1 と Agent 2 が混ざりません。
+**v0.7.4 — dashboard での per-agent conversation focus。** v0.7.3 で materialize された provider-neutral かつ agent-local な multi-agent conversation を土台に、agent node を選択すると conversation panel がその agent だけに絞り込まれ、表示項目数と全体ツリーに戻すコントロールが付きます。クリックは label の一致ではなく graph agent node identity で thread に解決されるため、同じ provider nickname を共有する agent どうしも混ざりません。Markdown の conversation セクションは provider nickname ではなく agent path で始まるようになり、各セクションがどの agent のものかを明示します。standalone viewer と live dashboard の両方が対象で、conversation materialization 自体は変更していません。
 
 統合 dashboard では execution graph、logs、conversation records を同じ inspection flow で確認できます。Finalized run は `conversations.md` と `conversations.json` を生成し、検証済み provider transcript は run-local SHA-256 content store にコピーされます。Claude Code、OpenAI Codex、Cursor、OpenCode、Google Antigravity は、それぞれが実際に公開する最も強い multi-agent evidence を利用します。gateway や local runtime が root request/response しか公開しない場合、ExecWeave は root conversation だけを表示し、subagent や hidden routing を捏造しません。
 
@@ -276,7 +276,7 @@ Conversation isolation は attribution/display の規則であり redaction boun
 
 ## 現在の状態
 
-v0.7.3 は cross-platform runtime collection、materialized execution graph、standalone/live dashboard、保守的な provider↔runtime correlation、content-addressed full-fidelity provider evidence、attributable multi-agent execution trace、run-local conversation access、provider-neutral projection 上の agent-local conversation isolation を統合します。各 integration は provider が実際に公開した最も強い identity/routing evidence のみを保持し、不足する場合は abstain します。Observed evidence と inference は設計上分離されたままです。
+v0.7.4 は cross-platform runtime collection、materialized execution graph、standalone/live dashboard、保守的な provider↔runtime correlation、content-addressed full-fidelity provider evidence、attributable multi-agent execution trace、run-local conversation access、provider-neutral projection 上の agent-local conversation isolation、standalone および live dashboard での per-agent conversation focus を統合します。各 integration は provider が実際に公開した最も強い identity/routing evidence のみを保持し、不足する場合は abstain します。Observed evidence と inference は設計上分離されたままです。
 
 ## ドキュメント
 

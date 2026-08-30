@@ -31,7 +31,7 @@ ExecWeave — source-available, local-first проект наблюдаемос�
 python -m pip install -U execweave
 ```
 
-Текущая версия — **v0.7.3**.
+Текущая версия — **v0.7.4**.
 
 Для разработки:
 
@@ -67,7 +67,7 @@ execweave record --open -- python my_agent.py
 
 `execweave top -- codex` оставляет Agent интерактивным в стартовом terminal и одновременно открывает либо подключает detached Top dashboard в зависимости от host environment.
 
-**v0.7.3 — provider-neutral, agent-local multi-agent conversations.** ExecWeave теперь проецирует conversation evidence, реально раскрытую provider, в отдельные dashboard threads для каждого agent, вместо копирования одного полного transcript во все agent nodes. Если provider предоставляет authoritative identity / routing evidence, сохраняются parent → child task assignments, inter-agent messages, waits/results и child → parent final responses. Child agent содержит только фактически полученную им task и собственную conversation; inherited parent history и sibling-private content исключаются. Общий merge layer также scope-ит данные по provider, raw thread identity и agent identity, поэтому даже повторно использованный thread ID не сможет объединить Agent 1 и Agent 2.
+**v0.7.4 — фокус на conversation отдельного agent в dashboard.** Опираясь на provider-neutral, agent-local multi-agent conversations, материализованные в v0.7.3, выбор agent node теперь ограничивает conversation panel только этим agent, показывая число видимых элементов и control для возврата к полному дереву. Клик сопоставляется с thread по identity graph agent node, а не по совпадению label, поэтому agents с одинаковым provider nickname остаются различимыми. Секции conversation в Markdown теперь начинаются с agent path, а не с provider nickname, так что каждая секция называет свой agent. Покрыты и standalone viewer, и live dashboard; сама материализация conversation не изменена.
 
 Единый dashboard объединяет execution graph, logs и conversation records в одном inspection flow. Finalized runs создают `conversations.md` и `conversations.json`, а проверенные provider transcripts копируются в run-local SHA-256 content store. Claude Code, OpenAI Codex, Cursor, OpenCode и Google Antigravity используют наиболее сильную multi-agent evidence, которую реально раскрывает соответствующая integration. Если gateway или local runtime показывает только root request/response, ExecWeave отображает только root conversation и не выдумывает subagents или hidden routing.
 
@@ -276,7 +276,7 @@ Conversation isolation — это правило attribution/display, а не re
 
 ## Текущий статус
 
-v0.7.3 объединяет cross-platform runtime collection, materialized execution graphs, standalone/live dashboards, conservative provider↔runtime correlation, full-fidelity content-addressed provider evidence, attributable multi-agent execution traces, прямой run-local conversation access и agent-local conversation isolation в provider-neutral projections. Каждая integration сохраняет только наиболее сильную identity/routing evidence, реально раскрытую provider, и abstain-ит при её отсутствии. Observed evidence и inference по-прежнему разделены архитектурно.
+v0.7.4 объединяет cross-platform runtime collection, materialized execution graphs, standalone/live dashboards, conservative provider↔runtime correlation, full-fidelity content-addressed provider evidence, attributable multi-agent execution traces, прямой run-local conversation access agent-local conversation isolation в provider-neutral projections и per-agent conversation focus в standalone и live dashboards. Каждая integration сохраняет только наиболее сильную identity/routing evidence, реально раскрытую provider, и abstain-ит при её отсутствии. Observed evidence и inference по-прежнему разделены архитектурно.
 
 ## Документация
 
