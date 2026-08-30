@@ -114,25 +114,22 @@ def test_projection_decorates_reference_without_mutating_or_embedding_raw_graph(
     assert reference["complete_from_source"] is True
 
 
-def test_projected_standalone_viewer_has_expandable_reference_only_inspector() -> None:
+def test_unified_viewer_preserves_reference_metadata_without_legacy_content_inspector() -> None:
     raw = _graph(_content_node("claude.tool_input"))
 
     html = render_graph_html(raw)
 
-    assert "content-inspector" in html
     assert "Tool Input" in html
     assert f"content/sha256/{'a' * 64}.json" in html
-    assert "Open stored content" in html
-    assert "sandbox" in html
-    assert "location.protocol==='file:'" in html
-    assert "Content bytes are not fetched over HTTP by this inspector" in html
-    assert "This does not imply visibility into hidden model/provider state" in html
-    assert "content_embedded_in_viewer\":false" in html
-    assert "http_content_serving_enabled\":false" in html
+    assert '"content_embedded_in_viewer":false' in html
+    assert '"http_content_serving_enabled":false' in html
+    assert "window.__execweaveStaticGraph=" in html
+    assert "content-inspector" not in html
+    assert "Open stored content" not in html
     assert "PRIVATE_TOOL_BODY_THAT_IS_NOT_IN_THE_GRAPH" not in html
 
 
-def test_standalone_viewer_exposes_agent_communication_and_activity_inspector() -> None:
+def test_unified_viewer_preserves_agent_communication_evidence_without_legacy_inspector() -> None:
     payload = _content_node("codex.agent_message.payload", digest="b" * 64)
     agent = {
         "id": "agent:codex:root",
@@ -187,14 +184,12 @@ def test_standalone_viewer_exposes_agent_communication_and_activity_inspector() 
 
     html = render_graph_html(raw)
 
-    assert "Agent communications" in html
-    assert "Agent activity" in html
-    assert "Inspect edge" in html
-    assert "Inspect peer" in html
     assert "SENT_AGENT_MESSAGE" in html
+    assert "HAS_AGENT_MESSAGE_PAYLOAD" in html
     assert "Agent Message Payload" in html
     assert f"content/sha256/{'b' * 64}.json" in html
-    assert "execweavePayloadNodes" in html
+    assert "Agent communications" not in html
+    assert "execweavePayloadNodes" not in html
 
 
 def test_invalid_content_ref_stays_generic_and_does_not_gain_local_file_link() -> None:
