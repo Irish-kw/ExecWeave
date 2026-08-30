@@ -1,15 +1,19 @@
 name: Provider Capability Stage Integrity
 
+# No path filter. This job guards release red lines — the disabled CONNECT handler,
+# the existing test set, the conversation completeness vocabulary, release metadata —
+# so it must run on every pull request. A filter listing only the capability-probe
+# files would arm the guard exactly when the guarded files are NOT the ones changing:
+# a pull request that weakens http_proxy.py, deletes a test, or bumps the version
+# while touching none of those paths would skip this job entirely.
 on:
   pull_request:
-    paths:
-      - ".github/workflows/provider-capability-stage-integrity.yml"
-      - "docs/internal/provider-capability-matrix.md"
-      - "scripts/probe_provider_capability.py"
-      - "scripts/check_release_stage_integrity.py"
-      - "src/execweave/evidence_availability.py"
-      - "src/execweave/provider_capability.py"
-      - "tests/test_provider_capability.py"
+  workflow_dispatch:
+    inputs:
+      baseline_ref:
+        description: Base commit or ref used to reconstruct baseline test node IDs
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -35,4 +39,4 @@ jobs:
       - name: Validate stage integrity
         run: >-
           python scripts/check_release_stage_integrity.py
-          --baseline-ref "${{ github.event.pull_request.base.sha }}"
+          --baseline-ref "${{ github.event.pull_request.base.sha || inputs.baseline_ref }}"
