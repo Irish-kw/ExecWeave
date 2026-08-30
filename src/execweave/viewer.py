@@ -261,6 +261,39 @@ function execweaveInjectedContext(text){
   const value=String(text||'');
   return value.startsWith('<recommended_plugins>')||value.startsWith('<environment_context>');
 }
+function execweaveGroupSaidTurns(messages){
+  // Consecutive turns the provider did not expose collapse into one line. They are
+  // grouped by sender only: a run of assignments root wrote to three different
+  // children is one line that still names all three, so nothing about who was
+  // dispatched is lost to the fold.
+  const groups=[];
+  for(const message of messages){
+    const encrypted=message?.content_state==='provider_encrypted',
+          sender=String(message?.sender||''),recipient=String(message?.recipient||''),
+          last=groups[groups.length-1];
+    if(encrypted&&last&&last.encrypted&&last.sender===sender){
+      last.count+=1;
+      if(recipient&&!last.recipients.includes(recipient))last.recipients.push(recipient);
+      continue;
+    }
+    groups.push({encrypted,count:1,sender,recipients:recipient?[recipient]:[],message});
+  }
+  return groups;
+}
+function execweaveAppendSaidGroup(box,group,path){
+  if(group.count===1){execweaveAppendSaidTurn(box,group.message,path);return}
+  const row=document.createElement('div');row.className='execweave-said-turn';
+  const who=document.createElement('div');who.className='execweave-said-who';
+  if(group.sender===path){who.classList.add('self');who.textContent='this agent'}
+  else who.textContent=group.sender||'\u2014';
+  const others=group.recipients.filter(value=>value!==path);
+  if(others.length)who.textContent+=' \u2192';
+  row.appendChild(who);
+  const body=document.createElement('div');body.className='execweave-said-body quiet';
+  body.textContent=`${group.count} turns the provider did not expose`
+    +(others.length?` \u2192 ${others.join(', ')}`:'');
+  row.appendChild(body);box.appendChild(row);
+}
 function execweaveAppendSaidTurn(box,message,path){
   const row=document.createElement('div');row.className='execweave-said-turn';
   const sender=String(message?.sender||''),recipient=String(message?.recipient||'');
@@ -307,7 +340,7 @@ function execweaveAgentSaid(node){
     none.textContent='No conversation evidence is available for this agent.';box.appendChild(none);
     return box;
   }
-  for(const message of messages)execweaveAppendSaidTurn(box,message,record.path||record.label);
+  for(const group of execweaveGroupSaidTurns(messages))execweaveAppendSaidGroup(box,group,record.path||record.label);
   return box;
 }
 function showDetails(kind,value){

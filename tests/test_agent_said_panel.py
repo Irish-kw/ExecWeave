@@ -14,6 +14,7 @@ still readable behind a disclosure.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -116,7 +117,7 @@ def _entries() -> list[dict[str, Any]]:
     ]
 
 
-def _panel(tmp_path: Path) -> dict[str, Any]:
+def _panel_script(tmp_path: Path, path: str = "/root/alpha"):
     """Render the shipped showDetails for an agent and report what it drew."""
     from execweave.viewer_projection import write_graph_html
 
@@ -142,10 +143,11 @@ const document={createElement(tag){const node=el(tag);node.classList.self=node;
 """
         + helpers
         + """
-const record={path:'/root/alpha',label:'/root/alpha',nodeId:'agent:codex:S:subagent:one'};
+const record={path:process.env.EW_PATH||'/root/alpha'};
 const messages=JSON.parse(process.argv[2]);
 const box=document.createElement('div');
-for(const message of messages)execweaveAppendSaidTurn(box,message,record.path);
+for(const group of execweaveGroupSaidTurns(messages))
+  execweaveAppendSaidGroup(box,group,record.path);
 const flat=box.children.map(row=>{
   const who=row.children[0],body=row.children[1];
   const inner=body.children.length?body.children[0]:null;
@@ -159,19 +161,25 @@ console.log(JSON.stringify(flat));
 """,
         encoding="utf-8",
     )
-    messages = _entries()[0]["conversation_preview"]["messages"]
+    return script
+
+
+def _render(messages: list[dict[str, Any]], path: str, tmp_path: Path) -> list[dict[str, Any]]:
+    script = _panel_script(tmp_path, path)
+    env = {**os.environ, "EW_PATH": path}
     result = subprocess.run(
         [shutil.which("node"), str(script), json.dumps(messages)],
+        env=env,
         capture_output=True,
         text=True,
         check=True,
     )
-    return {"turns": json.loads(result.stdout)}
+    return json.loads(result.stdout)
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is unavailable")
 def test_turns_read_as_who_said_what(tmp_path: Path) -> None:
-    turns = _panel(tmp_path)["turns"]
+    turns = _render(_entries()[0]["conversation_preview"]["messages"], "/root/alpha", tmp_path)
     # An inbound turn names its sender; only an outbound turn carries the arrow.
     assert [turn["who"] for turn in turns] == ["/root", "/root", "this agent →"]
 
@@ -185,3 +193,51 @@ def test_turns_read_as_who_said_what(tmp_path: Path) -> None:
 
     assert answer["body"] == "ALPHA ANSWER"
     assert not answer["folded"] and not answer["quiet"]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is unavailable")
+def test_a_run_of_unexposed_turns_collapses_but_still_names_its_recipients(
+    tmp_path: Path,
+) -> None:
+    """Root dispatched three children behind encryption; one line, three names."""
+    messages = [
+        {"sender": "/root", "recipient": "/root/a", "text": "", "content_state": "provider_encrypted"},
+        {"sender": "/root", "recipient": "/root/b", "text": "", "content_state": "provider_encrypted"},
+        {"sender": "/root", "recipient": "/root/c", "text": "", "content_state": "provider_encrypted"},
+        {"sender": "/root", "recipient": None, "text": "three are working on it"},
+    ]
+    turns = _render(messages, "/root", tmp_path)
+    assert len(turns) == 2, [turn["body"] for turn in turns]
+
+    collapsed = turns[0]
+    assert collapsed["quiet"]
+    assert collapsed["body"].startswith("3 turns the provider did not expose")
+    for child in ("/root/a", "/root/b", "/root/c"):
+        assert child in collapsed["body"], "a fold must not hide who was dispatched"
+    assert turns[1]["body"] == "three are working on it"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is unavailable")
+def test_a_lone_unexposed_turn_is_not_reworded_as_a_run(tmp_path: Path) -> None:
+    turns = _render(
+        [{"sender": "/root", "recipient": "/root/a", "text": "", "content_state": "provider_encrypted"}],
+        "/root",
+        tmp_path,
+    )
+    assert len(turns) == 1
+    assert turns[0]["body"].startswith("provider-encrypted")
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is unavailable")
+def test_unexposed_turns_from_different_senders_do_not_merge(tmp_path: Path) -> None:
+    """Merging across senders would claim one party said what two parties said."""
+    turns = _render(
+        [
+            {"sender": "/root", "recipient": "/root/a", "text": "", "content_state": "provider_encrypted"},
+            {"sender": "/root/a", "recipient": "/root", "text": "", "content_state": "provider_encrypted"},
+        ],
+        "/root/a",
+        tmp_path,
+    )
+    assert len(turns) == 2, "two senders must stay two rows"
+    assert [turn["who"] for turn in turns] == ["/root", "this agent \u2192"]
