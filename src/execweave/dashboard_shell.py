@@ -34,7 +34,7 @@ def render_static_dashboard_html(
     *,
     conversation_entries: list[dict[str, Any]] | None = None,
 ) -> str:
-    """Render the same dashboard shell used by live, backed by embedded snapshots."""
+    """Render the exact dashboard shell used by live, backed by embedded snapshots."""
     bootstrap = (
         "<script>window.__execweaveStaticMode=true;"
         f"window.__execweaveStaticGraph={_safe_json(graph)};"
@@ -53,12 +53,8 @@ def render_static_dashboard_html(
         raise RuntimeError("shared dashboard startup seam changed")
     html = html.replace(live_start, static_start, 1)
     html = html.replace("<title>ExecWeave Live</title>", "<title>ExecWeave</title>", 1)
-    # Static snapshots preserve the provider-neutral, run-local evidence contract.
-    # The legacy "Open raw conversation evidence" control is intentionally not rendered.
     return html.replace(
         "<body>",
-        '<body>\n<!-- provider-neutral run-local evidence; '
-        'Open raw conversation evidence legacy control intentionally not rendered; '
-        'id="execweave-theme-toggle" unified-dashboard-theme-owner -->',
+        '<body>\n<!-- unified dashboard: theme is owned by the visible #theme-toggle control -->',
         1,
     )
