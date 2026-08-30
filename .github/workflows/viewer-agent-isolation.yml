@@ -1,10 +1,8 @@
 name: Viewer Agent Isolation
 
-# Every agent-isolation defect this project shipped passed the unit suite and was
-# found by a person opening the page. This job opens the pages instead: it renders
-# one four-agent run through both shipped viewers and reads what each agent shows.
-# The live dashboard is exercised mid-run, because that is the state in which it
-# showed every agent every other agent's conversation.
+# The release gate opens the actual dashboard in Chromium. It reads the visible
+# root/subagent/non-agent inspectors, compares live with viewer.html, and archives
+# screenshots plus the rendered live.html for a human visual pass.
 on:
   pull_request:
   push:
@@ -31,10 +29,17 @@ jobs:
       - name: Install Chromium
         run: python -m playwright install --with-deps chromium
 
-      # EXECWEAVE_E2E_REQUIRED turns a missing browser into a failure. Without it
-      # the checks skip themselves when the browser cannot start, and a skipped
-      # viewer check is indistinguishable from a passing one.
-      - name: Read both viewers in a browser
+      - name: Read live and viewer.html in a browser
         env:
           EXECWEAVE_E2E_REQUIRED: "1"
+          EXECWEAVE_VISUAL_ARTIFACT_DIR: visual-artifacts
         run: python -m pytest -m viewer_e2e -v
+
+      - name: Upload visual release evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unified-dashboard-visuals
+          path: visual-artifacts
+          if-no-files-found: error
+          retention-days: 7

@@ -9,6 +9,7 @@ from .live_view_script_b import LIVE_SCRIPT_B
 from .live_view_script_c import LIVE_SCRIPT_C
 from .live_view_script_d import LIVE_SCRIPT_D
 from .live_view_style import LIVE_STYLE
+from .viewer_agent_panel import inject_agent_panel
 
 
 _SAFE_GIF_LZW = (
@@ -27,7 +28,7 @@ _SAFE_GIF_LZW = (
 
 
 def _restore_live_safety_contracts(html: str) -> str:
-    """Preserve the established live-view safety contracts after modular assembly."""
+    """Preserve live-view safety contracts while retiring legacy final-page swapping."""
     html = html.replace(
         "activityFilter='all',cameraTimer=null,animationFrame=null,activitySerial=0;",
         "activityFilter='all',cameraTimer=null,animationFrame=null,activitySerial=0,"
@@ -67,25 +68,45 @@ def _restore_live_safety_contracts(html: str) -> str:
     if lzw_count != 1:
         raise RuntimeError("live GIF encoder patch target not found")
 
-    old_open_final = (
+    open_final_button = '<button id="open-final" type="button">Open final graph</button>'
+    if open_final_button not in html:
+        raise RuntimeError("legacy final action patch target not found")
+    html = html.replace(open_final_button, "", 1)
+    html = html.replace(
+        ",openFinalButton=document.getElementById('open-final')",
+        "",
+        1,
+    )
+    html = html.replace(
+        "let rawEntries=[],logMode='structured',finishedShown=false,"
+        "finalHtmlCache=null,replaying=false;",
+        "let rawEntries=[],logMode='structured',finishedShown=false,replaying=false;",
+        1,
+    )
+    old_final_flow = (
+        "async function prepareFinalView(){try{const response=await fetch('/final',"
+        "{cache:'no-store'});if(!response.ok)throw new Error(String(response.status));"
+        "finalHtmlCache=await response.text()}catch(_){finalHtmlCache=null}}\n"
         "function openFinal(){if(!finalHtmlCache)return;document.open();"
-        "document.write(finalHtmlCache);document.close()}"
+        "document.write(finalHtmlCache);document.close()}\n"
+        "function onFinished(){if(finishedShown)return;finishedShown=true;"
+        "finishedActions.hidden=false;prepareFinalView()}\n"
+        "replayButton.onclick=replayRun;gifButton.onclick=downloadGif;"
+        "openFinalButton.onclick=openFinal;"
     )
-    new_open_final = (
-        "function openFinal(){if(!finalHtmlCache)return;"
-        "const finalWindow=window.open('about:blank','_blank');"
-        "if(!finalWindow){window.alert('Allow pop-ups to open the final graph.');return}"
-        "finalWindow.document.open();finalWindow.document.write(finalHtmlCache);"
-        "finalWindow.document.close();try{finalWindow.opener=null}catch(_){}}"
+    new_final_flow = (
+        "function onFinished(){if(finishedShown)return;finishedShown=true;"
+        "finishedActions.hidden=false}\n"
+        "replayButton.onclick=replayRun;gifButton.onclick=downloadGif;"
     )
-    if old_open_final not in html:
-        raise RuntimeError("final graph navigation patch target not found")
-    html = html.replace(old_open_final, new_open_final, 1)
-    return html
+    if old_final_flow not in html:
+        raise RuntimeError("legacy final renderer patch target not found")
+    return html.replace(old_final_flow, new_final_flow, 1)
 
 
-LIVE_HTML = _restore_live_safety_contracts(
-    f"""<!doctype html>
+LIVE_HTML = inject_agent_panel(
+    _restore_live_safety_contracts(
+        f"""<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -103,4 +124,5 @@ LIVE_HTML = _restore_live_safety_contracts(
 </script>
 </body>
 </html>"""
+    )
 )

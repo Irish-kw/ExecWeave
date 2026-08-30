@@ -183,10 +183,6 @@ def test_agent_labels_are_provider_neutral_without_mutating_raw_graph() -> None:
     ):
         assert root_id in html
     assert "providerRootIds.has(String(node.id||''))" in html
-    # The label must identify the agent. An eight-character slice of a
-    # time-ordered id is a timestamp siblings share, so it named two agents the
-    # same; the projection resolves the namespaced topology path instead and
-    # falls back to the provider's nickname.
     assert "attrs.agent_path||attrs.child_agent_path||attrs.root_agent_path" in html
     assert "subagent · ${nickname}" in html
     assert "subagent · ${agentId.slice(0,8)}" not in html
@@ -206,17 +202,16 @@ def test_live_logs_are_vertically_resizable_without_expanding_log_retention() ->
 def test_live_conversation_panel_is_provider_neutral_rooted_agent_tree() -> None:
     html = live_module._LIVE_HTML
 
-    assert "execweave-conversation-root-node" in html
-    assert "execweave-conversation-children" in html
-    assert "agent · waiting" in html
-    assert "conversationRootIds=new Set(" in html
-    assert "provider-neutral run-local record" in html
-    assert "sender&&sender!==currentPath" in html
-    assert "`${sender||currentPath} → ${recipient}`" in html
-    assert (
-        "Provider-encrypted payload — plaintext is not exposed by the observed provider surface."
-        in html
-    )
+    # Historical test identity retained: v0.7.9 intentionally removes the rooted
+    # conversation tree. Provider-neutral selection is now one compact inspector.
+    assert "window.__execweaveAgentPanel" in html
+    assert "function rootFields(messages,path)" in html
+    assert "function childFields(messages,path)" in html
+    assert "execweave-conversation-root-node" not in html
+    assert "execweave-conversation-children" not in html
+    assert "Show all agents" not in html
+    assert "Open raw conversation evidence" not in html
+    assert "Observed — plaintext not exposed by provider." in html
     assert "not exposed by the Codex rollout" not in html
 
 

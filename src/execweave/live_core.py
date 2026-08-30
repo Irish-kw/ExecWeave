@@ -51,7 +51,7 @@ _FINAL_THEME_CONTROLS = r"""
 
 
 def _inject_final_theme(html: str) -> str:
-    if 'id="execweave-theme-toggle"' in html:
+    if 'id="theme-toggle"' in html or 'id="execweave-theme-toggle"' in html:
         return html
     themed = html.replace("</style>", _FINAL_THEME_CSS + "\n</style>", 1)
     return themed.replace("</body>", _FINAL_THEME_CONTROLS + "\n</body>", 1)
@@ -66,17 +66,11 @@ def _inject_live_auth(html: str) -> str:
         "const MAX_NODES="
     )
     authenticated = html.replace(marker, replacement, 1)
-    authenticated = authenticated.replace(
+    return authenticated.replace(
         "fetch(`/live.json?after=${liveSequence}`,{cache:'no-store'})",
         "fetch(`/live.json?after=${liveSequence}`,{cache:'no-store',headers:{'X-ExecWeave-Token':liveAuthToken}})",
         1,
     )
-    authenticated = authenticated.replace(
-        "if(finished){setTimeout(()=>{location.href='/final'},250);return}",
-        "if(finished){setTimeout(async()=>{try{const finalResponse=await fetch('/final',{cache:'no-store',headers:{'X-ExecWeave-Token':liveAuthToken}});if(!finalResponse.ok)throw new Error(String(finalResponse.status));const finalHtml=await finalResponse.text();document.open();document.write(finalHtml);document.close()}catch(_){status.textContent='RECONNECTING'}},250);return}",
-        1,
-    )
-    return authenticated
 
 
 _AUTHENTICATED_LIVE_HTML = _inject_live_auth(_LIVE_HTML)
@@ -520,10 +514,16 @@ class _LiveState:
                 "live_finished": self._finished,
             }
 
-    def finish(self, graph: dict[str, object]) -> None:
+    def finish(self, graph: dict[str, object], *, final_html: str | None = None) -> None:
+        final_graph = dict(graph)
+        rendered_final = (
+            final_html
+            if isinstance(final_html, str)
+            else _inject_final_theme(render_graph_html(final_graph))
+        )
         with self._lock:
-            self._final_graph = dict(graph)
-            self._final_html = _inject_final_theme(render_graph_html(graph))
+            self._final_graph = final_graph
+            self._final_html = rendered_final
             self._finished = True
             counts = self._counts_locked()
             node_count = int(counts["node_count"])
@@ -711,7 +711,7 @@ def run_live(
         graph_payload = execution_graph.to_dict()
         write_execution_graph(execution_graph, graph_path)
         write_graph_html(graph_payload, viewer_path, open_browser=False)
-        state.finish(graph_payload)
+        state.finish(graph_payload, final_html=viewer_path.read_text(encoding="utf-8"))
         if linger_seconds:
             time.sleep(linger_seconds)
 

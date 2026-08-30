@@ -57,12 +57,12 @@ def test_agent_viewer_explains_provider_visibility_gap() -> None:
 
     html = render_graph_html(graph)
 
-    assert "Provider trace visibility" in html
-    assert "Not exposed by provider source" in html
-    assert "source capability boundary" in html
-    assert "execweaveAgentTraceCapability" in html
     assert "agent-trace-capability:gemini" in html
+    assert "DECLARES_AGENT_TRACE_VISIBILITY" in html
     assert "not_exposed_by_source" in html
+    assert "window.__execweaveStaticGraph=" in html
+    assert "Provider trace visibility" not in html
+    assert "execweaveAgentTraceCapability" not in html
 
 
 def test_agent_viewer_supports_provider_capability_fallback_for_rollout_agents() -> None:
@@ -110,8 +110,8 @@ def test_agent_viewer_supports_provider_capability_fallback_for_rollout_agents()
 
     html = render_graph_html(graph)
 
-    assert "Provider exposes rollout graph" in html
-    assert "Provider exposes thread identity" in html
-    assert "Provider exposes text / summary / encoded form" in html
     assert "SPAWNED_AGENT" in html
     assert "provider_exposed_rollout_graph" in html
+    assert "provider_exposed_thread_identity" in html
+    assert "provider_exposed_plaintext_summary_or_encoded" in html
+    assert "Provider exposes rollout graph" not in html

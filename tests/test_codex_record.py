@@ -102,7 +102,9 @@ def test_codex_record_binds_hook_sidecar_and_builds_correlated_artifacts(
     assert summary["tool_calls_considered"] == 1
     assert summary["skipped_unsupported"] == 1
     viewer_html = result.correlated_viewer.read_text(encoding="utf-8")
-    assert 'id="correlation-section"' in viewer_html
+    assert "window.__execweaveStaticGraph=" in viewer_html
+    assert '"correlation":{' in viewer_html
+    assert 'id="correlation-section"' not in viewer_html
 
 
 def test_codex_record_without_hook_events_falls_back_to_runtime_graph(tmp_path: Path) -> None:

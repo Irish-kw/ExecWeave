@@ -212,18 +212,22 @@ def test_conversation_index_and_static_dashboard_use_run_local_links(tmp_path: P
     viewer = tmp_path / "viewer.html"
     write_graph_html(graph, viewer)
     html = viewer.read_text(encoding="utf-8")
-    assert "Conversation records" in html
-    assert "Open complete conversation index" in html
+    assert "window.__execweaveStaticConversations=" in html
     assert f"content/sha256/{digest}.txt" in html
+    assert "Conversation records" not in html
+    assert "Open complete conversation index" not in html
     assert (tmp_path / "conversations.md").is_file()
     assert (tmp_path / "conversations.json").is_file()
 
 
 def test_live_dashboard_includes_conversation_panel_and_authenticated_links() -> None:
-    assert 'id="conversation-records"' in live_module._LIVE_HTML
-    assert "run-local record" in live_module._LIVE_HTML
+    html = live_module._LIVE_HTML
+    assert "window.__execweaveAgentPanel" in html
+    assert 'id="conversation-records"' not in html
+    assert 'id="execweave-conversation-panel"' not in html
+    assert "fetch('/conversations.json',{cache:'no-store',headers})" in html
     assert "window.__execweaveToken" in live_module._AUTHENTICATED_LIVE_HTML
-    assert "/conversations.md" in live_module._LIVE_HTML
+    assert "X-ExecWeave-Token" in live_module._AUTHENTICATED_LIVE_HTML
 
 
 def test_live_content_server_auth_and_path_boundaries(tmp_path: Path) -> None:

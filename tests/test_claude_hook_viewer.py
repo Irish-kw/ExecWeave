@@ -97,4 +97,5 @@ def test_agent_viewer_includes_claude_task_lifecycle_in_communications() -> None
     assert "CREATED_AGENT_TASK" in html
     assert "COMPLETED_AGENT_TASK" in html
     assert "agent_task" in html
-    assert "Agent communications" in html
+    assert "window.__execweaveStaticGraph=" in html
+    assert "Agent communications" not in html

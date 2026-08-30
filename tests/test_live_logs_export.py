@@ -71,7 +71,7 @@ def test_live_dashboard_has_structured_and_raw_log_modes() -> None:
 def test_finished_dashboard_supports_replay_and_gif_export() -> None:
     assert 'id="replay-run"' in LIVE_HTML
     assert 'id="download-gif"' in LIVE_HTML
-    assert 'id="open-final"' in LIVE_HTML
+    assert 'id="open-final"' not in LIVE_HTML
     assert "function replayRun()" in LIVE_HTML
     assert "function gifBlob(" in LIVE_HTML
     assert "GIF89a" in LIVE_HTML
@@ -81,10 +81,11 @@ def test_finished_dashboard_supports_replay_and_gif_export() -> None:
 
 
 def test_replay_final_fetch_keeps_live_authentication() -> None:
+    # Historical test name retained. v0.7.9 no longer fetches /final or replaces
+    # the document at completion; authentication remains on the live data channel.
     assert "window.__execweaveToken=liveAuthToken" in _AUTHENTICATED_LIVE_HTML
-    assert (
-        "fetch('/final',{cache:'no-store',headers:{"
-        "'X-ExecWeave-Token':window.__execweaveToken||''}})"
-        in _AUTHENTICATED_LIVE_HTML
-    )
+    assert "X-ExecWeave-Token':liveAuthToken" in _AUTHENTICATED_LIVE_HTML
+    assert "fetch('/final'" not in _AUTHENTICATED_LIVE_HTML
     assert "location.href='/final'" not in _AUTHENTICATED_LIVE_HTML
+    assert "document.write(" not in _AUTHENTICATED_LIVE_HTML
+    assert "window.open('about:blank','_blank')" not in _AUTHENTICATED_LIVE_HTML

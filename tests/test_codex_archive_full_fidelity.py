@@ -206,7 +206,9 @@ def test_codex_archive_preserves_complete_rollout_bytes_and_dashboard_preview(
     assert "Banach" in html
     assert "找出今晚仍營業的宵夜候選，整理首選與備案回報給 root。" in html
     assert "已與顧問 A 收斂：首選小李子清粥小菜，備案東引小吃店。" in html
-    assert "Provider-encrypted payload" in html
+    assert '"content_state":"provider_encrypted"' in html
+    assert "Provider-encrypted payload" not in html
+    assert "window.__execweaveStaticGraph=" in html
 
 
 def test_codex_visibility_uses_canonical_root_identity() -> None:

@@ -89,8 +89,9 @@ def test_claude_record_binds_hook_sidecar_and_builds_semantic_graph(
     assert summary["skipped_unsupported"] == result.correlation.skipped_unsupported
     assert summary["max_window_ms"] == result.correlation.max_window_ms
     viewer_html = result.correlated_viewer.read_text(encoding="utf-8")
-    assert 'id="correlation-section"' in viewer_html
+    assert "window.__execweaveStaticGraph=" in viewer_html
     assert '"correlation":{' in viewer_html
+    assert 'id="correlation-section"' not in viewer_html
 
 
 def test_claude_record_without_hook_events_falls_back_to_runtime_graph(tmp_path: Path) -> None:

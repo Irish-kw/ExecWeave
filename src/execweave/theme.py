@@ -19,7 +19,13 @@ _THEME_CONTROLS = r"""
 
 
 def inject_viewer_theme(html: str) -> str:
-    if 'id="execweave-theme-toggle"' in html:
+    """Inject the legacy standalone theme only when the page has no theme owner.
+
+    The v0.7.9 unified dashboard already ships the visible ``#theme-toggle`` and
+    its theme logic. Detect that real control instead of relying on a fake comment
+    sentinel, so ``execweave view`` cannot add a second theme implementation.
+    """
+    if 'id="theme-toggle"' in html or 'id="execweave-theme-toggle"' in html:
         return html
     themed = html.replace("</style>", _THEME_CSS + "\n</style>", 1)
     return themed.replace("</body>", _THEME_CONTROLS + "\n</body>", 1)

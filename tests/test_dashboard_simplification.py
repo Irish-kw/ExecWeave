@@ -148,11 +148,12 @@ def test_static_dashboard_cleans_only_canvas_and_keeps_embedded_evidence() -> No
     assert "execweaveDashboardGraphBase" in html
     assert "'agent_trace_capability','session','command'" in html
     assert "mergeTypes=new Set(['model','directory','network_endpoint'])" in html
-    assert "execweave-conversation-root-node" in html
+    assert "window.__execweaveStaticGraph=" in html
+    assert "setSnapshot(window.__execweaveStaticGraph||{})" in html
+    assert "execweave-conversation-root-node" not in html
     assert "tool-call:a" in html
     assert "content:hook-meta" in html
     assert "agent-trace-capability:codex" in html
-    assert "return execweaveDashboardGraph({nodes:uniqueById(nodes),edges:uniqueById(edges)})" in html
     assert "loadPresets();execweavePreferAgentView();applyGraphFilters()" not in html
 
 
@@ -198,8 +199,17 @@ def test_live_dashboard_uses_client_side_summary_without_changing_protocol() -> 
     assert "execweaveDashboardGraphBase" in html
     assert "hidden_context_node_count" in html
     assert "mergeTypes=new Set(['model','directory','network_endpoint'])" in html
-    assert "execweave-conversation-root-node" in html
+    assert "window.__execweaveAgentPanel" in html
+    assert "execweave-conversation-root-node" not in html
     assert "id=\"activity-resizer\"" in html
     assert "execweave.live.activity-height" in html
     assert "pointermove" in html
     assert "provider_hook_metadata" not in html
+    assert (
+        "updateStats(protectedMode?data:{...data,node_count:nodeById.size,edge_count:edgeById.size})"
+        in html
+    )
+    assert (
+        "else if(data.kind==='noop'){liveSequence=Number(data.sequence)||liveSequence;"
+        "updateStats(data);}" not in html
+    )

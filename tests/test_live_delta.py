@@ -52,11 +52,7 @@ def test_live_state_returns_snapshot_then_only_changed_entities(tmp_path: Path) 
 
     _append(
         event_path,
-        _event(
-            event_id="event-1",
-            sequence=1,
-            timestamp="2026-08-26T00:00:00Z",
-        ),
+        _event(event_id="event-1", sequence=1, timestamp="2026-08-26T00:00:00Z"),
     )
     first = state.live_update(0)
     assert first["kind"] == "delta"
@@ -81,11 +77,7 @@ def test_live_state_returns_snapshot_then_only_changed_entities(tmp_path: Path) 
 
     _append(
         event_path,
-        _event(
-            event_id="event-2",
-            sequence=2,
-            timestamp="2026-08-26T00:00:01Z",
-        ),
+        _event(event_id="event-2", sequence=2, timestamp="2026-08-26T00:00:01Z"),
     )
     second = state.live_update(1)
     assert second["kind"] == "delta"
@@ -99,10 +91,7 @@ def test_live_state_returns_snapshot_then_only_changed_entities(tmp_path: Path) 
     assert update["edges_updated"][0]["event_ids"] == []
 
 
-def test_live_state_resyncs_when_delta_history_is_too_old(
-    monkeypatch,
-    tmp_path: Path,
-) -> None:
+def test_live_state_resyncs_when_delta_history_is_too_old(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(live_module, "LIVE_DELTA_HISTORY", 1)
     event_path = tmp_path / "events.jsonl"
     event_path.write_text("", encoding="utf-8")
@@ -139,11 +128,7 @@ def test_live_state_resyncs_when_delta_history_exceeds_byte_budget(
 
     _append(
         event_path,
-        _event(
-            event_id="event-1",
-            sequence=1,
-            timestamp="2026-08-26T00:00:00Z",
-        ),
+        _event(event_id="event-1", sequence=1, timestamp="2026-08-26T00:00:00Z"),
     )
     response = state.live_update(0)
     assert response["kind"] == "snapshot"
@@ -188,6 +173,7 @@ def test_live_finish_is_a_sequence_visible_terminal_update(tmp_path: Path) -> No
     assert terminal["updates"][0]["event_count"] == 1
     final_html = state.final_html()
     assert final_html is not None
-    assert 'id="execweave-theme-toggle"' in final_html
+    assert 'id="theme-toggle"' in final_html
+    assert 'id="execweave-theme-toggle"' not in final_html
     assert "execweave-theme" in final_html
     assert 'data-theme="light"' in final_html

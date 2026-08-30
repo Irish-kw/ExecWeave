@@ -31,9 +31,11 @@ def test_dashboard_controls_are_pinned_and_logs_can_jump_to_graph_nodes() -> Non
 
 
 def test_final_theme_toggle_is_pinned_to_the_top_right() -> None:
-    themed = _inject_final_theme("<html><head><style></style></head><body></body></html>")
-    assert "#execweave-theme-toggle{position:fixed;right:14px;top:14px;" in themed
-    assert "right:14px;bottom:14px;" not in themed
+    themed = _inject_final_theme(LIVE_HTML)
+    assert themed == LIVE_HTML
+    assert 'id="theme-toggle"' in themed
+    assert 'id="execweave-theme-toggle"' not in themed
+    assert "#theme-toggle{position:fixed;top:15px;right:16px" in themed
 
 
 def test_internal_hook_processes_are_hidden_but_provider_tools_remain() -> None:
@@ -176,7 +178,6 @@ def test_internal_hook_runtime_detector_does_not_hide_provider_tool_events() -> 
 
     assert is_internal_hook_runtime_event(hook_event) is True
     assert is_internal_hook_runtime_event(tool_event) is False
-
 
 
 

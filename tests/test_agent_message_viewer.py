@@ -100,18 +100,16 @@ def test_agent_message_viewer_shows_send_delivery_context_and_consumption_eviden
 
     html = render_graph_html(graph)
 
-    assert "Message Evidence" in html
-    assert "message-stage-grid" in html
-    assert "execweaveAppendMessageInspector" in html
+    assert "window.__execweaveStaticGraph=" in html
+    assert "window.__execweaveAgentPanel" in html
     assert "SENT_AGENT_MESSAGE" in html
     assert "DELIVERED_AGENT_MESSAGE" in html
     assert "INCLUDED_AGENT_MESSAGE_IN_INFERENCE" in html
     assert "CONSUMED_AGENT_MESSAGE" in html
-    assert "Inspect inference" in html
-    assert "not proof that the model attended to" in html
-    assert "No evidence” is not a failure state" in html
-    assert "Agent Message Payload" in html
+    assert "HAS_AGENT_MESSAGE_PAYLOAD" in html
     assert f"content/sha256/{digest}.json" in html
+    assert "Message Evidence" not in html
+    assert "message-stage-grid" not in html
 
 
 def test_agent_message_viewer_keeps_missing_stages_neutral() -> None:
@@ -133,6 +131,8 @@ def test_agent_message_viewer_keeps_missing_stages_neutral() -> None:
 
     html = render_graph_html(graph)
 
-    assert "value.textContent=observed?'Observed':'No evidence'" in html
-    assert "No evidence” is not a failure state" in html
-    assert "message-stage is-failed" not in html
+    assert "agent-message:codex:m2" in html
+    assert "Codex agent message" in html
+    assert "window.__execweaveStaticGraph=" in html
+    assert "message-stage" not in html
+    assert "Message Evidence" not in html

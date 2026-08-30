@@ -24,7 +24,7 @@ import pytest
 
 SRC = Path(__file__).resolve().parents[1] / "src" / "execweave"
 FOCUS = SRC / "viewer_dashboard_focus.py"
-PANEL = SRC / "viewer_conversation_panel.py"
+PANEL = SRC / "viewer_agent_panel.py"
 
 # Real ids from a four-agent Codex run: the first eight characters of the first
 # two are identical, which is what collapsed them into one visible label.
@@ -78,33 +78,19 @@ def test_dashboard_projection_reads_the_namespaced_topology_paths() -> None:
 
 
 def test_conversation_panel_fallback_reads_them_too() -> None:
-    """Neither viewer may render conversation records outside the per-agent projection.
+    """The single compact inspector must refresh the scoped index during a live run.
 
-    The name is historical, and the node-ID floor is why it is kept: this test used
-    to require that the fallback resolve the namespaced agent paths in its rows.
-
-    Both panels used to fall back to a flat list of every stored conversation
-    record: no per-agent filtering, and no regard for the selected node. The live
-    dashboard reached it on every run, because the index it needs was only
-    fetched once the run had finished. Resolving the namespaced agent path in
-    those rows — what this test used to require — only made the leak better
-    labelled.
+    The historical fallback panel is gone. The surviving inspector resolves the
+    selected node's namespaced path and refreshes the authenticated conversation
+    index without creating a second, unscoped record list.
     """
     source = PANEL.read_text(encoding="utf-8")
-    assert "attributes?.child_agent_path" not in source, "the unscoped record list is back"
-    assert "conversation index loads at finalization" not in source, (
-        "the live panel must project agent conversations during the run, not after it"
-    )
-    assert "async function loadIndex(){if(indexLoading)return;" in source, (
-        "the live index must be refreshable while the run is still open"
-    )
-    assert "if(indexEntries!==null&&renderRich(indexEntries))return;loadIndex();" in source, (
-        "every live render must keep pumping the projected index"
-    )
-    assert (
-        "if(execweaveRenderRichConversationRecords(panel,embedded))return;panel.replaceChildren()"
-        in source
-    ), "the standalone viewer must fall through to an empty state, not to a record list"
+    assert "attrs(node).child_agent_path" in source
+    assert "async function refresh()" in source
+    assert "fetch('/conversations.json',{cache:'no-store',headers})" in source
+    assert "if(selectedNode)refresh()" in source
+    assert "conversation-records" not in source
+    assert "execweave-conversation-panel" not in source
 
 
 def test_a_timestamp_ordered_id_prefix_is_never_the_label() -> None:
