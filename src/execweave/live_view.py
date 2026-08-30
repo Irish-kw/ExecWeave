@@ -9,6 +9,7 @@ from .live_view_script_b import LIVE_SCRIPT_B
 from .live_view_script_c import LIVE_SCRIPT_C
 from .live_view_script_d import LIVE_SCRIPT_D
 from .live_view_style import LIVE_STYLE
+from .viewer_agent_panel import inject_agent_panel
 
 
 _SAFE_GIF_LZW = (
@@ -84,8 +85,9 @@ def _restore_live_safety_contracts(html: str) -> str:
     return html
 
 
-LIVE_HTML = _restore_live_safety_contracts(
-    f"""<!doctype html>
+LIVE_HTML = inject_agent_panel(
+    _restore_live_safety_contracts(
+        f"""<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -103,4 +105,5 @@ LIVE_HTML = _restore_live_safety_contracts(
 </script>
 </body>
 </html>"""
+    )
 )
