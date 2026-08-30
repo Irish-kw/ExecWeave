@@ -212,9 +212,10 @@ def test_conversation_index_and_static_dashboard_use_run_local_links(tmp_path: P
     viewer = tmp_path / "viewer.html"
     write_graph_html(graph, viewer)
     html = viewer.read_text(encoding="utf-8")
-    assert "Conversation records" in html
-    assert "Open complete conversation index" in html
+    assert "window.__execweaveStaticConversations=" in html
     assert f"content/sha256/{digest}.txt" in html
+    assert "Conversation records" not in html
+    assert "Open complete conversation index" not in html
     assert (tmp_path / "conversations.md").is_file()
     assert (tmp_path / "conversations.json").is_file()
 
