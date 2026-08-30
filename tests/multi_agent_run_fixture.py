@@ -34,7 +34,21 @@ def _line(ordinal: int, payload: dict[str, Any]) -> str:
     )
 
 
-def _root_rollout() -> str:
+# Codex encrypts some delegations, and a plain answer may legitimately quote the
+# words a routing envelope uses. Both are carried here so a browser check can tell
+# "observed but not exposed" apart from "never recorded", and so a parser that scans
+# for Sender:/Task name: outside a real Payload envelope loses a whole answer.
+ENCRYPTED_SPAWN_INDEX = 1
+QUOTED_ROUTING_ANSWER = (
+    "The log line I was asked about reads:\n"
+    "Sender: upstream-service\n"
+    "Task name: nightly-rebuild\n"
+    "Message type: heartbeat\n"
+    "That is quoted prose, not an envelope."
+)
+
+
+def _root_rollout(*, truncated: bool = False) -> str:
     lines = [json.dumps({"type": "session_meta", "payload": {
         "id": ROOT_THREAD, "agent_path": "/root"}}, ensure_ascii=False)]
     ordinal = 1
@@ -44,17 +58,31 @@ def _root_rollout() -> str:
     for index, (thread, path, nickname, marker) in enumerate(CHILDREN):
         ordinal += 1
         call_id = f"call_{index}"
+        message = (
+            "gAAAAA" + "encrypted-delegation"
+            if index == ENCRYPTED_SPAWN_INDEX
+            else f"answer question {index + 1}"
+        )
         lines.append(_line(ordinal, {"type": "function_call", "name": "spawn_agent",
-            "call_id": call_id,
-            "arguments": json.dumps({"message": f"answer question {index + 1}"})}))
+            "call_id": call_id, "arguments": json.dumps({"message": message})}))
         ordinal += 1
         lines.append(_line(ordinal, {"type": "function_call_output", "call_id": call_id,
             "output": json.dumps({"task_name": path, "thread_id": thread})}))
-    for thread, path, nickname, marker in CHILDREN:
+    if truncated:
+        # Codex archives the rollout on every Stop hook, so the first snapshot of a run
+        # holds the prompt and the delegations but none of the answers. A viewer that
+        # reads one entry per agent instead of aggregating them shows this one forever.
+        return "\n".join(lines) + "\n"
+    for index, (thread, path, nickname, marker) in enumerate(CHILDREN):
         ordinal += 1
+        answer = (
+            f"{marker} done\n{QUOTED_ROUTING_ANSWER}"
+            if index == 0
+            else f"{marker} done"
+        )
         lines.append(_line(ordinal, {"type": "agent_message", "author": path,
             "recipient": "/root",
-            "content": [{"type": "output_text", "text": f"{marker} done"}]}))
+            "content": [{"type": "output_text", "text": answer}]}))
     ordinal += 1
     summary = " · ".join(f"{marker}" for _, _, _, marker in CHILDREN)
     lines.append(_line(ordinal, {"type": "message", "role": "assistant",
@@ -86,7 +114,12 @@ def _child_rollout(thread: str, path: str, nickname: str, marker: str, index: in
     return "\n".join(lines) + "\n"
 
 
-def build_run(root: Path, *, per_agent_rollouts: bool = True) -> dict[str, Any]:
+def build_run(
+    root: Path,
+    *,
+    per_agent_rollouts: bool = True,
+    snapshots: int = 1,
+) -> dict[str, Any]:
     """Build the run. With ``per_agent_rollouts`` off, only the root rollout exists.
 
     That is what a real Codex run looks like: the parent's file records the delegations
@@ -100,7 +133,16 @@ def build_run(root: Path, *, per_agent_rollouts: bool = True) -> dict[str, Any]:
         "name": "OpenAI Codex", "attributes": {"provider": "codex", "agent_role": "root",
         "root_agent_path": "/root"}}]
     edges: list[dict[str, Any]] = []
-    documents = [("agent:OpenAI Codex", _root_rollout())]
+    documents: list[tuple[str, str]] = []
+    if snapshots > 1:
+        # Codex archives the rollout on every Stop hook, so one agent owns several
+        # content records and the earliest ones carry nothing a reader can use: a real
+        # four-agent run produced fourteen entries of which nine had no conversation at
+        # all. A viewer that reads the first record matching an agent finds one of
+        # these and shows an empty inspector for the rest of the run. The earliest
+        # archive is written first so index order alone would select it.
+        documents.append(("agent:OpenAI Codex", "partial archive, no session metadata\n"))
+    documents.append(("agent:OpenAI Codex", _root_rollout()))
     for index, (thread, path, nickname, marker) in enumerate(CHILDREN):
         node_id = f"agent:codex:{ROOT_THREAD}:subagent:{thread}"
         nodes.append({"id": node_id, "type": "agent", "name": "default",

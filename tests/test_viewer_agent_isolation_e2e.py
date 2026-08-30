@@ -16,7 +16,17 @@ from typing import Any
 
 import pytest
 
-from multi_agent_run_fixture import CHILDREN, build_run
+from multi_agent_run_fixture import (
+    CHILDREN,
+    ENCRYPTED_SPAWN_INDEX,
+    QUOTED_ROUTING_ANSWER,
+    build_run,
+)
+
+# The single wording the inspector uses for a turn the provider recorded but never
+# exposed in plaintext. Kept here so the browser check fails if it drifts back to a
+# phrase that claims the run observed nothing.
+ENCRYPTED_NOTICE = "Observed — plaintext not exposed by provider."
 
 MARKERS = {path: marker for _, path, _, marker in CHILDREN}
 ALL_MARKERS = set(MARKERS.values())
@@ -338,3 +348,146 @@ def test_no_agent_hands_over_a_transcript_that_is_not_its_own(tmp_path: Path) ->
                 assert not leaked, f"{path} exposes another agent through its inspector: {leaked}"
         finally:
             browser.close()
+
+def test_an_agent_archived_many_times_still_shows_its_prompt_and_answer(tmp_path: Path) -> None:
+    """One agent owns several archives, and the earliest carry nothing usable.
+
+    Codex writes the rollout again on every Stop hook. A real four-agent run produced
+    fourteen index entries of which nine held no conversation at all, and a renderer
+    that took the first record matching an agent found one of those and showed
+    "Not observed." for the prompt and the answer, permanently, for the rest of the
+    run. The inspector has to aggregate every record the agent owns.
+    """
+    from execweave.viewer_projection import write_graph_html
+
+    graph = build_run(tmp_path, snapshots=2)
+    viewer = tmp_path / "viewer.html"
+    write_graph_html(graph, viewer)
+
+    manager, executable = _browser()
+    with manager as playwright:
+        browser = _launch(playwright, executable)
+        try:
+            page = browser.new_page(viewport={"width": 1440, "height": 1000})
+            page.goto(viewer.as_uri())
+            page.wait_for_selector(".node", timeout=15000)
+            _click_id(page, _agent_id(graph, "/root"))
+            _wait_for_text(page, "spawn four agents")
+            labels, bodies = _cards(page)
+        finally:
+            browser.close()
+
+    assert labels == ["Prompt", "Final response"]
+    assert bodies[0] == "spawn four agents"
+    assert "Not observed." not in bodies, "the earliest empty archive won the selection"
+    leaked = sorted(marker for marker in ALL_MARKERS if marker not in bodies[1])
+    assert not leaked, f"the root lost answers addressed to it: {leaked}"
+
+
+def test_encrypted_turns_read_as_observed_and_quoted_routing_words_survive(
+    tmp_path: Path,
+) -> None:
+    """Two ways a turn can be misread, both checked in the page.
+
+    A delegation the provider encrypted is observed evidence whose plaintext was never
+    exposed; rendering it as "Not observed." would claim the run never recorded it. And
+    an answer that quotes ``Sender:`` or ``Task name:`` is prose, not a routing
+    envelope — a parser that scans for those words outside a real ``Payload:`` block
+    swallows the whole answer.
+    """
+    from execweave.viewer_projection import write_graph_html
+
+    graph = build_run(tmp_path, per_agent_rollouts=False)
+    viewer = tmp_path / "viewer.html"
+    write_graph_html(graph, viewer)
+    encrypted_path = CHILDREN[ENCRYPTED_SPAWN_INDEX][1]
+    quoting_path = CHILDREN[0][1]
+
+    manager, executable = _browser()
+    with manager as playwright:
+        browser = _launch(playwright, executable)
+        try:
+            page = browser.new_page(viewport={"width": 1440, "height": 1000})
+            page.goto(viewer.as_uri())
+            page.wait_for_selector(".node", timeout=15000)
+
+            _click_id(page, _agent_id(graph, encrypted_path))
+            _wait_for_text(page, MARKERS[encrypted_path])
+            labels, bodies = _cards(page)
+            assert labels == ["Task", "Thinking", "Response"]
+            assert bodies[0] == ENCRYPTED_NOTICE, (
+                "an encrypted delegation must read as observed, not as never recorded"
+            )
+
+            _click_id(page, _agent_id(graph, quoting_path))
+            _wait_for_text(page, MARKERS[quoting_path])
+            _, bodies = _cards(page)
+        finally:
+            browser.close()
+
+    for line in QUOTED_ROUTING_ANSWER.splitlines():
+        assert line in bodies[2], f"the answer lost a quoted line: {line!r}"
+
+
+def test_finishing_a_run_keeps_the_reader_on_the_same_dashboard(tmp_path: Path) -> None:
+    """Completion changes the state of the page, not which page it is.
+
+    The live dashboard used to fetch a separate ``/final`` document and write it over
+    the open one, so a reader watching a run was moved to a second renderer the moment
+    it ended. v0.7.9 has one renderer: the DOM the reader is looking at stays, its
+    nodes keep their identity, and only the terminal state changes.
+    """
+    from execweave import live as live_module
+    from execweave.viewer_projection import project_viewer_graph
+
+    graph = build_run(tmp_path)
+    projected = project_viewer_graph(graph)
+    event_path = tmp_path / "events.jsonl"
+    event_path.write_text("", encoding="utf-8")
+    state = live_module._LiveState("finish", event_path)
+    state._projected_graph_locked = lambda: dict(projected)  # type: ignore[method-assign]
+    state._viewer_projection_ever_active = True
+    token = "finish-token"
+    server = live_module._LocalThreadingHTTPServer(
+        ("127.0.0.1", 0), live_module._handler_factory(state, token)
+    )
+    server.daemon_threads = True
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    host, port = server.server_address[:2]
+
+    manager, executable = _browser()
+    try:
+        with manager as playwright:
+            browser = _launch(playwright, executable)
+            try:
+                page = browser.new_page(viewport={"width": 1440, "height": 1000})
+                page.goto(f"http://{host}:{port}/?t={token}")
+                page.wait_for_selector(".node", timeout=15000)
+                _click_id(page, _agent_id(graph, "/root"))
+                _wait_for_text(page, "spawn four agents")
+
+                # Mark the live document so a replacement is detectable.
+                page.evaluate("()=>{window.__execweaveSameDocument=true}")
+                before_url = page.url
+                before_cards = _cards(page)
+
+                state.finish(dict(graph), final_html="<html><body>replaced</body></html>")
+                page.wait_for_function(
+                    "()=>(document.body.innerText||'').includes('FINISHED')", timeout=15000
+                )
+
+                assert page.evaluate("()=>window.__execweaveSameDocument===true"), (
+                    "the finished run replaced the document the reader was on"
+                )
+                assert page.url == before_url, f"completion navigated away: {page.url}"
+                assert "replaced" not in page.locator("body").inner_text()
+                assert page.locator(".node").count() > 0, "the graph was torn down"
+                assert _cards(page) == before_cards, "the selected agent lost its inspector"
+                _assert_no_dashboard_clutter(page)
+            finally:
+                browser.close()
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
