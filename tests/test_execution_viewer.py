@@ -39,7 +39,7 @@ def _content(letter: str) -> dict:
     }
 
 
-def test_execution_viewer_uses_only_exact_incident_error_payload_edges() -> None:
+def test_execution_viewer_preserves_exact_incident_error_evidence_in_snapshot() -> None:
     agent = {
         "id": "agent:Antigravity",
         "type": "agent",
@@ -99,17 +99,14 @@ def test_execution_viewer_uses_only_exact_incident_error_payload_edges() -> None
 
     html = render_graph_html(graph)
 
-    assert "Execution Evidence" in html
-    assert "Stored error payload" in html
-    assert "Execution stop is provider-observed execution-loop evidence" in html
-    assert "agent_execution → observed_content" in html
-    assert "no timing or execution-number join" in html
-    assert "edge.target===value.id" in html
-    assert "edge.source===value.id" in html
+    assert "OBSERVED_EXECUTION_STOP" in html
+    assert "OBSERVED_EXECUTION_ERROR" in html
     assert "OBSERVED_EXECUTION_ERROR_CONTENT" in html
     assert execution_two["id"] in html
     assert execution_three["id"] in html
     assert content_two["attributes"]["path"] in html
     assert content_three["attributes"]["path"] in html
-    assert "execweaveAppendContentInspector" in html
-    assert "execweaveAppendDelegationInspector" in html
+    assert "window.__execweaveStaticGraph=" in html
+    assert "Execution Evidence" not in html
+    assert "execweaveAppendContentInspector" not in html
+    assert "execweaveAppendDelegationInspector" not in html
