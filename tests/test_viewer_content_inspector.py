@@ -114,7 +114,7 @@ def test_projection_decorates_reference_without_mutating_or_embedding_raw_graph(
     assert reference["complete_from_source"] is True
 
 
-def test_unified_viewer_preserves_reference_metadata_without_legacy_content_inspector() -> None:
+def test_projected_standalone_viewer_has_expandable_reference_only_inspector() -> None:
     raw = _graph(_content_node("claude.tool_input"))
 
     html = render_graph_html(raw)
@@ -129,7 +129,7 @@ def test_unified_viewer_preserves_reference_metadata_without_legacy_content_insp
     assert "PRIVATE_TOOL_BODY_THAT_IS_NOT_IN_THE_GRAPH" not in html
 
 
-def test_unified_viewer_preserves_agent_communication_evidence_without_legacy_inspector() -> None:
+def test_standalone_viewer_exposes_agent_communication_and_activity_inspector() -> None:
     payload = _content_node("codex.agent_message.payload", digest="b" * 64)
     agent = {
         "id": "agent:codex:root",
