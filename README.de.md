@@ -31,7 +31,7 @@ Installieren Sie das neueste veröffentlichte wheel/sdist von PyPI:
 python -m pip install -U execweave
 ```
 
-Die aktuelle Version ist **v0.7.4**.
+Die aktuelle Version ist **v0.7.5**.
 
 Für die Entwicklung:
 
@@ -67,7 +67,7 @@ execweave record --open -- python my_agent.py
 
 `execweave top -- codex` hält den Agent im Startterminal interaktiv und öffnet bzw. verbindet gleichzeitig das detached Top dashboard entsprechend der Host-Umgebung.
 
-**v0.7.4 — Conversation-Fokus pro Agent im Dashboard.** Aufbauend auf den in v0.7.3 materialisierten provider-neutralen, agent-lokalen Multi-Agent-Conversations begrenzt die Auswahl eines agent node das Conversation-Panel jetzt auf genau diesen Agent, samt Anzahl der sichtbaren Einträge und einem Control zum Wiederherstellen des vollständigen Baums. Ein Klick wird über die identity des graph agent node und nicht über Label-Vergleich zu einem Thread aufgelöst, sodass Agents mit demselben Provider-Nickname unterscheidbar bleiben. Markdown-Conversation-Abschnitte beginnen nun mit dem agent path statt mit dem Provider-Nickname, sodass jeder Abschnitt den zugehörigen Agent benennt. Sowohl der Standalone-Viewer als auch das Live-Dashboard sind abgedeckt; die Conversation-Materialisierung selbst bleibt unverändert.
+**v0.7.5 — Conversation-Isolation pro Agent als Standard und eine Evidence-Availability-Matrix.** Beim Öffnen eines Runs hat jeder Agent nun einen eigenen Abschnitt: Er enthält die Turns, die dieser Agent gesendet hat, und die an ihn gerichteten, sodass ein Child seine eigene Assignment und Antwort behält, während ein Austausch zwischen Siblings nie erscheint. Field-level availability wird getrennt von der conversation completeness erfasst, sodass ein verschlüsseltes Reasoning-Feld ein ansonsten vollständig archiviertes Transcript nicht mehr herabstuft. Eine Offline-Capability-Probe meldet je Client und Surface, was der Provider tatsächlich offenlegt, und hält Nichtlesbares fest, ohne den Grund zu behaupten.
 
 Das vereinheitlichte Dashboard bringt execution graph, logs und conversation records in denselben Inspection-Flow. Finalisierte Runs erzeugen `conversations.md` und `conversations.json`; validierte Provider-Transcripts werden in den run-local SHA-256 content store kopiert. Claude Code, OpenAI Codex, Cursor, OpenCode und Google Antigravity verwenden jeweils die stärkste Multi-Agent-Evidence, die ihre Integration tatsächlich offenlegt. Wenn ein Gateway oder lokaler Runtime nur root request/response sichtbar macht, zeigt ExecWeave nur diese Root-Conversation und erfindet weder Subagents noch hidden routing.
 
@@ -276,7 +276,7 @@ Conversation isolation ist eine Attribution-/Display-Regel, keine Redaction Boun
 
 ## Aktueller Stand
 
-v0.7.4 kombiniert cross-platform runtime collection, materialized execution graphs, standalone/live dashboards, konservative provider↔runtime correlation, full-fidelity content-addressed provider evidence, attributable multi-agent execution traces, direkten run-local conversation access agent-local conversation isolation in provider-neutralen Projektionen und per-agent conversation focus in den Standalone- und Live-Dashboards. Jede Integration bewahrt nur die stärkste identity/routing evidence, die der Provider tatsächlich offenlegt, und enthält sich, wenn diese Evidence fehlt. Observed evidence und inference bleiben konstruktiv getrennt.
+v0.7.5 kombiniert cross-platform runtime collection, materialized execution graphs, standalone/live dashboards, konservative provider↔runtime correlation, full-fidelity content-addressed provider evidence, attributable multi-agent execution traces, direkten run-local conversation access agent-local conversation isolation in provider-neutralen Projektionen und per-agent conversation focus in den Standalone- und Live-Dashboards. Jede Integration bewahrt nur die stärkste identity/routing evidence, die der Provider tatsächlich offenlegt, und enthält sich, wenn diese Evidence fehlt. Observed evidence und inference bleiben konstruktiv getrennt.
 
 ## Dokumentation
 
