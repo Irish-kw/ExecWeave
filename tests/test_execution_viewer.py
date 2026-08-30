@@ -39,7 +39,7 @@ def _content(letter: str) -> dict:
     }
 
 
-def test_execution_viewer_preserves_exact_incident_error_evidence_in_snapshot() -> None:
+def test_execution_viewer_uses_only_exact_incident_error_payload_edges() -> None:
     agent = {
         "id": "agent:Antigravity",
         "type": "agent",
