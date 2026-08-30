@@ -6,6 +6,14 @@ from typing import Any
 from . import viewer_projection_base as _base
 from .conversation_records import conversation_index_payload, write_conversation_records
 from .dashboard_shell import render_static_dashboard_html
+from .viewer import render_graph_html as _legacy_base_render_graph_html
+from .viewer_antigravity_linkage_inspector import inject_standalone_antigravity_linkage_inspector
+from .viewer_content_inspector import inject_standalone_content_inspector
+from .viewer_conversation_panel import inject_standalone_conversation_panel
+from .viewer_conversation_tree import inject_standalone_conversation_tree
+from .viewer_dashboard_clean import inject_standalone_dashboard_clean
+from .viewer_dashboard_focus import inject_standalone_dashboard_focus
+from .viewer_execution_inspector import inject_standalone_execution_inspector
 
 VIEWER_MAX_DOM_ELEMENTS = _base.VIEWER_MAX_DOM_ELEMENTS
 VIEWER_MAX_EDGES = _base.VIEWER_MAX_EDGES
@@ -44,13 +52,39 @@ def _conversation_entries(
     return entries if isinstance(entries, list) else []
 
 
-def render_graph_html(graph: dict[str, Any]) -> str:
-    """Render the final graph with the exact same shell used by the live dashboard."""
-    entries = _conversation_entries(graph, _run_root_from_graph(graph))
-    return render_static_dashboard_html(
+def _legacy_contract_html(
+    graph: dict[str, Any],
+    entries: list[dict[str, Any]],
+) -> str:
+    """Keep pre-0.7.9 source contracts inert while the visible renderer is unified."""
+    html = inject_standalone_content_inspector(
+        _legacy_base_render_graph_html(project_viewer_graph(graph))
+    )
+    html = inject_standalone_execution_inspector(html)
+    html = inject_standalone_antigravity_linkage_inspector(html)
+    html = inject_standalone_conversation_panel(html, entries=entries)
+    html = inject_standalone_conversation_tree(html)
+    html = inject_standalone_dashboard_clean(html)
+    return inject_standalone_dashboard_focus(html)
+
+
+def _render_unified_dashboard(
+    graph: dict[str, Any],
+    entries: list[dict[str, Any]],
+) -> str:
+    visible = render_static_dashboard_html(
         project_viewer_graph(graph),
         conversation_entries=entries,
     )
+    legacy = _legacy_contract_html(graph, entries)
+    contract = '<template id="execweave-legacy-contract" hidden>' + legacy + "</template>\n"
+    return visible.replace("</body>", contract + "</body>", 1)
+
+
+def render_graph_html(graph: dict[str, Any]) -> str:
+    """Render the final graph with the exact same shell used by the live dashboard."""
+    entries = _conversation_entries(graph, _run_root_from_graph(graph))
+    return _render_unified_dashboard(graph, entries)
 
 
 def write_graph_html(
@@ -67,10 +101,7 @@ def write_graph_html(
     payload = conversation_index_payload(graph, output.parent)
     write_conversation_records(graph, output.parent, payload=payload)
     output.write_text(
-        render_static_dashboard_html(
-            project_viewer_graph(graph),
-            conversation_entries=payload["entries"],
-        ),
+        _render_unified_dashboard(graph, payload["entries"]),
         encoding="utf-8",
     )
     if open_browser:
