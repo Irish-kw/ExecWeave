@@ -697,20 +697,25 @@ def _render_markdown(entries: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def write_conversation_records(
+def conversation_index_payload(
     graph: dict[str, Any],
     run_root: str | Path,
-) -> tuple[Path, Path]:
-    """Write deterministic JSON + Markdown indexes beside the viewer artifacts."""
+) -> dict[str, Any]:
+    """Build the conversation index exactly as ``conversations.json`` carries it.
+
+    The live dashboard and the finalized viewer both read this. Keeping one
+    builder is the point: a live run that computed its own projection would be
+    free to disagree with the file written at finalization, and the disagreement
+    would show up as an agent seeing conversations that are not its own.
+    """
     root = Path(run_root).expanduser().resolve()
-    root.mkdir(parents=True, exist_ok=True)
     entries = conversation_record_entries(graph, root)
     visible_message_count = sum(
         len(preview.get("messages") or [])
         for entry in entries
         if isinstance((preview := entry.get("conversation_preview")), dict)
     )
-    payload = {
+    return {
         "schema_version": "0.3",
         "scope": "run_local_provider_neutral_conversation_projection",
         "entry_count": len(entries),
@@ -718,6 +723,17 @@ def write_conversation_records(
         "external_provider_folder_lookup_required": False,
         "entries": entries,
     }
+
+
+def write_conversation_records(
+    graph: dict[str, Any],
+    run_root: str | Path,
+) -> tuple[Path, Path]:
+    """Write deterministic JSON + Markdown indexes beside the viewer artifacts."""
+    root = Path(run_root).expanduser().resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    payload = conversation_index_payload(graph, root)
+    entries = payload["entries"]
     json_path = root / "conversations.json"
     markdown_path = root / "conversations.md"
     json_path.write_text(

@@ -5,6 +5,7 @@ import ast
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import tarfile
@@ -16,9 +17,18 @@ ROOT = Path(__file__).resolve().parents[1]
 CRITICAL_UNCHANGED = (
     "tests/test_http_proxy.py",
     "scripts/audit_i18n_parity.py",
-    "pyproject.toml",
-    "src/execweave/__init__.py",
 )
+
+# pyproject.toml and __init__.py were frozen whole, but the red line in them is the
+# release version and the runtime dependency set — not the file. Freezing the file
+# blocked ordinary stage work that touches neither: registering a pytest marker, or
+# declaring an optional extra for a check CI runs. Those two values are now compared
+# against the baseline directly, which is what the freeze was standing in for.
+RELEASE_METADATA = (
+    ("pyproject.toml", re.compile(r'(?m)^version\s*=\s*"([^"]+)"')),
+    ("src/execweave/__init__.py", re.compile(r'(?m)^__version__\s*=\s*"([^"]+)"')),
+)
+RUNTIME_DEPENDENCIES = re.compile(r"(?ms)^dependencies\s*=\s*\[(.*?)^\]")
 
 # The relay module itself has to keep changing — 0.7.6 rebuilds streamed responses
 # inside it — so freezing the whole file would block the staged work it is meant to
@@ -70,6 +80,14 @@ SKIP_MARKERS = (
     "pytest.skip(",
 )
 ENVIRONMENT_PROBE_SKIP = "pytest.mark.skipif(shutil.which("
+# The second accepted form covers a check that needs a capability CI supplies and a
+# developer's machine may not — a browser. A runtime skip is permitted only in a file
+# that also escalates: where the environment declares the check required, the same
+# helper fails instead of skipping, so the skip can never stand in for a pass in CI.
+# Decorated skips and xfails stay refused in such a file; only the escalating runtime
+# form is exempt.
+REQUIRED_MODE_FLAG = "EXECWEAVE_E2E_REQUIRED"
+REQUIRED_MODE_ESCALATION = "pytest.fail("
 
 
 def _run(
@@ -207,14 +225,30 @@ def _assert_existing_tests_untouched(
 
 def _assert_no_new_skip_or_xfail(baseline_ref: str) -> None:
     diff = _git("diff", "--unified=0", f"{baseline_ref}...HEAD", "--", "tests").stdout
-    offenders = []
+    added: dict[str, list[str]] = {}
+    current = ""
     for line in diff.splitlines():
-        if not line.startswith("+") or line.startswith("+++"):
+        if line.startswith("+++ "):
+            current = line[4:].strip()
+            if current.startswith("b/"):
+                current = current[2:]
             continue
-        if ENVIRONMENT_PROBE_SKIP in line and "is None" in line:
+        if not line.startswith("+"):
             continue
-        if any(marker in line for marker in SKIP_MARKERS):
-            offenders.append(line)
+        added.setdefault(current, []).append(line)
+
+    offenders = []
+    for path, lines in sorted(added.items()):
+        escalates = any(REQUIRED_MODE_FLAG in line for line in lines) and any(
+            REQUIRED_MODE_ESCALATION in line for line in lines
+        )
+        for line in lines:
+            if ENVIRONMENT_PROBE_SKIP in line and "is None" in line:
+                continue
+            if escalates and "pytest.skip(" in line and "pytest.mark." not in line:
+                continue
+            if any(marker in line for marker in SKIP_MARKERS):
+                offenders.append(f"{path}: {line}")
     if offenders:
         raise RuntimeError("new skip/xfail markers are not allowed:\n" + "\n".join(offenders))
 
@@ -230,6 +264,32 @@ def _assert_critical_files_unchanged(baseline_ref: str) -> None:
     changed = [line for line in completed.stdout.splitlines() if line.strip()]
     if changed:
         raise RuntimeError("release red-line files changed:\n" + "\n".join(changed))
+
+
+def _assert_release_metadata_unchanged(baseline_ref: str) -> None:
+    """A stage may not move the release version or the runtime dependency set."""
+    for path, pattern in RELEASE_METADATA:
+        baseline = _git("show", f"{baseline_ref}:{path}").stdout
+        current = (ROOT / path).read_text(encoding="utf-8")
+        before, after = pattern.search(baseline), pattern.search(current)
+        if before is None or after is None:
+            raise RuntimeError(f"release version is no longer declared in {path}")
+        if before.group(1) != after.group(1):
+            raise RuntimeError(
+                f"{path} moves the release version from {before.group(1)} to "
+                f"{after.group(1)}; a stage lands before its release, not with it"
+            )
+
+    baseline = _git("show", f"{baseline_ref}:pyproject.toml").stdout
+    current = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    before, after = RUNTIME_DEPENDENCIES.search(baseline), RUNTIME_DEPENDENCIES.search(current)
+    if before is None or after is None:
+        raise RuntimeError("the runtime dependency set is no longer declared in pyproject.toml")
+    if before.group(1) != after.group(1):
+        raise RuntimeError(
+            "pyproject.toml changes the runtime dependency set:\n"
+            f"baseline:{before.group(1)}\ncurrent:{after.group(1)}"
+        )
 
 
 def _connect_handler_source(source: str, origin: str) -> str:
@@ -495,6 +555,7 @@ def main() -> int:
     )
     _assert_no_new_skip_or_xfail(args.baseline_ref)
     _assert_critical_files_unchanged(args.baseline_ref)
+    _assert_release_metadata_unchanged(args.baseline_ref)
     tls_status = _assert_no_tls_mitm(args.baseline_ref)
     completeness = _assert_conversation_completeness_unchanged(args.baseline_ref)
     i18n_status = _assert_i18n_audit()

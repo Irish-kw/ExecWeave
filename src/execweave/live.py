@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 import re
 import shutil
 from collections import deque
 
 from . import live_core as _core
+from .conversation_records import conversation_index_payload
 from .viewer_conversation_panel import inject_live_conversation_panel
 from .viewer_conversation_tree import inject_live_conversation_tree
 from .viewer_dashboard_clean import inject_live_dashboard_clean
@@ -104,6 +106,15 @@ def _handler_factory(state, token: str):
     run_root = state.event_path.parent.resolve()
 
     class Handler(base_handler):
+        def _live_conversation_index(self) -> dict[str, object] | None:
+            project = getattr(state, "conversation_index", None)
+            if project is None:
+                return None
+            try:
+                return project(run_root)
+            except (OSError, RuntimeError, ValueError):
+                return None
+
         def _send_run_file(self, target: Path, content_type: str) -> None:
             try:
                 size = target.stat().st_size
@@ -147,7 +158,22 @@ def _handler_factory(state, token: str):
                 self._send(b"Not found", "text/plain; charset=utf-8", 404)
                 return
             if not target.is_file():
-                self._send(b"Not found", "text/plain; charset=utf-8", 404)
+                # conversations.json is written at finalization. Until then the
+                # panel would fall back to an unscoped list of every stored
+                # record, so project the same index from the run's current graph
+                # and serve that instead.
+                payload = (
+                    self._live_conversation_index()
+                    if request_path == "/conversations.json"
+                    else None
+                )
+                if payload is None:
+                    self._send(b"Not found", "text/plain; charset=utf-8", 404)
+                    return
+                self._send(
+                    json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8"),
+                    "application/json; charset=utf-8",
+                )
                 return
             if request_path.endswith(".json"):
                 content_type = "application/json; charset=utf-8"
@@ -278,6 +304,17 @@ class _LiveState(_BaseLiveState):
 
     def _snapshot_from_accumulator_locked(self) -> dict[str, object]:
         return self._projected_snapshot_locked()
+
+    def conversation_index(self, run_root: Path) -> dict[str, object]:
+        """Project the conversation index from the graph observed so far.
+
+        Finalization writes this exact payload to conversations.json. Building it
+        from the same function during the run is what keeps the live dashboard
+        and the finalized viewer showing an agent the same conversation.
+        """
+        with self._lock:
+            graph = self._projected_graph_locked()
+        return conversation_index_payload(graph, run_root)
 
     def _refresh_incremental_locked(self) -> None:
         before_sequence = self._update_sequence

@@ -1,0 +1,40 @@
+name: Viewer Agent Isolation
+
+# Every agent-isolation defect this project shipped passed the unit suite and was
+# found by a person opening the page. This job opens the pages instead: it renders
+# one four-agent run through both shipped viewers and reads what each agent shows.
+# The live dashboard is exercised mid-run, because that is the state in which it
+# showed every agent every other agent's conversation.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  viewers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: python -m pip install -e ".[dev,e2e]"
+
+      - name: Install Chromium
+        run: python -m playwright install --with-deps chromium
+
+      # EXECWEAVE_E2E_REQUIRED turns a missing browser into a failure. Without it
+      # the checks skip themselves when the browser cannot start, and a skipped
+      # viewer check is indistinguishable from a passing one.
+      - name: Read both viewers in a browser
+        env:
+          EXECWEAVE_E2E_REQUIRED: "1"
+        run: python -m pytest -m viewer_e2e -v
