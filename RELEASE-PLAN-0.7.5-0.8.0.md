@@ -166,7 +166,7 @@ provider-observed fact
 
 9. **不得偽造 fixture。** 宣稱來自真實 provider 輸出的 fixture 就必須真的是。可去識別化（使用者名稱、本機絕對路徑、無關檔名、金鑰、私人內容），但結構欄位必須保留原樣。
 
-10. **credentials 不得進入任何 artifact。** API key、`Authorization` header、token、cookie 一律不得寫入 events、content store、graph、viewer、conversations。既有的 `filter_transport_credentials`（`content_evidence.py`）與 `_sanitize_metadata`（`inference_gateway_full_fidelity.py:146`）必須沿用，不得繞過。
+10. **transport / integration credentials 不得進入任何 artifact。** 這裡指的是 API key、`Authorization` / `Proxy-Authorization` header、access token、refresh token、session credential、cookie 等**用來驗證或授權 transport/integration 的秘密**；不得寫入 events、content store、graph、viewer、conversations。既有的 `filter_transport_credentials`（`content_evidence.py`）與 `_sanitize_metadata`（`inference_gateway_full_fidelity.py:146`）必須沿用，不得繞過。**這裡的 token 僅指 transport authentication token；prompt / completion / tool arguments / tool results 等 semantic payload 中名為 `token`、`api_key`、`password` 的欄位或字樣不屬於本條的 transport credential，不能因此被 generic sanitizer 刪除。**
 
 ### 3.3 技術手段相關
 
@@ -231,8 +231,8 @@ reasoning_availability    = opaque_encrypted
 
 | 值 | 意義 |
 |---|---|
-| `available` | 該欄位可得 |
-| `complete_from_surface` | 該表面實際曝露的內容被完整保存（宣稱邊界見 §4.6） |
+| `available` | 該欄位內容可讀，但目前**無法證明 provider surface 提供的該值是否已完整保存** |
+| `complete_from_surface` | 已知該 surface payload 的觀察邊界，且該表面實際曝露的內容被完整保存（宣稱邊界見 §4.6） |
 | `summary` | 只有摘要，沒有完整內容 |
 | `redacted` | provider 主動遮蔽（例如 `[redacted]` 標記） |
 | `opaque_encrypted` | 出現的是密文，內容不可讀 |
@@ -243,7 +243,15 @@ reasoning_availability    = opaque_encrypted
 | `capture_interrupted` | 擷取中斷 / 串流不完整 |
 | `unknown` | 尚未判定 |
 
-命名不強制與上表完全一致，但**責任邊界必須清楚**：這些值描述單一 field，**不描述整個 conversation**。
+**`available` 與 `complete_from_surface` 的 precedence 固定如下：**
+
+- 能確認內容可讀，但無法建立「surface 提供的值已完整保存」的證據 → `available`
+- 能確認 surface 的觀察邊界，且該 surface 實際提供的值被完整保存 → `complete_from_surface`
+- 若兩者看似都適用，**必須選 `complete_from_surface`**；不得同時輸出兩個 availability state，也不得用較弱的 `available` 降級已證實的完整 surface observation
+
+這個 precedence 必須由 schema validation / tests 固定，不能留給各 provider adapter 自行解讀。
+
+命名不強制與上表完全一致，但**責任邊界與上述 precedence 必須保留**：這些值描述單一 field，**不描述整個 conversation**。
 
 ### 4.3 `decryptability`：能不能在本機解開
 
@@ -415,6 +423,7 @@ Cursor autocomplete / Tab、background agent surfaces、其他 auth modes、其�
 - [ ] Tier B row 若未測，明確標示為未測，不得留白
 - [ ] Codex `reasoning.encrypted_content` 記為 `opaque_encrypted` + `no_local_decryptor_observed`，**不得**出現 server-side-only 的宣稱
 - [ ] 有測試驗證「升級規則」：沒有官方文件或直接證據時，不允許產生 `provider_documented_unavailable`
+- [ ] 有測試驗證 `available` / `complete_from_surface` precedence：完整 surface observation 必須使用 `complete_from_surface`，只有內容可讀但完整性未證實時才使用 `available`
 - [ ] 有測試驗證 field-level availability **不會**被寫入 conversation completeness
 - [ ] 探測器對缺少產物的 provider 回報「無資料」而非空矩陣
 
@@ -758,11 +767,12 @@ reasoning_availability    = opaque_encrypted      # 其中 reasoning 欄位是�
 | 證據未膨脹 | 檢查所有新的 `provider_transcript` / `provider_declared` / `reported` / `complete_from_surface` 標記是否有實據 |
 | observation 未升級成 fact | 檢查是否出現未經文件佐證的 server-side-only 宣稱 |
 | 兩層未混用 | `git diff origin/main -- src/execweave/agent_topology.py`；不得有新的 completeness 值或 rank 變動 |
+| availability precedence | 驗證完整 surface observation 使用 `complete_from_surface`；`available` 僅用於內容可讀但完整性未證實 |
 | 無過強 reasoning 宣稱 | `grep -rniE "full[ _-]?cot\|complete chain of thought\|full reasoning\|完整思維鏈\|完整 ?CoT"` 應為空 |
 | semantic payload 未被誤刪 | 檢查 `filter_transport_credentials` 是否被套用到 prompt / tool IO / file content |
 | 無第二套 schema | 檢查是否重用既有 full-fidelity emitters |
 | checker 未被放寬 | `git diff origin/main -- scripts/` 逐行看門檻 |
-| 無 credential 外洩 | 檢查產物與 fixture 是否含 API key、Authorization、路徑、使用者名稱 |
+| 無 credential 外洩 | 檢查產物與 fixture 是否含 transport authentication credentials（API key、Authorization、access/refresh token、cookie 等）；不得把 semantic payload 中單純名為 `token` / `api_key` / `password` 的內容誤判為 transport secret |
 | i18n 未受影響 | `python scripts/audit_i18n_parity.py` |
 | opt-in | 未啟用時行為與前一版一致 |
 
