@@ -179,27 +179,38 @@ def _trim_text(value: str) -> str:
 
 
 def _agent_message_header(text: str) -> dict[str, str]:
+    """Parse Codex routing headers only from an explicit Payload envelope.
+
+    Plain agent output is free-form text and may legitimately quote lines such as
+    ``Sender:`` or ``Task name:``. Those strings are routing metadata only when a
+    standalone ``Payload:`` line terminates a recognized header block.
+    """
+    lines = text.splitlines()
+    try:
+        payload_index = next(index for index, line in enumerate(lines) if line.strip() == "Payload:")
+    except StopIteration:
+        return {}
     result: dict[str, str] = {}
-    before_payload, marker, after_payload = text.partition("Payload:")
-    for line in before_payload.splitlines():
+    for line in lines[:payload_index]:
         key, separator, value = line.partition(":")
         if not separator:
             continue
         normalized = key.strip().lower().replace(" ", "_")
         if normalized in {"message_type", "task_name", "sender"} and value.strip():
             result[normalized] = value.strip()
-    if marker and after_payload.strip():
-        result["payload_text"] = after_payload.strip()
+    if not result:
+        return {}
+    payload_text = "\n".join(lines[payload_index + 1 :]).strip()
+    if payload_text:
+        result["payload_text"] = payload_text
     return result
 
 
 def _agent_message_visible_text(text: str, header: dict[str, str]) -> str | None:
-    """Return plaintext body without mistaking Codex routing metadata for content."""
+    """Return provider plaintext while stripping only a validated routing envelope."""
     payload = header.get("payload_text")
     if isinstance(payload, str) and payload:
         return _trim_text(payload)
-    if any(key in header for key in ("message_type", "task_name", "sender")):
-        return None
     return _trim_text(text) if text else None
 
 
