@@ -78,10 +78,33 @@ def test_dashboard_projection_reads_the_namespaced_topology_paths() -> None:
 
 
 def test_conversation_panel_fallback_reads_them_too() -> None:
+    """Neither viewer may render conversation records outside the per-agent projection.
+
+    The name is historical, and the node-ID floor is why it is kept: this test used
+    to require that the fallback resolve the namespaced agent paths in its rows.
+
+    Both panels used to fall back to a flat list of every stored conversation
+    record: no per-agent filtering, and no regard for the selected node. The live
+    dashboard reached it on every run, because the index it needs was only
+    fetched once the run had finished. Resolving the namespaced agent path in
+    those rows — what this test used to require — only made the leak better
+    labelled.
+    """
     source = PANEL.read_text(encoding="utf-8")
-    assert source.count("attributes?.child_agent_path") == 2, (
-        "both the static and live fallback link titles must resolve a subagent path"
+    assert "attributes?.child_agent_path" not in source, "the unscoped record list is back"
+    assert "conversation index loads at finalization" not in source, (
+        "the live panel must project agent conversations during the run, not after it"
     )
+    assert "async function loadIndex(){if(indexLoading)return;" in source, (
+        "the live index must be refreshable while the run is still open"
+    )
+    assert "if(indexEntries!==null&&renderRich(indexEntries))return;loadIndex();" in source, (
+        "every live render must keep pumping the projected index"
+    )
+    assert (
+        "if(execweaveRenderRichConversationRecords(panel,embedded))return;panel.replaceChildren()"
+        in source
+    ), "the standalone viewer must fall through to an empty state, not to a record list"
 
 
 def test_a_timestamp_ordered_id_prefix_is_never_the_label() -> None:

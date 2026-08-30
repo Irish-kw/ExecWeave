@@ -46,3 +46,4 @@ jobs:
           python scripts/check_release_stage_integrity.py
           --baseline-ref "${{ github.event.pull_request.base.sha || inputs.baseline_ref }}"
           --allow-test-change "tests/test_dashboard_information_architecture.py=the assertion pinned the colliding eight-character id fallback, which was the defect itself; the labels-are-provider-neutral subject is unchanged and still asserted"
+          --allow-test-change "tests/test_agent_node_labels.py=the assertion required the unscoped conversation record fallback to label agents correctly; that fallback showed every agent every other agent's conversation and has been removed, so the test now asserts the stronger property that no such fallback exists"
