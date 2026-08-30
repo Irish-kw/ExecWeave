@@ -122,7 +122,7 @@ def _cards(page: Any) -> tuple[list[str], list[str]]:
 def _wait_for_text(page: Any, text: str) -> None:
     page.wait_for_function(
         "value=>(document.getElementById('details')?.innerText||'').includes(value)",
-        text,
+        arg=text,
         timeout=15000,
     )
 
