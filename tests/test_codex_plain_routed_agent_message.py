@@ -74,14 +74,14 @@ def test_plain_routed_agent_message_keeps_its_provider_plaintext(tmp_path: Path)
 
 
 def test_protocol_header_without_payload_is_not_rendered_as_response_text(tmp_path: Path) -> None:
-    previews = codex_rollout_previews(
-        _write_parent_rollout(
-            tmp_path,
-            "Message type: notify\nTask name: /root/child\nSender: /root/child",
-        )
-    )
+    quoted = "Message type: notify\nTask name: /root/child\nSender: /root/child"
+    previews = codex_rollout_previews(_write_parent_rollout(tmp_path, quoted))
 
     child = next(preview for preview in previews if preview.get("agent_path") == "/root/child")
     response = child["messages"][-1]
-    assert response["kind"] == "notify"
-    assert response["text"] is None
+    # Without an explicit Payload: envelope these are ordinary provider plaintext
+    # lines. Routing still comes from the structured author/recipient fields.
+    assert response["kind"] == "agent_message"
+    assert response["sender"] == "/root/child"
+    assert response["recipient"] == "/root"
+    assert response["text"] == quoted
