@@ -54,11 +54,19 @@ def test_live_handler_requires_token_for_all_evidence_routes(tmp_path: Path) -> 
 
 
 def test_live_viewer_bootstrap_keeps_token_in_memory_and_uses_headers() -> None:
+    """The token is read once, erased from the URL, and sent as a header.
+
+    v0.7.9 keeps authentication on the live evidence channel and nothing else:
+    completion no longer fetches or renders a separate ``/final`` document, so the
+    authenticated page a reader ends on is the one they were already looking at.
+    """
     assert "new URLSearchParams(location.search).get('t')" in _AUTHENTICATED_LIVE_HTML
     assert "history.replaceState(null,'',location.pathname)" in _AUTHENTICATED_LIVE_HTML
     assert "'X-ExecWeave-Token':liveAuthToken" in _AUTHENTICATED_LIVE_HTML
-    assert "fetch('/final'" in _AUTHENTICATED_LIVE_HTML
+
+    assert "fetch('/final'" not in _AUTHENTICATED_LIVE_HTML
     assert "location.href='/final'" not in _AUTHENTICATED_LIVE_HTML
+    assert "document.write(" not in _AUTHENTICATED_LIVE_HTML
 
 
 def test_run_live_announces_token_but_does_not_persist_it(tmp_path: Path) -> None:
