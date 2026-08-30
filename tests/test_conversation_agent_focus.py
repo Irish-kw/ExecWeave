@@ -62,8 +62,10 @@ def test_focus_selects_exactly_one_agent_thread(tmp_path: Path) -> None:
     html = viewer.read_text(encoding="utf-8")
 
     source = PANEL.read_text(encoding="utf-8")
-    assert "entries.find(entry=>String(entry?.source_id||'')===String(node?.id||''))" in source
-    assert "entries.find(entry=>String(entry?.conversation_preview?.agent_path||'')===path)" in source
+    assert "const matches=entries.filter" in source
+    assert "String(entry?.source_id||'')===nodeId" in source
+    assert "String(entry?.conversation_preview?.agent_path||'')===path" in source
+    assert "messages:ordered.map(item=>item.message)" in source
     assert "selectedNode=node" in source
     assert "else selectedNode=null" in source
     assert "window.__execweaveStaticConversations=" in html
