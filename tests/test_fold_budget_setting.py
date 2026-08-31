@@ -24,6 +24,19 @@ from execweave.viewer_dashboard_clean import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _the_budget_belongs_to_one_test(monkeypatch: pytest.MonkeyPatch) -> None:
+    """apply_fold_budget writes the real environment, which outlives the test.
+
+    Setting the variable through monkeypatch before deleting it records the original
+    state, so whatever a test publishes is torn down. Without this the default-budget
+    browser check downstream reads a budget this module chose — which is how the full
+    suite caught it while every module passed on its own.
+    """
+    monkeypatch.setenv(FOLD_BUDGET_ENV, str(DEFAULT_FOLD_BUDGET))
+    monkeypatch.delenv(FOLD_BUDGET_ENV)
+
+
 def test_an_unset_budget_is_the_default(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(FOLD_BUDGET_ENV, raising=False)
     assert resolve_fold_budget() == DEFAULT_FOLD_BUDGET
