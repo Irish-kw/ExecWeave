@@ -27,10 +27,12 @@ _AGENT_PANEL_JS = r"""
 const details=document.getElementById('details'),detailsEmpty=document.getElementById('details-empty');
 if(!details||!detailsEmpty)return;
 let entries=Array.isArray(window.__execweaveStaticConversations)?window.__execweaveStaticConversations:[];
-let selectedNode=null,refreshing=false;
+let selectedNode=null,refreshing=false,selectedConversationSignature='';
+const foldStateByAgent=new Map();
 const ENCRYPTED_NOTICE='Observed — plaintext not exposed by provider.';
 const attrs=node=>node&&typeof node.attributes==='object'&&node.attributes?node.attributes:{};
 const nodePath=node=>String(attrs(node).agent_path||attrs(node).child_agent_path||attrs(node).root_agent_path||node?.name||'').trim();
+const agentKey=node=>nodePath(node)||String(node?.id||'');
 const messageText=message=>typeof message?.text==='string'?message.text.trim():'';
 const isEncrypted=message=>String(message?.content_state||'')==='provider_encrypted';
 const isObserved=message=>!!message&&(isEncrypted(message)||!!messageText(message));
@@ -56,6 +58,17 @@ function recordFor(node){
 function recordForPath(path){
   return aggregate(entries.filter(entry=>String(entry?.conversation_preview?.agent_path||'')===String(path)));
 }
+function conversationSignature(node){
+  if(!node||String(node.type||'')!=='agent')return '';
+  const preview=recordFor(node)?.conversation_preview||{};
+  const messages=Array.isArray(preview.messages)?preview.messages:[];
+  return JSON.stringify([agentKey(node),messages.map(messageKey)]);
+}
+function foldStateFor(node){
+  const key=agentKey(node);let state=foldStateByAgent.get(key);
+  if(!state){state=new Map();foldStateByAgent.set(key,state)}
+  return state;
+}
 function uniqueTexts(messages){const seen=new Set(),out=[];for(const message of messages){const text=displayText(message);if(!text||seen.has(text))continue;seen.add(text);out.push(text)}return out}
 function card(label,text){const box=document.createElement('section');box.className='execweave-agent-card';const head=document.createElement('div');head.className='execweave-agent-label';head.textContent=label;const body=document.createElement('pre');body.className='execweave-agent-body';body.textContent=text||'Not observed.';if(!text)body.classList.add('execweave-agent-empty');box.append(head,body);return box}
 function stampOf(message){return String(message?.timestamp||'')}
@@ -74,7 +87,7 @@ function runRounds(){
   // Every record the root owns, not the first one found: an agent is archived many
   // times and the earliest archives carry nothing.
   const messages=recordForPath('/root')?.conversation_preview?.messages||[];
-  return rootPrompts(messages,'/root').map(message=>({start:stampOf(message),label:summarise(messageText(message))}));
+  return rootPrompts(messages,'/root').map(message=>({key:messageKey(message),start:stampOf(message),label:summarise(messageText(message))}));
 }
 function roundOf(stamp,rounds){let found=null;for(const round of rounds){if(round.start&&stamp&&round.start<=stamp)found=round}return found||rounds[0]||null}
 function sameDayRun(rounds){const days=new Set(rounds.map(round=>String(round.start||'').slice(0,10)).filter(Boolean));return days.size<=1}
@@ -94,6 +107,7 @@ function rootRounds(messages,path){
     const finals=inside.filter(message=>isObserved(message)&&own(message,path)&&(String(message?.phase||'')==='final_answer'||/final[_ -]?response/i.test(String(message?.kind||''))));
     const fallback=inside.filter(message=>isObserved(message)&&own(message,path)&&/assistant|response|message/i.test(String(message?.kind||'')));
     return{
+      key:messageKey(window.opener),
       start:stampOf(window.opener),
       label:summarise(messageText(window.opener)),
       cards:[['Prompt',displayText(window.opener)],['Final response',displayText(finals.at(-1)||fallback.at(-1))]],
@@ -123,19 +137,23 @@ function childRounds(messages,path){
     let responses=inside.filter(message=>isObserved(message)&&!isInjected(message)&&own(message,path)&&(String(message?.phase||'')==='final_answer'||/final[_ -]?response|agent_result|result/i.test(String(message?.kind||''))));
     if(!responses.length)responses=inside.filter(message=>isObserved(message)&&!isInjected(message)&&own(message,path)&&!thoughts.includes(message)&&String(message?.recipient||'')!==path&&!/task|assign/i.test(String(message?.kind||'')));
     return{
+      key:messageKey(window.opener),
       start:stampOf(window.opener),
       cards:[['Task',displayText(spoken||window.opener)],['Thinking',uniqueTexts(thoughts).join('\n\n')],['Response',displayText(responses.at(-1))]],
     };
   });
 }
 function roundView(round){const view=document.createElement('div');view.className='execweave-agent-round';for(const[label,text]of round.cards)view.appendChild(card(label,text));return view}
-function foldedRound(round,when,label){
+function stableRoundKey(round){return String(round?.key||JSON.stringify([round?.start??null,round?.cards?.[0]?.[0]??null,round?.cards?.[0]?.[1]??null]))}
+function foldedRound(round,when,label,state){
   const fold=document.createElement('details');fold.className='execweave-agent-older';
+  const key=stableRoundKey(round);fold.dataset.foldKey=key;fold.open=state.get(key)===true;
   const head=document.createElement('summary');
   const time=document.createElement('span');time.className='execweave-agent-when';time.textContent=when;
   head.append(time);
   if(label){head.append(document.createTextNode(` \u00b7 ${label}`))}
   fold.append(head,roundView(round));
+  fold.addEventListener('toggle',()=>state.set(key,fold.open));
   return fold;
 }
 // A run graph is mostly not agents, and until now selecting one of those nodes showed
@@ -234,7 +252,7 @@ function nodeCards(node){
 function renderNode(node){
   const rows=nodeCards(node);
   if(!rows.length)return false;
-  selectedNode=null;detailsEmpty.hidden=true;details.replaceChildren();
+  selectedNode=null;selectedConversationSignature='';detailsEmpty.hidden=true;details.replaceChildren();
   const view=document.createElement('div');view.className='execweave-agent-view';
   for(const[label,text]of rows)view.appendChild(card(label,text));
   details.appendChild(view);return true;
@@ -242,7 +260,7 @@ function renderNode(node){
 function render(node){
   if(!node)return false;
   if(String(node.type||'')!=='agent')return renderNode(node);
-  selectedNode=node;detailsEmpty.hidden=true;details.replaceChildren();
+  selectedNode=node;selectedConversationSignature=conversationSignature(node);detailsEmpty.hidden=true;details.replaceChildren();
   const path=nodePath(node),preview=recordFor(node)?.conversation_preview||{},messages=Array.isArray(preview.messages)?preview.messages:[];
   const isRoot=path==='/root'||attrs(node).agent_role==='root'||attrs(node).root_agent_path==='/root';
   const rounds=isRoot?rootRounds(messages,path||'/root'):childRounds(messages,path);
@@ -253,14 +271,19 @@ function render(node){
   const sameDay=sameDayRun(runs.length?runs:rounds);
   const naming=round=>isRoot?round:(roundOf(round.start,runs)||{start:round.start,label:''});
   const list=document.createElement('div');list.className='execweave-agent-rounds';
-  const ordered=[...rounds].reverse();
+  const ordered=[...rounds].reverse(),state=foldStateFor(node);
   list.appendChild(roundView(ordered[0]));
-  for(const round of ordered.slice(1)){const named=naming(round);list.appendChild(foldedRound(round,clock(named.start||round.start,sameDay),named.label||''))}
+  for(const round of ordered.slice(1)){const named=naming(round);list.appendChild(foldedRound(round,clock(named.start||round.start,sameDay),named.label||'',state))}
   details.appendChild(list);return true;
 }
 function graphNode(id){const core=window.__execweaveCore;if(!core)return null;const graph=core.getDisplayGraph?.()||core.getGraph?.()||{};return (graph.nodes||[]).find(node=>String(node?.id||'')===String(id||''))||null}
-function syncSelection(){const selected=document.querySelector('.node.selected');if(!selected){selectedNode=null;return}const node=graphNode(selected.dataset.id);if(node)render(node);else selectedNode=null}
-function setEntries(next){entries=Array.isArray(next)?next:[];if(selectedNode)render(selectedNode)}
+function syncSelection(){const selected=document.querySelector('.node.selected');if(!selected){selectedNode=null;selectedConversationSignature='';return}const node=graphNode(selected.dataset.id);if(node)render(node);else selectedNode=null;if(!node)selectedConversationSignature=''}
+function setEntries(next){
+  const candidate=Array.isArray(next)?next:[];
+  if(!selectedNode){entries=candidate;return}
+  const previousSignature=selectedConversationSignature;entries=candidate;
+  if(conversationSignature(selectedNode)!==previousSignature)render(selectedNode);
+}
 async function refresh(){if(window.__execweaveStaticMode||refreshing)return;refreshing=true;try{const headers={};if(window.__execweaveToken)headers['X-ExecWeave-Token']=window.__execweaveToken;const response=await fetch('/conversations.json',{cache:'no-store',headers});if(response.ok){const payload=await response.json();setEntries(payload?.entries)}}catch(_){}finally{refreshing=false}}
 const nodes=document.getElementById('nodes');if(nodes)new MutationObserver(syncSelection).observe(nodes,{subtree:true,attributes:true,attributeFilter:['class']});
 document.addEventListener('click',event=>{if(event.target.closest?.('.node'))setTimeout(()=>{syncSelection();refresh()},0)},true);
