@@ -198,7 +198,9 @@ function execweaveBuildTopology(){
 }
 function execweavePortY(position,port,id){const h=execweaveHeightOf(id);if(!port||port.total<=1)return position.y+h/2;const span=h-20;return position.y+10+(span*port.index)/(port.total-1)}
 function execweaveDesiredPosition(id){const value=execweaveTopology.spec.get(id);return value?{x:value.x,y:value.y}:{x:0,y:0}}
-function execweaveCollision(position,next,id){const h=execweaveHeightOf(id);for(const [other,p] of next){if(other===id)continue;const gap=Math.max(74,(h+execweaveHeightOf(other))/2+24);if(Math.abs(p.x-position.x)<2&&Math.abs(p.y-position.y)<gap)return true}return false}
+// 74 still clears the tallest node this can produce: 50 plus one wrapped line is 64.
+// A third line would need this to grow with the nodes it compares.
+function execweaveCollision(position,next,id){for(const [other,p] of next){if(other===id)continue;if(Math.abs(p.x-position.x)<2&&Math.abs(p.y-position.y)<74)return true}return false}
 function execweavePlaceStable(id,desired,next){let candidate={...desired};while(execweaveCollision(candidate,next,id))candidate.y+=EXECWEAVE_ROW_GAP;return candidate}
 fullLayout=function(){
   const prior=positions;execweaveTopology=execweaveBuildTopology();const next=new Map();
