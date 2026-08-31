@@ -88,14 +88,6 @@ def _old_fold(page: Any) -> Any:
     return fold.first
 
 
-def _inserted_fold(page: Any) -> Any:
-    fold = page.locator("#details .execweave-agent-older").filter(
-        has_text="inserted historical round"
-    )
-    assert fold.count() == 1, "the newly discovered historical round must have one fold"
-    return fold.first
-
-
 def _with_inserted_historical_round(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     changed = copy.deepcopy(entries)
     roots = [
@@ -168,14 +160,30 @@ def _exercise_state_contract(
     assert _old_fold(page).evaluate("node=>node.open")
 
     changed = _with_inserted_historical_round(entries)
-    page.evaluate("payload=>window.__execweaveAgentPanel.setEntries(payload)", changed)
-    assert not page.evaluate(
-        "()=>window.__execweaveFoldSentinel===document.querySelector('#details .execweave-agent-older')"
-    ), "a changed conversation payload did not redraw the inspector"
-    assert _old_fold(page).evaluate("node=>node.open"), (
+    changed_snapshot = page.evaluate(
+        """payload=>{
+        const sentinel=window.__execweaveFoldSentinel;
+        window.__execweaveAgentPanel.setEntries(payload);
+        const folds=[...document.querySelectorAll('#details .execweave-agent-older')];
+        const old=folds.find(node=>node.innerText.includes('spawn four agents'));
+        const inserted=folds.filter(node=>node.innerText.includes('inserted historical round'));
+        return {
+          rebuilt:sentinel!==document.querySelector('#details .execweave-agent-older'),
+          oldOpen:Boolean(old?.open),
+          insertedCount:inserted.length,
+          insertedOpen:inserted.length===1?Boolean(inserted[0].open):null,
+        };
+        }""",
+        changed,
+    )
+    assert changed_snapshot["rebuilt"], "a changed conversation payload did not redraw the inspector"
+    assert changed_snapshot["oldOpen"], (
         "redrawing for new conversation evidence cleared the user's open choice"
     )
-    assert not _inserted_fold(page).evaluate("node=>node.open"), (
+    assert changed_snapshot["insertedCount"] == 1, (
+        "the newly discovered historical round must have one fold"
+    )
+    assert changed_snapshot["insertedOpen"] is False, (
         "a newly discovered historical round must default to closed"
     )
 
