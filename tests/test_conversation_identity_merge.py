@@ -360,9 +360,15 @@ def _assert_independent_root_previews(
     assert all(not (first_text in text and second_text in text) for text in texts)
 
 
-def test_two_same_provider_root_sessions_are_isolated_despite_shared_display_alias(
+def test_two_same_provider_root_sessions_share_the_synthesized_root_thread(
     tmp_path: Path,
 ) -> None:
+    """Historical test ID retained; the contract now requires execution isolation.
+
+    Stage integrity treats test node IDs as release API. The old name described the
+    defect, so keeping it preserves regression history while these assertions pin the
+    corrected behavior: a shared synthesized display alias cannot merge executions.
+    """
     graph = _content_graph(
         tmp_path,
         [
