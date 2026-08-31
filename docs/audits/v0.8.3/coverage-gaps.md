@@ -6,7 +6,7 @@ This document lists what the audit has **not** proved. A coverage gap is not a b
 
 ## 1. Real provider executions are not uniformly reproducible in this audit environment
 
-The GitHub connector gives repository read/write access, but this audit session does not have authenticated local installations/accounts for every provider CLI and cannot independently launch all provider runtimes. As a result, provider paths were traced from current code, repository fixtures/tests and current official documentation where available, but the following still require real/sanitized captures before the v0.8.3 release candidate can be called fully audited:
+The GitHub connector gives repository read/write access, but this audit session does not have authenticated local installations/accounts for every provider CLI and cannot independently launch all provider runtimes. As a result, provider paths were traced from current code, repository fixtures/tests and current provider contracts represented in the repository, but the following still require real/sanitized captures before the v0.8.3 release candidate can be called fully audited:
 
 - Google Antigravity: 1 / 2 / 5 / 10 agents, parallel and sequential children, repeated `Stop`, incomplete/torn transcript, schema mismatch.
 - Claude Code: 1 / 2 / 5 / 10 agents, parallel children, nested child if currently supported, independent sessions in one ExecWeave run.
@@ -15,9 +15,11 @@ The GitHub connector gives repository read/write access, but this audit session 
 - OpenCode: two independent root sessions, parent/child sessions and simultaneous tool calls through the current plugin wire.
 - Gemini CLI: current hook payload verification against an installed current CLI.
 
+Audit-only synthetic/behavioral characterizations now directly reproduce the identity defects for Antigravity, OpenCode, vLLM and LiteLLM, but they are not a substitute for the final real-provider matrix.
+
 ## 2. Antigravity historical-turn loss remains unresolved
 
-The user supplied a real observation in which earlier Antigravity turns disappeared instead of remaining as folded historical rounds. The repository does not yet contain a sanitized three-turn Antigravity fixture that reproduces this end to end.
+A real Antigravity observation showed earlier turns disappearing instead of remaining as folded historical rounds. The repository does not yet contain a sanitized three-turn Antigravity fixture that reproduces this end to end.
 
 Required closure:
 
@@ -26,26 +28,43 @@ Required closure:
 3. project raw evidence -> graph -> conversation records -> dashboard;
 4. exercise repeated Stop/poll updates;
 5. verify in Chromium that rounds 1 and 2 remain present/folded and round 3 remains current/open;
-6. repeat with one child conversation and one parent conversation to prove isolation.
+6. verify a manually opened historical round remains open through polling until explicitly closed;
+7. repeat with one child conversation and one parent conversation to prove isolation.
 
-Until this is reproduced or explicitly dismissed, `SUS-001` remains a release blocker.
+Until this is reproduced or explicitly dismissed with provider/runtime version and fixture evidence, `SUS-001` remains a release blocker. A synthetic parser fixture may supplement coverage but cannot close this report by itself.
 
-## 3. PR #25 is a moving implementation line, not the audit baseline
+## 3. PR #25 branch has not yet received the validated hardening stack
 
-PR #26 intentionally audits from `main` and does not modify or rebase onto PR #25. PR #25 is the v0.8.3 graph ergonomics/routing implementation line and reached ready-for-review state during this audit.
+PR #26 intentionally audits from `main` and does not modify or rebase onto PR #25.
 
-Its own report states that it added real Chromium coverage for adaptive sizing, reversible focus, placement and routing, with a recorded crossing regression floor. That is useful evidence, but PR #26 must not silently treat a separate branch as the final release candidate.
+Current separate implementation state:
+
+- PR #25 branch: `release/0.8.3-graph-ergonomics@8362e74acd91d703991efd8cac2f0826c86cad3a`.
+- stacked PR #27: `fix/0.8.3-pr25-premerge-hardening@c7d338ca95839e1fd30829c9208fc9d1eda62137`.
+- `PR25_HARDENING_STACK_GATE = PASS`.
+- `PR25_BRANCH_PREMERGE_GATE = BLOCKED`.
+
+PR #27 closes PM-001 through PM-008 and is green on Ubuntu/macOS/Windows, Stage Integrity, Windows Launcher and real Chromium. That validates the **stacked result**, not the unchanged PR #25 branch.
+
+Required closure before PR #25 can merge to `main`:
+
+1. only after explicit authorization, merge PR #27 into `release/0.8.3-graph-ergonomics`;
+2. fetch the resulting immutable new PR #25 head;
+3. discard all old PR #25 workflow evidence;
+4. rerun full applicable CI, Chromium viewer behavior, Stage Integrity and Windows Launcher on that exact head;
+5. re-audit its exact diff against current `main`;
+6. only then change `PR25_BRANCH_PREMERGE_GATE` to PASS.
 
 Required closure after the eventual v0.8.3 candidate is assembled:
 
-- rerun PR #25's Chromium tests on the candidate SHA;
+- rerun the PR #25/#27 Chromium regressions on the candidate SHA;
 - rerun conversation-fold Chromium tests on that same SHA;
 - rerun provider/identity regressions after P0/P1 fixes;
 - verify Live, Finished and static `viewer.html` together, rather than accepting independent branch results.
 
 ## 4. Browser combination coverage is incomplete
 
-Existing Chromium tests are strong in specific areas, especially historical-round folding, and PR #25 adds focus/layout/routing tests. The following state combinations still need an explicit release-candidate matrix:
+Existing Chromium tests are strong in specific areas, especially historical-round folding, and the validated PR #27 stack covers PR #25 hardening behaviors. The following state combinations still need an explicit release-candidate matrix:
 
 - focused node + 800 ms live poll;
 - focused node disappears in new payload;
@@ -63,7 +82,7 @@ Existing Chromium tests are strong in specific areas, especially historical-roun
 
 ## 5. Large graph measurements are not yet recorded on the final candidate
 
-The audit requirement asks for small (~10), medium (~50) and large (100–300+) graphs with different evidence mixes. PR #25 reports a crossing baseline on its dense fixture, but the system-wide release candidate still needs comparable measurements across:
+The audit requirement asks for small (~10), medium (~50) and large (100–300+) graphs with different evidence mixes. PR #25 reports a crossing baseline on its dense fixture, and PR #27 hardens live geometry/camera/export behavior, but the system-wide release candidate still needs comparable measurements across:
 
 - agent-heavy;
 - process-heavy;
@@ -83,9 +102,7 @@ Record at minimum:
 
 ## 6. Cross-platform native evidence requires real OS runs
 
-Source inspection covers the portable collector and platform-specific modules, but this audit did not execute a full native matrix on Linux, macOS and Windows.
-
-Still required:
+The CI matrix is green on Linux/macOS/Windows for the audit and the PR #27 stack, but that does not constitute a full real native-evidence capture matrix. Still required on the assembled release candidate:
 
 - Windows path case/slash/drive-letter identity;
 - long Windows paths in graph/search/inspector;
@@ -128,11 +145,11 @@ The repository contains good provider-specific tool adapters, but a uniform beha
 - tool arguments/results;
 - model attribution.
 
-This matters most where one evidence path uses a provider hook and another parses transcript/content because dual paths can create duplicate identities.
+This matters most where one evidence path uses a provider hook and another parses transcript/content because dual paths can create duplicate identities. AUD-004 and AUD-006 prove that this risk is real for current OpenCode/Antigravity identity surfaces.
 
 ## 10. Model switching and cross-provider model-name collisions need release-candidate regression coverage
 
-`AUD-008` confirms that several API/gateway paths use global `model:catalog:<name>` IDs. Beyond fixing that issue, the release candidate should test:
+`AUD-008` confirms that several API/gateway paths use global `model:catalog:<name>` IDs. Beyond fixing or explicitly accepting that issue, the release candidate should test:
 
 - model switching within one run;
 - same model label across two unrelated providers;
@@ -140,12 +157,20 @@ This matters most where one evidence path uses a provider hook and another parse
 - missing model name;
 - one model shared by several agents without losing agent -> model attribution.
 
-## 11. Replay/export parity needs stronger behavioral coverage
+## 11. Replay/export parity needs final-candidate behavioral coverage
 
-The controls exist in the shared dashboard, but the audit has not independently exercised every replay/export path after a run finishes. The release candidate should prove that replay/export uses the same archived run evidence and does not depend on an external provider transcript directory that was claimed to have been copied into the run.
+PR #27 fixes the concrete PM-008 defect where GIF replay/export still used fixed 160x50 geometry after dashboard nodes became adaptive, and its Chromium suite is green. The assembled release candidate still needs replay/export verification after provider identity fixes land, proving that replay/export uses the same archived run evidence and does not depend on an external provider transcript directory that was claimed to have been copied into the run.
 
 ## 12. Test-quality gaps remain even with a green suite
 
-The repository contains several high-quality behavioral tests, including Chromium tests and real multi-agent fixtures. It also contains tests that deliberately preserve known limitations, such as the current cross-session root-conversation merge.
+The exact PR #26 audit head `e10c4454fef86379b38f854298c45cc4336c187d` passed Ubuntu/macOS/Windows CI, Viewer Chromium, Stage Integrity and Windows Launcher while reproducing the current defects. That illustrates the distinction between **characterization green** and **release correctness green**.
 
-A green suite therefore cannot by itself mean release correctness. For v0.8.3, audit closure requires reviewing whether every P0/P1 regression tests the desired fixed behavior rather than merely documenting current behavior.
+Several tests deliberately preserve broken behavior so the audit can prove the defect without modifying production code. Remediation PRs must invert those tests into desired-behavior regressions.
+
+A green suite therefore cannot by itself mean release correctness. For v0.8.3, audit closure requires reviewing whether every P0/P1 regression tests the desired fixed behavior and then running those regressions together on one final release-candidate SHA.
+
+## 13. Production remediation has not started
+
+PR #26 now includes `remediation-plan.md`, which groups the confirmed blockers into R1–R6 implementation batches. The audit deliberately stops before modifying `src/execweave/`.
+
+After PR #25 lands, production branches must be created from a freshly fetched new `main`. Until then the remediation plan is a reviewed handoff, not evidence that any AUD-001..AUD-009 production defect has been fixed.
