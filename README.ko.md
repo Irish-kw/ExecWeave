@@ -31,7 +31,7 @@ PyPI에서 최신 wheel/sdist를 설치합니다.
 python -m pip install -U execweave
 ```
 
-현재 릴리스는 **v0.8.2** 입니다.
+현재 릴리스는 **v0.8.3** 입니다.
 
 개발 설치:
 
@@ -67,7 +67,7 @@ execweave record --open -- python my_agent.py
 
 `execweave top -- codex`는 Agent를 시작 terminal에서 interactive 상태로 유지하면서 host 환경에 따라 detached Top dashboard를 열거나 attach합니다.
 
-**v0.8.2 — 모든 라운드와 모든 node 가 자신이 무엇을 담고 있는지 말합니다.** 한 번의 실행이 하나의 질문으로 끝나는 경우는 드물지만 패널에는 하나의 자리밖에 없었습니다. 가장 오래된 질문에 가장 새로운 답변을 짝지었기 때문에, 두 라운드짜리 실행에서는 첫 번째 질문 옆에 두 번째 질문의 답변이 놓이고 첫 라운드 자신의 답변에는 닿을 수 없었습니다. 이제 단위는 라운드입니다. 가장 새로운 라운드는 펼쳐진 채로 두고, 오래된 라운드는 자신의 시각과 질문을 밝히는 한 줄로 접히며, subagent 의 접힌 줄은 그것이 속한 root 라운드와 같은 시각과 문구를 가집니다. 또한 두 subagent 가 자신의 Response 를 잃고 있었습니다. provider 의 공통 서문을 어느 agent 의 assignment 로 읽지 않게 하는 규칙이, 두 agent 아래에 나타나는 긴 텍스트 전부와 일치했기 때문입니다. child 의 답변은 자기 기록에도 부모 기록에도 나타납니다. 이 규칙은 이제 들어온 메시지만 봅니다. 따라서 agent 가 쓴 것은 실행 중 몇 번 반복되든 그 agent 의 것입니다. process, file, network endpoint 를 선택해도 더 이상 빈 패널이 그려지지 않습니다. 각자 자신을 밝힙니다. 명령줄과 그 pid 및 부모, 경로와 그것을 건드린 이력, 주소와 그곳에 도달한 process 입니다. 그리고 어떤 유형이 한도를 넘어 붐비면 가장 새로운 것들은 그려진 채로 두고 오래된 것들은 하나의 node 로 접히며, 그 안에 담긴 모든 것을 여전히 이름으로 열거합니다. 천 개의 path 를 건드리는 실행도 하나도 잃지 않은 채 읽을 수 있습니다. 각 agent 가 소유한 provider-neutral, agent-local multi-agent conversation 은 예전과 같은 기록 그대로입니다. 달라진 것은 읽는 사람이 그중 일부가 아니라 전부에 닿을 수 있다는 점입니다. 어떤 유형이 어디서부터 접히는지는 Dashboard 를 만드는 모든 명령의 `--fold-budget N` 이 정합니다. 수백 개의 파일을 쓰는 배포 환경은 패키지를 고치지 않고 자신의 숫자를 고를 수 있습니다. v0.8.2에서는 두 가지 Dashboard 회귀를 추가로 수정했습니다. 이전 conversation round는 800 ms live refresh 이후에도 사용자가 명시적으로 선택한 열림/닫힘 상태를 유지하며, multi-agent graph는 안정적인 root/child 계층을 사용합니다. lifecycle return edge는 rank에 영향을 주지 않고, 공유 tool/model 연결은 분리된 port와 bundled trunk로 라우팅되며, agent를 선택하면 관련 없는 edge가 흐려집니다. 이는 presentation에만 해당하는 변경으로 Live, finished, `viewer.html`은 계속 같은 renderer를 공유하고 raw graph evidence는 바뀌지 않습니다.
+**v0.8.3 — 모든 라운드와 모든 node 가 자신이 무엇을 담고 있는지 말합니다.** 한 번의 실행이 하나의 질문으로 끝나는 경우는 드물지만 패널에는 하나의 자리밖에 없었습니다. 가장 오래된 질문에 가장 새로운 답변을 짝지었기 때문에, 두 라운드짜리 실행에서는 첫 번째 질문 옆에 두 번째 질문의 답변이 놓이고 첫 라운드 자신의 답변에는 닿을 수 없었습니다. 이제 단위는 라운드입니다. 가장 새로운 라운드는 펼쳐진 채로 두고, 오래된 라운드는 자신의 시각과 질문을 밝히는 한 줄로 접히며, subagent 의 접힌 줄은 그것이 속한 root 라운드와 같은 시각과 문구를 가집니다. 또한 두 subagent 가 자신의 Response 를 잃고 있었습니다. provider 의 공통 서문을 어느 agent 의 assignment 로 읽지 않게 하는 규칙이, 두 agent 아래에 나타나는 긴 텍스트 전부와 일치했기 때문입니다. child 의 답변은 자기 기록에도 부모 기록에도 나타납니다. 이 규칙은 이제 들어온 메시지만 봅니다. 따라서 agent 가 쓴 것은 실행 중 몇 번 반복되든 그 agent 의 것입니다. process, file, network endpoint 를 선택해도 더 이상 빈 패널이 그려지지 않습니다. 각자 자신을 밝힙니다. 명령줄과 그 pid 및 부모, 경로와 그것을 건드린 이력, 주소와 그곳에 도달한 process 입니다. 그리고 어떤 유형이 한도를 넘어 붐비면 가장 새로운 것들은 그려진 채로 두고 오래된 것들은 하나의 node 로 접히며, 그 안에 담긴 모든 것을 여전히 이름으로 열거합니다. 천 개의 path 를 건드리는 실행도 하나도 잃지 않은 채 읽을 수 있습니다. 각 agent 가 소유한 provider-neutral, agent-local multi-agent conversation 은 예전과 같은 기록 그대로입니다. 달라진 것은 읽는 사람이 그중 일부가 아니라 전부에 닿을 수 있다는 점입니다. 어떤 유형이 어디서부터 접히는지는 Dashboard 를 만드는 모든 명령의 `--fold-budget N` 이 정합니다. 수백 개의 파일을 쓰는 배포 환경은 패키지를 고치지 않고 자신의 숫자를 고를 수 있습니다. v0.8.3에서는 두 가지 Dashboard 회귀를 추가로 수정했습니다. 이전 conversation round는 800 ms live refresh 이후에도 사용자가 명시적으로 선택한 열림/닫힘 상태를 유지하며, multi-agent graph는 안정적인 root/child 계층을 사용합니다. lifecycle return edge는 rank에 영향을 주지 않고, 공유 tool/model 연결은 분리된 port와 bundled trunk로 라우팅되며, agent를 선택하면 관련 없는 edge가 흐려집니다. 이는 presentation에만 해당하는 변경으로 Live, finished, `viewer.html`은 계속 같은 renderer를 공유하고 raw graph evidence는 바뀌지 않습니다.
 
 통합 dashboard는 execution graph, logs, conversation records를 하나의 inspection flow에서 제공합니다. Finalized run은 `conversations.md`와 `conversations.json`을 만들며, 검증된 provider transcript는 run-local SHA-256 content store로 복사됩니다. Claude Code, OpenAI Codex, Cursor, OpenCode, Google Antigravity는 각 integration이 실제로 노출하는 가장 강한 multi-agent evidence를 사용합니다. gateway나 local runtime이 root request/response만 노출하면 ExecWeave는 root conversation만 보여 주며 subagent나 hidden routing을 만들어내지 않습니다.
 
@@ -276,7 +276,7 @@ Conversation isolation은 attribution/display 규칙이지 redaction boundary가
 
 ## 현재 상태
 
-v0.8.2은 cross-platform runtime collection, materialized execution graph, standalone/live dashboard, 보수적인 provider↔runtime correlation, content-addressed full-fidelity provider evidence, attributable multi-agent execution trace, run-local conversation access, provider-neutral projection의 agent-local conversation isolation, standalone 및 live dashboard의 per-round agent conversation 패널과 스스로를 설명하는 non-agent node 및 유형별 접기를 통합합니다. 각 integration은 provider가 실제로 노출한 가장 강한 identity/routing evidence만 보존하고 충분한 증거가 없으면 abstain합니다. Observed evidence와 inference는 설계상 계속 분리됩니다. v0.8.2는 또한 live polling 사이에서 사용자가 제어한 conversation fold 상태를 유지하고 raw evidence를 바꾸지 않은 채 topology-aware multi-agent layout/routing을 적용합니다.
+v0.8.3은 cross-platform runtime collection, materialized execution graph, standalone/live dashboard, 보수적인 provider↔runtime correlation, content-addressed full-fidelity provider evidence, attributable multi-agent execution trace, run-local conversation access, provider-neutral projection의 agent-local conversation isolation, standalone 및 live dashboard의 per-round agent conversation 패널과 스스로를 설명하는 non-agent node 및 유형별 접기를 통합합니다. 각 integration은 provider가 실제로 노출한 가장 강한 identity/routing evidence만 보존하고 충분한 증거가 없으면 abstain합니다. Observed evidence와 inference는 설계상 계속 분리됩니다. v0.8.3는 또한 live polling 사이에서 사용자가 제어한 conversation fold 상태를 유지하고 raw evidence를 바꾸지 않은 채 topology-aware multi-agent layout/routing을 적용합니다.
 
 ## 문서
 
