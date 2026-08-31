@@ -105,7 +105,7 @@ def test_release_version_and_noncommercial_license_metadata_are_078() -> None:
     """
     assert __version__ == "0.8.3"
     pyproject = Path("pyproject.toml").read_text(encoding="utf-8")
-    assert 'version = "0.8.2"' in pyproject
+    assert 'version = "0.8.3"' in pyproject
     assert "ExecWeave v0.8.3 release metadata" in pyproject
     assert "License :: Other/Proprietary License" in pyproject
     assert "License :: OSI Approved :: MIT License" not in pyproject
