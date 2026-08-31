@@ -21,13 +21,17 @@ LIVE_READABILITY_STYLE = r"""
 LIVE_READABILITY_SCRIPT = r"""
 const EXECWEAVE_NODE_W=160,EXECWEAVE_NODE_H=50,EXECWEAVE_ROW_GAP=104;
 const EXECWEAVE_NODE_W_MAX=320,EXECWEAVE_LABEL_PAD=20;
+// A second label line adds this much. Every vertical measurement below is written as a
+// fraction of the node's own height, so a one-line node reproduces the numbers the fixed
+// 50 produced: centre 25, the lifecycle anchor 39, and a port span of 30.
+const EXECWEAVE_LINE_H=14;
 const EXECWEAVE_LANES={runtime:0,root:1,agent:2,model:3,tool:4,endpoint:5,other:5};
 const EXECWEAVE_LANE_ORDER=['runtime','root','agent','model','tool','endpoint'];
 // The gap that follows each lane. These are the differences in the fixed table this
 // replaced, so a graph whose labels all fit the minimum width lands on exactly the
 // x positions it did before: 0, 270, 540, 820, 1100, 1380.
 const EXECWEAVE_LANE_GAP={runtime:110,root:110,agent:120,model:120,tool:120};
-let execweaveTopology={spec:new Map(),bundleByEdge:new Map(),sourcePort:new Map(),targetPort:new Map(),width:new Map(),laneX:{},crowded:false};
+let execweaveTopology={spec:new Map(),bundleByEdge:new Map(),sourcePort:new Map(),targetPort:new Map(),width:new Map(),height:new Map(),laneX:{},crowded:false};
 let execweaveRuler=null;
 // Measure with a hidden text node carrying the label's own class, so the width comes
 // from the font actually in use rather than a guess. Contexts without layout (a
@@ -57,6 +61,25 @@ function execweaveNodeWidth(node){
   return Math.max(EXECWEAVE_NODE_W,Math.min(EXECWEAVE_NODE_W_MAX,Math.ceil(wanted)));
 }
 function execweaveWidthOf(id){const value=execweaveTopology.width.get(id);return Number.isFinite(value)?value:EXECWEAVE_NODE_W}
+function execweaveHeightOf(id){const value=execweaveTopology.height.get(id);return Number.isFinite(value)?value:EXECWEAVE_NODE_H}
+function execweaveCentreY(position,id){return position.y+execweaveHeightOf(id)/2}
+// Break at the last separator that fits, so a path or a namespaced tool name splits
+// where a reader would split it. A label with no separator breaks on the character.
+function execweaveWrapLabel(text,width){
+  const value=String(text||''),room=width-EXECWEAVE_LABEL_PAD;
+  if(execweaveMeasure(value)<=room)return[value];
+  let cut=0;
+  for(let index=1;index<value.length;index++){
+    if(execweaveMeasure(value.slice(0,index))>room)break;
+    if(/[\/_\-. :]/.test(value[index-1]))cut=index;
+  }
+  if(!cut){
+    let low=0,high=value.length;
+    while(low<high){const mid=Math.ceil((low+high)/2);if(execweaveMeasure(value.slice(0,mid))<=room)low=mid;else high=mid-1}
+    cut=Math.max(1,low);
+  }
+  return[value.slice(0,cut),value.slice(cut)];
+}
 function execweaveLaneXOf(lane){const value=execweaveTopology.laneX[lane];return Number.isFinite(value)?value:0}
 // A lane starts far enough right that the widest node in the lane before it cannot
 // reach into it. With every label at the minimum width this reproduces the fixed
@@ -120,10 +143,11 @@ function execweaveBuildTopology(){
     const ab=agentBarycenter(a),bb=agentBarycenter(b);if(ab!==bb)return ab-bb;
     return execweaveStableNodeSort(a,b);
   });
-  const width=new Map(),widthByLane=new Map();
+  const width=new Map(),height=new Map(),widthByLane=new Map();
   for(const node of nodes){
     const w=execweaveNodeWidth(node),lane=execweaveLane(node);
     width.set(node.id,w);
+    height.set(node.id,EXECWEAVE_NODE_H+(execweaveWrapLabel(execweaveNodeLabel(node),w).length>1?EXECWEAVE_LINE_H:0));
     widthByLane.set(lane,Math.max(widthByLane.get(lane)||EXECWEAVE_NODE_W,w));
   }
   // `other` shares a column with `endpoint`, so it must not widen a lane of its own.
@@ -170,11 +194,11 @@ function execweaveBuildTopology(){
     list.sort((a,b)=>{const as=spec.get(a.source),bs=spec.get(b.source);return (as?.y??0)-(bs?.y??0)||(as?.rank??0)-(bs?.rank??0)||edgeId(a).localeCompare(edgeId(b))});
     list.forEach((edge,index)=>targetPort.set(edgeId(edge),{index,total:list.length}));
   }
-  return{spec,bundleByEdge,sourcePort,targetPort,width,laneX,crowded:edges.length>=16||nodes.length>=12};
+  return{spec,bundleByEdge,sourcePort,targetPort,width,height,laneX,crowded:edges.length>=16||nodes.length>=12};
 }
-function execweavePortY(position,port){if(!port||port.total<=1)return position.y+25;const span=30;return position.y+10+(span*port.index)/(port.total-1)}
+function execweavePortY(position,port,id){const h=execweaveHeightOf(id);if(!port||port.total<=1)return position.y+h/2;const span=h-20;return position.y+10+(span*port.index)/(port.total-1)}
 function execweaveDesiredPosition(id){const value=execweaveTopology.spec.get(id);return value?{x:value.x,y:value.y}:{x:0,y:0}}
-function execweaveCollision(position,next,id){for(const [other,p] of next){if(other===id)continue;if(Math.abs(p.x-position.x)<2&&Math.abs(p.y-position.y)<74)return true}return false}
+function execweaveCollision(position,next,id){const h=execweaveHeightOf(id);for(const [other,p] of next){if(other===id)continue;const gap=Math.max(74,(h+execweaveHeightOf(other))/2+24);if(Math.abs(p.x-position.x)<2&&Math.abs(p.y-position.y)<gap)return true}return false}
 function execweavePlaceStable(id,desired,next){let candidate={...desired};while(execweaveCollision(candidate,next,id))candidate.y+=EXECWEAVE_ROW_GAP;return candidate}
 fullLayout=function(){
   const prior=positions;execweaveTopology=execweaveBuildTopology();const next=new Map();
@@ -196,22 +220,22 @@ placeAddedNodes=function(ids){
 function execweaveRoute(edge){
   const id=edgeId(edge),sp=positions.get(edge.source)||{x:0,y:0},tp=positions.get(edge.target)||{x:0,y:0},sourceSpec=execweaveTopology.spec.get(edge.source)||{},targetSpec=execweaveTopology.spec.get(edge.target)||{},bundle=execweaveTopology.bundleByEdge.get(id),sourcePort=execweaveTopology.sourcePort.get(id),targetPort=execweaveTopology.targetPort.get(id);
   if(bundle&&bundle.size>1){
-    const sx=sp.x+execweaveWidthOf(edge.source),sy=execweavePortY(sp,sourcePort),tx=tp.x,ty=execweavePortY(tp,targetPort),trunkX=Math.max(sx+54,tx-82-(bundle.groupIndex%6)*24);
+    const sx=sp.x+execweaveWidthOf(edge.source),sy=execweavePortY(sp,sourcePort,edge.source),tx=tp.x,ty=execweavePortY(tp,targetPort,edge.target),trunkX=Math.max(sx+54,tx-82-(bundle.groupIndex%6)*24);
     return{d:`M ${sx} ${sy} H ${trunkX} V ${ty} H ${tx}`,labelX:(trunkX+tx)/2,labelY:ty-8,kind:'bundle',bundle};
   }
   if(execweaveIsSpawn(edge)){
-    const sx=sp.x+execweaveWidthOf(edge.source),sy=execweavePortY(sp,sourcePort),tx=tp.x,ty=tp.y+25,bend=Math.max(48,(tx-sx)*.46);
+    const sx=sp.x+execweaveWidthOf(edge.source),sy=execweavePortY(sp,sourcePort,edge.source),tx=tp.x,ty=execweaveCentreY(tp,edge.target),bend=Math.max(48,(tx-sx)*.46);
     return{d:`M ${sx} ${sy} C ${sx+bend} ${sy}, ${tx-bend} ${ty}, ${tx} ${ty}`,labelX:(sx+tx)/2,labelY:Math.min(sy,ty)-10,kind:'spawn',bundle:null};
   }
   if(execweaveIsStopped(edge)){
-    const sx=sp.x,sy=sp.y+39,tx=tp.x+execweaveWidthOf(edge.target),ty=tp.y+39,offset=62+((sourceSpec.order||0)%4)*11;
+    const sx=sp.x,sy=sp.y+execweaveHeightOf(edge.source)*0.78,tx=tp.x+execweaveWidthOf(edge.target),ty=tp.y+execweaveHeightOf(edge.target)*0.78,offset=62+((sourceSpec.order||0)%4)*11;
     return{d:`M ${sx} ${sy} C ${sx-offset} ${sy+offset}, ${tx+offset} ${ty+offset}, ${tx} ${ty}`,labelX:(sx+tx)/2,labelY:Math.max(sy,ty)+offset*.66,kind:'lifecycle-return',bundle:null};
   }
   const forward=(targetSpec.rank??0)>=(sourceSpec.rank??0);
-  const sx=forward?sp.x+execweaveWidthOf(edge.source):sp.x,tx=forward?tp.x:tp.x+execweaveWidthOf(edge.target),sy=execweavePortY(sp,sourcePort),ty=execweavePortY(tp,targetPort),distance=Math.abs(tx-sx),bend=Math.max(44,distance*.42),sign=forward?1:-1;
+  const sx=forward?sp.x+execweaveWidthOf(edge.source):sp.x,tx=forward?tp.x:tp.x+execweaveWidthOf(edge.target),sy=execweavePortY(sp,sourcePort,edge.source),ty=execweavePortY(tp,targetPort,edge.target),distance=Math.abs(tx-sx),bend=Math.max(44,distance*.42),sign=forward?1:-1;
   return{d:`M ${sx} ${sy} C ${sx+sign*bend} ${sy}, ${tx-sign*bend} ${ty}, ${tx} ${ty}`,labelX:(sx+tx)/2,labelY:(sy+ty)/2-8,kind:forward?'forward':'reverse',bundle:null};
 }
-anchor=function(id,right){const p=positions.get(id)||{x:0,y:0};return{x:p.x+(right?execweaveWidthOf(id):0),y:p.y+25}};
+anchor=function(id,right){const p=positions.get(id)||{x:0,y:0};return{x:p.x+(right?execweaveWidthOf(id):0),y:execweaveCentreY(p,id)}};
 curve=function(edge){return execweaveRoute(edge).d};
 // The base renderer draws every node 160 wide and truncates its label at 28 characters,
 // so a label that now has room would still be cut. Both are re-applied here from the
@@ -230,17 +254,32 @@ const execweaveBaseUpdateNodeElement=updateNodeElement;
 updateNodeElement=function(node){
   execweaveBaseUpdateNodeElement(node);const group=nodeElements.get(node.id);if(!group)return;
   const width=execweaveWidthOf(node.id);
-  const rect=group.querySelector('rect');if(rect)rect.setAttribute('width',width);
+  const height=execweaveHeightOf(node.id);
+  const rect=group.querySelector('rect');if(rect){rect.setAttribute('width',width);rect.setAttribute('height',height)}
   const label=group.querySelector('.name-label');
   if(label){
     const full=execweaveNodeLabel(node);
-    label.textContent=execweaveFitLabel(full,width);
+    const lines=execweaveWrapLabel(full,width);
+    label.textContent='';
+    if(lines.length>1){
+      label.setAttribute('y',32);
+      const first=document.createElementNS('http://www.w3.org/2000/svg','tspan');
+      first.setAttribute('x',10);first.setAttribute('y',32);first.textContent=lines[0];
+      const second=document.createElementNS('http://www.w3.org/2000/svg','tspan');
+      second.setAttribute('x',10);second.setAttribute('y',32+EXECWEAVE_LINE_H);
+      second.textContent=execweaveFitLabel(lines[1],width);
+      label.appendChild(first);label.appendChild(second);
+    }else{
+      label.setAttribute('y',34);
+      label.textContent=execweaveFitLabel(full,width);
+    }
+    group.dataset.labelLines=String(lines.length);
     group.dataset.fullLabel=full;
     let title=group.querySelector('title');
     if(!title){title=document.createElementNS('http://www.w3.org/2000/svg','title');group.appendChild(title)}
     title.textContent=full;
   }
-  group.dataset.nodeWidth=String(width);
+  group.dataset.nodeWidth=String(width);group.dataset.nodeHeight=String(height);
   const spec=execweaveTopology.spec.get(node.id);if(!spec)return;
   group.dataset.layoutLane=spec.lane;group.dataset.layoutRank=String(spec.rank);group.dataset.layoutOrder=String(spec.order);
 };

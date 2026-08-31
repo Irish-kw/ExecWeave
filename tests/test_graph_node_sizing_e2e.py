@@ -60,6 +60,8 @@ def _nodes(page: Any) -> list[dict[str, Any]]:
                     x: t ? Number(t[1]) : 0,
                     y: t ? Number(t[2]) : 0,
                     text: label ? label.textContent : '',
+                    lines: Number(g.dataset.labelLines || 1),
+                    height: rect ? Number(rect.getAttribute('height')) : 0,
                     full: g.dataset.fullLabel || '',
                     title: g.querySelector('title')?.textContent || '',
                 };
@@ -189,3 +191,57 @@ def test_no_edge_leaves_a_wide_node_at_the_old_constant(tmp_path: Path) -> None:
     assert not any(start == pytest.approx(wide["x"] + 160, abs=1) for start in starts), (
         f"an edge still starts at the old fixed width, inside the node: {starts}"
     )
+
+
+WRAPPABLE = "src/execweave/very/deeply/nested/module_with_a_long_name.py"
+
+
+def test_a_label_past_the_ceiling_wraps_to_two_lines(tmp_path: Path) -> None:
+    """At the width ceiling the label runs out of room; it wraps before it truncates."""
+    graph = _graph_with("read")
+    graph["nodes"].append(
+        {"id": "file:1", "type": "file", "name": WRAPPABLE, "attributes": {}}
+    )
+    graph["edges"].append(
+        {"id": "e5", "source": "agent:/root", "target": "file:1",
+         "relation": "WROTE_FILE", "attributes": {}}
+    )
+    drawn = _drawn(tmp_path, graph)
+    wrapped = next(node for node in drawn if node["id"] == "file:1")
+
+    assert wrapped["width"] == 320, f"a label this long must reach the ceiling: {wrapped}"
+    assert wrapped["lines"] == 2, f"it must wrap rather than truncate at one line: {wrapped}"
+    assert wrapped["height"] > 50, f"a wrapped node must be taller: {wrapped}"
+    assert wrapped["full"] == WRAPPABLE
+    # Split where a reader would split it, not mid-token.
+    assert wrapped["text"].startswith("src/execweave/"), wrapped["text"]
+
+
+def test_a_single_line_node_keeps_the_geometry_it_always_had(tmp_path: Path) -> None:
+    """Height became per-node; a one-line node must not move by a pixel."""
+    drawn = _drawn(tmp_path, _graph_with("read"))
+    for node in drawn:
+        assert node["lines"] == 1, node
+        assert node["height"] == 50, f"an unwrapped node changed height: {node}"
+
+
+def test_a_wrapped_node_does_not_overlap_the_row_below(tmp_path: Path) -> None:
+    """Taller nodes need more vertical room than the fixed gap allowed."""
+    graph = _graph_with("read")
+    for index in range(4):
+        graph["nodes"].append(
+            {"id": f"file:{index}", "type": "file",
+             "name": f"{WRAPPABLE}.{index}", "attributes": {}}
+        )
+        graph["edges"].append(
+            {"id": f"ef{index}", "source": "agent:/root", "target": f"file:{index}",
+             "relation": "WROTE_FILE", "attributes": {}}
+        )
+    drawn = sorted(_drawn(tmp_path, graph), key=lambda node: (node["x"], node["y"]))
+    for upper, lower in zip(drawn, drawn[1:]):
+        if upper["x"] != lower["x"]:
+            continue
+        assert upper["y"] + upper["height"] <= lower["y"], (
+            f"{upper['id']} ends at {upper['y'] + upper['height']} but "
+            f"{lower['id']} starts at {lower['y']}"
+        )
