@@ -6,9 +6,14 @@ Audit branch: `audit/0.8.3-system-wide-provider-dashboard`
 
 Audit baseline: `main@1ec0dcb0171f9346f8232a99e857cbd6b3168f08`
 
-Related implementation line: PR #25 (`release/0.8.3-graph-ergonomics`) is intentionally separate and was not modified by this audit.
+Related implementation lines are intentionally separate from this audit:
+
+- PR #25: `release/0.8.3-graph-ergonomics` at `8362e74acd91d703991efd8cac2f0826c86cad3a`.
+- stacked PR #27: `fix/0.8.3-pr25-premerge-hardening` at validated head `c7d338ca95839e1fd30829c9208fc9d1eda62137`.
 
 # V0.8.3_RELEASE_GATE = FAIL
+
+`PR25_HARDENING_STACK_GATE = PASS`, but `PR25_BRANCH_PREMERGE_GATE = BLOCKED` until PR #27 is explicitly merged into the PR #25 branch and the resulting new PR #25 head is revalidated. This audit did not perform that merge.
 
 ## Executive summary
 
@@ -33,19 +38,24 @@ The P0/P1 release blockers are:
 6. `AUD-006` — Antigravity tool evidence and conversation evidence use incompatible agent identities even when they share an exact `conversationId`.
 7. `SUS-001` — real Antigravity historical-turn loss remains unresolved until reproduced or dismissed with sanitized provider evidence.
 
-The detailed source-of-truth is `bug-inventory.json`; `bug-inventory.md` is the human-readable view and `release-gate.md` defines the conditions required before PASS.
+The detailed source-of-truth is `bug-inventory.json`; `bug-inventory.md` is the human-readable view, `release-gate.md` defines the conditions required before PASS, and `remediation-plan.md` turns the confirmed findings into reviewable implementation batches.
 
 ## Highest-severity finding: cross-session conversation merge
 
 `AUD-001` is P0 because it can combine content from two independent provider sessions into one dashboard conversation.
 
-The repository already contains a direct characterization in `tests/test_conversation_identity_merge.py::test_two_same_provider_root_sessions_share_the_synthesized_root_thread`: two distinct OpenCode session agents (`ses_one`, `ses_two`) are projected into one `opencode:root` thread containing both `ANSWER ONE` and `ANSWER TWO`.
+The repository already contains a direct OpenCode characterization in `tests/test_conversation_identity_merge.py::test_two_same_provider_root_sessions_share_the_synthesized_root_thread`: two distinct OpenCode session agents (`ses_one`, `ses_two`) are projected into one `opencode:root` thread containing both `ANSWER ONE` and `ANSWER TWO`.
 
-That behavior was previously described as a known limitation. For the v0.8.3 release gate it is treated as a correctness defect: root status and provider label are insufficient evidence that two independent sessions are the same conversation.
+PR #26 now independently reproduces the same mechanism with two distinct Antigravity conversation-scoped graph agents. They collapse into one synthesized `antigravity:root` conversation containing both root answers. That establishes the defect as a conversation-identity contract problem, not an OpenCode-specific special case.
+
+Root cause is the combination of two choices:
+
+- `conversation_preview._agent_identity()` synthesizes `<provider>:root` for root-shaped observations without a provider-native thread;
+- `_conversation_records_core._conversation_identity_keys()` can then use that ExecWeave-derived thread together with `/root` scope as positive merge evidence.
 
 Required remediation invariant:
 
-> Independent provider-native execution/session identities stay separate unless positive provider evidence proves they are the same thread.
+> Independent provider-native execution/session identities stay separate unless positive provider evidence proves they are the same thread. An ExecWeave-derived presentation thread is not positive provider identity.
 
 ## Endpoint identity domain defects
 
@@ -53,24 +63,26 @@ Required remediation invariant:
 
 Local runtimes (`Ollama`, `llama.cpp`, `vLLM`, `LM Studio`) correctly include endpoint identity in the runtime node, but construct request IDs from runtime name plus native request ID. Two independent endpoints can therefore emit the same native request ID and collapse into one `inference_request` graph node.
 
-Inference gateways (`LiteLLM`, `OpenRouter`, generic gateway path) likewise include endpoint identity in the gateway node while request/deployment IDs omit it. A native ID is authoritative only inside the endpoint identity domain that emitted it.
+Inference gateways (`LiteLLM`, `OpenRouter`, generic gateway path) likewise include endpoint identity in the gateway node while request/deployment IDs omit it. PR #26 separately characterizes both the LiteLLM request collision and a deployment-ID collision across two endpoints. A native request or deployment identifier is authoritative only inside the endpoint identity domain that emitted it.
 
-Audit characterization tests reproduce both collisions directly.
+The OpenRouter response/generation reconciliation path must therefore be changed with the same endpoint-scoping helper rather than fixed independently.
 
 ## OpenCode identity split
 
 `AUD-004` is confirmed with one plugin payload.
 
-The semantic adapter uses generic `agent:OpenCode`; the full-fidelity/conversation path uses `agent:opencode:session:<sessionID>`. One logical provider session can therefore appear as two root agents, splitting model/tool evidence from conversation evidence.
+The semantic adapter uses generic `agent:OpenCode`; the full-fidelity conversation path uses `agent:opencode:session:<sessionID>`. The strengthened PR #26 characterization also proves that full-fidelity provider metadata itself can use the generic agent in the same processing cycle while chat content is session-scoped.
+
+One logical provider session can therefore split model/tool/metadata/conversation evidence across different graph roots.
 
 The remediation must preserve two properties simultaneously:
 
-- one logical OpenCode session -> one canonical graph agent;
+- one logical OpenCode session -> one canonical graph agent across semantic, metadata, full-fidelity, agent-trace, model and tool evidence;
 - two independent OpenCode sessions -> two distinct graph agents/conversations.
 
 ## Antigravity identity/topology cluster
 
-The original real-world symptom remains useful, but the static audit found two directly reproducible upstream correctness defects that should be fixed before reasoning about layout.
+The original real-world symptom remains useful, but the static and behavioral audit found two directly reproducible upstream correctness defects that should be fixed before reasoning about layout.
 
 ### AUD-005 — fabricated root provenance
 
@@ -78,17 +90,26 @@ The original real-world symptom remains useful, but the static audit found two d
 
 A validated transcript proves that a transcript belongs to a conversation. It does **not** prove that the conversation is the root of the provider execution. Child-shaped conversation evidence can therefore acquire stronger root provenance than the provider actually supplied.
 
+The existing topology model already supports the right invariant: positive child evidence uses disjoint attributes and can remain authoritative regardless of event order. The fix should remove the fabricated archive root claim rather than infer a new hierarchy.
+
 ### AUD-006 — split tool/conversation agent identity
 
-Current PostToolUse fallback evidence already carries exact `conversationId`, but its source is generic `agent:Antigravity`. The Stop transcript archive for that same exact ID uses `agent:antigravity:conversation:<conversationId>`.
+Both current Antigravity PostToolUse paths are affected:
+
+- the exact `toolCall` path in `antigravity_adapter_base`;
+- the 2.0/no-tool-identity fallback path in `antigravity_adapter`.
+
+Both can carry an exact `conversationId` while sourcing agent evidence from generic `agent:Antigravity`. Stop transcript archive for the same ID uses `agent:antigravity:conversation:<conversationId>`.
 
 Graph accumulation is ID-based, so these do not become one logical agent automatically. Tool activity can therefore appear disconnected from the conversation that produced it.
+
+Importantly, validated Antigravity child linkage already uses `agent:antigravity:conversation:<childId>`. The remediation therefore does not require an ID migration: it should promote one shared conversation-agent helper and replace the child linkage's legacy bare `agent_path` claim with evidence-scoped topology while preserving conservative abstention on invalid/torn implementation wires.
 
 ### SUS-001 — historical-turn loss
 
 The user-supplied real Antigravity run showed older turns disappearing after later activity. This remains `SUSPECTED`, not promoted to confirmed, because the audit still lacks a sanitized real transcript fixture reproducing the loss through archive -> graph -> conversation projection -> Chromium.
 
-The required three-round reproduction is documented in `release-gate.md`.
+The required three-round reproduction is documented in `release-gate.md` and `remediation-plan.md`. A synthetic parser fixture is useful coverage but is not sufficient to close this real-provider report.
 
 ## P2 / coverage findings
 
@@ -98,7 +119,7 @@ The required three-round reproduction is documented in `release-gate.md`.
 
 `AUD-009` — strongly supported: deterministic fallback IDs for responses with no native request ID fingerprint response fields rather than an observation occurrence. Two independent identical observations can therefore receive the same synthesized request ID.
 
-P2 findings do not automatically block release once all P0/P1 items are fixed, but they must be fixed or explicitly accepted/tracked before changing the release gate to PASS.
+P2 findings do not automatically block release once all P0/P1 items are fixed, but they must be fixed or explicitly accepted/tracked before changing the release gate to PASS. The occurrence-identity part of AUD-009 should be evaluated with AUD-002/AUD-003 because they share the inference identity contract.
 
 ## Provider surface audited
 
@@ -132,7 +153,9 @@ Several initially suspicious dashboard behaviors were investigated and dismissed
 - Cursor has a provider-specific subagent/delegation path;
 - `collaborationspawn_agent` is a provider-native label and should not be rewritten merely for display.
 
-PR #25 separately implements graph ergonomics/routing work and reports real Chromium coverage for adaptive sizing, reversible focus, lane/component placement and routing determinism. Those branch results are useful evidence but **do not** make the v0.8.3 release gate pass. All provider fixes plus PR #25 behavior must be rerun on one assembled release-candidate SHA.
+PR #27 closes the eight PR #25 pre-merge hardening findings (PM-001 through PM-008) on top of the PR #25 branch and is fully green at `c7d338ca95839e1fd30829c9208fc9d1eda62137`, including real Chromium. That proves the hardening stack, **not** the unchanged PR #25 branch itself. PR #27 must first be merged into PR #25 after explicit authorization, and the resulting exact PR #25 head must then be revalidated before PR #25 can be considered merge-ready for `main`.
+
+Even after that, all provider fixes plus the dashboard work must be rerun on one assembled release-candidate SHA before v0.8.3 can pass.
 
 See `dashboard-matrix.md` for the checked behaviors and remaining final-candidate coverage requirements.
 
@@ -154,31 +177,42 @@ These limitations must remain accurately disclosed and must not be represented a
 
 `tests/test_v083_system_audit_characterization.py` records current broken behavior without modifying production code:
 
+- `AUD-001` Antigravity two-root cross-session conversation merge, complementing the existing OpenCode characterization;
 - `AUD-002` vLLM endpoint request-ID collision;
 - `AUD-003` LiteLLM endpoint request-ID collision;
-- `AUD-004` OpenCode generic/session agent split;
+- `AUD-003` LiteLLM deployment-ID collision across endpoints;
+- `AUD-004` OpenCode generic/session agent split, including generic full-fidelity metadata versus session-scoped chat content;
 - `AUD-005` Antigravity fabricated root provenance;
-- `AUD-006` Antigravity tool/conversation identity split.
+- `AUD-006` Antigravity tool/conversation identity split on both the exact `toolCall` and fallback PostToolUse paths.
 
 The tests intentionally assert the current defect so the audit branch remains green and the repository's stage-integrity rule against new `skip`/`xfail` markers is respected. Remediation PRs must invert these characterizations into correctness regressions.
 
-`AUD-001` is already directly characterized by the existing root-session merge test in `tests/test_conversation_identity_merge.py`.
+The exact audit head `e10c4454fef86379b38f854298c45cc4336c187d` passed:
 
-## Release ordering
+- CI `33377701731` on Ubuntu/macOS/Windows;
+- Viewer Agent Isolation `33377701793`, including real Chromium;
+- Provider Capability Stage Integrity `33377701728`;
+- Windows Launcher Compatibility `33377701746`.
 
-Do not attempt to hide upstream identity defects with layout changes. Correct remediation order is:
+Green audit CI means the characterizations are reproducible and internally consistent. It does **not** mean the characterized defects are fixed.
+
+## Remediation architecture and ordering
+
+Do not attempt to hide upstream identity defects with layout changes. Correct dependency order is:
 
 `provider evidence -> identity domain -> topology provenance -> conversation ownership -> graph projection -> dashboard projection -> layout/routing`
 
-Recommended fix batches:
+`remediation-plan.md` reduces the confirmed blockers into focused contracts and branches:
 
-1. P0 conversation identity isolation (`AUD-001`).
-2. endpoint/request/deployment identity domain (`AUD-002`, `AUD-003`, and evaluate `AUD-009`).
-3. OpenCode canonical session identity (`AUD-004`).
-4. Antigravity topology + conversation-scoped identity (`AUD-005`, `AUD-006`).
-5. sanitized three-round Antigravity reproduction for `SUS-001`.
-6. resolve/accept P2 items.
-7. assemble with PR #25 and run the complete release-candidate matrix.
+1. R1: P0 conversation identity isolation (`AUD-001`).
+2. R2: endpoint/request/deployment identity domain (`AUD-002`, `AUD-003`, relevant `AUD-009`).
+3. R3: OpenCode canonical session identity (`AUD-004`).
+4. R4: Antigravity topology + conversation-scoped identity (`AUD-005`, `AUD-006`).
+5. R5: sanitized real three-round Antigravity reproduction for `SUS-001`.
+6. R6: resolve/accept P2 items.
+7. assemble all fixes with the PR #25 line and run the complete release-candidate matrix.
+
+Production remediation should start from freshly fetched post-PR25 `main`; do not silently stack all fixes unless a real dependency requires it.
 
 ## Branch / release rules
 
