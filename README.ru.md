@@ -13,9 +13,16 @@
 </p>
 <!-- i18n-nav:end -->
 
+<p align="center">
+  <a href="https://pypi.org/project/execweave/"><img src="https://img.shields.io/pypi/v/execweave" alt="PyPI"></a>
+  <a href="https://github.com/Irish-kw/ExecWeave/actions/workflows/ci.yml"><img src="https://github.com/Irish-kw/ExecWeave/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <img src="https://img.shields.io/badge/Python-3.10%2B-blue" alt="Python 3.10+">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue" alt="License"></a>
+</p>
+
 **Узнайте, что AI Agent действительно делает на вашей машине.**
 
-ExecWeave — source-available, local-first проект наблюдаемости, который превращает активность AI Agent в интерактивный execution graph и явно разделяет observed evidence, provider content и derived inference.
+ExecWeave — source-available, local-first проект наблюдаемости, который превращает активность AI Agent в интерактивный execution graph и явно разделяет observed evidence, явно предоставленный provider content и derived inference.
 
 > **Event — это ground truth. Graph — materialized view.**
 
@@ -23,15 +30,22 @@ ExecWeave — source-available, local-first проект наблюдаемос�
   <img src="docs/assets/codex.gif" alt="ExecWeave animated live demo" width="100%">
 </p>
 
+Этот README описывает **v0.8.3**.
+
+## Почему ExecWeave
+
+- **Единая локальная inspection surface.** Live runs, завершённые runs и standalone `viewer.html` используют один dashboard renderer для graph, logs, conversations и node details.
+- **Evidence-aware by design.** Direct observations, identity links, консервативные inference и causal claims остаются различимыми, а не превращаются в один тип связи.
+- **Provider-aware без выдумывания скрытого поведения.** ExecWeave использует только routing / identity evidence, которые provider действительно раскрывает; отсутствующая evidence остаётся отсутствующей.
+- **Не привязан к одному Agent.** OS-runtime telemetry может оборачивать любую локальную command, а поддерживаемые provider adapters добавляют более богатую semantic evidence.
+
 ## Установка
 
-Установите последний опубликованный wheel/sdist из PyPI:
+Установите последний опубликованный package из PyPI:
 
 ```bash
 python -m pip install -U execweave
 ```
-
-Текущая версия — **v0.8.3**.
 
 Для разработки:
 
@@ -41,9 +55,9 @@ cd ExecWeave
 python -m pip install -e ".[dev]"
 ```
 
-## Быстрый старт
+## Быстрый старт за 60 секунд
 
-Live OS-runtime telemetry работает с **любой локальной командой**. Названия Agent/runtime ниже — лишь примеры, а не whitelist.
+Live OS-runtime telemetry работает с **любой локальной command**. Названия Agent/runtime ниже — примеры, а не whitelist.
 
 ```bash
 execweave live --open -- claude
@@ -55,57 +69,68 @@ execweave live --open -- ollama serve
 execweave live --open -- python my_agent.py
 ```
 
-> **Разрешите Hook, когда появится запрос.** При первом provider-integrated запуске Agent/IDE может спросить, можно ли ExecWeave включить локальную Hook-интеграцию. Выберите **Allow / Yes**. Без разрешения OS-runtime telemetry может продолжать работать, но provider-level observability для tools, models и supplied content будет ограничена или недоступна.
+> **Разрешите Hook, когда появится запрос.** При первом provider-integrated run Agent/IDE может спросить, разрешено ли ExecWeave включить локальную Hook integration. Выберите **Allow / Yes**. Без разрешения OS-runtime telemetry всё ещё может работать, но provider-level observability для tools, models, conversations и supplied content может быть ограничена или недоступна.
 
-Google Antigravity сейчас использует CLI-команду `agy`. ExecWeave также принимает `antigravity` как удобный alias и преобразует его в `agy`. Для Cursor команда `execweave live --open -- cursor` сначала ищет обычный PATH launcher, а затем при необходимости использует стандартный binary десктопного приложения Cursor на macOS/Windows.
+Google Antigravity сейчас использует CLI command `agy`. ExecWeave также принимает `antigravity` как friendly alias и разрешает его в `agy`. Для Cursor команда `execweave live --open -- cursor` сначала ищет обычный PATH launcher, а затем при необходимости использует стандартный binary desktop-приложения Cursor на macOS и Windows.
 
-Для создания finalized artifact pipeline:
+Чтобы создать finalized run artifacts:
 
 ```bash
 execweave record --open -- python my_agent.py
 ```
 
-`execweave top -- codex` оставляет Agent интерактивным в стартовом terminal и одновременно открывает либо подключает detached Top dashboard в зависимости от host environment.
+Чтобы Agent оставался интерактивным в стартовом terminal, а overview была открыта отдельно:
 
-**v0.8.3 — каждый раунд и каждый узел говорят, что в них есть.** Прогон редко состоит из одного вопроса, а в панели помещался только один: она ставила самый старый вопрос рядом с самым свежим ответом, поэтому прогон из двух раундов показывал первый вопрос рядом с ответом на второй, а собственный ответ первого раунда оставался недостижимым. Теперь единицей стал раунд — самый свежий раскрыт, более старые сворачиваются в строку, называющую собственное время и собственный вопрос, а свёртка subagent несёт отметку времени и формулировку корневого раунда, из которого она пришла. Два subagent к тому же теряли свой ответ: правило, не дающее прочесть общую преамбулу provider как задание одного agent, срабатывало на любой длинный текст, встречающийся под двумя agent, а ответ потомка появляется и в его собственной записи, и в записи родителя. Теперь это правило смотрит только на входящие сообщения, поэтому написанное agent остаётся его собственным, сколько бы раз прогон это ни повторил. Выбор процесса, файла или сетевой конечной точки больше не рисует пустую панель: каждый называет, что он такое — командная строка со своим pid и родителем, путь с историей того, что его касалось, адрес с процессом, который до него дошёл. А тип, переполнивший свой бюджет, оставляет отрисованными самые свежие элементы, тогда как более старые сворачиваются в один узел, который по-прежнему называет каждый из них, так что прогон, затрагивающий тысячу путей, остаётся читаемым и не теряет ни одного. Provider-neutral, agent-local multi-agent conversations, которыми владеет каждый agent, — те же самые записи, что и раньше; изменилось то, что читатель добирается до всех них, а не до одной. Порог, за которым тип сворачивается, задаёт `--fold-budget N` у каждой команды, которая строит панель, так что развёртывание, чьи agent пишут сотни файлов, выбирает своё число, а не правит пакет. v0.8.3 дополнительно исправляет две регрессии Dashboard: старые conversation rounds сохраняют явно выбранное читателем состояние open/closed между live refresh каждые 800 мс, а multi-agent graph использует стабильную иерархию root/child, где lifecycle return edges не влияют на rank, общие tool/model connections проходят через раздельные ports и bundled trunks, а при выборе agent несвязанные edges приглушаются. Это только presentation-изменения: Live, finished и `viewer.html` по-прежнему используют один renderer, а raw graph evidence не меняется.
-
-Единый dashboard объединяет execution graph, logs и conversation records в одном inspection flow. Finalized runs создают `conversations.md` и `conversations.json`, а проверенные provider transcripts копируются в run-local SHA-256 content store. Claude Code, OpenAI Codex, Cursor, OpenCode и Google Antigravity используют наиболее сильную multi-agent evidence, которую реально раскрывает соответствующая integration. Если gateway или local runtime показывает только root request/response, ExecWeave отображает только root conversation и не выдумывает subagents или hidden routing.
-
-## v0.6.9: full-fidelity observability с явными evidence boundaries
-
-v0.6.9 расширяет provider/runtime observability за пределы компактной metadata. Когда поддерживаемая integration point явно предоставляет content, ExecWeave может сохранить **полное предоставленное значение** в локальном SHA-256 content-addressed store, оставив в semantic event stream только reference.
-
-```text
-<run-root>/content/sha256/<sha256>.<json|txt|bin>
+```bash
+execweave top -- codex
 ```
 
-В зависимости от adapter и upstream hook/API surface сохраняемый content может включать prompts/messages, model request/response objects, tool inputs/results, assistant responses, reasoning/thinking text, если он явно раскрыт, shell/MCP output и file content, предоставленный provider hooks.
+## Dashboard
 
-`complete_from_source: true` означает лишь, что ExecWeave сохранил полное значение, переданное этой integration point. Это **не означает**, что ExecWeave видел hidden model state, provider-side stages, которые не были раскрыты, не наблюдавшийся final wire request или bytes, которые не были перехвачены.
+ExecWeave не переключается на другой viewer после завершения run. Live, finished и standalone viewing используют одну dashboard model.
 
-Full fidelity также меняет privacy boundary: application-level secrets внутри content сохраняются. Известные transport credentials фильтруются только в выбранных provider-metadata projections, где adapter явно определяет такое поведение. ExecWeave **не является** универсальным secret scanner или content redactor.
+- **Execution graph:** показывает agents, processes, files, network endpoints, tools, model/runtime entities и поддерживаемые semantic relations.
+- **Conversation rounds:** самый новый round сразу доступен для чтения; старые rounds остаются доступны по отдельности и не перезаписываются новыми replies.
+- **Node details:** process nodes показывают command / PID context, file nodes — path / history context, network nodes — endpoint / process context.
+- **Large-run readability:** если тип превышает свой бюджет, новые members остаются видимыми, а старые сворачиваются в inspectable aggregate. Порог задаётся через `--fold-budget N`.
+- **Selection clarity:** multi-agent layout сохраняет стабильную root / child hierarchy и приглушает несвязанные edges при выборе Agent.
 
-### Поддерживаемые semantic / inference surfaces
+### Изменения Dashboard в v0.8.3
+
+v0.8.3 улучшает читаемость плотных и multi-round runs без изменения raw evidence:
+
+- conversation panels стали round-based и больше не связывают старый prompt с новой reply;
+- явно выбранный пользователем open / closed state сохраняется после 800-ms Live refresh;
+- subagent responses остаются приписаны Agent, который действительно их создал;
+- выбор process, file или network больше не открывает пустой detail panel;
+- node types с высокой cardinality сворачиваются по настраиваемому бюджету, а не заполняют graph сотнями или тысячами nodes;
+- lifecycle return edges больше не искажают root / child rank, а shared tool/model traffic использует более понятную routed geometry.
+
+Это изменения только presentation layer. Raw graph evidence не меняется, а Live, finished и `viewer.html` по-прежнему используют один renderer.
+
+## Поддерживаемые integrations
 
 | Integration | OS-runtime observation при запуске под ExecWeave | Specialized evidence |
 | --- | --- | --- |
-| Claude Code | Yes | native hooks + full-fidelity hook content + subagent result, если его раскрывает provider |
+| Claude Code | Yes | native hooks + full-fidelity supplied hook content + exact subagent results, когда provider их раскрывает |
 | OpenAI Codex | Yes | lifecycle hooks + validated rollout transcripts + agent-local task/message/final-response routing |
 | Google Antigravity / Antigravity CLI | Yes | passive native hooks + conversation/subagent routing, когда его можно валидировать |
-| Cursor | Yes | native hooks + exact subagent task/summary routing, когда доступно |
-| OpenCode | Yes | project plugin + session/task routing + full-fidelity plugin content |
+| Cursor | Yes | native hooks + exact subagent task/summary routing, когда он доступен |
+| OpenCode | Yes | project plugin + session/task routing + full-fidelity supplied plugin content |
 | Ollama | Yes | `execweave-model-runtime event/exchange/probe --runtime ollama` |
 | llama.cpp | Yes | `execweave-model-runtime event/exchange/probe --runtime llamacpp` |
 | vLLM | Yes | `execweave-model-runtime event/exchange/probe --runtime vllm` |
-| LM Studio | Только если локальный process запущен под ExecWeave | `execweave-model-runtime event/exchange/probe --runtime lmstudio` |
-| LiteLLM Proxy | Yes, если настроенный proxy запущен под ExecWeave | metadata-oriented gateway callback/event integration |
-| OpenRouter | Наблюдается локальный client, а не process удалённого сервиса | `execweave-inference-gateway event/exchange/generation --gateway openrouter` |
+| LM Studio | Только когда локальный process запущен под ExecWeave | `execweave-model-runtime event/exchange/probe --runtime lmstudio` |
+| LiteLLM Proxy | Yes, когда настроенный proxy запущен под ExecWeave | metadata-oriented gateway callback/event integration |
+| OpenRouter | Наблюдает локальный client, а не remote service process | `execweave-inference-gateway event/exchange/generation --gateway openrouter` |
 
-OpenRouter `exchange` — caller-supplied request+response evidence, а не transparent wire interception. LiteLLM Proxy остаётся более узкой metadata-oriented integration в текущем baseline. Provider-neutral conversation projection никогда не превращает отсутствующую provider evidence в выдуманную agent relationship.
+Stable provider identifiers вроде Cursor `tool_use_id`, Codex rollout thread identity или OpenCode `sessionID + callID` доказывают logical provider identity, но не являются OS PID. Cross-agent content показывается только тогда, когда provider раскрывает явную route, delegation или result. Gateways и local runtimes, которые предоставляют только root request/response traffic, остаются root-only; ExecWeave не выдумывает subagents или hidden routing.
 
-## Evidence layers
+OpenRouter `exchange` — caller-supplied request+response evidence, а не transparent wire interception. LiteLLM Proxy остаётся более узкой metadata-oriented integration в текущем baseline. Legacy Gemini CLI entry points сохраняются для совместимости, но для новых сценариев Google CLI следует использовать Antigravity (`agy`).
 
-ExecWeave сохраняет evidence layers раздельно, а не сводит все сигналы в одну trace:
+## Evidence model
+
+ExecWeave сохраняет evidence layers раздельными, а не сплющивает все сигналы в одну trace:
 
 ```text
 Agent / IDE semantic + supplied content evidence
@@ -117,14 +142,14 @@ Model runtime / inference-server evidence
 OS runtime evidence: process / file / network
 ```
 
-Relationship считается causal только тогда, когда underlying telemetry действительно поддерживает такой claim. Tool → Process bridges остаются консервативной derived evidence:
+Relationship считается causal только тогда, когда underlying telemetry действительно поддерживает этот claim. Консервативные Tool → Process bridges остаются помеченными как derived evidence:
 
 ```text
 inferred: true
 causal: false
 ```
 
-При неоднозначности edge не создаётся. Exact shared request identity между Gateway и Model Runtime остаётся identity evidence, а не causal evidence:
+Exact shared request identity между Gateway и Model Runtime — это identity evidence, а не causal evidence:
 
 ```text
 identity_exact: true
@@ -132,90 +157,48 @@ inferred: false
 causal: false
 ```
 
-## Agent / IDE integrations
+При неоднозначности edge не создаётся.
+
+### Full-fidelity supplied content
+
+Начиная с **v0.6.9**, поддерживаемые integration points могут сохранять полное значение, явно предоставленное provider / hook / API, в локальном SHA-256 content-addressed store, тогда как semantic event stream хранит только reference:
+
+```text
+<run-root>/content/sha256/<sha256>.<json|txt|bin>
+```
+
+В зависимости от integration могут сохраняться prompt/message, request/response objects, tool input/result, assistant response, явно раскрытый reasoning/thinking text, shell/MCP output и file content, предоставленный provider hooks.
+
+`complete_from_source: true` означает только то, что ExecWeave сохранил полное значение, переданное этим integration point. Это **не означает**, что ExecWeave видел hidden model state, никогда не раскрытые provider-side stages, ненаблюдаемую final wire request или bytes, которые он не interceptировал.
+
+## Часто используемые команды
+
+### Agent / IDE recorders
 
 ```bash
-execweave-claude-hook --print-config
 execweave-claude-record --open -- claude
-
-execweave-codex-hook --print-config
 execweave-codex-record --open -- codex
-
-execweave-antigravity-hook --print-config
 execweave-antigravity-record --open -- antigravity
-
-execweave-cursor-hook --print-config
 execweave-cursor-record --open -- cursor
-
 execweave-opencode-plugin --install
 execweave-opencode-record --open -- opencode
 ```
 
-Provider-integrated recorders сохраняют raw runtime, semantic, correlated и conversation artifacts отдельно. Stable provider identifiers, например Cursor `tool_use_id`, Codex rollout thread identity или OpenCode `sessionID + callID`, подтверждают logical provider identity, но не являются OS PIDs. Cross-agent content показывается только если provider явно раскрывает route, delegation или result. Legacy Gemini CLI hook entry points остаются в пакете ради совместимости существующих установок, но для нового Google CLI следует использовать Antigravity (`agy`).
-
-## Inference gateways и model runtimes
-
-Сбор evidence OpenRouter или LiteLLM gateway:
+### Gateways и model runtimes
 
 ```bash
 execweave-inference-gateway event --gateway openrouter --sidecar gateway.jsonl
-execweave-inference-gateway event --gateway litellm --sidecar gateway.jsonl
 execweave-inference-gateway exchange --gateway openrouter --sidecar gateway.jsonl
-```
+execweave-inference-gateway event --gateway litellm --sidecar gateway.jsonl
 
-Сбор model-runtime evidence для Ollama, llama.cpp, vLLM или LM Studio:
-
-```bash
 execweave-model-runtime event --runtime ollama --sidecar model-runtime.jsonl
 execweave-model-runtime exchange --runtime ollama --sidecar model-runtime.jsonl
 execweave-model-runtime probe --runtime ollama --sidecar model-runtime.jsonl
 ```
 
-`event` — response-only evidence. `exchange` сохраняет caller-supplied request+response object и не утверждает transparent interception. Runtime catalog relations сохраняют source-specific смысл: `LOADED_MODEL`, `SERVES_MODEL` и `ADVERTISES_MODEL` не взаимозаменяемы. Catalog visibility LM Studio остаётся `ADVERTISES_MODEL` и не доказывает, что weights находились resident in memory.
+`event` — response-only evidence. `exchange` сохраняет caller-supplied request+response object и не утверждает наличие transparent interception. Runtime catalog relations сохраняют source-specific смысл: `LOADED_MODEL`, `SERVES_MODEL` и `ADVERTISES_MODEL` не взаимозаменяемы. LM Studio catalog visibility остаётся `ADVERTISES_MODEL` и не доказывает, что weights были resident in memory.
 
-## Security analysis, evidence grades и bounded rule packs
-
-Запустите встроенный analysis:
-
-```bash
-execweave analyze run.graph.json --output analysis.json
-```
-
-Findings показывают evidence grade независимо от severity. Текущие grades: `A`, `B`, `C`, `D`, `U` — от direct syscall attribution до inferred/unknown provenance. Это категории силы evidence, **не probabilities и не trust scores**.
-
-Local rule packs позволяют добавлять bounded, объяснимые **single-edge observation** policies без выполнения third-party code:
-
-```bash
-execweave-rule-pack graph.json --rule-pack local-policy.json --output report.json
-```
-
-Rule packs не могут выполнять code, определять regex/path programs или утверждать byte-level data flow/exfiltration. Rule-pack findings остаются observation-only.
-
-Security findings явно сохраняют и более сильные non-claims:
-
-```json
-{
-  "data_flow_proven": false,
-  "exfiltration_proven": false
-}
-```
-
-## Run integrity
-
-Можно seal завершённый run и позже проверить, не изменился ли его regular-file inventory относительно seal:
-
-```text
-execweave-integrity seal .execweave/runs/<run-id>
-execweave-integrity verify .execweave/runs/<run-id>
-```
-
-Deterministic manifest записывает file size/SHA-256 и отклоняет symbolic links. Он выявляет пропавшие, изменённые, заменённые или новые regular files после seal.
-
-Этот local seal намеренно **не** описывается как adversary-resistant tamper evidence, когда evidence и manifest остаются в одной writable trust boundary. Manifest фиксирует `malicious_writer_resistance: false` и `external_trust_anchor: false`. Если требуется более сильный trust anchor, скопируйте или защитите digest manifest за пределами этой boundary.
-
-## Runtime evidence и graph operations
-
-Portable collector работает в Linux, macOS и Windows. Для Linux также есть syscall-backed reference backend `strace`.
+### Runtime, graph, security и integrity
 
 ```bash
 execweave doctor
@@ -225,26 +208,15 @@ execweave graph-summary run.graph.json
 execweave graph-filter run.graph.json --causal-only --output causal.graph.json
 execweave graph-focus run.graph.json NODE_ID --hops 2 --output focused.graph.json
 execweave path run.graph.json SOURCE TARGET --causal-only
+execweave analyze run.graph.json --output analysis.json
+execweave-rule-pack graph.json --rule-pack local-policy.json --output report.json
+execweave-integrity seal .execweave/runs/<run-id>
+execweave-integrity verify .execweave/runs/<run-id>
 ```
 
-Portable filesystem observation является session-correlated, а не process-causal; polling может пропускать очень короткую активность. Linux `strace` даёт более сильную process-attributed syscall evidence для поддерживаемых executions. В будущем по-прежнему планируются native collectors для Linux eBPF, Windows ETW и macOS Endpoint Security.
+Evidence grade security finding независим от severity. Текущие grades: `A`, `B`, `C`, `D` и `U`; это evidence-strength categories, а не probabilities или trust scores. Rule packs — bounded, explainable single-edge observation policies; они не выполняют third-party code и не доказывают byte-level exfiltration.
 
-## Performance и безопасность больших runs
-
-ExecWeave включает bounded filesystem/viewer protections, incremental Live JSONL tailing, large-graph safety guards, detached Top и provisional live sidecars для настроенных provider integrations.
-
-Воспроизводимый reference result incremental `GraphAccumulator` достигает **164,273 ev/s** на 1M synthetic events в документированном GitHub Actions workload. Это benchmark graph accumulation, а не end-to-end collector/browser throughput.
-
-Запустите package-level overhead benchmark на репрезентативном host/workload:
-
-```bash
-execweave-overhead --iterations 7 --strace auto --output-json benchmark-results.json
-execweave-scalability
-```
-
-Reference data и methodology находятся в [`docs/benchmarks/`](docs/benchmarks/).
-
-## Layered artifacts
+## Run artifacts
 
 Provider-integrated run может содержать:
 
@@ -263,45 +235,50 @@ Provider-integrated run может содержать:
 ├── events.correlated.jsonl
 ├── graph.correlated.json
 ├── viewer.correlated.html
-└── integrity.json            # после явного seal
+└── integrity.json            # after an explicit seal
 ```
 
 Derived correlation никогда не переписывает raw runtime или provider sidecar evidence.
 
-## Privacy
+## Ограничения и конфиденциальность
 
-ExecWeave — local-first: captures, content blobs, graphs, reports и viewers по умолчанию остаются локальными. **OS runtime collector** намеренно не захватывает file contents или raw read/write byte buffers. Эту boundary нельзя путать с **provider full-fidelity content store, введённым в v0.6.9**: поддерживаемые hooks/APIs могут явно передавать prompts, tool arguments/results, model responses, reasoning/thinking text, shell output, file content и другие чувствительные значения, и ExecWeave может сохранить их полностью.
+- Portable collector работает в Linux, macOS и Windows. Portable filesystem observation является session-correlated, а не process-causal, и polling может пропускать достаточно короткоживущую activity.
+- В Linux также есть syscall-backed reference backend `strace`, который даёт более сильную process-attributed syscall evidence для поддерживаемых executions.
+- Native collectors для Linux eBPF, Windows ETW и macOS Endpoint Security остаются planned work, а не текущей заявленной возможностью.
+- Full-fidelity provider content может сохранять secrets, встроенные в prompts, tool values, model responses, shell output или supplied files. ExecWeave **не является** универсальным secret scanner или content redactor.
+- Conversation isolation — это attribution/display rule, а не redaction boundary. Если provider явно route-ит content между agents, этот content может законно появляться у участвующих endpoints.
+- Commands, paths, endpoints, identifiers, model metadata, prompts, tool values и content blobs могут быть чувствительными. Перед публикацией проверьте весь run directory.
+- Local integrity seal обнаруживает изменения файлов относительно своего manifest, но не является adversary-resistant, если evidence и manifest остаются внутри одной writable trust boundary.
 
-Conversation isolation — это правило attribution/display, а не redaction boundary. Если provider явно отправляет содержимое Agent 1 в Agent 2, такая routed evidence законно может появиться у участвующих endpoints. Не предполагайте, что content был secret-redacted. Commands, paths, endpoint metadata, identifiers, model metadata, prompts, tool values и content blobs могут быть чувствительными. Перед публикацией проверьте весь run directory.
+## Производительность
 
-## Текущий статус
+ExecWeave включает bounded filesystem/viewer protections, incremental Live JSONL tailing, large-graph safety guards, detached Top и provisional live sidecars для настроенных provider integrations.
 
-v0.8.3 объединяет cross-platform runtime collection, materialized execution graphs, standalone/live dashboards, conservative provider↔runtime correlation, full-fidelity content-addressed provider evidence, attributable multi-agent execution traces, прямой run-local conversation access, agent-local conversation isolation в provider-neutral projections, панели conversation по раундам и самоописывающиеся non-agent узлы со свёрткой по типу в standalone и live dashboards. Каждая integration сохраняет только наиболее сильную identity/routing evidence, реально раскрытую provider, и abstain-ит при её отсутствии. Observed evidence и inference по-прежнему разделены архитектурно. v0.8.3 также сохраняет управляемое читателем состояние conversation fold между live polling и применяет topology-aware multi-agent layout/routing без изменения raw evidence.
+Воспроизводимый reference result инкрементального `GraphAccumulator` достигает **164,273 ev/s** на 1M synthetic events в документированном GitHub Actions workload. Это graph-accumulation benchmark, а не end-to-end collector/browser throughput.
+
+Запускайте package-level benchmarks на репрезентативном host/workload:
+
+```bash
+execweave-overhead --iterations 7 --strace auto --output-json benchmark-results.json
+execweave-scalability
+```
+
+Reference data и methodology находятся в [`docs/benchmarks/`](docs/benchmarks/).
 
 ## Документация
 
-- [`Phase 1 — Runtime Collection`](docs/phase-1-runtime-collection.ru.md)
-- [`Phase 2 — Execution Graph`](docs/phase-2-execution-graph.ru.md)
-- [`Live Graph`](docs/live-graph.ru.md)
-- [`Semantic Telemetry`](docs/semantic-telemetry.ru.md)
-- [`Claude Code Hooks`](docs/claude-code-hooks.ru.md)
-- [`OpenAI Codex Hooks`](docs/codex-hooks.ru.md)
-- [`Google Antigravity Hooks`](docs/antigravity-hooks.md)
-- [`Cursor Hooks`](docs/cursor-hooks.ru.md)
-- [`OpenCode Plugin`](docs/opencode-plugin.ru.md)
-- [`Inference Gateway / OpenRouter / LiteLLM`](docs/inference-gateway.ru.md)
-- [`Model Runtime / Ollama / llama.cpp / vLLM / LM Studio`](docs/model-runtime.ru.md)
-- [`Runtime Threat Model`](docs/runtime-threat-model.ru.md)
-- [`Evidence Grades`](docs/evidence-grades.ru.md)
-- [`Rule Packs`](docs/rule-packs.ru.md)
-- [`Run Integrity`](docs/run-integrity.ru.md)
-- [`Security Analysis`](docs/security-analysis.ru.md)
-- [`Performance Benchmarks`](docs/benchmarks/README.md)
+| Область | Документы |
+| --- | --- |
+| Runtime и graph | [`Phase 1 — Runtime Collection`](docs/phase-1-runtime-collection.md) · [`Phase 2 — Execution Graph`](docs/phase-2-execution-graph.md) · [`Live Graph`](docs/live-graph.md) · [`Semantic Telemetry`](docs/semantic-telemetry.md) |
+| Agent / IDE integrations | [`Claude Code`](docs/claude-code-hooks.md) · [`OpenAI Codex`](docs/codex-hooks.md) · [`Google Antigravity`](docs/antigravity-hooks.md) · [`Cursor`](docs/cursor-hooks.md) · [`OpenCode`](docs/opencode-plugin.md) |
+| Gateways и runtimes | [`Inference Gateway / OpenRouter / LiteLLM`](docs/inference-gateway.md) · [`Model Runtime / Ollama / llama.cpp / vLLM / LM Studio`](docs/model-runtime.md) |
+| Trust и analysis | [`Runtime Threat Model`](docs/runtime-threat-model.md) · [`Evidence Grades`](docs/evidence-grades.md) · [`Rule Packs`](docs/rule-packs.md) · [`Run Integrity`](docs/run-integrity.md) · [`Security Analysis`](docs/security-analysis.md) |
+| Performance | [`Benchmarks`](docs/benchmarks/README.md) |
 
-## Участие в разработке
+## Вклад
 
-Приветствуются contributions, особенно для native OS collectors, Agent/IDE adapters, inference gateways, model runtimes, evidence/correlation methods, privacy/redaction, graph UX, multi-agent conversation attribution и performance evaluation.
+Приветствуются contributions, особенно в native OS collectors, Agent/IDE adapters, inference gateways, model runtimes, evidence/correlation methods, privacy/redaction, graph UX, multi-agent conversation attribution и performance evaluation.
 
-## License
+## Лицензия
 
-Начиная с v0.6.8 ExecWeave распространяется по **PolyForm Noncommercial License 1.0.0**. Некоммерческое использование, изменение и распространение разрешены на условиях лицензии. Коммерческое использование требует отдельной письменной commercial license от licensor. См. [`LICENSE`](LICENSE).
+Начиная с v0.6.8, ExecWeave распространяется по **PolyForm Noncommercial License 1.0.0**. Некоммерческое использование, изменение и распространение разрешены на её условиях. Коммерческое использование требует отдельной письменной commercial license от licensor. См. [`LICENSE`](LICENSE).

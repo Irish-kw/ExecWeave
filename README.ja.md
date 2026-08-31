@@ -13,9 +13,16 @@
 </p>
 <!-- i18n-nav:end -->
 
+<p align="center">
+  <a href="https://pypi.org/project/execweave/"><img src="https://img.shields.io/pypi/v/execweave" alt="PyPI"></a>
+  <a href="https://github.com/Irish-kw/ExecWeave/actions/workflows/ci.yml"><img src="https://github.com/Irish-kw/ExecWeave/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <img src="https://img.shields.io/badge/Python-3.10%2B-blue" alt="Python 3.10+">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue" alt="License"></a>
+</p>
+
 **AI Agent があなたのマシン上で実際に何をしたのかを可視化します。**
 
-ExecWeave は source-available / local-first の observability プロジェクトです。AI Agent の活動をインタラクティブな execution graph に変換し、observed evidence、provider content、derived inference を明確に分離します。
+ExecWeave は source-available / local-first の observability プロジェクトです。AI Agent の活動をインタラクティブな execution graph に変換し、observed evidence、provider が明示的に供給した content、derived inference を明確に分離します。
 
 > **Event が ground truth であり、Graph は materialized view です。**
 
@@ -23,17 +30,24 @@ ExecWeave は source-available / local-first の observability プロジェク�
   <img src="docs/assets/codex.gif" alt="ExecWeave animated live demo" width="100%">
 </p>
 
+この README は **v0.8.3** を説明します。
+
+## ExecWeave を使う理由
+
+- **ローカルの inspection surface を 1 つに統合。** Live run、完了済み run、standalone `viewer.html` は同じ dashboard renderer を使い、graph、logs、conversation、node details を 1 画面にまとめます。
+- **Evidence-aware な設計。** Direct observation、identity link、保守的な inference、causal claim を同じ意味の edge として扱いません。
+- **Provider-aware だが、隠れた挙動を作らない。** Provider が実際に公開した routing / identity evidence だけを使い、存在しない evidence を補完しません。
+- **特定の Agent 専用ではない。** OS-runtime telemetry は任意のローカル command を包めます。対応 provider adapter がある場合は、より豊かな semantic evidence を追加します。
+
 ## インストール
 
-PyPI から最新の wheel/sdist をインストールします。
+PyPI から最新の公開済み package をインストールします。
 
 ```bash
 python -m pip install -U execweave
 ```
 
-現在のリリースは **v0.8.3** です。
-
-開発環境では次のようにインストールできます。
+開発用インストール：
 
 ```bash
 git clone https://github.com/Irish-kw/ExecWeave.git
@@ -41,9 +55,9 @@ cd ExecWeave
 python -m pip install -e ".[dev]"
 ```
 
-## クイックスタート
+## 60 秒クイックスタート
 
-Live OS-runtime telemetry は **任意のローカルコマンド**に利用できます。以下の Agent/runtime 名は例であり、ホワイトリストではありません。
+Live OS-runtime telemetry は**任意のローカル command**で利用できます。以下の Agent/runtime 名は例であり whitelist ではありません。
 
 ```bash
 execweave live --open -- claude
@@ -55,57 +69,68 @@ execweave live --open -- ollama serve
 execweave live --open -- python my_agent.py
 ```
 
-> **Hook の許可を求められたら承認してください。** provider integration を初めて使うとき、Agent/IDE が ExecWeave のローカル Hook を有効化してよいか確認する場合があります。**Allow / Yes** を選択してください。承認しなくても OS-runtime telemetry は動作できますが、provider-level の tool、model、supplied-content observability は制限されます。
+> **Hook の許可を求められたら承認してください。** 初回の provider-integrated run では、Agent/IDE が ExecWeave のローカル Hook integration を有効にしてよいか確認することがあります。**Allow / Yes** を選んでください。許可しなくても OS-runtime telemetry は動作する場合がありますが、provider-level の tool、model、conversation、supplied-content observability は低下または利用不可になります。
 
-Google Antigravity の現在の CLI コマンドは `agy` です。ExecWeave は `antigravity` を friendly alias として受け付け、自動的に `agy` に解決します。Cursor の `execweave live --open -- cursor` は、まず通常の PATH launcher を探し、見つからない場合は macOS/Windows の標準 Cursor desktop application binary にフォールバックします。
+Google Antigravity の現在の CLI command は `agy` です。ExecWeave は friendly alias として `antigravity` も受け付け、`agy` に解決します。Cursor の `execweave live --open -- cursor` は、まず通常の PATH launcher を探し、見つからない場合は macOS / Windows の標準 Cursor desktop application binary を試します。
 
-finalized artifact pipeline を作成する場合：
+Finalized run artifacts を作るには：
 
 ```bash
 execweave record --open -- python my_agent.py
 ```
 
-`execweave top -- codex` は Agent を起動 terminal 上でインタラクティブなまま保ち、ホスト環境に応じて detached Top dashboard を開くか既存のものに attach します。
+Agent を起動 terminal で対話可能なまま、detached overview を開くには：
 
-**v0.8.3 — どのラウンドも、どの node も、自分が何を持っているかを述べる。** 一回の実行が一つの問いで終わることは稀ですが、パネルには一つ分の場所しかありませんでした。最も古い問いに最も新しい回答を並べるため、二ラウンドの実行では最初の問いの隣に二番目の問いの回答が出て、最初のラウンド自身の回答には到達できませんでした。いまはラウンドが単位です。最新のものは開いたまま、古いものは自分の時刻と問いを示す一行に畳まれ、subagent の折り畳みは、それが属する root ラウンドと同じ時刻と文言を持ちます。さらに二つの subagent は自分の Response を失っていました。provider の共通前置きをある agent の assignment と読ませないための規則が、二つの agent の下に現れる長い文字列すべてに一致していたためです。child の回答は自分の記録にも親の記録にも現れます。この規則はいま受信したメッセージだけを見るので、agent が書いたものは実行中に何度繰り返されても自分のものです。process、file、network endpoint を選んでも空のパネルは出ません。それぞれが自分を述べます。コマンドラインとその pid と親、パスとそれに触れた履歴、アドレスとそこへ到達した process です。そしてある型が上限を超えて混み合うと、新しいものは描かれたまま、古いものは一つの node に畳まれ、そこに含まれるすべてを名前で列挙します。千の path に触れる実行でも、一つも失わずに読める状態が保たれます。 各 agent が保持する provider-neutral かつ agent-local な multi-agent conversation は以前と同じ記録のままです。変わったのは、読者がその一部ではなく全体に到達できることです。 ある型がどこから畳まれるかは、Dashboard を生成するすべてのコマンドの `--fold-budget N` で決まります。数百のファイルを書く配置環境は、パッケージを書き換えずに自分の数を選べます。 v0.8.3 ではさらに 2 つの Dashboard 回帰を修正しました。古い conversation round は 800 ms ごとの live refresh をまたいでも読者が明示的に選んだ開閉状態を保持し、multi-agent graph は安定した root/child 階層を使います。lifecycle return edge は rank に影響せず、共有 tool/model 接続は分離した port と bundled trunk で描画され、agent を選択すると無関係な edge が薄くなります。これらは presentation のみの変更で、Live・finished・`viewer.html` は引き続き同じ renderer を共有し、raw graph evidence は変更しません。
-
-統合 dashboard では execution graph、logs、conversation records を同じ inspection flow で確認できます。Finalized run は `conversations.md` と `conversations.json` を生成し、検証済み provider transcript は run-local SHA-256 content store にコピーされます。Claude Code、OpenAI Codex、Cursor、OpenCode、Google Antigravity は、それぞれが実際に公開する最も強い multi-agent evidence を利用します。gateway や local runtime が root request/response しか公開しない場合、ExecWeave は root conversation だけを表示し、subagent や hidden routing を捏造しません。
-
-## v0.6.9：明示的な evidence boundary を持つ full-fidelity observability
-
-v0.6.9 では、コンパクトな metadata だけでなく、対応 integration point が明示的に渡した**完全な値**をローカルの SHA-256 content-addressed store に保存できるようになりました。semantic event stream には reference のみを保持します。
-
-```text
-<run-root>/content/sha256/<sha256>.<json|txt|bin>
+```bash
+execweave top -- codex
 ```
 
-adapter と upstream hook/API surface に応じて、prompt/message、model request/response object、tool input/result、assistant response、明示的に公開された reasoning/thinking text、shell/MCP output、provider hook が渡した file content などを保存できます。
+## Dashboard
 
-`complete_from_source: true` は、その integration point が渡した値を ExecWeave が完全に保存したことだけを意味します。hidden model state、provider-side の非公開 stage、観測していない最終 wire request、取得していない bytes を見たという意味ではありません。
+ExecWeave は run 終了時に別の viewer へ切り替えません。Live、finished、standalone viewing は同じ dashboard model を使います。
 
-Full fidelity は privacy boundary も変えます。content に application-level secret が含まれていれば、そのまま保存されます。既知の transport credential は adapter が明示的に定義した一部の provider-metadata projection でのみフィルタされます。ExecWeave は汎用 secret scanner や content redactor ではありません。
+- **Execution graph：** agents、processes、files、network endpoints、tools、model/runtime entities、および対応 semantic relations を表示します。
+- **Conversation rounds：** 最新 round はすぐ読め、古い round も個別に展開できます。新しい reply に上書きされません。
+- **Node details：** process node は command / PID context、file node は path / history context、network node は endpoint / process context を表示します。
+- **Large-run readability：** type ごとの予算を超えた場合、最近の member はそのまま表示し、古い member は inspection 可能な aggregate にまとめます。閾値は `--fold-budget N` で設定します。
+- **Selection clarity：** multi-agent layout は安定した root / child hierarchy を維持し、agent 選択時には無関係な edges を薄く表示します。
 
-### 対応している semantic / inference surface
+### v0.8.3 Dashboard の変更点
+
+v0.8.3 は raw evidence を変えずに、dense / multi-round run の読みやすさを改善します。
+
+- conversation panel を round 単位にし、古い prompt と新しい reply の誤った組み合わせを防止；
+- ユーザーが明示的に設定した open / closed state を 800 ms の Live refresh 後も保持；
+- subagent response を実際に生成した agent に帰属したまま維持；
+- process、file、network を選択した際の空の detail panel を解消；
+- 高 cardinality の node type を設定可能な予算で fold し、数百・数千 node が graph を埋め尽くすのを防止；
+- lifecycle return edge が root / child rank を歪めないようにし、共有 tool/model traffic の routed geometry を明確化。
+
+これらは presentation-layer の変更です。Raw graph evidence は変わらず、Live、finished、`viewer.html` は引き続き同じ renderer を共有します。
+
+## 対応 Integrations
 
 | Integration | ExecWeave 配下で起動した場合の OS-runtime observation | Specialized evidence |
 | --- | --- | --- |
-| Claude Code | Yes | native hooks + full-fidelity hook content + provider が公開した subagent result |
-| OpenAI Codex | Yes | lifecycle hooks + validated rollout transcript + agent-local task/message/final-response routing |
-| Google Antigravity / Antigravity CLI | Yes | passive native hooks + 検証できる場合の conversation/subagent routing |
+| Claude Code | Yes | native hooks + full-fidelity supplied hook content + provider が公開した場合の exact subagent results |
+| OpenAI Codex | Yes | lifecycle hooks + validated rollout transcripts + agent-local task/message/final-response routing |
+| Google Antigravity / Antigravity CLI | Yes | passive native hooks + 検証可能な場合の conversation/subagent routing |
 | Cursor | Yes | native hooks + 利用可能な場合の exact subagent task/summary routing |
-| OpenCode | Yes | project plugin + session/task routing + full-fidelity plugin content |
+| OpenCode | Yes | project plugin + session/task routing + full-fidelity supplied plugin content |
 | Ollama | Yes | `execweave-model-runtime event/exchange/probe --runtime ollama` |
 | llama.cpp | Yes | `execweave-model-runtime event/exchange/probe --runtime llamacpp` |
 | vLLM | Yes | `execweave-model-runtime event/exchange/probe --runtime vllm` |
-| LM Studio | ローカル process を ExecWeave から起動した場合のみ | `execweave-model-runtime event/exchange/probe --runtime lmstudio` |
-| LiteLLM Proxy | 設定済み proxy を ExecWeave から起動した場合は Yes | metadata-oriented gateway callback/event integration |
+| LM Studio | ローカル process を ExecWeave 配下で起動した場合のみ | `execweave-model-runtime event/exchange/probe --runtime lmstudio` |
+| LiteLLM Proxy | 設定済み proxy を ExecWeave 配下で起動した場合は Yes | metadata-oriented gateway callback/event integration |
 | OpenRouter | remote service process ではなくローカル client を観測 | `execweave-inference-gateway event/exchange/generation --gateway openrouter` |
 
-OpenRouter `exchange` は caller-supplied request+response evidence であり、transparent wire interception ではありません。LiteLLM Proxy は現行 baseline ではより限定的な metadata-oriented integration です。Provider-neutral conversation projection は、存在しない provider evidence を架空の agent relationship に昇格させません。
+Cursor `tool_use_id`、Codex rollout thread identity、OpenCode `sessionID + callID` のような stable provider identifier は logical provider identity を示しますが、OS PID ではありません。Cross-agent content は provider が明示的な route、delegation、result を公開した場合にのみ表示されます。Gateway / local runtime が root request/response しか公開しない場合は root-only のままで、ExecWeave が subagent や hidden routing を作ることはありません。
 
-## Evidence layers
+OpenRouter `exchange` は caller-supplied request+response evidence であり、transparent wire interception ではありません。LiteLLM Proxy は現在の baseline ではより限定的な metadata-oriented integration です。Legacy Gemini CLI entry points は互換性のため残っていますが、新しい Google CLI 利用では Antigravity (`agy`) を使用してください。
 
-ExecWeave はすべての信号を一つの trace に潰さず、evidence layer を分離して保持します。
+## Evidence model
+
+ExecWeave はすべての signal を 1 本の trace に平坦化せず、evidence layer の境界を保ちます。
 
 ```text
 Agent / IDE semantic + supplied content evidence
@@ -117,14 +142,14 @@ Model runtime / inference-server evidence
 OS runtime evidence: process / file / network
 ```
 
-relationship を causal とするのは、基礎 telemetry がその claim を支持する場合だけです。Tool → Process bridge は保守的な derived evidence のままです。
+Relationship を causal とするのは、下位 telemetry がその claim を実際に支える場合だけです。保守的な Tool → Process bridge は derived evidence としてマークされます。
 
 ```text
 inferred: true
 causal: false
 ```
 
-曖昧な場合は edge を作りません。Gateway と Model Runtime 間の exact shared request identity も、causal evidence ではなく identity evidence として扱います。
+Gateway と Model Runtime が exact shared request identity を持つことは identity evidence であり、causal evidence ではありません。
 
 ```text
 identity_exact: true
@@ -132,90 +157,48 @@ inferred: false
 causal: false
 ```
 
-## Agent / IDE integrations
+曖昧な場合は edge を作りません。
+
+### Full-fidelity supplied content
+
+**v0.6.9** 以降、対応 integration point は provider / hook / API が明示的に渡した完全な値をローカル SHA-256 content-addressed store に保存し、semantic event stream には reference だけを残せます。
+
+```text
+<run-root>/content/sha256/<sha256>.<json|txt|bin>
+```
+
+Integration に応じて、prompt/message、request/response object、tool input/result、assistant response、明示的に公開された reasoning/thinking text、shell/MCP output、provider hook が提供した file content などを保存できます。
+
+`complete_from_source: true` は、その integration point から渡された値を完全に保存したことだけを意味します。Hidden model state、公開されていない provider-side stage、観測していない final wire request、intercept していない bytes を見たという意味では**ありません**。
+
+## よく使うコマンド
+
+### Agent / IDE recorders
 
 ```bash
-execweave-claude-hook --print-config
 execweave-claude-record --open -- claude
-
-execweave-codex-hook --print-config
 execweave-codex-record --open -- codex
-
-execweave-antigravity-hook --print-config
 execweave-antigravity-record --open -- antigravity
-
-execweave-cursor-hook --print-config
 execweave-cursor-record --open -- cursor
-
 execweave-opencode-plugin --install
 execweave-opencode-record --open -- opencode
 ```
 
-Provider-integrated recorder は raw runtime、semantic、correlated、conversation artifacts を分離して保存します。Cursor `tool_use_id`、Codex rollout thread identity、OpenCode `sessionID + callID` のような stable provider identifier は provider 内部の logical identity を示しますが、OS PID ではありません。cross-agent content は provider が明示的に route、delegation、result を公開した場合にのみ表示されます。Legacy Gemini CLI hook entry point は既存環境との互換性のため残っていますが、新しい Google CLI 利用では Antigravity (`agy`) を推奨します。
-
-## Inference gateway と model runtime
-
-OpenRouter または LiteLLM gateway evidence を取得します。
+### Gateways と model runtimes
 
 ```bash
 execweave-inference-gateway event --gateway openrouter --sidecar gateway.jsonl
-execweave-inference-gateway event --gateway litellm --sidecar gateway.jsonl
 execweave-inference-gateway exchange --gateway openrouter --sidecar gateway.jsonl
-```
+execweave-inference-gateway event --gateway litellm --sidecar gateway.jsonl
 
-Ollama、llama.cpp、vLLM、LM Studio の model-runtime evidence を取得します。
-
-```bash
 execweave-model-runtime event --runtime ollama --sidecar model-runtime.jsonl
 execweave-model-runtime exchange --runtime ollama --sidecar model-runtime.jsonl
 execweave-model-runtime probe --runtime ollama --sidecar model-runtime.jsonl
 ```
 
-`event` は response-only evidence です。`exchange` は caller-supplied request+response object を保存しますが、transparent interception を主張しません。Runtime catalog relation の意味は source ごとに保持され、`LOADED_MODEL`、`SERVES_MODEL`、`ADVERTISES_MODEL` は交換可能ではありません。LM Studio の catalog visibility が `ADVERTISES_MODEL` でも、weights が memory resident だったことの証明にはなりません。
+`event` は response-only evidence です。`exchange` は caller-supplied request+response object を保存しますが transparent interception を主張しません。Runtime catalog relation は source-specific な意味を維持し、`LOADED_MODEL`、`SERVES_MODEL`、`ADVERTISES_MODEL` は相互に置き換えられません。LM Studio の catalog visibility は `ADVERTISES_MODEL` であり、weights が memory に resident していた証明ではありません。
 
-## Security analysis、evidence grades、bounded rule packs
-
-組み込み analysis を実行します。
-
-```bash
-execweave analyze run.graph.json --output analysis.json
-```
-
-Finding は severity と独立した evidence grade を持ちます。現在の grade は `A`、`B`、`C`、`D`、`U` で、直接 syscall attribution から inferred/unknown provenance までを表します。これは probability や trust score ではありません。
-
-Local rule pack は第三者コードを実行せず、bounded で説明可能な**single-edge observation** policy を追加できます。
-
-```bash
-execweave-rule-pack graph.json --rule-pack local-policy.json --output report.json
-```
-
-Rule pack は code を実行できず、regex/path program を定義できず、byte-level data flow や exfiltration を断定できません。rule-pack finding は observation-only のままです。
-
-Security finding は強い claim をしないことも明示します。
-
-```json
-{
-  "data_flow_proven": false,
-  "exfiltration_proven": false
-}
-```
-
-## Run integrity
-
-完了した run を seal し、後から regular-file inventory が seal 時点から変わっていないか検証できます。
-
-```text
-execweave-integrity seal .execweave/runs/<run-id>
-execweave-integrity verify .execweave/runs/<run-id>
-```
-
-Deterministic manifest は file size/SHA-256 を記録し、symbolic link を拒否します。seal 後に regular file が欠落、変更、置換、追加されると検証に失敗します。
-
-この local seal は、evidence と manifest が同じ writable trust boundary にある場合、adversary-resistant tamper evidence とは説明しません。Manifest は `malicious_writer_resistance: false` と `external_trust_anchor: false` を記録します。より強い trust anchor が必要なら manifest digest を boundary の外へコピー・保護してください。
-
-## Runtime evidence と graph operations
-
-Portable collector は Linux、macOS、Windows で動作します。Linux には syscall-backed `strace` reference backend もあります。
+### Runtime、graph、security、integrity
 
 ```bash
 execweave doctor
@@ -225,28 +208,17 @@ execweave graph-summary run.graph.json
 execweave graph-filter run.graph.json --causal-only --output causal.graph.json
 execweave graph-focus run.graph.json NODE_ID --hops 2 --output focused.graph.json
 execweave path run.graph.json SOURCE TARGET --causal-only
+execweave analyze run.graph.json --output analysis.json
+execweave-rule-pack graph.json --rule-pack local-policy.json --output report.json
+execweave-integrity seal .execweave/runs/<run-id>
+execweave-integrity verify .execweave/runs/<run-id>
 ```
 
-Portable filesystem observation は session-correlated であり process-causal ではありません。polling は十分短い活動を見逃す可能性があります。Linux `strace` は対応 execution でより強い process-attributed syscall evidence を提供します。Linux eBPF、Windows ETW、macOS Endpoint Security の native collector は今後の計画です。
+Security finding の evidence grade は severity とは独立しています。現在の grade は `A`、`B`、`C`、`D`、`U` で、probability や trust score ではなく evidence-strength category です。Rule pack は bounded / explainable な single-edge observation policy であり、third-party code を実行せず、byte-level exfiltration を証明することもできません。
 
-## Performance と large-run safety
+## Run artifacts
 
-ExecWeave には bounded filesystem/viewer protection、incremental Live JSONL tailing、large-graph safety guard、detached Top、設定済み provider integration 用の provisional live sidecar が含まれます。
-
-再現可能な incremental `GraphAccumulator` reference result は、文書化された GitHub Actions workload の 1M synthetic events で **164,273 ev/s** に達します。これは graph accumulation benchmark であり、end-to-end collector/browser throughput ではありません。
-
-代表的な host/workload で package-level overhead benchmark を再実行してください。
-
-```bash
-execweave-overhead --iterations 7 --strace auto --output-json benchmark-results.json
-execweave-scalability
-```
-
-Reference data と methodology は [`docs/benchmarks/`](docs/benchmarks/) を参照してください。
-
-## Layered artifacts
-
-Provider-integrated run には次のような artifact が含まれる場合があります。
+Provider-integrated run には次のような artifact が含まれます。
 
 ```text
 .execweave/runs/<run-id>/
@@ -263,45 +235,50 @@ Provider-integrated run には次のような artifact が含まれる場合が�
 ├── events.correlated.jsonl
 ├── graph.correlated.json
 ├── viewer.correlated.html
-└── integrity.json            # explicit seal 後
+└── integrity.json            # after an explicit seal
 ```
 
-Derived correlation は raw runtime や provider sidecar evidence を書き換えません。
+Derived correlation が raw runtime や provider sidecar evidence を書き換えることはありません。
 
-## Privacy
+## 制限とプライバシー
 
-ExecWeave は local-first で、capture、content blob、graph、report、viewer は既定でローカルに残ります。**OS runtime collector** は file content や raw read/write byte buffer を意図的には収集しません。ただし、この boundary と v0.6.9 で導入された **provider full-fidelity content store** を混同しないでください。対応 hook/API が prompt、tool argument/result、model response、reasoning/thinking text、shell output、file content などを明示的に渡した場合、ExecWeave はその値を完全に保存できます。
+- Portable collector は Linux、macOS、Windows で動作します。Portable filesystem observation は session-correlated であって process-causal ではなく、polling は非常に短い activity を取りこぼす場合があります。
+- Linux には syscall-backed `strace` reference backend もあり、対応 execution ではより強い process-attributed syscall evidence を得られます。
+- Native Linux eBPF、Windows ETW、macOS Endpoint Security collector は planned work であり、現在の能力としては主張していません。
+- Full-fidelity provider content は prompt、tool value、model response、shell output、supplied file に含まれる secret も保存し得ます。ExecWeave は汎用 secret scanner / content redactor では**ありません**。
+- Conversation isolation は attribution/display rule であり redaction boundary ではありません。Provider が content を他 agent へ明示的に route した場合、参加 endpoint にその content が表示されるのは正当です。
+- Commands、paths、endpoints、identifiers、model metadata、prompts、tool values、content blobs はすべて sensitive になり得ます。共有前に run directory 全体を確認してください。
+- Local integrity seal は manifest に対する file change を検出できますが、evidence と manifest が同じ writable trust boundary にある場合、adversary-resistant tamper evidence とは表現できません。
 
-Conversation isolation は attribution/display の規則であり redaction boundary ではありません。provider が Agent 1 の内容を Agent 2 に明示的に送れば、その routed evidence は参加 endpoint に表示され得ます。content が secret-redacted 済みだと仮定しないでください。Command、path、endpoint metadata、identifier、model metadata、prompt、tool value、content blob はすべて機密情報になり得ます。共有前に run directory 全体を確認してください。
+## パフォーマンス
 
-## 現在の状態
+ExecWeave には bounded filesystem/viewer protection、incremental Live JSONL tailing、large-graph safety guard、detached Top、設定済み provider integration 用の provisional live sidecar が含まれます。
 
-v0.8.3 は cross-platform runtime collection、materialized execution graph、standalone/live dashboard、保守的な provider↔runtime correlation、content-addressed full-fidelity provider evidence、attributable multi-agent execution trace、run-local conversation access、provider-neutral projection 上の agent-local conversation isolation、standalone および live dashboard での per-round agent conversation パネルと、自己記述する non-agent node および型ごとの折り畳みを統合します。各 integration は provider が実際に公開した最も強い identity/routing evidence のみを保持し、不足する場合は abstain します。Observed evidence と inference は設計上分離されたままです。 v0.8.3 ではさらに、live polling をまたいで読者が制御した conversation fold 状態を保持し、raw evidence を変えずに topology-aware な multi-agent layout/routing を適用します。
+再現可能な incremental `GraphAccumulator` reference result は、文書化された GitHub Actions workload の 1M synthetic events で **164,273 ev/s** に達します。これは graph-accumulation benchmark であり、end-to-end collector / browser throughput ではありません。
+
+代表的な host/workload で package-level benchmark を実行してください。
+
+```bash
+execweave-overhead --iterations 7 --strace auto --output-json benchmark-results.json
+execweave-scalability
+```
+
+Reference data と methodology は [`docs/benchmarks/`](docs/benchmarks/) にあります。
 
 ## ドキュメント
 
-- [`Phase 1 — Runtime Collection`](docs/phase-1-runtime-collection.ja.md)
-- [`Phase 2 — Execution Graph`](docs/phase-2-execution-graph.ja.md)
-- [`Live Graph`](docs/live-graph.ja.md)
-- [`Semantic Telemetry`](docs/semantic-telemetry.ja.md)
-- [`Claude Code Hooks`](docs/claude-code-hooks.ja.md)
-- [`OpenAI Codex Hooks`](docs/codex-hooks.ja.md)
-- [`Google Antigravity Hooks`](docs/antigravity-hooks.md)
-- [`Cursor Hooks`](docs/cursor-hooks.ja.md)
-- [`OpenCode Plugin`](docs/opencode-plugin.ja.md)
-- [`Inference Gateway / OpenRouter / LiteLLM`](docs/inference-gateway.ja.md)
-- [`Model Runtime / Ollama / llama.cpp / vLLM / LM Studio`](docs/model-runtime.ja.md)
-- [`Runtime Threat Model`](docs/runtime-threat-model.ja.md)
-- [`Evidence Grades`](docs/evidence-grades.ja.md)
-- [`Rule Packs`](docs/rule-packs.ja.md)
-- [`Run Integrity`](docs/run-integrity.ja.md)
-- [`Security Analysis`](docs/security-analysis.ja.md)
-- [`Performance Benchmarks`](docs/benchmarks/README.md)
+| 分野 | ドキュメント |
+| --- | --- |
+| Runtime と graph | [`Phase 1 — Runtime Collection`](docs/phase-1-runtime-collection.md) · [`Phase 2 — Execution Graph`](docs/phase-2-execution-graph.md) · [`Live Graph`](docs/live-graph.md) · [`Semantic Telemetry`](docs/semantic-telemetry.md) |
+| Agent / IDE integrations | [`Claude Code`](docs/claude-code-hooks.md) · [`OpenAI Codex`](docs/codex-hooks.md) · [`Google Antigravity`](docs/antigravity-hooks.md) · [`Cursor`](docs/cursor-hooks.md) · [`OpenCode`](docs/opencode-plugin.md) |
+| Gateways と runtimes | [`Inference Gateway / OpenRouter / LiteLLM`](docs/inference-gateway.md) · [`Model Runtime / Ollama / llama.cpp / vLLM / LM Studio`](docs/model-runtime.md) |
+| Trust と analysis | [`Runtime Threat Model`](docs/runtime-threat-model.md) · [`Evidence Grades`](docs/evidence-grades.md) · [`Rule Packs`](docs/rule-packs.md) · [`Run Integrity`](docs/run-integrity.md) · [`Security Analysis`](docs/security-analysis.md) |
+| Performance | [`Benchmarks`](docs/benchmarks/README.md) |
 
 ## コントリビューション
 
-native OS collector、Agent/IDE adapter、inference gateway、model runtime、evidence/correlation method、privacy/redaction、graph UX、multi-agent conversation attribution、performance evaluation への contribution を歓迎します。
+Native OS collector、Agent/IDE adapter、inference gateway、model runtime、evidence/correlation method、privacy/redaction、graph UX、multi-agent conversation attribution、performance evaluation への貢献を歓迎します。
 
-## License
+## ライセンス
 
-v0.6.8 以降、ExecWeave は **PolyForm Noncommercial License 1.0.0** で提供されます。非商用での利用、変更、再配布はライセンス条件の範囲で許可されます。商用利用には licensor から別途書面による commercial license が必要です。詳細は [`LICENSE`](LICENSE) を参照してください。
+v0.6.8 以降、ExecWeave は **PolyForm Noncommercial License 1.0.0** の下で提供されます。非商用の利用・変更・再配布はライセンス条件に従って許可されます。商用利用には licensor との別途の書面 commercial license が必要です。詳しくは [`LICENSE`](LICENSE) を参照してください。

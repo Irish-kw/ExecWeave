@@ -129,8 +129,8 @@ def test_all_readmes_use_current_release_dashboard_and_conversation_anchors() ->
         assert "conversations.json" in text, path
 
     readme = Path("README.md").read_text(encoding="utf-8")
-    assert f"The current release is **v{__version__}**." in readme
-    assert "provider-neutral, agent-local multi-agent conversations" in readme
+    assert f"This README documents **v{__version__}**." in readme
+    assert "subagent responses remain attributed to the agent that produced them" in readme
 
 
 def test_english_readme_declares_noncommercial_source_available_license() -> None:
