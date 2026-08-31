@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from execweave.content_store import FullFidelityContentStore
 from execweave.conversation_archive import antigravity_conversation_archive_events
 from execweave.inference_gateway import litellm_response_to_events
@@ -23,12 +21,12 @@ def _served_request_id(events: list[dict[str, object]]) -> str:
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="AUD-002: local runtime request identity is not endpoint scoped on v0.8.2/main",
-)
-def test_aud_002_vllm_request_identity_is_endpoint_scoped() -> None:
-    payload = {"model": "same-model", "usage": {"prompt_tokens": 1, "completion_tokens": 1}}
+def test_aud_002_characterizes_vllm_request_identity_collision() -> None:
+    """AUD-002: distinct endpoints currently collapse onto one request node id."""
+    payload = {
+        "model": "same-model",
+        "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+    }
     first = vllm_response_to_events(
         payload,
         endpoint="http://127.0.0.1:8000",
@@ -42,15 +40,15 @@ def test_aud_002_vllm_request_identity_is_endpoint_scoped() -> None:
         timestamp=_TIMESTAMP,
     )
 
-    assert _served_request_id(first) != _served_request_id(second)
+    assert _served_request_id(first) == _served_request_id(second)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="AUD-003: gateway request identity is not endpoint scoped on v0.8.2/main",
-)
-def test_aud_003_litellm_request_identity_is_endpoint_scoped() -> None:
-    payload = {"model": "same-model", "usage": {"prompt_tokens": 1, "completion_tokens": 1}}
+def test_aud_003_characterizes_litellm_request_identity_collision() -> None:
+    """AUD-003: distinct LiteLLM endpoints currently collapse onto one request node id."""
+    payload = {
+        "model": "same-model",
+        "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+    }
     first = litellm_response_to_events(
         payload,
         endpoint="http://127.0.0.1:4000",
@@ -64,14 +62,11 @@ def test_aud_003_litellm_request_identity_is_endpoint_scoped() -> None:
         timestamp=_TIMESTAMP,
     )
 
-    assert _served_request_id(first) != _served_request_id(second)
+    assert _served_request_id(first) == _served_request_id(second)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="AUD-004: OpenCode semantic and conversation paths use different agent IDs",
-)
-def test_aud_004_opencode_one_session_has_one_agent_identity(tmp_path: Path) -> None:
+def test_aud_004_characterizes_opencode_dual_agent_identity(tmp_path: Path) -> None:
+    """AUD-004: semantic and conversation paths currently name the same session differently."""
     payload = {
         "hook_event_name": "chat.message",
         "sessionID": "ses-audit-one",
@@ -96,16 +91,15 @@ def test_aud_004_opencode_one_session_has_one_agent_identity(tmp_path: Path) -> 
         if event.get("relation") == "OBSERVED_CHAT_MESSAGE"
     )
 
-    assert semantic_agent == conversation_agent
+    assert semantic_agent != conversation_agent
+    assert semantic_agent == "agent:OpenCode"
+    assert conversation_agent == "agent:opencode:session:ses-audit-one"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="AUD-005: a validated Antigravity transcript is incorrectly stamped provider_session_root",
-)
-def test_aud_005_antigravity_transcript_does_not_fabricate_root_provenance(
+def test_aud_005_characterizes_antigravity_fabricated_root_provenance(
     tmp_path: Path,
 ) -> None:
+    """AUD-005: transcript ownership currently fabricates provider_session_root evidence."""
     conversation_id = "child-conversation"
     transcript = (
         tmp_path
@@ -127,4 +121,4 @@ def test_aud_005_antigravity_transcript_does_not_fabricate_root_provenance(
 
     assert events
     attrs = events[0]["source"]["attributes"]
-    assert attrs.get("root_topology_evidence") != "provider_session_root"
+    assert attrs.get("root_topology_evidence") == "provider_session_root"
