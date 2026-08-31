@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
@@ -29,21 +28,11 @@ def _instrumented_viewer(tmp_path: Path, graph: dict[str, Any]) -> Path:
     from execweave.dashboard_shell import render_static_dashboard_html
 
     html = render_static_dashboard_html(graph)
-    assert _CORE_SEAM in html, "dashboard core seam changed; update the browser test deliberately"
+    assert _CORE_SEAM in html, "dashboard core seam changed; update this browser test deliberately"
     html = html.replace(_CORE_SEAM, _CORE_TEST_SEAM, 1)
     viewer = tmp_path / "instrumented-viewer.html"
     viewer.write_text(html, encoding="utf-8")
     return viewer
-
-
-def _open(viewer: Path, *, width: int = 1500, height: int = 900):
-    manager, executable = _browser()
-    playwright = manager.start()
-    browser = _launch(playwright, executable)
-    page = browser.new_page(viewport={"width": width, "height": height})
-    page.goto(viewer.as_uri())
-    page.wait_for_selector(".node", timeout=15000)
-    return manager, browser, page
 
 
 def _by_id(page: Any) -> dict[str, dict[str, Any]]:
@@ -57,22 +46,13 @@ def _layout_shift_graph() -> dict[str, Any]:
         "edge_count": 1,
         "event_count": 1,
         "nodes": [
-            {
-                "id": "agent:/root",
-                "type": "agent",
-                "name": "/root",
-                "attributes": {"agent_role": "root", "agent_path": "/root"},
-            },
+            {"id": "agent:/root", "type": "agent", "name": "/root",
+             "attributes": {"agent_role": "root", "agent_path": "/root"}},
             {"id": "file:f", "type": "file", "name": "a.md", "attributes": {}},
         ],
         "edges": [
-            {
-                "id": "e-file",
-                "source": "agent:/root",
-                "target": "file:f",
-                "relation": "WROTE_FILE",
-                "attributes": {},
-            }
+            {"id": "e-file", "source": "agent:/root", "target": "file:f",
+             "relation": "WROTE_FILE", "attributes": {}},
         ],
     }
 
@@ -81,131 +61,93 @@ def test_live_delta_moves_existing_nodes_when_a_new_wide_upstream_lane_appears(
     tmp_path: Path,
 ) -> None:
     viewer = _instrumented_viewer(tmp_path, _layout_shift_graph())
-    manager, browser, page = _open(viewer)
-    try:
-        before = _by_id(page)
-        before_paths = page.eval_on_selector_all(
-            ".edge", "nodes => nodes.map(node => node.getAttribute('d'))"
-        )
-        update = {
-            "event_count": 2,
-            "node_count": 3,
-            "edge_count": 2,
-            "nodes_added": [
-                {
-                    "id": "process:wide",
-                    "type": "process",
-                    "name": LONG_LABEL,
-                    "attributes": {},
-                }
-            ],
-            "nodes_updated": [],
-            "edges_added": [
-                {
-                    "id": "e-start",
-                    "source": "process:wide",
-                    "target": "agent:/root",
-                    "relation": "STARTED_AGENT",
-                    "attributes": {},
-                }
-            ],
-            "edges_updated": [],
-        }
-        page.evaluate("update => window.__execweaveCore.applyDelta(update)", update)
-        page.wait_for_timeout(80)
-        after = _by_id(page)
-        after_paths = page.eval_on_selector_all(
-            ".edge", "nodes => nodes.map(node => node.getAttribute('d'))"
-        )
+    manager, executable = _browser()
+    with manager as playwright:
+        browser = _launch(playwright, executable)
+        try:
+            page = browser.new_page(viewport={"width": 1500, "height": 900})
+            page.goto(viewer.as_uri())
+            page.wait_for_selector(".node", timeout=15000)
+            before = _by_id(page)
+            before_paths = page.eval_on_selector_all(
+                ".edge", "nodes => nodes.map(node => node.getAttribute('d'))"
+            )
+            update = {
+                "event_count": 2,
+                "node_count": 3,
+                "edge_count": 2,
+                "nodes_added": [
+                    {"id": "process:wide", "type": "process", "name": LONG_LABEL,
+                     "attributes": {}}
+                ],
+                "nodes_updated": [],
+                "edges_added": [
+                    {"id": "e-start", "source": "process:wide", "target": "agent:/root",
+                     "relation": "STARTED_AGENT", "attributes": {}}
+                ],
+                "edges_updated": [],
+            }
+            page.evaluate("update => window.__execweaveCore.applyDelta(update)", update)
+            page.wait_for_timeout(80)
+            after = _by_id(page)
+            after_paths = page.eval_on_selector_all(
+                ".edge", "nodes => nodes.map(node => node.getAttribute('d'))"
+            )
+        finally:
+            browser.close()
 
-        assert after["process:wide"]["width"] > 160, after["process:wide"]
-        assert after["agent:/root"]["x"] > before["agent:/root"]["x"] + 100
-        assert after["file:f"]["x"] > before["file:f"]["x"] + 100
-        assert after["agent:/root"]["y"] == pytest.approx(before["agent:/root"]["y"], abs=1)
-        assert after["file:f"]["y"] == pytest.approx(before["file:f"]["y"], abs=1)
-        assert before_paths != after_paths, "existing edges were not rerouted with the moved nodes"
-    finally:
-        browser.close()
-        manager.stop()
+    assert after["process:wide"]["width"] > 160, after["process:wide"]
+    assert after["agent:/root"]["x"] > before["agent:/root"]["x"] + 100
+    assert after["file:f"]["x"] > before["file:f"]["x"] + 100
+    assert after["agent:/root"]["y"] == pytest.approx(before["agent:/root"]["y"], abs=1)
+    assert after["file:f"]["y"] == pytest.approx(before["file:f"]["y"], abs=1)
+    assert before_paths != after_paths, "existing edges were not rerouted with moved nodes"
 
 
 def _wide_camera_graph() -> dict[str, Any]:
     return {
         "schema_version": "1.0",
         "nodes": [
-            {
-                "id": "agent:/root",
-                "type": "agent",
-                "name": "/root",
-                "attributes": {"agent_role": "root", "agent_path": "/root"},
-            },
-            {
-                "id": "process:wide",
-                "type": "process",
-                "name": LONG_LABEL,
-                "attributes": {},
-            },
-            {
-                "id": "file:wrapped",
-                "type": "file",
-                "name": "src/execweave/very/deeply/nested/module_with_a_long_name.py",
-                "attributes": {},
-            },
+            {"id": "agent:/root", "type": "agent", "name": "/root",
+             "attributes": {"agent_role": "root", "agent_path": "/root"}},
+            {"id": "process:wide", "type": "process", "name": LONG_LABEL, "attributes": {}},
+            {"id": "file:wrapped", "type": "file",
+             "name": "src/execweave/very/deeply/nested/module_with_a_long_name.py",
+             "attributes": {}},
         ],
         "edges": [
-            {
-                "id": "e1",
-                "source": "process:wide",
-                "target": "agent:/root",
-                "relation": "STARTED_AGENT",
-                "attributes": {},
-            },
-            {
-                "id": "e2",
-                "source": "agent:/root",
-                "target": "file:wrapped",
-                "relation": "WROTE_FILE",
-                "attributes": {},
-            },
+            {"id": "e1", "source": "process:wide", "target": "agent:/root",
+             "relation": "STARTED_AGENT", "attributes": {}},
+            {"id": "e2", "source": "agent:/root", "target": "file:wrapped",
+             "relation": "WROTE_FILE", "attributes": {}},
         ],
     }
 
 
-def test_graph_bounds_use_actual_width_and_height(tmp_path: Path) -> None:
-    viewer = _instrumented_viewer(tmp_path, _wide_camera_graph())
-    manager, browser, page = _open(viewer)
-    try:
-        result = page.evaluate(
-            """() => {
-            const positions=window.__execweaveCore.getPositions();
-            const rows=[...document.querySelectorAll('.node')].map(group=>{
-              const p=positions.get(group.dataset.id),rect=group.querySelector('rect');
-              return {x:p.x,y:p.y,w:Number(rect.getAttribute('width')),h:Number(rect.getAttribute('height'))};
-            });
-            return {actual:window.__execweaveCore.graphBounds(),expected:{
-              minX:Math.min(...rows.map(r=>r.x)),maxX:Math.max(...rows.map(r=>r.x+r.w)),
-              minY:Math.min(...rows.map(r=>r.y)),maxY:Math.max(...rows.map(r=>r.y+r.h))}};
-            }"""
-        )
-        for key in ("minX", "maxX", "minY", "maxY"):
-            assert result["actual"][key] == pytest.approx(result["expected"][key], abs=1), result
-    finally:
-        browser.close()
-        manager.stop()
-
-
-def test_focus_centers_the_actual_wide_node_rectangle(tmp_path: Path) -> None:
-    viewer = _render(tmp_path, _wide_camera_graph())
+def test_bounds_and_focus_use_actual_node_dimensions(tmp_path: Path) -> None:
+    instrumented = _instrumented_viewer(tmp_path, _wide_camera_graph())
     manager, executable = _browser()
     with manager as playwright:
         browser = _launch(playwright, executable)
         try:
             page = browser.new_page(viewport={"width": 1200, "height": 760})
-            page.goto(viewer.as_uri())
+            page.goto(instrumented.as_uri())
             page.wait_for_selector('.node[data-id="process:wide"]', timeout=15000)
+            bounds = page.evaluate(
+                """() => {
+                const positions=window.__execweaveCore.getPositions();
+                const rows=[...document.querySelectorAll('.node')].map(group=>{
+                  const p=positions.get(group.dataset.id),rect=group.querySelector('rect');
+                  return {x:p.x,y:p.y,w:Number(rect.getAttribute('width')),h:Number(rect.getAttribute('height'))};
+                });
+                return {actual:window.__execweaveCore.graphBounds(),expected:{
+                  minX:Math.min(...rows.map(r=>r.x)),maxX:Math.max(...rows.map(r=>r.x+r.w)),
+                  minY:Math.min(...rows.map(r=>r.y)),maxY:Math.max(...rows.map(r=>r.y+r.h))}};
+                }"""
+            )
             page.evaluate("() => window.__execweaveCore.focusNode('process:wide')")
             page.wait_for_timeout(300)
-            offsets = page.evaluate(
+            centered = page.evaluate(
                 """() => {
                 const node=document.querySelector('.node[data-id="process:wide"] rect').getBoundingClientRect();
                 const svg=document.getElementById('svg').getBoundingClientRect();
@@ -213,11 +155,14 @@ def test_focus_centers_the_actual_wide_node_rectangle(tmp_path: Path) -> None:
                         dy:(node.top+node.height/2)-(svg.top+svg.height/2),width:node.width};
                 }"""
             )
-            assert offsets["width"] > 160, offsets
-            assert abs(offsets["dx"]) <= 3, offsets
-            assert abs(offsets["dy"]) <= 3, offsets
         finally:
             browser.close()
+
+    for key in ("minX", "maxX", "minY", "maxY"):
+        assert bounds["actual"][key] == pytest.approx(bounds["expected"][key], abs=1), bounds
+    assert centered["width"] > 160, centered
+    assert abs(centered["dx"]) <= 3, centered
+    assert abs(centered["dy"]) <= 3, centered
 
 
 def _root_barycentre_graph() -> dict[str, Any]:
@@ -272,12 +217,11 @@ def _observed_tool_graph() -> dict[str, Any]:
             {"id": "agent:OpenCode", "type": "agent", "name": "/root",
              "attributes": {"agent_role": "root", "agent_path": "/root"}},
             {"id": "tool-call:opencode:s:c1", "type": "tool_call", "name": "Read",
-             "first_seen": "2026-08-31T08:00:00Z",
-             "attributes": {"provider": "opencode", "tool_name": "Read"}},
+             "first_seen": "2026-08-31T08:00:00Z", "attributes": {"tool_name": "Read"}},
             {"id": "tool:opencode:Read", "type": "tool", "name": "Read", "attributes": {}},
             {"id": "tool-call-observation:antigravity:c:2", "type": "tool_call_observation",
              "name": "completed tool (identity unavailable)", "first_seen": "2026-08-31T08:01:00Z",
-             "attributes": {"provider": "antigravity", "conversation_id": "c", "step_index": 2}},
+             "attributes": {"conversation_id": "c", "step_index": 2}},
         ],
         "edges": [
             {"id": "o1", "source": "agent:OpenCode", "target": "tool-call:opencode:s:c1",
@@ -330,21 +274,26 @@ def test_tool_panel_accepts_observed_and_owned_relations_without_duplicates(tmp_
 
 def test_repeated_text_measurement_hits_the_browser_once(tmp_path: Path) -> None:
     viewer = _instrumented_viewer(tmp_path, _layout_shift_graph())
-    manager, browser, page = _open(viewer)
-    try:
-        calls = page.evaluate(
-            """() => {
-            const proto=SVGTextElement.prototype,original=proto.getComputedTextLength;
-            let count=0;
-            proto.getComputedTextLength=function(){count++;return original.call(this)};
-            try{for(let i=0;i<30;i++)window.__execweaveCore.execweaveMeasure('__execweave_cache_probe__')}finally{proto.getComputedTextLength=original}
-            return count;
-            }"""
-        )
-        assert calls == 1, f"the same string caused {calls} synchronous SVG measurements"
-    finally:
-        browser.close()
-        manager.stop()
+    manager, executable = _browser()
+    with manager as playwright:
+        browser = _launch(playwright, executable)
+        try:
+            page = browser.new_page(viewport={"width": 1200, "height": 760})
+            page.goto(viewer.as_uri())
+            page.wait_for_selector(".node", timeout=15000)
+            calls = page.evaluate(
+                """() => {
+                const proto=SVGTextElement.prototype,original=proto.getComputedTextLength;
+                let count=0;
+                proto.getComputedTextLength=function(){count++;return original.call(this)};
+                try{for(let i=0;i<30;i++)window.__execweaveCore.execweaveMeasure('__execweave_cache_probe__')}finally{proto.getComputedTextLength=original}
+                return count;
+                }"""
+            )
+        finally:
+            browser.close()
+
+    assert calls == 1, f"the same string caused {calls} synchronous SVG measurements"
 
 
 def _dense_raw_graph(call_count: int = 40, junk_count: int = 400) -> dict[str, Any]:
