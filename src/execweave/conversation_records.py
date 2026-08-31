@@ -1,13 +1,98 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any
 
 from . import _conversation_records_core as _core
+from . import conversation_preview as _preview_module
 from ._conversation_records_core import *  # noqa: F403
 from .agent_topology import THREAD_ID_EXECWEAVE_DERIVED, THREAD_ID_PROVIDER_NATIVE
 from .conversation_message_identity import dedupe_codex_message_observations
 
+_core_conversation_preview = _core.conversation_preview
 _core_merge_conversation_previews = _core._merge_conversation_previews
+
+
+def _antigravity_step_ordinals(path: str | Path) -> list[int | None]:
+    """Recover stable provider record positions for visible Antigravity messages.
+
+    Antigravity Stop archives are cumulative snapshots of the same transcript. The
+    archive edge sequence therefore changes between snapshots and cannot identify a
+    transcript record. Live-verified transcript records expose ``step_index``; use it
+    when an explicit ``ordinal`` is absent so old turns keep the same identity across
+    repeated Stop archives.
+    """
+    source_path = Path(path).expanduser().resolve(strict=False)
+    try:
+        lines = source_path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError):
+        return []
+
+    ordinals: list[int | None] = []
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(record, dict):
+            continue
+        role = str(record.get("source") or "").lower()
+        if role not in {"user", "human", "assistant", "model"}:
+            continue
+        text = _preview_module._text_parts(record.get("content") or record.get("text"))
+        if not text:
+            continue
+
+        record_ordinal = record.get("ordinal")
+        if isinstance(record_ordinal, int) and not isinstance(record_ordinal, bool):
+            ordinals.append(record_ordinal)
+            continue
+        step_index = record.get("step_index")
+        ordinals.append(
+            step_index
+            if isinstance(step_index, int) and not isinstance(step_index, bool)
+            else None
+        )
+    return ordinals
+
+
+def _conversation_preview(
+    path: str | Path,
+    *,
+    content_kind: str,
+    provider: str,
+    source: dict[str, Any] | None,
+    timestamp: object = None,
+    ordinal: object = None,
+) -> dict[str, Any] | None:
+    preview = _core_conversation_preview(
+        path,
+        content_kind=content_kind,
+        provider=provider,
+        source=source,
+        timestamp=timestamp,
+        ordinal=ordinal,
+    )
+    if (
+        not isinstance(preview, dict)
+        or provider.strip().lower() != "antigravity"
+        or not content_kind.startswith("antigravity.conversation_transcript")
+    ):
+        return preview
+
+    messages = preview.get("messages")
+    if not isinstance(messages, list):
+        return preview
+    stable_ordinals = _antigravity_step_ordinals(path)
+    if len(stable_ordinals) != len(messages):
+        return preview
+    for message, stable_ordinal in zip(messages, stable_ordinals, strict=True):
+        if isinstance(message, dict) and stable_ordinal is not None:
+            message["ordinal"] = stable_ordinal
+    return preview
 
 
 def _conversation_identity_keys(
@@ -211,5 +296,6 @@ def _merge_conversation_previews(entries: list[dict[str, Any]]) -> None:
 
 # Functions defined in the core module resolve these globals at call time. Rebinding
 # keeps the public API stable while tightening identity before the observation stage.
+_core.conversation_preview = _conversation_preview
 _core._conversation_identity_keys = _conversation_identity_keys
 _core._merge_conversation_previews = _merge_conversation_previews

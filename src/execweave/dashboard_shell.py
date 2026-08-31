@@ -9,12 +9,46 @@ from .viewer_dashboard_clean import fold_budget_bootstrap, inject_live_dashboard
 from .viewer_dashboard_focus import inject_live_dashboard_focus
 from .viewer_live_layout import inject_live_dashboard_layout
 
+_AGENT_PANEL_TOPOLOGY_OLD = (
+    "const path=nodePath(node),preview=recordFor(node)?.conversation_preview||{},"
+    "messages=Array.isArray(preview.messages)?preview.messages:[];\n"
+    "  const isRoot=path==='/root'||attrs(node).agent_role==='root'||"
+    "attrs(node).root_agent_path==='/root';"
+)
+_AGENT_PANEL_TOPOLOGY_NEW = (
+    "const preview=recordFor(node)?.conversation_preview||{},"
+    "previewPath=String(preview.agent_path||'').trim();\n"
+    "  const path=previewPath||nodePath(node),"
+    "messages=Array.isArray(preview.messages)?preview.messages:[];\n"
+    "  const isRoot=preview.is_root===true||path==='/root'||"
+    "attrs(node).agent_role==='root'||attrs(node).root_agent_path==='/root';"
+)
+
+
+def _align_agent_panel_topology(html: str) -> str:
+    """Render conversation topology without upgrading graph provenance.
+
+    A transcript can conservatively resolve to the observed run root because no
+    positive parent evidence exists. That derived presentation fact belongs to the
+    conversation preview; copying it back onto the graph would incorrectly turn it
+    into provider evidence. The panel therefore consumes the preview's resolved path
+    and root flag when choosing its round renderer while leaving graph attributes
+    untouched.
+    """
+    if _AGENT_PANEL_TOPOLOGY_OLD not in html:
+        raise RuntimeError("agent panel topology seam changed")
+    return html.replace(
+        _AGENT_PANEL_TOPOLOGY_OLD,
+        _AGENT_PANEL_TOPOLOGY_NEW,
+        1,
+    )
+
 
 def _build_dashboard_html() -> str:
     html = inject_live_dashboard_layout(
         inject_live_dashboard_focus(inject_live_dashboard_clean(_BASE_LIVE_HTML))
     )
-    return inject_agent_panel(html)
+    return _align_agent_panel_topology(inject_agent_panel(html))
 
 
 DASHBOARD_HTML = _build_dashboard_html()
