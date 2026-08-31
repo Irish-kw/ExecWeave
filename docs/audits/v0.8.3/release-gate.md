@@ -6,6 +6,20 @@ Baseline audit branch point: `main@1ec0dcb0171f9346f8232a99e857cbd6b3168f08`.
 
 The audit found one confirmed P0, five confirmed P1 defects, two confirmed P2 defects, one strongly-supported P2 issue, and one unresolved suspected P1 Antigravity history-loss report. v0.8.3 must not ship until the mandatory conditions below are satisfied on one assembled release-candidate SHA.
 
+## PR #25 merge gate is separate from the release gate
+
+At the audited snapshot:
+
+`PR25_PREMERGE_GATE = PASS`
+
+for PR #25 head `8362e74acd91d703991efd8cac2f0826c86cad3a` against `main@1ec0dcb0171f9346f8232a99e857cbd6b3168f08`.
+
+That pre-merge PASS is intentionally narrower than the v0.8.3 release gate. It means PR #25's graph ergonomics/tool-traffic implementation may be merged into `main` after the atomic checks in `pr25-premerge-checklist.md` are repeated immediately before the merge. It does **not** mean the provider/conversation identity blockers below are fixed, and it does not authorize version bump, tag, GitHub Release, or PyPI publication.
+
+The checked PR #25 snapshot was mergeable, ahead 17 / behind 0, had zero unresolved review threads, had all applicable workflows green (`CI`, `Viewer Agent Isolation`, `Provider Capability Stage Integrity`, `Windows Launcher Compatibility`, `Documentation i18n`), and had no changed-path overlap with PR #26.
+
+If PR #25 head or `main` moves, the pre-merge PASS expires until those checks are repeated against the new pair of SHAs.
+
 ## Mandatory conditions before PASS
 
 ### 1. Fix AUD-001: cross-session root conversation merge
@@ -69,7 +83,9 @@ If the real fixture cannot reproduce the original report, document the exact pro
 
 ### 6. Assemble PR #25 work and rerun all dashboard behavior on the release candidate
 
-PR #25 is separate work and reached ready-for-review state during this audit. Its branch results are not sufficient by themselves for a release PASS.
+PR #25 is separate work and passed its own pre-merge gate during this audit. Its branch results are sufficient for merging that isolated implementation after the final atomic check, but are not sufficient by themselves for a v0.8.3 release PASS.
+
+After PR #25 lands, provider/identity remediation should start from the new `main`. When all release blockers are fixed, assemble one intended release-candidate SHA containing both the merged PR #25 work and the provider fixes, then rerun the dashboard behavior below.
 
 PASS evidence on one final candidate SHA:
 
@@ -83,7 +99,8 @@ PASS evidence on one final candidate SHA:
 - manual zoom, Fit graph and Follow latest under polling;
 - search/filter/Unicode combinations;
 - replay/export sanity;
-- small, medium and 100–300+ node graphs with no unexplained overlaps/intersections.
+- small, medium and 100–300+ node graphs with no unexplained overlaps/intersections;
+- tool traffic still maps to the corrected canonical agent identity after AUD-004/AUD-006 remediation.
 
 ### 7. Every confirmed P0/P1 must have a behavioral regression
 
@@ -138,6 +155,6 @@ These must remain accurately disclosed and must not be represented as complete e
 
 ## Rule for changing to PASS
 
-Do not change `V0.8.3_RELEASE_GATE` to PASS because PR #25 is green, because individual fix PRs are green, or because the existing test suite is green.
+Do not change `V0.8.3_RELEASE_GATE` to PASS because PR #25 is green, because PR #25 has been merged, because individual fix PRs are green, or because the existing test suite is green.
 
 Change it only after all mandatory conditions above are verified on the same intended v0.8.3 release-candidate SHA.
