@@ -129,3 +129,37 @@ def test_a_connected_file_stays_beside_the_spine(tmp_path: Path) -> None:
     assert drawn["file:1"]["y"] < spine_floor, (
         f"a connected file was demoted to the secondary band: {drawn['file:1']}"
     )
+
+
+def test_a_subagent_is_never_demoted_even_with_no_edge_to_its_root(tmp_path: Path) -> None:
+    """Codex records subagents with no edge back to the root that spawned them.
+
+    Reading the graph alone therefore makes every subagent its own component, and
+    banding pushed all of them into the region meant for stray evidence — below the
+    run they are the point of. An agent belongs to the spine whether or not the
+    provider recorded an edge to it.
+    """
+    graph = _spine()
+    graph["edges"] = [edge for edge in graph["edges"] if edge["id"] != "s1"]
+    for index in range(3):
+        graph["nodes"].append(
+            {"id": f"agent:/root/lone{index}", "type": "agent", "name": f"lone{index}",
+             "attributes": {"agent_role": "child", "agent_path": f"/root/lone{index}"}}
+        )
+    graph["nodes"].append(
+        {"id": "orphan:1", "type": "file", "name": "/tmp/stray.tmp", "attributes": {}}
+    )
+
+    drawn = {node["id"]: node for node in _drawn(tmp_path, graph)}
+    root = drawn["agent:/root"]
+    orphan = drawn["orphan:1"]
+    for key, node in drawn.items():
+        if not key.startswith("agent:"):
+            continue
+        assert node["y"] < orphan["y"], (
+            f"{key} was demoted below stray evidence at y={orphan['y']}: {node}"
+        )
+    lone = drawn["agent:/root/lone0"]
+    assert abs(lone["y"] - root["y"]) < 600, (
+        f"an edgeless subagent is far from its root: root={root['y']} lone={lone['y']}"
+    )

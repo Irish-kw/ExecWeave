@@ -147,20 +147,59 @@ def test_a_wide_node_never_reaches_into_the_next_lane(tmp_path: Path) -> None:
 
 
 def test_lanes_keep_their_established_positions_when_nothing_is_wide(tmp_path: Path) -> None:
-    """Deriving lane x must reproduce the table it replaced, or every run shifts."""
+    """Deriving lane x must reproduce the table it replaced, or every run shifts.
+
+    Every lane has to be occupied for that comparison to mean anything: an empty lane
+    reserves no column, so a fixture missing one would not be measuring the derivation
+    against the old table at all.
+    """
     graph = _graph_with("read")
-    graph["nodes"].append(
+    graph["nodes"] += [
+        {"id": "process:p", "type": "process", "name": "sh", "attributes": {}},
         {"id": "agent:/root/a", "type": "agent", "name": "a",
-         "attributes": {"agent_role": "child", "agent_path": "/root/a"}}
-    )
-    graph["edges"].append(
-        {"id": "e2", "source": "agent:/root", "target": "agent:/root/a",
-         "relation": "SPAWNED_AGENT", "attributes": {}}
-    )
+         "attributes": {"agent_role": "child", "agent_path": "/root/a"}},
+        {"id": "model:m", "type": "model", "name": "gpt", "attributes": {}},
+        {"id": "file:f", "type": "file", "name": "a.md", "attributes": {}},
+        {"id": "endpoint:e", "type": "network_endpoint", "name": "1.1.1.1:443", "attributes": {}},
+    ]
+    graph["edges"] += [
+        {"id": "l1", "source": "process:p", "target": "agent:/root", "relation": "STARTED", "attributes": {}},
+        {"id": "l2", "source": "agent:/root", "target": "agent:/root/a", "relation": "SPAWNED_AGENT", "attributes": {}},
+        {"id": "l3", "source": "agent:/root/a", "target": "model:m", "relation": "USED_MODEL", "attributes": {}},
+        {"id": "l4", "source": "agent:/root/a", "target": "file:f", "relation": "WROTE_FILE", "attributes": {}},
+        {"id": "l5", "source": "agent:/root/a", "target": "endpoint:e", "relation": "REACHED", "attributes": {}},
+    ]
     by_lane = {node["lane"]: node["x"] for node in _drawn(tmp_path, graph)}
+    assert by_lane.get("runtime") == 0, by_lane
     assert by_lane.get("root") == 270, by_lane
     assert by_lane.get("agent") == 540, by_lane
+    assert by_lane.get("model") == 820, by_lane
     assert by_lane.get("tool") == 1100, by_lane
+    # file took the column endpoint used to hold; endpoint follows it.
+    assert by_lane.get("file") == 1380, by_lane
+    assert by_lane.get("endpoint") == 1660, by_lane
+
+
+def test_an_empty_lane_reserves_no_column(tmp_path: Path) -> None:
+    """A lane holding nothing used to cost a column, and every edge crossing it paid.
+
+    With the model and tool lanes empty, an agent writing a file was separated from it
+    by two columns of nothing.
+    """
+    graph = _graph_with("read")
+    graph["nodes"] = [node for node in graph["nodes"] if node["type"] != "tool"]
+    graph["edges"] = []
+    graph["nodes"].append({"id": "file:f", "type": "file", "name": "a.md", "attributes": {}})
+    graph["edges"].append({"id": "l1", "source": "agent:/root", "target": "file:f",
+                           "relation": "WROTE_FILE", "attributes": {}})
+
+    by_lane = {node["lane"]: node["x"] for node in _drawn(tmp_path, graph)}
+    # runtime, model and tool all hold nothing here, so root starts the graph and file
+    # follows it directly rather than sitting four columns away.
+    assert by_lane.get("root") == 0, by_lane
+    assert by_lane.get("file") == 270, (
+        f"empty lanes are still reserving columns: {by_lane}"
+    )
 
 
 def test_no_edge_leaves_a_wide_node_at_the_old_constant(tmp_path: Path) -> None:

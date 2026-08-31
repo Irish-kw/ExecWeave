@@ -87,11 +87,14 @@ function execweaveLaneXOf(lane){const value=execweaveTopology.laneX[lane];return
 // A lane starts far enough right that the widest node in the lane before it cannot
 // reach into it. With every label at the minimum width this reproduces the fixed
 // table exactly; a wide label pushes every lane after it, and only those.
-function execweaveLaneX(widthByLane){
+function execweaveLaneX(widthByLane,occupied){
   const laneX={};let x=0;
   for(const lane of EXECWEAVE_LANE_ORDER){
     laneX[lane]=x;
-    x+=Math.max(EXECWEAVE_NODE_W,widthByLane.get(lane)||EXECWEAVE_NODE_W)+EXECWEAVE_LANE_GAP[lane];
+    // A lane holding nothing reserves nothing. Walking every lane unconditionally
+    // spent a column on each empty one, and an agent talking to a file paid for the
+    // empty model and tool lanes between them in edge length.
+    if(!occupied||occupied.has(lane))x+=Math.max(EXECWEAVE_NODE_W,widthByLane.get(lane)||EXECWEAVE_NODE_W)+EXECWEAVE_LANE_GAP[lane];
   }
   laneX.other=laneX.endpoint;
   return laneX;
@@ -147,16 +150,17 @@ function execweaveBuildTopology(){
     const ab=agentBarycenter(a),bb=agentBarycenter(b);if(ab!==bb)return ab-bb;
     return execweaveStableNodeSort(a,b);
   });
-  const width=new Map(),height=new Map(),widthByLane=new Map();
+  const width=new Map(),height=new Map(),widthByLane=new Map(),occupied=new Set();
   for(const node of nodes){
     const w=execweaveNodeWidth(node),lane=execweaveLane(node);
     width.set(node.id,w);
     height.set(node.id,EXECWEAVE_NODE_H+(execweaveWrapLabel(execweaveNodeLabel(node),w).length>1?EXECWEAVE_LINE_H:0));
     widthByLane.set(lane,Math.max(widthByLane.get(lane)||EXECWEAVE_NODE_W,w));
+    occupied.add(lane==='other'?'endpoint':lane);
   }
   // `other` shares a column with `endpoint`, so it must not widen a lane of its own.
   widthByLane.set('endpoint',Math.max(widthByLane.get('endpoint')||EXECWEAVE_NODE_W,widthByLane.get('other')||EXECWEAVE_NODE_W));
-  const laneX=execweaveLaneX(widthByLane);
+  const laneX=execweaveLaneX(widthByLane,occupied);
   const spec=new Map();
   const put=(node,lane,order,y)=>spec.set(node.id,{lane,rank:EXECWEAVE_LANES[lane],order,x:laneX[lane],y});
   roots.forEach((node,index)=>put(node,'root',index,rootY+index*EXECWEAVE_ROW_GAP));
@@ -176,15 +180,21 @@ function execweaveBuildTopology(){
   if(componentOf.size){
     const sizes=new Map();
     for(const value of componentOf.values())sizes.set(value,(sizes.get(value)||0)+1);
+    // An agent belongs to the spine whether or not the provider recorded an edge to
+    // it. Codex records subagents with no edge back to their root, so reading the
+    // graph alone demoted every subagent to the band meant for stray evidence.
+    const spineIds=new Set(nodes.filter(node=>node?.type==='agent').map(node=>node.id));
     let primary=roots.length?componentOf.get(roots[0].id):undefined;
     if(primary===undefined){
       let best=-1;
       for(const [value,size] of [...sizes.entries()].sort((a,b)=>a[0]-b[0]))if(size>best){best=size;primary=value}
     }
-    const secondary=[...sizes.keys()].filter(value=>value!==primary).sort((a,b)=>a-b);
+    const spineComponents=new Set([...componentOf.entries()].filter(entry=>spineIds.has(entry[0])).map(entry=>entry[1]));
+    if(primary!==undefined)spineComponents.add(primary);
+    const secondary=[...sizes.keys()].filter(value=>!spineComponents.has(value)).sort((a,b)=>a-b);
     if(secondary.length){
       let floor=-Infinity;
-      for(const [id,value] of componentOf)if(value===primary){const s=spec.get(id);if(s)floor=Math.max(floor,s.y+(height.get(id)||EXECWEAVE_NODE_H))}
+      for(const [id,value] of componentOf)if(spineComponents.has(value)){const s=spec.get(id);if(s)floor=Math.max(floor,s.y+(height.get(id)||EXECWEAVE_NODE_H))}
       if(!Number.isFinite(floor))floor=0;
       for(const value of secondary){
         const members=[...componentOf.entries()].filter(entry=>entry[1]===value).map(entry=>entry[0]);
