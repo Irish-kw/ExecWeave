@@ -1,14 +1,16 @@
 from __future__ import annotations
 
-import hashlib
-import json
 from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any
 
 from .content_evidence import content_observation_event
 from .content_store import ContentReference, FullFidelityContentStore
-from .openai_compatible import _endpoint_digest, sanitize_openai_compatible_endpoint
+from .openai_compatible import (
+    _endpoint_digest,
+    _request_identity,
+    sanitize_openai_compatible_endpoint,
+)
 
 _REQUEST_CONTENT_KEYS = frozenset(
     {"messages", "prompt", "input", "system", "instructions", "tools", "functions"}
@@ -19,35 +21,32 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _request_id(payload: dict[str, Any], explicit: str | None) -> str:
-    if isinstance(explicit, str) and explicit:
-        return explicit
-    native = payload.get("id")
-    if isinstance(native, str) and native:
-        return native
-    seed = {key: payload.get(key) for key in ("model", "created", "usage")}
-    raw = json.dumps(seed, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()[:32]
-
-
 def _request_entity(
     response: dict[str, Any],
     *,
     endpoint: str,
     provider_name: str,
     request_id: str | None,
+    observed_at: str,
 ) -> dict[str, Any]:
-    native_id = _request_id(response, request_id)
+    safe_endpoint = sanitize_openai_compatible_endpoint(endpoint)
+    endpoint_scope = _endpoint_digest(safe_endpoint)
+    native_id, request_id_source = _request_identity(
+        response,
+        request_id,
+        endpoint_scope=endpoint_scope,
+        observed_at=observed_at,
+    )
     return {
         "type": "inference_request",
-        "id": (
-            f"inference-request:openai-compatible:{_endpoint_digest(endpoint)}:{native_id}"
-        ),
+        "id": f"inference-request:openai-compatible:{endpoint_scope}:{native_id}",
         "name": native_id,
         "attributes": {
             "protocol": "openai_compatible",
             "provider_name": provider_name,
-            "endpoint": sanitize_openai_compatible_endpoint(endpoint),
+            "endpoint": safe_endpoint,
+            "endpoint_scope": endpoint_scope,
+            "request_id_source": request_id_source,
         },
     }
 
@@ -204,6 +203,7 @@ def response_to_content_events(
         endpoint=safe_endpoint,
         provider_name=provider_name,
         request_id=request_id,
+        observed_at=observed_at,
     )
     attrs = {
         "observation_scope": "response_only",
@@ -301,6 +301,7 @@ def exchange_to_content_events(
         endpoint=safe_endpoint,
         provider_name=provider_name,
         request_id=request_id,
+        observed_at=observed_at,
     )
     attrs = {
         "observation_scope": "caller_supplied_exchange",
