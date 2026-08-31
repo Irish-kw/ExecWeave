@@ -31,9 +31,12 @@ def harden_dashboard_html(html: str) -> str:
         label="measurement fallback cache",
     )
 
-    # A node may become wider/taller without moving a lane origin (for example the last
-    # occupied lane). Existing edge paths still depend on that dimension, so lane-shift
-    # detection alone is not enough to decide whether the rendered geometry is stale.
+    # A pre-existing node may become wider/taller without moving a lane origin (for
+    # example the last occupied lane). Existing edge paths still depend on that
+    # dimension, so lane-shift detection alone is not enough to decide whether rendered
+    # geometry is stale. New nodes are deliberately excluded: their dimensions are new,
+    # not changed, and treating every addition as a dimension change would rerender the
+    # entire existing graph on every live node addition.
     html = _replace_once(
         html,
         """  const priorLaneX={...(execweaveTopology.laneX||{})};
@@ -42,7 +45,7 @@ def harden_dashboard_html(html: str) -> str:
         """  const priorLaneX={...(execweaveTopology.laneX||{})},priorWidth=new Map(execweaveTopology.width||[]),priorHeight=new Map(execweaveTopology.height||[]);
   execweaveTopology=execweaveBuildTopology();
   const laneShifted=EXECWEAVE_LANE_ORDER.some(lane=>priorLaneX[lane]!==execweaveTopology.laneX[lane]);
-  const dimensionsChanged=[...nodeById.keys()].some(id=>priorWidth.get(id)!==execweaveTopology.width.get(id)||priorHeight.get(id)!==execweaveTopology.height.get(id));
+  const dimensionsChanged=[...priorWidth.keys()].some(id=>nodeById.has(id)&&(priorWidth.get(id)!==execweaveTopology.width.get(id)||priorHeight.get(id)!==execweaveTopology.height.get(id)));
   const geometryChanged=laneShifted||dimensionsChanged;""",
         label="delta dimension change detection",
     )
