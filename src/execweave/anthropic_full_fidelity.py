@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import hashlib
-import json
 from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any
 
-from .anthropic import _endpoint_digest, sanitize_anthropic_endpoint
+from .anthropic import _endpoint_digest, _request_identity, sanitize_anthropic_endpoint
 from .content_evidence import content_observation_event
 from .content_store import ContentReference, FullFidelityContentStore
 
@@ -17,36 +15,31 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _request_id(payload: dict[str, Any], explicit: str | None) -> str:
-    if isinstance(explicit, str) and explicit:
-        return explicit
-    native = payload.get("id")
-    if isinstance(native, str) and native:
-        return native
-    seed = {
-        key: payload.get(key)
-        for key in ("model", "type", "role", "stop_reason", "usage")
-    }
-    raw = json.dumps(seed, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()[:32]
-
-
 def _request_entity(
     response: dict[str, Any],
     *,
     endpoint: str,
     request_id: str | None,
+    observed_at: str,
 ) -> dict[str, Any]:
-    native_id = _request_id(response, request_id)
     safe = sanitize_anthropic_endpoint(endpoint)
+    endpoint_scope = _endpoint_digest(safe)
+    native_id, request_id_source = _request_identity(
+        response,
+        request_id,
+        endpoint_scope=endpoint_scope,
+        observed_at=observed_at,
+    )
     return {
         "type": "inference_request",
-        "id": f"inference-request:anthropic:{_endpoint_digest(safe)}:{native_id}",
+        "id": f"inference-request:anthropic:{endpoint_scope}:{native_id}",
         "name": native_id,
         "attributes": {
             "protocol": "anthropic_messages",
             "provider_name": "anthropic",
             "endpoint": safe,
+            "endpoint_scope": endpoint_scope,
+            "request_id_source": request_id_source,
         },
     }
 
@@ -154,7 +147,12 @@ def response_to_content_events(
     """Store one supplied Anthropic final response without claiming unseen request evidence."""
     observed_at = timestamp or _now()
     safe = sanitize_anthropic_endpoint(endpoint)
-    request = _request_entity(payload, endpoint=safe, request_id=request_id)
+    request = _request_entity(
+        payload,
+        endpoint=safe,
+        request_id=request_id,
+        observed_at=observed_at,
+    )
     attrs = {
         "observation_scope": "response_only",
         "request_observed": False,
@@ -253,7 +251,12 @@ def exchange_to_content_events(
 
     observed_at = timestamp or _now()
     safe = sanitize_anthropic_endpoint(endpoint)
-    request = _request_entity(response_payload, endpoint=safe, request_id=request_id)
+    request = _request_entity(
+        response_payload,
+        endpoint=safe,
+        request_id=request_id,
+        observed_at=observed_at,
+    )
     attrs = {
         "observation_scope": "caller_supplied_exchange",
         "request_observed": True,

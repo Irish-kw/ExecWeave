@@ -53,12 +53,18 @@ def _gateway_entity(gateway: str, endpoint: str) -> dict[str, Any]:
     )
 
 
-def _model_entity(model: str) -> dict[str, Any]:
+def _model_entity(gateway: str, endpoint: str, model: str) -> dict[str, Any]:
+    _, endpoint_scope = _gateway_endpoint_scope(endpoint)
     return _entity(
         "model",
-        f"model:catalog:{model}",
+        f"model:gateway:{gateway}:{endpoint_scope}:{model}",
         name=model,
-        attributes={"catalog_id": model},
+        attributes={
+            "catalog_id": model,
+            "gateway": gateway,
+            "endpoint_scope": endpoint_scope,
+            "identity_scope": "gateway_endpoint",
+        },
     )
 
 
@@ -262,7 +268,7 @@ def gateway_response_to_events(
                 event_type=f"inference_gateway.{gateway_name}.model.requested",
                 relation="REQUESTED_MODEL",
                 source=request,
-                target=_model_entity(requested_model),
+                target=_model_entity(gateway_name, endpoint, requested_model),
                 gateway=gateway_name,
                 attributes=attrs,
             )
@@ -274,7 +280,7 @@ def gateway_response_to_events(
                 event_type=f"inference_gateway.{gateway_name}.model.resolved",
                 relation="ROUTED_TO_MODEL",
                 source=request,
-                target=_model_entity(resolved),
+                target=_model_entity(gateway_name, endpoint, resolved),
                 gateway=gateway_name,
                 attributes=attrs,
             )
@@ -418,7 +424,7 @@ def openrouter_generation_to_events(
                 event_type="inference_gateway.openrouter.model.resolved",
                 relation="ROUTED_TO_MODEL",
                 source=request,
-                target=_model_entity(model),
+                target=_model_entity("openrouter", endpoint, model),
                 gateway="openrouter",
                 attributes=attrs,
             )

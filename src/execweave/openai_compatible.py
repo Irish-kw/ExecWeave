@@ -57,28 +57,42 @@ def _api_entity(provider_name: str, endpoint: str) -> dict[str, Any]:
     )
 
 
-def _model_entity(model: str) -> dict[str, Any]:
+def _model_entity(provider_name: str, endpoint: str, model: str) -> dict[str, Any]:
+    endpoint_scope = _endpoint_digest(endpoint)
     return _entity(
         "model",
-        f"model:catalog:{model}",
+        f"model:openai-compatible:{endpoint_scope}:{model}",
         name=model,
-        attributes={"catalog_id": model},
+        attributes={
+            "catalog_id": model,
+            "provider_name": provider_name,
+            "endpoint_scope": endpoint_scope,
+            "identity_scope": "openai_compatible_endpoint",
+        },
     )
 
 
-def _request_id(payload: dict[str, Any], explicit: str | None) -> str:
-    if explicit:
-        return explicit
+def _request_identity(
+    payload: dict[str, Any],
+    explicit: str | None,
+    *,
+    endpoint_scope: str,
+    observed_at: str,
+) -> tuple[str, str]:
+    if isinstance(explicit, str) and explicit:
+        return explicit, "provided"
     native = payload.get("id")
     if isinstance(native, str) and native:
-        return native
+        return native, "provider_native"
     seed = {
         "model": payload.get("model"),
         "created": payload.get("created"),
         "usage": payload.get("usage"),
     }
     raw = json.dumps(seed, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()[:32]
+    occurrence = "\0".join(("openai-compatible", endpoint_scope, observed_at, raw))
+    digest = hashlib.sha256(occurrence.encode("utf-8", errors="replace")).hexdigest()[:32]
+    return digest, "execweave_observation"
 
 
 def _copy_int(mapping: dict[str, Any], source: str, target: str, attrs: dict[str, Any]) -> None:
@@ -121,8 +135,15 @@ def response_to_events(
     timestamp: str | None = None,
 ) -> list[dict[str, Any]]:
     observed_at = timestamp or _now()
-    api = _api_entity(provider_name, endpoint)
-    native_id = _request_id(payload, request_id)
+    safe_endpoint = sanitize_openai_compatible_endpoint(endpoint)
+    endpoint_scope = _endpoint_digest(safe_endpoint)
+    api = _api_entity(provider_name, safe_endpoint)
+    native_id, request_id_source = _request_identity(
+        payload,
+        request_id,
+        endpoint_scope=endpoint_scope,
+        observed_at=observed_at,
+    )
     attrs = _usage_attributes(payload)
     attrs.update(
         {
@@ -130,15 +151,22 @@ def response_to_events(
             "attribution": "direct_api_response",
             "evidence_source": "openai_compatible_response",
             "provider_name": provider_name,
+            "endpoint_scope": endpoint_scope,
+            "request_id_source": request_id_source,
             "causal": False,
             "inferred": False,
         }
     )
     request = _entity(
         "inference_request",
-        f"inference-request:openai-compatible:{_endpoint_digest(endpoint)}:{native_id}",
+        f"inference-request:openai-compatible:{endpoint_scope}:{native_id}",
         name=native_id,
-        attributes={"provider_name": provider_name, **_usage_attributes(payload)},
+        attributes={
+            "provider_name": provider_name,
+            "endpoint_scope": endpoint_scope,
+            "request_id_source": request_id_source,
+            **_usage_attributes(payload),
+        },
     )
     events = [
         {
@@ -157,7 +185,7 @@ def response_to_events(
                 "event_type": "openai_compatible.model.requested",
                 "relation": "REQUESTED_MODEL",
                 "source": request,
-                "target": _model_entity(requested_model),
+                "target": _model_entity(provider_name, safe_endpoint, requested_model),
                 "attributes": attrs,
             }
         )
@@ -169,7 +197,7 @@ def response_to_events(
                 "event_type": "openai_compatible.model.used",
                 "relation": "USED_MODEL",
                 "source": request,
-                "target": _model_entity(resolved_model),
+                "target": _model_entity(provider_name, safe_endpoint, resolved_model),
                 "attributes": attrs,
             }
         )
