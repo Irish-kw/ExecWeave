@@ -143,7 +143,21 @@ function execweaveBuildTopology(){
     if(!touching.length)return Number.MAX_SAFE_INTEGER;
     return touching.reduce((sum,edge)=>sum+(childOrder.get(edge.source)||0),0)/touching.length;
   };
-  for(const lane of ['runtime','model','endpoint','other'])byLane.get(lane).sort(execweaveStableNodeSort);
+  // Order an evidence lane by the average position of whoever points at it, so a
+  // target sits opposite its sources instead of wherever the alphabet put it. This is
+  // the crossing-reduction step the tool lane already had; the others sorted by name
+  // and ignored the graph entirely.
+  const sourceBarycentre=node=>{
+    const touching=edges.filter(edge=>edge.target===node.id&&childOrder.has(edge.source));
+    if(!touching.length)return Number.MAX_SAFE_INTEGER;
+    return touching.reduce((sum,edge)=>sum+(childOrder.get(edge.source)||0),0)/touching.length;
+  };
+  const byBarycentre=(a,b)=>{
+    const ab=sourceBarycentre(a),bb=sourceBarycentre(b);
+    return ab!==bb?ab-bb:execweaveStableNodeSort(a,b);
+  };
+  byLane.get('runtime').sort(execweaveStableNodeSort);
+  for(const lane of ['model','file','endpoint','other'])byLane.get(lane).sort(byBarycentre);
   byLane.get('tool').sort((a,b)=>{
     const ac=/spawn|send|wait|agent/i.test(String(a?.name||execweaveAttrs(a).tool_name||'')),bc=/spawn|send|wait|agent/i.test(String(b?.name||execweaveAttrs(b).tool_name||''));
     if(ac!==bc)return ac?-1:1;
@@ -172,6 +186,14 @@ function execweaveBuildTopology(){
   ordinary.forEach((node,index)=>put(node,'tool',collab.length+index,80+index*130));
   for(const lane of ['file','endpoint','other'])byLane.get(lane).forEach((node,index)=>put(node,lane,index,80+index*104));
   for(const node of nodes)if(!spec.has(node.id))put(node,execweaveLane(node),0,100);
+
+  // The lifecycle offset spreads returns apart by their order within a lane, so it
+  // needs to know how many there are. A fixed modulus wrapped: with five subagents the
+  // first and the fifth were handed the same offset and their loops landed on top of
+  // each other.
+  const laneCount=new Map();
+  for(const value of spec.values())laneCount.set(value.lane,(laneCount.get(value.lane)||0)+1);
+  for(const value of spec.values())value.laneCount=laneCount.get(value.lane)||1;
 
   // Push every component that cannot reach the spine below it. The spine is the
   // component holding the first root; with no root at all it is the largest, which
@@ -287,17 +309,18 @@ function execweaveRoute(edge){
     const sx=sp.x+execweaveWidthOf(edge.source),sy=execweavePortY(sp,sourcePort,edge.source),tx=tp.x,ty=execweavePortY(tp,targetPort,edge.target),trunkX=Math.max(sx+54,tx-82-(bundle.groupIndex%6)*24);
     return{d:`M ${sx} ${sy} H ${trunkX} V ${ty} H ${tx}`,labelX:(trunkX+tx)/2,labelY:ty-8,kind:'bundle',bundle};
   }
-  if(execweaveIsSpawn(edge)){
-    const sx=sp.x+execweaveWidthOf(edge.source),sy=execweavePortY(sp,sourcePort,edge.source),tx=tp.x,ty=execweaveCentreY(tp,edge.target),bend=Math.max(48,(tx-sx)*.46);
-    return{d:`M ${sx} ${sy} C ${sx+bend} ${sy}, ${tx-bend} ${ty}, ${tx} ${ty}`,labelX:(sx+tx)/2,labelY:Math.min(sy,ty)-10,kind:'spawn',bundle:null};
-  }
   if(execweaveIsStopped(edge)){
-    const sx=sp.x,sy=sp.y+execweaveHeightOf(edge.source)*0.78,tx=tp.x+execweaveWidthOf(edge.target),ty=tp.y+execweaveHeightOf(edge.target)*0.78,offset=62+((sourceSpec.order||0)%4)*11;
+    const sx=sp.x,sy=sp.y+execweaveHeightOf(edge.source)*0.78,tx=tp.x+execweaveWidthOf(edge.target),ty=tp.y+execweaveHeightOf(edge.target)*0.78,offset=62+((sourceSpec.order||0)%Math.max(1,sourceSpec.laneCount||4))*11;
     return{d:`M ${sx} ${sy} C ${sx-offset} ${sy+offset}, ${tx+offset} ${ty+offset}, ${tx} ${ty}`,labelX:(sx+tx)/2,labelY:Math.max(sy,ty)+offset*.66,kind:'lifecycle-return',bundle:null};
   }
+  // One family for every ordinary execution edge. Spawning a subagent is ordinary
+  // flow, but it routed on its own bend constant and anchored its target at the node's
+  // centre instead of a port, so an agent's spawn and its tool call left the same node
+  // on different geometry. The kind is still reported, because the difference is worth
+  // styling and worth asserting; the geometry is not.
   const forward=(targetSpec.rank??0)>=(sourceSpec.rank??0);
   const sx=forward?sp.x+execweaveWidthOf(edge.source):sp.x,tx=forward?tp.x:tp.x+execweaveWidthOf(edge.target),sy=execweavePortY(sp,sourcePort,edge.source),ty=execweavePortY(tp,targetPort,edge.target),distance=Math.abs(tx-sx),bend=Math.max(44,distance*.42),sign=forward?1:-1;
-  return{d:`M ${sx} ${sy} C ${sx+sign*bend} ${sy}, ${tx-sign*bend} ${ty}, ${tx} ${ty}`,labelX:(sx+tx)/2,labelY:(sy+ty)/2-8,kind:forward?'forward':'reverse',bundle:null};
+  return{d:`M ${sx} ${sy} C ${sx+sign*bend} ${sy}, ${tx-sign*bend} ${ty}, ${tx} ${ty}`,labelX:(sx+tx)/2,labelY:(sy+ty)/2-8,kind:execweaveIsSpawn(edge)?'spawn':(forward?'forward':'reverse'),bundle:null};
 }
 anchor=function(id,right){const p=positions.get(id)||{x:0,y:0};return{x:p.x+(right?execweaveWidthOf(id):0),y:execweaveCentreY(p,id)}};
 curve=function(edge){return execweaveRoute(edge).d};
