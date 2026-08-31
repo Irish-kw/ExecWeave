@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .agent_trace import opencode_root_agent, opencode_session_agent
+
 _MAX_COMMAND_CHARS = 4096
 _MAX_LABEL_CHARS = 160
 _SUPPORTED_EVENTS = {"chat.message", "tool.execute.before", "tool.execute.after"}
@@ -63,8 +65,16 @@ def _clean_text(value: object, *, limit: int) -> tuple[str | None, bool]:
     return (text, False) if len(text) <= limit else (text[:limit], True)
 
 
-def _agent() -> dict[str, Any]:
-    return _entity("agent", "agent:OpenCode", name="OpenCode")
+def _agent(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    if isinstance(payload, dict):
+        session_id = payload.get("sessionID")
+        agent_name = payload.get("agent")
+        if isinstance(session_id, str) and session_id:
+            return opencode_session_agent(
+                session_id,
+                agent_name=agent_name if isinstance(agent_name, str) else None,
+            )
+    return opencode_root_agent()
 
 
 def _common(payload: dict[str, Any]) -> dict[str, Any]:
@@ -165,7 +175,7 @@ def _chat_message(payload: dict[str, Any], *, timestamp: str) -> list[dict[str, 
             timestamp=timestamp,
             event_type="semantic.opencode.model.observed",
             relation="USED_MODEL",
-            source=_agent(),
+            source=_agent(payload),
             target=_entity(
                 "model",
                 f"model:opencode:{name}",
@@ -192,7 +202,7 @@ def _before(payload: dict[str, Any], *, timestamp: str) -> list[dict[str, Any]]:
             timestamp=timestamp,
             event_type="semantic.opencode.tool.requested",
             relation="REQUESTED_TOOL_CALL",
-            source=_agent(),
+            source=_agent(payload),
             target=call,
             attributes=common,
         ),
