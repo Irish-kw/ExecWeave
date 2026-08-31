@@ -39,6 +39,8 @@ def _line(ordinal: int, payload: dict[str, Any]) -> str:
 # "observed but not exposed" apart from "never recorded", and so a parser that scans
 # for Sender:/Task name: outside a real Payload envelope loses a whole answer.
 ENCRYPTED_SPAWN_INDEX = 1
+SECOND_QUESTION = "and which of those needs a follow-up"
+SECOND_ANSWER = "only the third one; the rest answered in full"
 QUOTED_ROUTING_ANSWER = (
     "The log line I was asked about reads:\n"
     "Sender: upstream-service\n"
@@ -48,7 +50,7 @@ QUOTED_ROUTING_ANSWER = (
 )
 
 
-def _root_rollout(*, truncated: bool = False) -> str:
+def _root_rollout(*, truncated: bool = False, rounds: int = 1) -> str:
     lines = [json.dumps({"type": "session_meta", "payload": {
         "id": ROOT_THREAD, "agent_path": "/root"}}, ensure_ascii=False)]
     ordinal = 1
@@ -88,6 +90,18 @@ def _root_rollout(*, truncated: bool = False) -> str:
     lines.append(_line(ordinal, {"type": "message", "role": "assistant",
         "phase": "final_answer",
         "content": [{"type": "output_text", "text": f"all four answered: {summary}"}]}))
+    if rounds > 1:
+        # A run is rarely one question. The panel has one Prompt slot and one Response
+        # slot, so with two rounds it paired the oldest question with the newest answer
+        # and neither the first round's answer nor the second question was reachable.
+        ordinal += 1
+        lines.append(_line(ordinal, {"type": "message", "role": "user",
+            "content": [{"type": "input_text", "text": SECOND_QUESTION}],
+            "internal_chat_message_metadata_passthrough": {"content_item_kinds": ["user.text"]}}))
+        ordinal += 1
+        lines.append(_line(ordinal, {"type": "message", "role": "assistant",
+            "phase": "final_answer",
+            "content": [{"type": "output_text", "text": SECOND_ANSWER}]}))
     return "\n".join(lines) + "\n"
 
 
@@ -119,6 +133,7 @@ def build_run(
     *,
     per_agent_rollouts: bool = True,
     snapshots: int = 1,
+    rounds: int = 1,
 ) -> dict[str, Any]:
     """Build the run. With ``per_agent_rollouts`` off, only the root rollout exists.
 
@@ -142,7 +157,7 @@ def build_run(
         # these and shows an empty inspector for the rest of the run. The earliest
         # archive is written first so index order alone would select it.
         documents.append(("agent:OpenAI Codex", "partial archive, no session metadata\n"))
-    documents.append(("agent:OpenAI Codex", _root_rollout()))
+    documents.append(("agent:OpenAI Codex", _root_rollout(rounds=rounds)))
     for index, (thread, path, nickname, marker) in enumerate(CHILDREN):
         node_id = f"agent:codex:{ROOT_THREAD}:subagent:{thread}"
         nodes.append({"id": node_id, "type": "agent", "name": "default",

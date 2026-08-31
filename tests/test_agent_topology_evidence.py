@@ -400,7 +400,10 @@ def test_viewer_root_selection_has_no_first_record_fallback() -> None:
     source = VIEWER_TREE.read_text(encoding="utf-8")
     assert "records[0]" not in source
     assert "entries.find(" not in source
-    assert "const matches=entries.filter" in source
+    assert "function aggregate(matches)" in source
+    assert "return aggregate(entries.filter(" in source
+    # The root's own rounds are read the same way, across every record it owns.
+    assert "recordForPath('/root')" in source
     assert "path==='/root'||attrs(node).agent_role==='root'||attrs(node).root_agent_path==='/root'" in source
 
 

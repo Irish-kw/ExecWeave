@@ -20,6 +20,8 @@ from multi_agent_run_fixture import (
     CHILDREN,
     ENCRYPTED_SPAWN_INDEX,
     QUOTED_ROUTING_ANSWER,
+    SECOND_ANSWER,
+    SECOND_QUESTION,
     build_run,
 )
 
@@ -491,3 +493,56 @@ def test_finishing_a_run_keeps_the_reader_on_the_same_dashboard(tmp_path: Path) 
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+def test_each_round_keeps_its_own_question_and_answer(tmp_path: Path) -> None:
+    """A run is rarely one question, and the panel has room for one.
+
+    With two rounds it took the oldest prompt and the newest answer, so it showed the
+    first question beside the second question's answer. The first round's real answer
+    and the second question were both unreachable. Rounds are now separate: the newest
+    is open, older ones fold to their own moment, and each keeps the pair it belongs to.
+    """
+    from execweave.viewer_projection import write_graph_html
+
+    graph = build_run(tmp_path, rounds=2)
+    viewer = tmp_path / "viewer.html"
+    write_graph_html(graph, viewer)
+
+    manager, executable = _browser()
+    with manager as playwright:
+        browser = _launch(playwright, executable)
+        try:
+            page = browser.new_page(viewport={"width": 1440, "height": 1000})
+            page.goto(viewer.as_uri())
+            page.wait_for_selector(".node", timeout=15000)
+            _click_id(page, _agent_id(graph, "/root"))
+            _wait_for_text(page, SECOND_QUESTION)
+
+            open_round = page.locator("#details .execweave-agent-round").first
+            newest = open_round.locator(".execweave-agent-body").all_text_contents()
+            folds = page.locator("#details .execweave-agent-older > summary").all_text_contents()
+
+            page.eval_on_selector_all("#details details", "items=>items.forEach(x=>{x.open=true})")
+            page.wait_for_timeout(200)
+            older = page.locator(
+                "#details .execweave-agent-older .execweave-agent-body"
+            ).all_text_contents()
+
+            # One assignment per child, so a subagent has a single round and no fold.
+            _click_id(page, _agent_id(graph, CHILDREN[0][1]))
+            _wait_for_text(page, MARKERS[CHILDREN[0][1]])
+            child_folds = page.locator("#details .execweave-agent-older").count()
+        finally:
+            browser.close()
+
+    assert [value.strip() for value in newest] == [SECOND_QUESTION, SECOND_ANSWER], (
+        "the open round must hold the question and the answer that belong together"
+    )
+    assert len(folds) == 1, f"the earlier round should fold to one line: {folds}"
+    assert "spawn four agents" in folds[0], f"the fold must name its own round: {folds[0]}"
+    assert [value.strip() for value in older][0] == "spawn four agents"
+    assert ALL_MARKERS <= {marker for marker in ALL_MARKERS if marker in older[1]}, (
+        "the earlier round lost the answer it was given"
+    )
+    assert child_folds == 0, "a subagent with one round must not grow a fold"
