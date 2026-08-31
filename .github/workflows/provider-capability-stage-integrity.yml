@@ -83,4 +83,16 @@ jobs:
                    || [[ "$HEAD_REF" == "release/0.8.3-graph-ergonomics" ]]; }; then
             args+=(--allow-test-change "tests/test_conversation_identity_merge.py=AUD-001 only: the historical root-collision assertion is no longer correct after derived presentation thread ids stop acting as cross-execution identity; the original test node ID is retained and the assertion now requires isolation")
           fi
+          # R2 changes the historical llama.cpp request-ID assertion because native
+          # request IDs are no longer globally authoritative: the endpoint scope is now
+          # part of the graph request identity. Grant only this branch/file combination.
+          model_runtime_identity_changed=""
+          if git diff --name-only "$BASELINE_REF...HEAD" \
+              | grep -qx 'tests/test_model_runtime.py'; then
+            model_runtime_identity_changed=yes
+          fi
+          if [[ "$HEAD_REF" == "fix/0.8.3-inference-endpoint-identity" \
+              && -n "$model_runtime_identity_changed" ]]; then
+            args+=(--allow-test-change "tests/test_model_runtime.py=AUD-002 only: the historical llama.cpp request ID assertion now includes the sanitized endpoint scope; the test node ID and runtime privacy contract are unchanged")
+          fi
           python scripts/check_release_stage_integrity.py "${args[@]}"
