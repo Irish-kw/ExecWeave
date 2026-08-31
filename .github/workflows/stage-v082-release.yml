@@ -1,0 +1,132 @@
+name: Stage v0.8.2 release metadata
+
+on:
+  push:
+    branches:
+      - release/0.8.2-metadata
+
+permissions:
+  contents: write
+
+jobs:
+  stage:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    env:
+      EXPECTED_MAIN: b4e806f58ae51955fd9105706b2b2dae30ac4029
+      RELEASE_BRANCH: release/0.8.2-metadata
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: release/0.8.2-metadata
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify remote parents before editing
+        shell: bash
+        run: |
+          git fetch origin main "$RELEASE_BRANCH"
+          test "$(git rev-parse origin/main)" = "$EXPECTED_MAIN"
+          test "$(git rev-parse origin/$RELEASE_BRANCH)" = "$(git rev-parse HEAD)"
+
+      - name: Stage v0.8.2 metadata and translated release notes
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: Path, old: str, new: str) -> None:
+              text = path.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != 1:
+                  raise RuntimeError(f"{path}: expected exactly one occurrence of {old!r}, found {count}")
+              path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          replace_once(
+              Path("pyproject.toml"),
+              "# ExecWeave v0.8.1 release metadata",
+              "# ExecWeave v0.8.2 release metadata",
+          )
+          replace_once(Path("pyproject.toml"), 'version = "0.8.1"', 'version = "0.8.2"')
+          replace_once(
+              Path("src/execweave/__init__.py"),
+              '__version__ = "0.8.1"',
+              '__version__ = "0.8.2"',
+          )
+          release_test = Path("tests/test_v069_dashboard_release.py")
+          replace_once(release_test, 'assert __version__ == "0.8.1"', 'assert __version__ == "0.8.2"')
+          replace_once(
+              release_test,
+              'assert \'version = "0.8.1"\' in pyproject',
+              'assert \'version = "0.8.2"\' in pyproject',
+          )
+          replace_once(
+              release_test,
+              'assert "ExecWeave v0.8.1 release metadata" in pyproject',
+              'assert "ExecWeave v0.8.2 release metadata" in pyproject',
+          )
+
+          release_suffix = {
+              "README.md": " v0.8.2 fixes two Dashboard regressions on top of that: older conversation rounds now keep the reader's explicit open/closed state across the 800 ms live refresh, and multi-agent graphs use a stable root/child hierarchy where lifecycle return edges do not affect rank, shared tool/model connections use separated ports and bundled trunks, and selecting an agent fades unrelated edges. These are presentation-only changes: Live, finished, and `viewer.html` still share the same renderer and raw graph evidence is unchanged.",
+              "README.zh-TW.md": " v0.8.2 在此基礎上修正兩個 Dashboard 回歸：較舊的 conversation round 會在每 800 ms 的 live refresh 後維持讀者明確留下的展開/收合狀態；multi-agent graph 則使用穩定的 root/child 階層，lifecycle return edge 不影響 rank，共用 tool/model 連線使用分離 port 與 bundled trunk，選取 agent 時淡化無關 edge。這些都只改 presentation：Live、finished 與 `viewer.html` 仍共用同一 renderer，raw graph evidence 完全不變。",
+              "README.zh-CN.md": " v0.8.2 在此基础上修复两个 Dashboard 回归：较旧的 conversation round 在每 800 ms 的 live refresh 后保持读者明确留下的展开/收起状态；multi-agent graph 使用稳定的 root/child 层级，lifecycle return edge 不影响 rank，共用 tool/model 连接使用分离 port 与 bundled trunk，选择 agent 时淡化无关 edge。这些都只改变 presentation：Live、finished 与 `viewer.html` 仍共用同一 renderer，raw graph evidence 完全不变。",
+              "README.ja.md": " v0.8.2 ではさらに 2 つの Dashboard 回帰を修正しました。古い conversation round は 800 ms ごとの live refresh をまたいでも読者が明示的に選んだ開閉状態を保持し、multi-agent graph は安定した root/child 階層を使います。lifecycle return edge は rank に影響せず、共有 tool/model 接続は分離した port と bundled trunk で描画され、agent を選択すると無関係な edge が薄くなります。これらは presentation のみの変更で、Live・finished・`viewer.html` は引き続き同じ renderer を共有し、raw graph evidence は変更しません。",
+              "README.ko.md": " v0.8.2에서는 두 가지 Dashboard 회귀를 추가로 수정했습니다. 이전 conversation round는 800 ms live refresh 이후에도 사용자가 명시적으로 선택한 열림/닫힘 상태를 유지하며, multi-agent graph는 안정적인 root/child 계층을 사용합니다. lifecycle return edge는 rank에 영향을 주지 않고, 공유 tool/model 연결은 분리된 port와 bundled trunk로 라우팅되며, agent를 선택하면 관련 없는 edge가 흐려집니다. 이는 presentation에만 해당하는 변경으로 Live, finished, `viewer.html`은 계속 같은 renderer를 공유하고 raw graph evidence는 바뀌지 않습니다.",
+              "README.fr.md": " v0.8.2 corrige en plus deux régressions du Dashboard : les anciens conversation rounds conservent l'état ouvert/fermé explicitement choisi par le lecteur malgré le refresh live de 800 ms, et les graphes multi-agent utilisent une hiérarchie root/child stable où les lifecycle return edges n'influencent pas le rank, les connexions tool/model partagées passent par des ports séparés et des trunks regroupés, et la sélection d'un agent atténue les edges sans rapport. Ces changements sont uniquement de présentation : Live, finished et `viewer.html` partagent toujours le même renderer et la raw graph evidence reste inchangée.",
+              "README.de.md": " v0.8.2 behebt zusätzlich zwei Dashboard-Regressionen: Ältere conversation rounds behalten über den 800-ms-Live-Refresh hinweg genau den vom Leser gesetzten geöffnet/geschlossen-Zustand, und Multi-Agent-Graphs verwenden eine stabile root/child-Hierarchie, in der lifecycle return edges den rank nicht beeinflussen, gemeinsame tool/model-Verbindungen über getrennte ports und gebündelte trunks laufen und bei Auswahl eines Agents irrelevante edges ausgeblendet werden. Das sind reine Presentation-Änderungen: Live, finished und `viewer.html` verwenden weiterhin denselben renderer, und die raw graph evidence bleibt unverändert.",
+              "README.ru.md": " v0.8.2 дополнительно исправляет две регрессии Dashboard: старые conversation rounds сохраняют явно выбранное читателем состояние open/closed между live refresh каждые 800 мс, а multi-agent graph использует стабильную иерархию root/child, где lifecycle return edges не влияют на rank, общие tool/model connections проходят через раздельные ports и bundled trunks, а при выборе agent несвязанные edges приглушаются. Это только presentation-изменения: Live, finished и `viewer.html` по-прежнему используют один renderer, а raw graph evidence не меняется.",
+          }
+          status_suffix = {
+              "README.md": " v0.8.2 additionally preserves reader-controlled conversation fold state across live polling and applies topology-aware multi-agent layout/routing without changing raw evidence.",
+              "README.zh-TW.md": " v0.8.2 另外會在 live polling 間保留讀者控制的 conversation fold 狀態，並套用 topology-aware 的 multi-agent layout/routing，而不改動 raw evidence。",
+              "README.zh-CN.md": " v0.8.2 还会在 live polling 之间保留读者控制的 conversation fold 状态，并应用 topology-aware 的 multi-agent layout/routing，而不改动 raw evidence。",
+              "README.ja.md": " v0.8.2 ではさらに、live polling をまたいで読者が制御した conversation fold 状態を保持し、raw evidence を変えずに topology-aware な multi-agent layout/routing を適用します。",
+              "README.ko.md": " v0.8.2는 또한 live polling 사이에서 사용자가 제어한 conversation fold 상태를 유지하고 raw evidence를 바꾸지 않은 채 topology-aware multi-agent layout/routing을 적용합니다.",
+              "README.fr.md": " v0.8.2 conserve aussi l'état de repli conversation contrôlé par le lecteur entre les live polling et applique un layout/routing multi-agent topology-aware sans modifier la raw evidence.",
+              "README.de.md": " v0.8.2 bewahrt außerdem den vom Leser gesteuerten conversation-fold-Zustand über Live-Polling hinweg und verwendet topology-aware Multi-Agent-Layout/-Routing, ohne die raw evidence zu verändern.",
+              "README.ru.md": " v0.8.2 также сохраняет управляемое читателем состояние conversation fold между live polling и применяет topology-aware multi-agent layout/routing без изменения raw evidence.",
+          }
+
+          readmes = sorted(Path(".").glob("README*.md"))
+          if set(path.name for path in readmes) != set(release_suffix):
+              raise RuntimeError(f"unexpected README set: {[path.name for path in readmes]}")
+
+          for path in readmes:
+              text = path.read_text(encoding="utf-8")
+              count = text.count("v0.8.1")
+              if count != 3:
+                  raise RuntimeError(f"{path}: expected exactly 3 current-release v0.8.1 anchors, found {count}")
+              text = text.replace("v0.8.1", "v0.8.2")
+              lines = text.splitlines()
+              release_rows = [i for i, line in enumerate(lines) if line.startswith("**v0.8.2")]
+              status_rows = [i for i, line in enumerate(lines) if line.startswith("v0.8.2")]
+              if len(release_rows) != 1 or len(status_rows) != 1:
+                  raise RuntimeError(
+                      f"{path}: release/status anchors are ambiguous: {release_rows=} {status_rows=}"
+                  )
+              lines[release_rows[0]] += release_suffix[path.name]
+              lines[status_rows[0]] += status_suffix[path.name]
+              path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+          PY
+
+          python scripts/sync_i18n_nav.py --check
+          python scripts/audit_i18n_parity.py --languages fr de ru
+          git diff --check
+
+      - name: Commit with remote race check
+        shell: bash
+        run: |
+          base_head="$(git rev-parse HEAD)"
+          git status --short
+          git add pyproject.toml src/execweave/__init__.py tests/test_v069_dashboard_release.py README*.md
+          git diff --cached --check
+          git config user.name "GWW"
+          git config user.email "49675917+Irish-kw@users.noreply.github.com"
+          git commit -m "release: bump package and documentation metadata to v0.8.2"
+          git fetch origin main "$RELEASE_BRANCH"
+          test "$(git rev-parse origin/main)" = "$EXPECTED_MAIN"
+          test "$(git rev-parse origin/$RELEASE_BRANCH)" = "$base_head"
+          git push origin HEAD:"$RELEASE_BRANCH"
