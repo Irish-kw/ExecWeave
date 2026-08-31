@@ -92,7 +92,12 @@ def test_a_long_label_widens_its_node_instead_of_being_cut(tmp_path: Path) -> No
     assert "…" in tool["text"] or tool["text"] == LONG_LABEL, (
         f"a label that does not fit must end in an ellipsis, not a hard cut: {tool['text']!r}"
     )
-    assert not tool["text"].startswith(LONG_LABEL[:28] + "x"), "still cut at 28 characters"
+    # The base renderer cuts at 28 characters regardless of width. Widening the node
+    # without re-applying the label buys nothing, and still ends in an ellipsis, so
+    # the ellipsis alone cannot tell the two apart. The width has to be spent.
+    assert len(tool["text"]) > 28, (
+        f"the extra width is not being used; still the 28-character cut: {tool['text']!r}"
+    )
 
 
 def test_a_short_label_keeps_the_minimum_width(tmp_path: Path) -> None:
