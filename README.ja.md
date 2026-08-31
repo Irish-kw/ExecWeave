@@ -31,7 +31,7 @@ PyPI から最新の wheel/sdist をインストールします。
 python -m pip install -U execweave
 ```
 
-現在のリリースは **v0.8.1** です。
+現在のリリースは **v0.8.2** です。
 
 開発環境では次のようにインストールできます。
 
@@ -67,7 +67,7 @@ execweave record --open -- python my_agent.py
 
 `execweave top -- codex` は Agent を起動 terminal 上でインタラクティブなまま保ち、ホスト環境に応じて detached Top dashboard を開くか既存のものに attach します。
 
-**v0.8.1 — どのラウンドも、どの node も、自分が何を持っているかを述べる。** 一回の実行が一つの問いで終わることは稀ですが、パネルには一つ分の場所しかありませんでした。最も古い問いに最も新しい回答を並べるため、二ラウンドの実行では最初の問いの隣に二番目の問いの回答が出て、最初のラウンド自身の回答には到達できませんでした。いまはラウンドが単位です。最新のものは開いたまま、古いものは自分の時刻と問いを示す一行に畳まれ、subagent の折り畳みは、それが属する root ラウンドと同じ時刻と文言を持ちます。さらに二つの subagent は自分の Response を失っていました。provider の共通前置きをある agent の assignment と読ませないための規則が、二つの agent の下に現れる長い文字列すべてに一致していたためです。child の回答は自分の記録にも親の記録にも現れます。この規則はいま受信したメッセージだけを見るので、agent が書いたものは実行中に何度繰り返されても自分のものです。process、file、network endpoint を選んでも空のパネルは出ません。それぞれが自分を述べます。コマンドラインとその pid と親、パスとそれに触れた履歴、アドレスとそこへ到達した process です。そしてある型が上限を超えて混み合うと、新しいものは描かれたまま、古いものは一つの node に畳まれ、そこに含まれるすべてを名前で列挙します。千の path に触れる実行でも、一つも失わずに読める状態が保たれます。 各 agent が保持する provider-neutral かつ agent-local な multi-agent conversation は以前と同じ記録のままです。変わったのは、読者がその一部ではなく全体に到達できることです。 ある型がどこから畳まれるかは、Dashboard を生成するすべてのコマンドの `--fold-budget N` で決まります。数百のファイルを書く配置環境は、パッケージを書き換えずに自分の数を選べます。
+**v0.8.2 — どのラウンドも、どの node も、自分が何を持っているかを述べる。** 一回の実行が一つの問いで終わることは稀ですが、パネルには一つ分の場所しかありませんでした。最も古い問いに最も新しい回答を並べるため、二ラウンドの実行では最初の問いの隣に二番目の問いの回答が出て、最初のラウンド自身の回答には到達できませんでした。いまはラウンドが単位です。最新のものは開いたまま、古いものは自分の時刻と問いを示す一行に畳まれ、subagent の折り畳みは、それが属する root ラウンドと同じ時刻と文言を持ちます。さらに二つの subagent は自分の Response を失っていました。provider の共通前置きをある agent の assignment と読ませないための規則が、二つの agent の下に現れる長い文字列すべてに一致していたためです。child の回答は自分の記録にも親の記録にも現れます。この規則はいま受信したメッセージだけを見るので、agent が書いたものは実行中に何度繰り返されても自分のものです。process、file、network endpoint を選んでも空のパネルは出ません。それぞれが自分を述べます。コマンドラインとその pid と親、パスとそれに触れた履歴、アドレスとそこへ到達した process です。そしてある型が上限を超えて混み合うと、新しいものは描かれたまま、古いものは一つの node に畳まれ、そこに含まれるすべてを名前で列挙します。千の path に触れる実行でも、一つも失わずに読める状態が保たれます。 各 agent が保持する provider-neutral かつ agent-local な multi-agent conversation は以前と同じ記録のままです。変わったのは、読者がその一部ではなく全体に到達できることです。 ある型がどこから畳まれるかは、Dashboard を生成するすべてのコマンドの `--fold-budget N` で決まります。数百のファイルを書く配置環境は、パッケージを書き換えずに自分の数を選べます。 v0.8.2 ではさらに 2 つの Dashboard 回帰を修正しました。古い conversation round は 800 ms ごとの live refresh をまたいでも読者が明示的に選んだ開閉状態を保持し、multi-agent graph は安定した root/child 階層を使います。lifecycle return edge は rank に影響せず、共有 tool/model 接続は分離した port と bundled trunk で描画され、agent を選択すると無関係な edge が薄くなります。これらは presentation のみの変更で、Live・finished・`viewer.html` は引き続き同じ renderer を共有し、raw graph evidence は変更しません。
 
 統合 dashboard では execution graph、logs、conversation records を同じ inspection flow で確認できます。Finalized run は `conversations.md` と `conversations.json` を生成し、検証済み provider transcript は run-local SHA-256 content store にコピーされます。Claude Code、OpenAI Codex、Cursor、OpenCode、Google Antigravity は、それぞれが実際に公開する最も強い multi-agent evidence を利用します。gateway や local runtime が root request/response しか公開しない場合、ExecWeave は root conversation だけを表示し、subagent や hidden routing を捏造しません。
 
@@ -276,7 +276,7 @@ Conversation isolation は attribution/display の規則であり redaction boun
 
 ## 現在の状態
 
-v0.8.1 は cross-platform runtime collection、materialized execution graph、standalone/live dashboard、保守的な provider↔runtime correlation、content-addressed full-fidelity provider evidence、attributable multi-agent execution trace、run-local conversation access、provider-neutral projection 上の agent-local conversation isolation、standalone および live dashboard での per-round agent conversation パネルと、自己記述する non-agent node および型ごとの折り畳みを統合します。各 integration は provider が実際に公開した最も強い identity/routing evidence のみを保持し、不足する場合は abstain します。Observed evidence と inference は設計上分離されたままです。
+v0.8.2 は cross-platform runtime collection、materialized execution graph、standalone/live dashboard、保守的な provider↔runtime correlation、content-addressed full-fidelity provider evidence、attributable multi-agent execution trace、run-local conversation access、provider-neutral projection 上の agent-local conversation isolation、standalone および live dashboard での per-round agent conversation パネルと、自己記述する non-agent node および型ごとの折り畳みを統合します。各 integration は provider が実際に公開した最も強い identity/routing evidence のみを保持し、不足する場合は abstain します。Observed evidence と inference は設計上分離されたままです。 v0.8.2 ではさらに、live polling をまたいで読者が制御した conversation fold 状態を保持し、raw evidence を変えずに topology-aware な multi-agent layout/routing を適用します。
 
 ## ドキュメント
 
