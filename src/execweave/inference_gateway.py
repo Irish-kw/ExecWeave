@@ -27,6 +27,12 @@ def sanitize_gateway_endpoint(endpoint: str) -> str:
     return urlunsplit((split.scheme, host, path, "", ""))
 
 
+def _gateway_endpoint_scope(endpoint: str) -> tuple[str, str]:
+    safe_endpoint = sanitize_gateway_endpoint(endpoint)
+    digest = hashlib.sha256(safe_endpoint.encode("utf-8")).hexdigest()[:24]
+    return safe_endpoint, digest
+
+
 def _entity(
     entity_type: str,
     entity_id: str,
@@ -38,13 +44,12 @@ def _entity(
 
 
 def _gateway_entity(gateway: str, endpoint: str) -> dict[str, Any]:
-    safe_endpoint = sanitize_gateway_endpoint(endpoint)
-    digest = hashlib.sha256(safe_endpoint.encode("utf-8")).hexdigest()[:24]
+    safe_endpoint, digest = _gateway_endpoint_scope(endpoint)
     return _entity(
         "inference_gateway",
         f"inference-gateway:{gateway}:{digest}",
         name=gateway,
-        attributes={"gateway": gateway, "endpoint": safe_endpoint},
+        attributes={"gateway": gateway, "endpoint": safe_endpoint, "endpoint_scope": digest},
     )
 
 
@@ -67,13 +72,18 @@ def _provider_entity(provider: str) -> dict[str, Any]:
     )
 
 
-def _deployment_entity(gateway: str, deployment: str) -> dict[str, Any]:
+def _deployment_entity(gateway: str, endpoint: str, deployment: str) -> dict[str, Any]:
+    _, endpoint_scope = _gateway_endpoint_scope(endpoint)
     slug = hashlib.sha256(deployment.encode("utf-8", errors="replace")).hexdigest()[:24]
     return _entity(
         "inference_deployment",
-        f"inference-deployment:{gateway}:{slug}",
+        f"inference-deployment:{gateway}:{endpoint_scope}:{slug}",
         name=deployment,
-        attributes={"gateway": gateway, "deployment_id": deployment},
+        attributes={
+            "gateway": gateway,
+            "endpoint_scope": endpoint_scope,
+            "deployment_id": deployment,
+        },
     )
 
 
@@ -106,19 +116,44 @@ def _event(
     }
 
 
-def _request_id(payload: dict[str, Any], explicit: str | None) -> str:
+def _request_identity(
+    payload: dict[str, Any],
+    explicit: str | None,
+    *,
+    gateway: str,
+    endpoint_scope: str,
+    observed_at: str,
+) -> tuple[str, str]:
     if explicit:
-        return explicit
+        return explicit, "provided"
     native = payload.get("id")
     if isinstance(native, str) and native:
-        return native
+        return native, "provider_native"
     seed = {
         "model": payload.get("model"),
         "created": payload.get("created"),
         "usage": payload.get("usage"),
     }
     raw = json.dumps(seed, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    return hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()[:32]
+    occurrence = "\0".join((gateway, endpoint_scope, observed_at, raw))
+    digest = hashlib.sha256(occurrence.encode("utf-8", errors="replace")).hexdigest()[:32]
+    return digest, "execweave_observation"
+
+
+def _request_entity(
+    gateway: str,
+    endpoint: str,
+    request_native_id: str,
+    *,
+    attributes: dict[str, Any],
+) -> dict[str, Any]:
+    _, endpoint_scope = _gateway_endpoint_scope(endpoint)
+    return _entity(
+        "inference_request",
+        f"inference-request:{gateway}:{endpoint_scope}:{request_native_id}",
+        name=request_native_id,
+        attributes={"gateway": gateway, "endpoint_scope": endpoint_scope, **attributes},
+    )
 
 
 def _copy_int(mapping: dict[str, Any], source: str, target: str, attrs: dict[str, Any]) -> None:
@@ -178,13 +213,22 @@ def gateway_response_to_events(
 ) -> list[dict[str, Any]]:
     observed_at = timestamp or _now()
     gateway = _gateway_entity(gateway_name, endpoint)
-    native_id = _request_id(payload, request_id)
+    _, endpoint_scope = _gateway_endpoint_scope(endpoint)
+    native_id, request_id_source = _request_identity(
+        payload,
+        request_id,
+        gateway=gateway_name,
+        endpoint_scope=endpoint_scope,
+        observed_at=observed_at,
+    )
     response_model = payload.get("model")
     resolved = resolved_model
     if not isinstance(resolved, str) or not resolved:
         resolved = response_model if isinstance(response_model, str) and response_model else None
 
     attrs = _usage_attributes(payload)
+    attrs["endpoint_scope"] = endpoint_scope
+    attrs["request_id_source"] = request_id_source
     if isinstance(requested_model, str) and requested_model:
         attrs["requested_model"] = requested_model
     if isinstance(resolved, str) and resolved:
@@ -194,11 +238,11 @@ def gateway_response_to_events(
     if isinstance(deployment_id, str) and deployment_id:
         attrs["deployment_id"] = deployment_id
 
-    request = _entity(
-        "inference_request",
-        f"inference-request:{gateway_name}:{native_id}",
-        name=native_id,
-        attributes={"gateway": gateway_name, **attrs},
+    request = _request_entity(
+        gateway_name,
+        endpoint,
+        native_id,
+        attributes=attrs,
     )
     events = [
         _event(
@@ -254,7 +298,7 @@ def gateway_response_to_events(
                 event_type=f"inference_gateway.{gateway_name}.deployment.resolved",
                 relation="ROUTED_TO_DEPLOYMENT",
                 source=request,
-                target=_deployment_entity(gateway_name, deployment_id),
+                target=_deployment_entity(gateway_name, endpoint, deployment_id),
                 gateway=gateway_name,
                 attributes=attrs,
             )
@@ -324,8 +368,13 @@ def openrouter_generation_to_events(
         raise ValueError("OpenRouter generation metadata requires id")
     observed_at = timestamp or _now()
     gateway = _gateway_entity("openrouter", endpoint)
+    _, endpoint_scope = _gateway_endpoint_scope(endpoint)
 
-    attrs: dict[str, Any] = {"protocol": "openrouter_generation"}
+    attrs: dict[str, Any] = {
+        "protocol": "openrouter_generation",
+        "endpoint_scope": endpoint_scope,
+        "request_id_source": "provider_native",
+    }
     for key in (
         "latency",
         "generation_time",
@@ -343,11 +392,11 @@ def openrouter_generation_to_events(
         if isinstance(value, bool):
             attrs[key] = value
 
-    request = _entity(
-        "inference_request",
-        f"inference-request:openrouter:{generation_id}",
-        name=generation_id,
-        attributes={"gateway": "openrouter", **attrs},
+    request = _request_entity(
+        "openrouter",
+        endpoint,
+        generation_id,
+        attributes=attrs,
     )
     events = [
         _event(
