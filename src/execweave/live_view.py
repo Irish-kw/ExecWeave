@@ -11,6 +11,7 @@ from .live_view_script_c import LIVE_SCRIPT_C
 from .live_view_script_d import LIVE_SCRIPT_D
 from .live_view_style import LIVE_STYLE
 from .viewer_agent_panel import inject_agent_panel
+from .viewer_dashboard_hardening_v2 import harden_dashboard_html
 
 
 _SAFE_GIF_LZW = (
@@ -105,9 +106,10 @@ def _restore_live_safety_contracts(html: str) -> str:
     return html.replace(old_final_flow, new_final_flow, 1)
 
 
-LIVE_HTML = inject_agent_panel(
-    _restore_live_safety_contracts(
-        f"""<!doctype html>
+LIVE_HTML = harden_dashboard_html(
+    inject_agent_panel(
+        _restore_live_safety_contracts(
+            f"""<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -126,5 +128,6 @@ LIVE_HTML = inject_agent_panel(
 </script>
 </body>
 </html>"""
+        )
     )
 )
