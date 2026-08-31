@@ -14,12 +14,12 @@ pytestmark = pytest.mark.viewer_e2e
 _CORE_SEAM = (
     "window.__execweaveCore={getActivities:()=>activities.slice(),getGraph:()=>graph,"
     "getPositions:()=>new Map(positions),selectEdge,selectNode,focusNode,markLatest,"
-    "setCameraMode};applyTheme"
+    "setCameraMode};"
 )
 _CORE_TEST_SEAM = (
     "window.__execweaveCore={getActivities:()=>activities.slice(),getGraph:()=>graph,"
     "getPositions:()=>new Map(positions),selectEdge,selectNode,focusNode,markLatest,"
-    "setCameraMode,applyDelta,graphBounds,execweaveMeasure};applyTheme"
+    "setCameraMode,applyDelta,graphBounds,execweaveMeasure};"
 )
 
 
@@ -28,7 +28,7 @@ def _instrumented_viewer(tmp_path: Path, graph: dict[str, Any]) -> Path:
     from execweave.dashboard_shell import render_static_dashboard_html
 
     html = render_static_dashboard_html(graph)
-    assert _CORE_SEAM in html, "dashboard core seam changed; update this browser test deliberately"
+    assert _CORE_SEAM in html, "dashboard core seam changed; update this test deliberately"
     html = html.replace(_CORE_SEAM, _CORE_TEST_SEAM, 1)
     viewer = tmp_path / "instrumented-viewer.html"
     viewer.write_text(html, encoding="utf-8")
@@ -39,21 +39,34 @@ def _by_id(page: Any) -> dict[str, dict[str, Any]]:
     return {row["id"]: row for row in _nodes(page)}
 
 
+def _root() -> dict[str, Any]:
+    return {
+        "id": "agent:/root",
+        "type": "agent",
+        "name": "/root",
+        "attributes": {"agent_role": "root", "agent_path": "/root"},
+    }
+
+
+def _edge(ident: str, source: str, target: str, relation: str, **extra: Any) -> dict[str, Any]:
+    return {
+        "id": ident,
+        "source": source,
+        "target": target,
+        "relation": relation,
+        "attributes": {},
+        **extra,
+    }
+
+
 def _layout_shift_graph() -> dict[str, Any]:
     return {
         "schema_version": "1.0",
         "node_count": 2,
         "edge_count": 1,
         "event_count": 1,
-        "nodes": [
-            {"id": "agent:/root", "type": "agent", "name": "/root",
-             "attributes": {"agent_role": "root", "agent_path": "/root"}},
-            {"id": "file:f", "type": "file", "name": "a.md", "attributes": {}},
-        ],
-        "edges": [
-            {"id": "e-file", "source": "agent:/root", "target": "file:f",
-             "relation": "WROTE_FILE", "attributes": {}},
-        ],
+        "nodes": [_root(), {"id": "file:f", "type": "file", "name": "a.md", "attributes": {}}],
+        "edges": [_edge("e-file", "agent:/root", "file:f", "WROTE_FILE")],
     }
 
 
@@ -77,13 +90,16 @@ def test_live_delta_moves_existing_nodes_when_a_new_wide_upstream_lane_appears(
                 "node_count": 3,
                 "edge_count": 2,
                 "nodes_added": [
-                    {"id": "process:wide", "type": "process", "name": LONG_LABEL,
-                     "attributes": {}}
+                    {
+                        "id": "process:wide",
+                        "type": "process",
+                        "name": LONG_LABEL,
+                        "attributes": {},
+                    }
                 ],
                 "nodes_updated": [],
                 "edges_added": [
-                    {"id": "e-start", "source": "process:wide", "target": "agent:/root",
-                     "relation": "STARTED_AGENT", "attributes": {}}
+                    _edge("e-start", "process:wide", "agent:/root", "STARTED_AGENT")
                 ],
                 "edges_updated": [],
             }
@@ -108,48 +124,52 @@ def _wide_camera_graph() -> dict[str, Any]:
     return {
         "schema_version": "1.0",
         "nodes": [
-            {"id": "agent:/root", "type": "agent", "name": "/root",
-             "attributes": {"agent_role": "root", "agent_path": "/root"}},
+            _root(),
             {"id": "process:wide", "type": "process", "name": LONG_LABEL, "attributes": {}},
-            {"id": "file:wrapped", "type": "file",
-             "name": "src/execweave/very/deeply/nested/module_with_a_long_name.py",
-             "attributes": {}},
+            {
+                "id": "file:wrapped",
+                "type": "file",
+                "name": "src/execweave/very/deeply/nested/module_with_a_long_name.py",
+                "attributes": {},
+            },
         ],
         "edges": [
-            {"id": "e1", "source": "process:wide", "target": "agent:/root",
-             "relation": "STARTED_AGENT", "attributes": {}},
-            {"id": "e2", "source": "agent:/root", "target": "file:wrapped",
-             "relation": "WROTE_FILE", "attributes": {}},
+            _edge("e1", "process:wide", "agent:/root", "STARTED_AGENT"),
+            _edge("e2", "agent:/root", "file:wrapped", "WROTE_FILE"),
         ],
     }
 
 
 def test_bounds_and_focus_use_actual_node_dimensions(tmp_path: Path) -> None:
-    instrumented = _instrumented_viewer(tmp_path, _wide_camera_graph())
+    viewer = _instrumented_viewer(tmp_path, _wide_camera_graph())
     manager, executable = _browser()
     with manager as playwright:
         browser = _launch(playwright, executable)
         try:
             page = browser.new_page(viewport={"width": 1200, "height": 760})
-            page.goto(instrumented.as_uri())
+            page.goto(viewer.as_uri())
             page.wait_for_selector('.node[data-id="process:wide"]', timeout=15000)
             bounds = page.evaluate(
                 """() => {
                 const positions=window.__execweaveCore.getPositions();
                 const rows=[...document.querySelectorAll('.node')].map(group=>{
                   const p=positions.get(group.dataset.id),rect=group.querySelector('rect');
-                  return {x:p.x,y:p.y,w:Number(rect.getAttribute('width')),h:Number(rect.getAttribute('height'))};
+                  return {x:p.x,y:p.y,w:Number(rect.getAttribute('width')),
+                          h:Number(rect.getAttribute('height'))};
                 });
                 return {actual:window.__execweaveCore.graphBounds(),expected:{
-                  minX:Math.min(...rows.map(r=>r.x)),maxX:Math.max(...rows.map(r=>r.x+r.w)),
-                  minY:Math.min(...rows.map(r=>r.y)),maxY:Math.max(...rows.map(r=>r.y+r.h))}};
+                  minX:Math.min(...rows.map(r=>r.x)),
+                  maxX:Math.max(...rows.map(r=>r.x+r.w)),
+                  minY:Math.min(...rows.map(r=>r.y)),
+                  maxY:Math.max(...rows.map(r=>r.y+r.h))}};
                 }"""
             )
             page.evaluate("() => window.__execweaveCore.focusNode('process:wide')")
             page.wait_for_timeout(300)
             centered = page.evaluate(
                 """() => {
-                const node=document.querySelector('.node[data-id="process:wide"] rect').getBoundingClientRect();
+                const node=document.querySelector('.node[data-id="process:wide"] rect')
+                  .getBoundingClientRect();
                 const svg=document.getElementById('svg').getBoundingClientRect();
                 return {dx:(node.left+node.width/2)-(svg.left+svg.width/2),
                         dy:(node.top+node.height/2)-(svg.top+svg.height/2),width:node.width};
@@ -169,27 +189,33 @@ def _root_barycentre_graph() -> dict[str, Any]:
     return {
         "schema_version": "1.0",
         "nodes": [
-            {"id": "agent:/root", "type": "agent", "name": "/root",
-             "attributes": {"agent_role": "root", "agent_path": "/root"}},
-            {"id": "agent:/root/a", "type": "agent", "name": "a",
-             "attributes": {"agent_role": "child", "agent_path": "/root/a"}},
-            {"id": "agent:/root/b", "type": "agent", "name": "b",
-             "attributes": {"agent_role": "child", "agent_path": "/root/b"}},
+            _root(),
+            {
+                "id": "agent:/root/a",
+                "type": "agent",
+                "name": "a",
+                "attributes": {"agent_role": "child", "agent_path": "/root/a"},
+            },
+            {
+                "id": "agent:/root/b",
+                "type": "agent",
+                "name": "b",
+                "attributes": {"agent_role": "child", "agent_path": "/root/b"},
+            },
             {"id": "file:z-child0", "type": "file", "name": "z-child0", "attributes": {}},
             {"id": "file:a-root", "type": "file", "name": "a-root", "attributes": {}},
             {"id": "file:b-child1", "type": "file", "name": "b-child1", "attributes": {}},
         ],
         "edges": [
-            {"id": "spawn-a", "source": "agent:/root", "target": "agent:/root/a",
-             "relation": "SPAWNED_AGENT", "first_sequence": 1, "attributes": {}},
-            {"id": "spawn-b", "source": "agent:/root", "target": "agent:/root/b",
-             "relation": "SPAWNED_AGENT", "first_sequence": 2, "attributes": {}},
-            {"id": "f0", "source": "agent:/root/a", "target": "file:z-child0",
-             "relation": "WROTE_FILE", "attributes": {}},
-            {"id": "fr", "source": "agent:/root", "target": "file:a-root",
-             "relation": "WROTE_FILE", "attributes": {}},
-            {"id": "f1", "source": "agent:/root/b", "target": "file:b-child1",
-             "relation": "WROTE_FILE", "attributes": {}},
+            _edge(
+                "spawn-a", "agent:/root", "agent:/root/a", "SPAWNED_AGENT", first_sequence=1
+            ),
+            _edge(
+                "spawn-b", "agent:/root", "agent:/root/b", "SPAWNED_AGENT", first_sequence=2
+            ),
+            _edge("f0", "agent:/root/a", "file:z-child0", "WROTE_FILE"),
+            _edge("fr", "agent:/root", "file:a-root", "WROTE_FILE"),
+            _edge("f1", "agent:/root/b", "file:b-child1", "WROTE_FILE"),
         ],
     }
 
@@ -207,32 +233,44 @@ def test_root_owned_evidence_participates_in_barycentre_order(tmp_path: Path) ->
         finally:
             browser.close()
 
-    assert rows["file:z-child0"]["y"] < rows["file:a-root"]["y"] < rows["file:b-child1"]["y"], rows
+    assert (
+        rows["file:z-child0"]["y"]
+        < rows["file:a-root"]["y"]
+        < rows["file:b-child1"]["y"]
+    ), rows
 
 
 def _observed_tool_graph() -> dict[str, Any]:
     return {
         "schema_version": "1.0",
         "nodes": [
-            {"id": "agent:OpenCode", "type": "agent", "name": "/root",
-             "attributes": {"agent_role": "root", "agent_path": "/root"}},
-            {"id": "tool-call:opencode:s:c1", "type": "tool_call", "name": "Read",
-             "first_seen": "2026-08-31T08:00:00Z", "attributes": {"tool_name": "Read"}},
+            _root() | {"id": "agent:OpenCode"},
+            {
+                "id": "tool-call:opencode:s:c1",
+                "type": "tool_call",
+                "name": "Read",
+                "first_seen": "2026-08-31T08:00:00Z",
+                "attributes": {"tool_name": "Read"},
+            },
             {"id": "tool:opencode:Read", "type": "tool", "name": "Read", "attributes": {}},
-            {"id": "tool-call-observation:antigravity:c:2", "type": "tool_call_observation",
-             "name": "completed tool (identity unavailable)", "first_seen": "2026-08-31T08:01:00Z",
-             "attributes": {"conversation_id": "c", "step_index": 2}},
+            {
+                "id": "tool-call-observation:antigravity:c:2",
+                "type": "tool_call_observation",
+                "name": "completed tool (identity unavailable)",
+                "first_seen": "2026-08-31T08:01:00Z",
+                "attributes": {"conversation_id": "c", "step_index": 2},
+            },
         ],
         "edges": [
-            {"id": "o1", "source": "agent:OpenCode", "target": "tool-call:opencode:s:c1",
-             "relation": "OBSERVED_TOOL_CALL", "attributes": {}},
-            {"id": "o1b", "source": "agent:OpenCode", "target": "tool-call:opencode:s:c1",
-             "relation": "OWNED_TOOL_CALL", "attributes": {}},
-            {"id": "u1", "source": "tool-call:opencode:s:c1", "target": "tool:opencode:Read",
-             "relation": "USES_TOOL", "attributes": {}},
-            {"id": "o2", "source": "agent:OpenCode",
-             "target": "tool-call-observation:antigravity:c:2",
-             "relation": "OBSERVED_TOOL_CALL", "attributes": {}},
+            _edge("o1", "agent:OpenCode", "tool-call:opencode:s:c1", "OBSERVED_TOOL_CALL"),
+            _edge("o1b", "agent:OpenCode", "tool-call:opencode:s:c1", "OWNED_TOOL_CALL"),
+            _edge("u1", "tool-call:opencode:s:c1", "tool:opencode:Read", "USES_TOOL"),
+            _edge(
+                "o2",
+                "agent:OpenCode",
+                "tool-call-observation:antigravity:c:2",
+                "OBSERVED_TOOL_CALL",
+            ),
         ],
     }
 
@@ -286,7 +324,10 @@ def test_repeated_text_measurement_hits_the_browser_once(tmp_path: Path) -> None
                 const proto=SVGTextElement.prototype,original=proto.getComputedTextLength;
                 let count=0;
                 proto.getComputedTextLength=function(){count++;return original.call(this)};
-                try{for(let i=0;i<30;i++)window.__execweaveCore.execweaveMeasure('__execweave_cache_probe__')}finally{proto.getComputedTextLength=original}
+                try{
+                  for(let i=0;i<30;i++)
+                    window.__execweaveCore.execweaveMeasure('__execweave_cache_probe__');
+                }finally{proto.getComputedTextLength=original}
                 return count;
                 }"""
             )
@@ -297,20 +338,29 @@ def test_repeated_text_measurement_hits_the_browser_once(tmp_path: Path) -> None
 
 
 def _dense_raw_graph(call_count: int = 40, junk_count: int = 400) -> dict[str, Any]:
-    nodes: list[dict[str, Any]] = [
-        {"id": "agent:/root", "type": "agent", "name": "/root",
-         "attributes": {"agent_role": "root", "agent_path": "/root"}}
-    ]
+    nodes: list[dict[str, Any]] = [_root()]
     edges: list[dict[str, Any]] = []
     for index in range(call_count):
         call_id = f"tool-call:test:{index}"
-        nodes.append({"id": call_id, "type": "tool_call", "name": f"tool-{index}",
-                      "first_seen": f"2026-08-31T08:00:{index % 60:02d}Z", "attributes": {}})
-        edges.append({"id": f"call-{index}", "source": "agent:/root", "target": call_id,
-                      "relation": "OBSERVED_TOOL_CALL", "attributes": {}})
+        nodes.append(
+            {
+                "id": call_id,
+                "type": "tool_call",
+                "name": f"tool-{index}",
+                "first_seen": f"2026-08-31T08:00:{index % 60:02d}Z",
+                "attributes": {},
+            }
+        )
+        edges.append(_edge(f"call-{index}", "agent:/root", call_id, "OBSERVED_TOOL_CALL"))
     for index in range(junk_count):
-        nodes.append({"id": f"observed-content:junk:{index}", "type": "observed_content",
-                      "name": "junk", "attributes": {}})
+        nodes.append(
+            {
+                "id": f"observed-content:junk:{index}",
+                "type": "observed_content",
+                "name": "junk",
+                "attributes": {},
+            }
+        )
     return {"schema_version": "1.0", "nodes": nodes, "edges": edges}
 
 
@@ -325,7 +375,8 @@ def test_dense_tool_panel_does_not_linearly_find_each_raw_node(tmp_path: Path) -
             page.wait_for_selector(".node", timeout=15000)
             page.evaluate(
                 """() => {
-                const original=Array.prototype.find;window.__execweaveRawFindCount=0;window.__execweaveOriginalFind=original;
+                const original=Array.prototype.find;
+                window.__execweaveRawFindCount=0;window.__execweaveOriginalFind=original;
                 Array.prototype.find=function(...args){
                   let raw=false;
                   for(let i=0;i<Math.min(this.length,64);i++){
