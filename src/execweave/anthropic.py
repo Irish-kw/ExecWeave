@@ -58,24 +58,36 @@ def _api_entity(endpoint: str) -> dict[str, Any]:
 def _model_entity(model: str) -> dict[str, Any]:
     return _entity(
         "model",
-        f"model:catalog:{model}",
+        f"model:anthropic:{model}",
         name=model,
-        attributes={"catalog_id": model},
+        attributes={
+            "catalog_id": model,
+            "provider_name": "anthropic",
+            "identity_scope": "provider:anthropic",
+        },
     )
 
 
-def _request_id(payload: dict[str, Any], explicit: str | None) -> str:
+def _request_identity(
+    payload: dict[str, Any],
+    explicit: str | None,
+    *,
+    endpoint_scope: str,
+    observed_at: str,
+) -> tuple[str, str]:
     if isinstance(explicit, str) and explicit:
-        return explicit
+        return explicit, "provided"
     native = payload.get("id")
     if isinstance(native, str) and native:
-        return native
+        return native, "provider_native"
     seed = {
         key: payload.get(key)
         for key in ("model", "type", "role", "stop_reason", "usage")
     }
     raw = json.dumps(seed, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()[:32]
+    occurrence = "\0".join(("anthropic", endpoint_scope, observed_at, raw))
+    digest = hashlib.sha256(occurrence.encode("utf-8", errors="replace")).hexdigest()[:32]
+    return digest, "execweave_observation"
 
 
 def _usage_attributes(payload: dict[str, Any]) -> dict[str, Any]:
@@ -112,7 +124,13 @@ def response_to_events(
 ) -> list[dict[str, Any]]:
     observed_at = timestamp or _now()
     safe = sanitize_anthropic_endpoint(endpoint)
-    native_id = _request_id(payload, request_id)
+    endpoint_scope = _endpoint_digest(safe)
+    native_id, request_id_source = _request_identity(
+        payload,
+        request_id,
+        endpoint_scope=endpoint_scope,
+        observed_at=observed_at,
+    )
     attrs = _usage_attributes(payload)
     attrs.update(
         {
@@ -120,6 +138,8 @@ def response_to_events(
             "attribution": "direct_api_response",
             "evidence_source": "anthropic_response",
             "provider_name": "anthropic",
+            "endpoint_scope": endpoint_scope,
+            "request_id_source": request_id_source,
             "causal": False,
             "inferred": False,
         }
@@ -130,9 +150,14 @@ def response_to_events(
             attrs[key] = value
     request = _entity(
         "inference_request",
-        f"inference-request:anthropic:{_endpoint_digest(safe)}:{native_id}",
+        f"inference-request:anthropic:{endpoint_scope}:{native_id}",
         name=native_id,
-        attributes={"provider_name": "anthropic", **_usage_attributes(payload)},
+        attributes={
+            "provider_name": "anthropic",
+            "endpoint_scope": endpoint_scope,
+            "request_id_source": request_id_source,
+            **_usage_attributes(payload),
+        },
     )
     events = [
         {
