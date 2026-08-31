@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .theme import ensure_viewer_theme
 from .viewer_projection import build_viewer_from_graph
+from .viewer_dashboard_clean import add_fold_budget_argument, apply_fold_budget
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -27,12 +28,14 @@ def build_parser() -> argparse.ArgumentParser:
         dest="open_browser",
         help="Open the generated viewer in the default browser",
     )
+    add_fold_budget_argument(parser)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    apply_fold_budget(getattr(args, "fold_budget", None))
     graph_path = args.graph.expanduser().resolve()
     output = args.output or graph_path.with_name(f"{graph_path.stem}.html")
     try:

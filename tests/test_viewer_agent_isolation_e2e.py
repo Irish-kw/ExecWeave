@@ -595,3 +595,47 @@ def test_a_crowded_type_folds_its_older_nodes_instead_of_dropping_them(tmp_path:
         f"{len(drawn_files)} drawn plus {len(listed)} folded does not account for {total}"
     )
     assert "src/module_" in listed[0], f"the fold must name what it holds: {listed[0]}"
+
+
+def test_the_reader_chooses_how_many_of_a_crowded_type_stay_drawn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Twelve was a starting point, not a measurement.
+
+    A deployment whose agents write hundreds of files needs its own number, so the
+    budget is a setting the run chooses. This drives the setting the way a person
+    would reach it — ``--fold-budget 5`` — and counts what the page actually draws.
+    """
+    from execweave.viewer_dashboard_clean import FOLD_BUDGET_ENV
+    from execweave.viewer_projection import write_graph_html
+
+    total, budget = 40, 5
+    monkeypatch.setenv(FOLD_BUDGET_ENV, str(budget))
+    graph = build_run(tmp_path, files=total)
+    viewer = tmp_path / "viewer.html"
+    write_graph_html(graph, viewer)
+
+    manager, executable = _browser()
+    with manager as playwright:
+        browser = _launch(playwright, executable)
+        try:
+            page = browser.new_page(viewport={"width": 1440, "height": 1000})
+            page.goto(viewer.as_uri())
+            page.wait_for_selector(".node", timeout=15000)
+            drawn = page.eval_on_selector_all(".node", "nodes=>nodes.map(n=>n.dataset.id)")
+            drawn_files = [value for value in drawn if str(value).startswith("file:")]
+            folds = [value for value in drawn if "folded" in str(value)]
+            assert len(folds) == 1, f"expected one fold node, drew {folds}"
+            _click_id(page, folds[0])
+            labels, bodies = _cards(page)
+        finally:
+            browser.close()
+
+    assert len(drawn_files) == budget, (
+        f"asked for {budget} drawn, got {len(drawn_files)}; the budget did not reach the page"
+    )
+    held = dict(zip(labels, bodies))
+    listed = [line for line in held["Holding"].splitlines() if line.strip()]
+    assert len(listed) == total - budget, (
+        f"{len(listed)} folded does not account for {total} minus the {budget} drawn"
+    )

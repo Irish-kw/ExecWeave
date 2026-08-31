@@ -25,6 +25,7 @@ from .sink import JsonlSink
 from .validate import validate_event_stream
 from .viewer import build_viewer_from_graph
 from .workflow import record_to_viewer
+from .viewer_dashboard_clean import add_fold_budget_argument, apply_fold_budget
 
 
 def _add_collection_arguments(parser: argparse.ArgumentParser) -> None:
@@ -130,6 +131,7 @@ def build_parser() -> argparse.ArgumentParser:
         dest="open_browser",
         help="Open the generated viewer after the command exits",
     )
+    add_fold_budget_argument(record)
     record.add_argument("command", nargs=argparse.REMAINDER, help="Command to execute")
 
     live = subparsers.add_parser(
@@ -137,6 +139,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run a command with the portable collector and stream its graph to localhost",
     )
     _add_live_arguments(live)
+    add_fold_budget_argument(live)
     live.add_argument("command", nargs=argparse.REMAINDER, help="Command to execute")
 
     subparsers.add_parser("doctor", help="Show runtime collector availability")
@@ -290,6 +293,7 @@ def build_parser() -> argparse.ArgumentParser:
         dest="open_browser",
         help="Open the generated viewer in the default browser",
     )
+    add_fold_budget_argument(view)
     return parser
 
 
@@ -303,6 +307,7 @@ def _clean_command(command: list[str]) -> list[str]:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    apply_fold_budget(getattr(args, "fold_budget", None))
 
     if args.subcommand == "doctor":
         print(json.dumps(backend_diagnostics(), indent=2, sort_keys=True))

@@ -6,6 +6,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from .top import _consume_attach_token_file, run_attached_top, run_top
+from .viewer_dashboard_clean import add_fold_budget_argument, apply_fold_budget
 
 
 def _clean_command(command: list[str]) -> list[str]:
@@ -67,6 +68,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--attach", default=None, help=argparse.SUPPRESS)
     parser.add_argument("--attach-token-file", default=None, help=argparse.SUPPRESS)
     parser.add_argument("--attach-command-json", default="[]", help=argparse.SUPPRESS)
+    add_fold_budget_argument(parser)
     parser.add_argument("command", nargs=argparse.REMAINDER, help="Command to execute")
     return parser
 
@@ -104,6 +106,7 @@ def _validate_attach_url(raw: str) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    apply_fold_budget(getattr(args, "fold_budget", None))
 
     if args.attach is not None:
         try:

@@ -10,6 +10,7 @@ import webbrowser
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import lru_cache
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from socketserver import TCPServer
@@ -22,6 +23,7 @@ from .live_view import LIVE_HTML as _LIVE_HTML
 from .semantic import LiveSemanticNormalizer, merge_semantic_sidecar
 from .sink import JsonlSink
 from .validate import validate_event_stream
+from .viewer_dashboard_clean import fold_budget_bootstrap, resolve_fold_budget
 from .viewer import (
     VIEWER_MAX_DOM_ELEMENTS,
     VIEWER_MAX_EDGES,
@@ -74,6 +76,20 @@ def _inject_live_auth(html: str) -> str:
 
 
 _AUTHENTICATED_LIVE_HTML = _inject_live_auth(_LIVE_HTML)
+
+
+@lru_cache(maxsize=8)
+def _live_page(html: str, budget: int) -> str:
+    """The served page carries the fold budget this run was started with.
+
+    The shell is a module constant, so the budget cannot be baked in at import time —
+    the command line has not been read yet. It is spliced in per budget instead, and
+    cached, because a run resolves exactly one.
+    """
+    bootstrap = f"<script>{fold_budget_bootstrap(budget)}</script>\n"
+    if "<script>" not in html:
+        return bootstrap + html
+    return html.replace("<script>", bootstrap + "<script>", 1)
 
 
 @dataclass(frozen=True)
@@ -576,7 +592,8 @@ def _handler_factory(state: _LiveState, token: str):
                 return
             path = parsed.path
             if path == "/":
-                self._send(_AUTHENTICATED_LIVE_HTML.encode("utf-8"), "text/html; charset=utf-8")
+                page = _live_page(_AUTHENTICATED_LIVE_HTML, resolve_fold_budget())
+                self._send(page.encode("utf-8"), "text/html; charset=utf-8")
                 return
             if path == "/graph.json":
                 payload = json.dumps(
