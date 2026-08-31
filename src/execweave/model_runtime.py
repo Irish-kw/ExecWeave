@@ -66,14 +66,19 @@ def sanitize_endpoint(endpoint: str) -> str:
     return urlunsplit((split.scheme, host, path, "", ""))
 
 
-def _runtime_entity(runtime: str, endpoint: str) -> dict[str, Any]:
+def _endpoint_scope(endpoint: str) -> tuple[str, str]:
     safe_endpoint = sanitize_endpoint(endpoint)
     digest = hashlib.sha256(safe_endpoint.encode("utf-8")).hexdigest()[:24]
+    return safe_endpoint, digest
+
+
+def _runtime_entity(runtime: str, endpoint: str) -> dict[str, Any]:
+    safe_endpoint, digest = _endpoint_scope(endpoint)
     return _entity(
         "model_runtime",
         f"model-runtime:{runtime}:{digest}",
         name=runtime,
-        attributes={"provider": runtime, "endpoint": safe_endpoint},
+        attributes={"provider": runtime, "endpoint": safe_endpoint, "endpoint_scope": digest},
     )
 
 
@@ -107,12 +112,19 @@ def _model_entity(runtime: str, model: str) -> dict[str, Any]:
     )
 
 
-def _request_id(runtime: str, payload: dict[str, Any], explicit: str | None) -> str:
+def _request_identity(
+    runtime: str,
+    payload: dict[str, Any],
+    explicit: str | None,
+    *,
+    endpoint_scope: str,
+    observed_at: str,
+) -> tuple[str, str]:
     if explicit:
-        return explicit
+        return explicit, "provided"
     native = payload.get("id")
     if isinstance(native, str) and native:
-        return native
+        return native, "provider_native"
     seed = {
         "model": payload.get("model"),
         "created_at": payload.get("created_at"),
@@ -123,7 +135,9 @@ def _request_id(runtime: str, payload: dict[str, Any], explicit: str | None) -> 
         "eval_count": payload.get("eval_count"),
     }
     raw = json.dumps(seed, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    return hashlib.sha256((runtime + "\0" + raw).encode("utf-8", errors="replace")).hexdigest()[:32]
+    occurrence = "\0".join((runtime, endpoint_scope, observed_at, raw))
+    digest = hashlib.sha256(occurrence.encode("utf-8", errors="replace")).hexdigest()[:32]
+    return digest, "execweave_observation"
 
 
 def _inference_entities(
@@ -136,12 +150,24 @@ def _inference_entities(
     attributes: dict[str, Any],
 ) -> list[dict[str, Any]]:
     runtime_entity = _runtime_entity(runtime, endpoint)
-    request_native_id = _request_id(runtime, payload, request_id)
+    _, endpoint_scope = _endpoint_scope(endpoint)
+    request_native_id, request_id_source = _request_identity(
+        runtime,
+        payload,
+        request_id,
+        endpoint_scope=endpoint_scope,
+        observed_at=timestamp,
+    )
+    identity_attrs = {
+        **attributes,
+        "endpoint_scope": endpoint_scope,
+        "request_id_source": request_id_source,
+    }
     request = _entity(
         "inference_request",
-        f"inference-request:{runtime}:{request_native_id}",
+        f"inference-request:{runtime}:{endpoint_scope}:{request_native_id}",
         name=request_native_id,
-        attributes={"provider": runtime, **attributes},
+        attributes={"provider": runtime, **identity_attrs},
     )
     events = [
         _event(
@@ -151,7 +177,7 @@ def _inference_entities(
             source=runtime_entity,
             target=request,
             runtime=runtime,
-            attributes=attributes,
+            attributes=identity_attrs,
         )
     ]
     model = payload.get("model")
@@ -164,7 +190,7 @@ def _inference_entities(
                 source=request,
                 target=_model_entity(runtime, model),
                 runtime=runtime,
-                attributes=attributes,
+                attributes=identity_attrs,
             )
         )
     return events
