@@ -73,8 +73,12 @@ def test_llamacpp_response_records_usage_and_timings_without_choices() -> None:
     events = llamacpp_response_to_events(payload)
     rendered = json.dumps(events)
     assert "private answer" not in rendered
-    request = next(event["target"] for event in events if event["relation"] == "SERVED_INFERENCE")
-    assert request["id"] == "inference-request:llamacpp:chatcmpl-1"
+    served = next(event for event in events if event["relation"] == "SERVED_INFERENCE")
+    request = served["target"]
+    endpoint_scope = served["source"]["id"].rsplit(":", 1)[-1]
+    assert request["id"] == f"inference-request:llamacpp:{endpoint_scope}:chatcmpl-1"
+    assert request["attributes"]["request_id_source"] == "provider_native"
+    assert request["attributes"]["endpoint_scope"] == endpoint_scope
     assert request["attributes"]["total_tokens"] == 92
     assert request["attributes"]["cached_prompt_tokens"] == 10
     assert request["attributes"]["timing_predicted_per_second"] == 53.3
