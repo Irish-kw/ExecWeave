@@ -9,6 +9,46 @@ read_hook_payload = _base.read_hook_payload
 _base_semantic_events = _base.antigravity_hook_to_semantic_events
 
 
+def _conversation_agent(payload: dict[str, Any]) -> dict[str, Any]:
+    conversation_id = payload.get("conversationId")
+    if isinstance(conversation_id, str) and conversation_id:
+        return {
+            "type": "agent",
+            "id": f"agent:antigravity:conversation:{conversation_id}",
+            "name": "Antigravity conversation",
+            "attributes": {
+                "provider": "antigravity",
+                "conversation_id": conversation_id,
+                "identity_semantics": "provider_conversation_id",
+            },
+        }
+    return {
+        "type": "agent",
+        "id": "agent:Antigravity",
+        "name": "Antigravity",
+        "attributes": {"provider": "antigravity"},
+    }
+
+
+def _canonicalize_agent_identity(
+    events: list[dict[str, Any]],
+    payload: dict[str, Any],
+) -> list[dict[str, Any]]:
+    canonical = _conversation_agent(payload)
+    if canonical["id"] == "agent:Antigravity":
+        return events
+    for event in events:
+        for endpoint in ("source", "target"):
+            entity = event.get(endpoint)
+            if (
+                isinstance(entity, dict)
+                and entity.get("type") == "agent"
+                and entity.get("id") == "agent:Antigravity"
+            ):
+                event[endpoint] = canonical
+    return events
+
+
 def _post_tool_observation(payload: dict[str, Any], *, timestamp: str) -> dict[str, Any]:
     conversation_id = payload.get("conversationId")
     if not isinstance(conversation_id, str) or not conversation_id:
@@ -38,12 +78,7 @@ def _post_tool_observation(payload: dict[str, Any], *, timestamp: str) -> dict[s
         "timestamp": timestamp,
         "event_type": "semantic.antigravity.tool.completed_without_identity",
         "relation": "OBSERVED_TOOL_CALL",
-        "source": {
-            "type": "agent",
-            "id": "agent:Antigravity",
-            "name": "Antigravity",
-            "attributes": {"provider": "antigravity"},
-        },
+        "source": _conversation_agent(payload),
         "target": {
             "type": "tool_call_observation",
             "id": f"tool-call-observation:antigravity:{conversation_id}:{step}",
@@ -73,4 +108,5 @@ def antigravity_hook_to_semantic_events(
 
             timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         return [_post_tool_observation(payload, timestamp=timestamp)]
-    return _base_semantic_events(payload, hook_event=hook_event, timestamp=timestamp)
+    events = _base_semantic_events(payload, hook_event=hook_event, timestamp=timestamp)
+    return _canonicalize_agent_identity(events, payload)
