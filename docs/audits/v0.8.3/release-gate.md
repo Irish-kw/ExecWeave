@@ -4,31 +4,33 @@ Baseline audit branch point: `main@1ec0dcb0171f9346f8232a99e857cbd6b3168f08`.
 
 # V0.8.3_RELEASE_GATE = FAIL
 
-The audit found one confirmed P0, five confirmed P1 defects, two confirmed P2 defects, one strongly-supported P2 issue, and one unresolved suspected P1 Antigravity history-loss report. v0.8.3 must not ship until the mandatory conditions below are satisfied on one assembled release-candidate SHA.
+The audit still has one confirmed P0, five confirmed P1 defects, two confirmed P2 defects, one strongly-supported P2 issue, and one unresolved suspected P1 Antigravity history-loss report. v0.8.3 must not ship until the mandatory conditions below are satisfied on one assembled release-candidate SHA.
 
 ## PR #25 merge gate is separate from the release gate
 
-Latest audited PR #25 snapshot:
+The PR #25 implementation branch itself is still:
 
-`PR25_PREMERGE_GATE = BLOCKED`
+- PR #25 head: `8362e74acd91d703991efd8cac2f0826c86cad3a`
+- base: `main@1ec0dcb0171f9346f8232a99e857cbd6b3168f08`
+- `PR25_BRANCH_PREMERGE_GATE = BLOCKED`
 
-for PR #25 head `8362e74acd91d703991efd8cac2f0826c86cad3a` against `main@1ec0dcb0171f9346f8232a99e857cbd6b3168f08`.
+That branch has not yet received the hardening that closes `PM-001` through `PM-007`.
 
-Although that head is mergeable, ahead 17 / behind 0, has zero unresolved review threads, and had all applicable workflows green, a second source-level pre-merge review found seven unresolved issues in the PR itself. They are documented in `pr25-final-review.md`:
+The hardening exists separately as stacked PR #27:
 
-- `PM-001` — live layout preserves stale x coordinates after adaptive lane widths change;
-- `PM-002` — Fit/Follow/focus bounds and node centers still assume fixed 160×50 geometry, and `graphBounds()` never updates `maxY` from positions;
-- `PM-003` — newly introduced SVG text measurement has no cache in the live rebuild path;
-- `PM-004` — evidence barycentre ordering ignores root-owned evidence because only child agents have ordering coordinates;
-- `PM-005` — the new tool-traffic panel only recognizes `REQUESTED_TOOL_CALL`, while repository paths also emit `OBSERVED_TOOL_CALL` and may use `OWNED_TOOL_CALL`;
-- `PM-006` — raw panel graph lookup repeatedly scans all edges and nodes, producing avoidable dense-graph O(E×N) work;
-- `PM-007` — the Stage Integrity allowance for `tests/test_conversation_agent_focus.py` is not scoped to the exact PR #25 branch and would remain available to future branches.
+- PR #27 base: `release/0.8.3-graph-ergonomics` (PR #25 branch)
+- validated PR #27 head: `c7d338ca95839e1fd30829c9208fc9d1eda62137`
+- `PR25_HARDENING_STACK_GATE = PASS`
+- CI run `33376194384`: success on Ubuntu/macOS/Windows
+- Viewer Agent Isolation run `33376194481`: success, including real Chromium
+- Provider Capability Stage Integrity run `33376194392`: success
+- Windows Launcher Compatibility run `33376194426`: success
 
-Therefore the prior pre-merge PASS is revoked. Green CI on `8362e74a...` does not override these source-level findings. PR #25 must receive a new fix commit, new regressions, and a full re-audit on the new head before it may merge.
+PR #27 closes the seven source-level findings from `pr25-final-review.md` and also closes `PM-008`, a GIF replay/export adaptive-geometry defect discovered during hardening. The final re-audit additionally removed a live performance regression where every newly added node was treated as an existing-node dimension change and caused a whole-graph rerender.
 
-This PR #25 merge gate remains narrower than the v0.8.3 release gate. Even after PR #25 eventually passes and merges, the provider/conversation identity blockers below remain and no version bump, tag, GitHub Release, or PyPI publication is authorized.
+This means **PR #27 is ready to be merged into PR #25's branch**, but **PR #25 must not yet be merged into `main`**. After PR #27 is merged into the PR #25 branch, the new immutable PR #25 head must receive the same exact-head CI/Chromium/stage-integrity/launcher revalidation. No merge has been authorized or performed by this audit.
 
-If PR #25 head or `main` moves, all old PR #25 workflow evidence expires until the new pair of SHAs is rechecked.
+Even after PR #25 eventually passes and merges, the provider/conversation identity blockers below remain. No version bump, tag, GitHub Release, or PyPI publication is authorized.
 
 ## Mandatory conditions before PASS
 
@@ -38,9 +40,9 @@ Two independent provider sessions must never become one synthesized `<provider>:
 
 PASS evidence:
 
-- the existing OpenCode characterization test is inverted to require two conversation identities;
-- at least one second provider/root-session fixture proves the rule is system-wide;
-- no provider-native thread is duplicated by a synthesized thread;
+- invert the existing OpenCode characterization to require two conversation identities;
+- add at least one second provider/root-session fixture proving the rule is system-wide;
+- provider-native threads are not duplicated by synthesized threads;
 - messages from independent sessions cannot appear in one conversation panel.
 
 ### 2. Fix AUD-002 and AUD-003: endpoint-scoped inference identity
@@ -91,23 +93,24 @@ PASS evidence:
 
 If the real fixture cannot reproduce the original report, document the exact provider/runtime version and evidence used to dismiss it.
 
-### 6. Repair, merge, and then revalidate PR #25 behavior on the release candidate
+### 6. Land and revalidate the PR #25 hardening stack
 
-PR #25 is separate work and is currently **blocked before merge** by `PM-001` through `PM-007`. Its previous green branch results do not authorize merge until those findings are closed on a new PR #25 head.
+Current state:
 
-Before PR #25 merge, require:
+`PR25_HARDENING_STACK_GATE = PASS`
 
-- live lane x positions recompute for existing nodes while preserving stable y where appropriate;
-- camera bounds and focus/follow centers use actual per-node dimensions;
-- repeated SVG text measurement is cached/bounded appropriately;
-- root-owned evidence participates in barycentre ordering;
-- tool traffic recognizes the supported agent→call ownership relation family without fabricating relation semantics or double-counting;
-- raw graph node/edge lookup is indexed for dense graphs;
-- the Stage Integrity test-change allowance is scoped to the exact PR #25 branch and file change;
-- new behavioral/performance regressions exist for those changes;
-- all applicable workflows are green on the exact new head.
+`PR25_BRANCH_PREMERGE_GATE = BLOCKED`
 
-After PR #25 eventually lands, provider/identity remediation should start from the new `main`. When all release blockers are fixed, assemble one intended release-candidate SHA containing both the merged PR #25 work and the provider fixes, then rerun the dashboard behavior below.
+Before PR #25 may merge to `main`:
+
+1. merge PR #27 into `release/0.8.3-graph-ergonomics` only after explicit merge authorization;
+2. fetch the resulting new PR #25 head and verify it actually contains PM-001..PM-008 hardening;
+3. discard all workflow evidence from the old PR #25 head;
+4. rerun full applicable CI, Chromium viewer behavior, Stage Integrity and Windows Launcher on the exact new PR #25 head;
+5. re-audit the exact PR #25 diff against current `main`;
+6. only then change `PR25_BRANCH_PREMERGE_GATE` to PASS.
+
+After PR #25 eventually lands, provider/identity remediation should start from the new `main`. When all release blockers are fixed, assemble one intended release-candidate SHA containing both the merged PR #25 work and provider fixes.
 
 PASS evidence on one final candidate SHA:
 
@@ -126,9 +129,7 @@ PASS evidence on one final candidate SHA:
 
 ### 7. Every confirmed P0/P1 must have a behavioral regression
 
-Source-string assertions alone are not sufficient for the release gate.
-
-Provider identity regressions must assert actual graph IDs/topology/conversation identities. Dashboard state regressions must run in Chromium. Sanitized real provider evidence is preferred where available.
+Source-string assertions alone are not sufficient for the release gate. Provider identity regressions must assert actual graph IDs/topology/conversation identities. Dashboard state regressions must run in Chromium. Sanitized real provider evidence is preferred where available.
 
 ### 8. Full release-candidate test/CI matrix must be green
 
@@ -138,13 +139,13 @@ At minimum:
 - existing full pytest suite;
 - Ruff;
 - Chromium dashboard E2E;
-- Linux/macOS/Windows CI paths applicable to the changed files;
+- Linux/macOS/Windows CI paths applicable to changed files;
 - provider-capability/stage-integrity gates;
 - package/wheel/launcher workflows where path filters require them.
 
 ## P2 policy
 
-P2 findings do not automatically block v0.8.3 once all P0/P1 conditions are green, but each must be either fixed or explicitly accepted/tracked before changing this file to PASS.
+P2 findings do not automatically block v0.8.3 once all P0/P1 conditions are green, but each must be fixed or explicitly accepted/tracked before changing this file to PASS.
 
 Current P2 items:
 
@@ -156,8 +157,6 @@ AUD-008 or AUD-009 becomes release-blocking if the P1 endpoint/identity repair d
 
 ## Known limitations that do not independently block PASS
 
-These must remain accurately disclosed and must not be represented as complete evidence:
-
 - portable polling can miss short-lived sockets;
 - descendants that outlive the launched root are not continuously sampled by the portable loop;
 - Gemini exact tool before/after pairing can be unavailable when the provider exposes no stable call ID;
@@ -166,7 +165,7 @@ These must remain accurately disclosed and must not be represented as complete e
 
 ## Current blocker list
 
-1. `PM-001`..`PM-007` — PR #25 itself is not yet merge-ready.
+1. PR #27 hardening is validated but has not yet been merged into the PR #25 branch; PR #25 exact new head therefore does not exist yet.
 2. `AUD-001` — P0 — independent root conversations merge.
 3. `AUD-002` — P1 — local-runtime request identity not endpoint scoped.
 4. `AUD-003` — P1 — gateway request/deployment identity not endpoint scoped.
@@ -174,10 +173,10 @@ These must remain accurately disclosed and must not be represented as complete e
 6. `AUD-005` — P1 — Antigravity Stop archive fabricates provider-root provenance.
 7. `AUD-006` — P1 — Antigravity tool/conversation identity split.
 8. `SUS-001` — suspected P1 — real Antigravity historical-turn loss must be reproduced or dismissed.
-9. Final assembled candidate has not yet rerun the combined provider + dashboard + cross-platform release matrix.
+9. Final assembled candidate has not rerun the combined provider + dashboard + cross-platform release matrix.
 
 ## Rule for changing to PASS
 
-Do not change `V0.8.3_RELEASE_GATE` to PASS because an old PR #25 SHA was green, because PR #25 is eventually merged, because individual fix PRs are green, or because the existing test suite is green.
+Do not change `V0.8.3_RELEASE_GATE` to PASS because PR #27 is green, because PR #25 is eventually merged, because individual fix PRs are green, or because the existing test suite is green.
 
 Change it only after all mandatory conditions above are verified on the same intended v0.8.3 release-candidate SHA.
