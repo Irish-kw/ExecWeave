@@ -62,4 +62,27 @@ def harden_dashboard_html(html: str) -> str:
   }""",
         label="delta geometry rerender",
     )
+
+    # PM-008 (discovered while tightening PM-002): GIF replay used the old fixed 160x50
+    # node rectangle even after the dashboard became adaptive. Export is a projection of
+    # the same graph, so its bounds, edge anchors and drawn rectangles must use the same
+    # per-node geometry as Live/Finished/viewer rather than silently reverting to v0.8.2.
+    html = _replace_once(
+        html,
+        "minX=Math.min(minX,p.x);maxX=Math.max(maxX,p.x+160);minY=Math.min(minY,p.y);maxY=Math.max(maxY,p.y+50)",
+        "minX=Math.min(minX,p.x);maxX=Math.max(maxX,p.x+execweaveCameraWidth(node.id));minY=Math.min(minY,p.y);maxY=Math.max(maxY,p.y+execweaveCameraHeight(node.id))",
+        label="gif adaptive bounds",
+    )
+    html = _replace_once(
+        html,
+        "const point=(id,right=false)=>{const p=positions.get(id)||{x:0,y:0};return{x:ox+(p.x+(right?160:0))*scale,y:oy+(p.y+25)*scale}};",
+        "const point=(id,right=false)=>{const p=positions.get(id)||{x:0,y:0},w=execweaveCameraWidth(id),h=execweaveCameraHeight(id);return{x:ox+(p.x+(right?w:0))*scale,y:oy+(p.y+h/2)*scale}};",
+        label="gif adaptive anchors",
+    )
+    html = _replace_once(
+        html,
+        "const x=ox+p.x*scale,y=oy+p.y*scale,w=160*scale,h=50*scale;",
+        "const x=ox+p.x*scale,y=oy+p.y*scale,w=execweaveCameraWidth(node.id)*scale,h=execweaveCameraHeight(node.id)*scale;",
+        label="gif adaptive rectangles",
+    )
     return html
