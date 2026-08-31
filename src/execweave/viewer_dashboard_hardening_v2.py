@@ -21,6 +21,16 @@ def harden_dashboard_html(html: str) -> str:
         label="tool timestamp filter",
     )
 
+    # Only a real browser measurement is authoritative enough to cache. Detached/export
+    # contexts can fall back to the character estimate, but caching that estimate would
+    # prevent a later attached render from upgrading the same string to measured width.
+    html = _replace_once(
+        html,
+        "return execweaveRememberMeasure(value,value.length*7.1);",
+        "return value.length*7.1;",
+        label="measurement fallback cache",
+    )
+
     # A node may become wider/taller without moving a lane origin (for example the last
     # occupied lane). Existing edge paths still depend on that dimension, so lane-shift
     # detection alone is not enough to decide whether the rendered geometry is stale.
