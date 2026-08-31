@@ -37,6 +37,13 @@ jobs:
         run: python -m pip install -e ".[dev]"
 
       - name: Validate stage integrity
-        run: >-
-          python scripts/check_release_stage_integrity.py
-          --baseline-ref "${{ github.event.pull_request.base.sha || inputs.baseline_ref }}"
+        shell: bash
+        env:
+          BASELINE_REF: "${{ github.event.pull_request.base.sha || inputs.baseline_ref }}"
+          HEAD_REF: "${{ github.head_ref }}"
+        run: |
+          args=(--baseline-ref "$BASELINE_REF")
+          if [[ "$HEAD_REF" == release/* ]]; then
+            args+=(--allow-test-change "tests/test_v069_dashboard_release.py=release metadata assertions may advance only on a release/* pull request; the historical test name remains stable because the node-ID floor refuses renames")
+          fi
+          python scripts/check_release_stage_integrity.py "${args[@]}"
