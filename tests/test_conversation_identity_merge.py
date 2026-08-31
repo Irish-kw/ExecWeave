@@ -342,20 +342,32 @@ def test_matching_labels_and_paths_alone_never_merge_two_agents(tmp_path: Path) 
         assert f"{other} CHILD SUMMARY" not in text
 
 
+def _assert_independent_root_previews(
+    previews: list[dict[str, Any]],
+    *,
+    alias: str,
+    first_text: str,
+    second_text: str,
+) -> None:
+    assert len(previews) == 2, "independent root executions collapsed into one conversation"
+    assert all(preview["is_root"] is True for preview in previews)
+    assert len({preview["thread_id"] for preview in previews}) == 2
+    assert all(preview["thread_id"].startswith(f"{alias}::agent=") for preview in previews)
+    assert all(preview["evidence_thread_ids"] == [alias] for preview in previews)
+    texts = [_texts(preview) for preview in previews]
+    assert sum(first_text in text for text in texts) == 1
+    assert sum(second_text in text for text in texts) == 1
+    assert all(not (first_text in text and second_text in text) for text in texts)
+
+
 def test_two_same_provider_root_sessions_share_the_synthesized_root_thread(
     tmp_path: Path,
 ) -> None:
-    """Characterizes a known limitation, so changing it stays a deliberate decision.
+    """Historical test ID retained; the contract now requires execution isolation.
 
-    Providers that expose no thread of their own all receive the synthesized
-    ``<provider>:root``, so two independent sessions in one run share a thread identity
-    and merge. That predates evidence-based grouping — the previous key
-    ``(provider, thread_id, agent_path)`` merged them identically — and separating them
-    would mean abandoning the ``<provider>:root`` contract other providers rely on.
-
-    What matters for isolation is that this only ever affects two *roots* of the same
-    provider. Distinct child executions carry distinct identities and never merge, which
-    ``test_matching_labels_and_paths_alone_never_merge_two_agents`` pins.
+    Stage integrity treats test node IDs as release API. The old name described the
+    defect, so keeping it preserves regression history while these assertions pin the
+    corrected behavior: a shared synthesized display alias cannot merge executions.
     """
     graph = _content_graph(
         tmp_path,
@@ -369,11 +381,53 @@ def test_two_same_provider_root_sessions_share_the_synthesized_root_thread(
         for entry in conversation_record_entries(graph, tmp_path)
         if isinstance(entry.get("conversation_preview"), dict)
     ]
-    assert len(previews) == 1
-    assert previews[0]["thread_id"] == "opencode:root"
-    # Neither observation is dropped by the merge.
-    text = _texts(previews[0])
-    assert "ANSWER ONE" in text and "ANSWER TWO" in text
+    _assert_independent_root_previews(
+        previews,
+        alias="opencode:root",
+        first_text="ANSWER ONE",
+        second_text="ANSWER TWO",
+    )
+
+
+def test_two_antigravity_root_conversations_are_isolated(tmp_path: Path) -> None:
+    first = {
+        "id": "agent:antigravity:conversation:ag-root-one",
+        "type": "agent",
+        "name": "Antigravity conversation",
+        "attributes": {
+            "provider": "antigravity",
+            "conversation_id": "ag-root-one",
+            "identity_semantics": "provider_conversation_id",
+        },
+    }
+    second = {
+        "id": "agent:antigravity:conversation:ag-root-two",
+        "type": "agent",
+        "name": "Antigravity conversation",
+        "attributes": {
+            "provider": "antigravity",
+            "conversation_id": "ag-root-two",
+            "identity_semantics": "provider_conversation_id",
+        },
+    }
+    graph = _content_graph(
+        tmp_path,
+        [
+            (first, "antigravity.assistant_response", "AG ANSWER ONE"),
+            (second, "antigravity.assistant_response", "AG ANSWER TWO"),
+        ],
+    )
+    previews = [
+        entry["conversation_preview"]
+        for entry in conversation_record_entries(graph, tmp_path)
+        if isinstance(entry.get("conversation_preview"), dict)
+    ]
+    _assert_independent_root_previews(
+        previews,
+        alias="antigravity:root",
+        first_text="AG ANSWER ONE",
+        second_text="AG ANSWER TWO",
+    )
 
 
 # ── Cross-provider: existing thread identity contracts are unchanged ─────────
