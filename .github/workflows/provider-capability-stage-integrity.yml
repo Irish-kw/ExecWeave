@@ -40,4 +40,3 @@ jobs:
         run: >-
           python scripts/check_release_stage_integrity.py
           --baseline-ref "${{ github.event.pull_request.base.sha || inputs.baseline_ref }}"
-          --allow-test-change "tests/test_v069_dashboard_release.py=the release metadata assertions move from 0.7.9 to 0.8.0. The test keeps the function name it was written under because the node-ID floor refuses renames, and the English README anchor it pins is unchanged"

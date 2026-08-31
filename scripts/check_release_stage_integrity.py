@@ -30,6 +30,28 @@ RELEASE_METADATA = (
 )
 RUNTIME_DEPENDENCIES = re.compile(r"(?ms)^dependencies\s*=\s*\[(.*?)^\]")
 
+# A stage must not move the release version, and for a long time that was enforced by
+# refusing the move outright. The rule is right about a stage and wrong about the one
+# branch whose entire job is the release, which was pushed straight to the default
+# branch to get past it — so the guard never inspected a release at all, and every
+# release pull request carried a red check that meant nothing.
+#
+# Telling the two apart needs no flag and no opt-out. A release branch changes release
+# metadata and nothing else: the two version declarations, the test that pins them, the
+# READMEs carrying the release line, and this job's own allowance list, which has to
+# name that test. A branch that also touches a source file, a fixture, or any other test
+# is a stage, and a stage still may not move the version — that half of the rule is
+# unchanged, and the message below names the files that disqualified the branch.
+RELEASE_ONLY_PATHS = frozenset(
+    {
+        "pyproject.toml",
+        "src/execweave/__init__.py",
+        "tests/test_v069_dashboard_release.py",
+        ".github/workflows/provider-capability-stage-integrity.yml",
+    }
+)
+RELEASE_ONLY_README = re.compile(r"^README(\.[A-Za-z-]+)?\.md$")
+
 # The relay module itself has to keep changing — 0.7.6 rebuilds streamed responses
 # inside it — so freezing the whole file would block the staged work it is meant to
 # protect. What must never move is the refusal to terminate TLS. The handler body is
@@ -266,8 +288,26 @@ def _assert_critical_files_unchanged(baseline_ref: str) -> None:
         raise RuntimeError("release red-line files changed:\n" + "\n".join(changed))
 
 
-def _assert_release_metadata_unchanged(baseline_ref: str) -> None:
-    """A stage may not move the release version or the runtime dependency set."""
+def _release_only_offenders(changed_paths: list[str]) -> list[str]:
+    """Return the files that make a branch something other than a release."""
+    return sorted(
+        path
+        for path in changed_paths
+        if path.strip()
+        and path not in RELEASE_ONLY_PATHS
+        and RELEASE_ONLY_README.match(path) is None
+    )
+
+
+def _assert_release_metadata_unchanged(baseline_ref: str) -> str:
+    """Only a release-only branch may move the release version.
+
+    The runtime dependency set may not move on any branch, a release included.
+    """
+    completed = _git("diff", "--name-only", f"{baseline_ref}...HEAD")
+    offenders = _release_only_offenders(completed.stdout.splitlines())
+
+    moves: list[str] = []
     for path, pattern in RELEASE_METADATA:
         baseline = _git("show", f"{baseline_ref}:{path}").stdout
         current = (ROOT / path).read_text(encoding="utf-8")
@@ -275,10 +315,14 @@ def _assert_release_metadata_unchanged(baseline_ref: str) -> None:
         if before is None or after is None:
             raise RuntimeError(f"release version is no longer declared in {path}")
         if before.group(1) != after.group(1):
-            raise RuntimeError(
-                f"{path} moves the release version from {before.group(1)} to "
-                f"{after.group(1)}; a stage lands before its release, not with it"
-            )
+            if offenders:
+                raise RuntimeError(
+                    f"{path} moves the release version from {before.group(1)} to "
+                    f"{after.group(1)}, but this branch is not only a release. A stage "
+                    "lands before its release, not with it. Files that are not release "
+                    "metadata:\n" + "\n".join(offenders)
+                )
+            moves.append(f"{path}: {before.group(1)} -> {after.group(1)}")
 
     baseline = _git("show", f"{baseline_ref}:pyproject.toml").stdout
     current = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
@@ -290,6 +334,10 @@ def _assert_release_metadata_unchanged(baseline_ref: str) -> None:
             "pyproject.toml changes the runtime dependency set:\n"
             f"baseline:{before.group(1)}\ncurrent:{after.group(1)}"
         )
+
+    if not moves:
+        return "held"
+    return "release-only branch; " + ", ".join(moves)
 
 
 def _connect_handler_source(source: str, origin: str) -> str:
@@ -555,7 +603,7 @@ def main() -> int:
     )
     _assert_no_new_skip_or_xfail(args.baseline_ref)
     _assert_critical_files_unchanged(args.baseline_ref)
-    _assert_release_metadata_unchanged(args.baseline_ref)
+    release_version = _assert_release_metadata_unchanged(args.baseline_ref)
     tls_status = _assert_no_tls_mitm(args.baseline_ref)
     completeness = _assert_conversation_completeness_unchanged(args.baseline_ref)
     i18n_status = _assert_i18n_audit()
@@ -573,6 +621,7 @@ def main() -> int:
                 "allowed_test_changes": allowed_test_changes,
                 "new_skip_or_xfail": False,
                 "critical_release_files_unchanged": True,
+                "release_version": release_version,
                 "tls_mitm_invariant": tls_status,
                 "conversation_completeness_unchanged": completeness,
                 "i18n_audit": i18n_status,
