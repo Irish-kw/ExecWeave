@@ -25,12 +25,15 @@ const EXECWEAVE_NODE_W_MAX=320,EXECWEAVE_LABEL_PAD=20;
 // fraction of the node's own height, so a one-line node reproduces the numbers the fixed
 // 50 produced: centre 25, the lifecycle anchor 39, and a port span of 30.
 const EXECWEAVE_LINE_H=14;
-const EXECWEAVE_LANES={runtime:0,root:1,agent:2,model:3,tool:4,endpoint:5,other:5};
-const EXECWEAVE_LANE_ORDER=['runtime','root','agent','model','tool','endpoint'];
+const EXECWEAVE_LANES={runtime:0,root:1,agent:2,model:3,tool:4,file:5,endpoint:6,other:6};
+const EXECWEAVE_LANE_ORDER=['runtime','root','agent','model','tool','file','endpoint'];
 // The gap that follows each lane. These are the differences in the fixed table this
 // replaced, so a graph whose labels all fit the minimum width lands on exactly the
 // x positions it did before: 0, 270, 540, 820, 1100, 1380.
-const EXECWEAVE_LANE_GAP={runtime:110,root:110,agent:120,model:120,tool:120};
+const EXECWEAVE_LANE_GAP={runtime:110,root:110,agent:120,model:120,tool:120,file:120};
+// A component with no path to the execution spine is packed below it rather than
+// interleaved with it, so its rows never sit between two nodes that talk to each other.
+const EXECWEAVE_BAND_GAP=170;
 let execweaveTopology={spec:new Map(),bundleByEdge:new Map(),sourcePort:new Map(),targetPort:new Map(),width:new Map(),height:new Map(),laneX:{},crowded:false};
 let execweaveRuler=null;
 // Measure with a hidden text node carrying the label's own class, so the width comes
@@ -104,7 +107,8 @@ function execweaveLane(node){
   if(type==='agent')return execweaveIsRoot(node)?'root':'agent';
   if(type.includes('model')||type.includes('inference')||type.includes('llm'))return'model';
   if(type.includes('tool'))return'tool';
-  if(type.includes('network')||type.includes('endpoint')||type.includes('socket')||type.includes('host')||type.includes('file')||type.includes('path'))return'endpoint';
+  if(type.includes('file')||type.includes('path'))return'file';
+  if(type.includes('network')||type.includes('endpoint')||type.includes('socket')||type.includes('host'))return'endpoint';
   if(type.includes('process')||type.includes('session')||type.includes('runtime')||type.includes('shell'))return'runtime';
   return'other';
 }
@@ -162,8 +166,37 @@ function execweaveBuildTopology(){
   const tools=byLane.get('tool'),collab=tools.filter(node=>/spawn|send|wait|agent/i.test(String(node?.name||execweaveAttrs(node).tool_name||''))),ordinary=tools.filter(node=>!collab.includes(node));
   collab.forEach((node,index)=>put(node,'tool',index,-170+index*82));
   ordinary.forEach((node,index)=>put(node,'tool',collab.length+index,80+index*130));
-  const tail=[...byLane.get('endpoint'),...byLane.get('other')];tail.forEach((node,index)=>put(node,execweaveLane(node),index,80+index*104));
+  for(const lane of ['file','endpoint','other'])byLane.get(lane).forEach((node,index)=>put(node,lane,index,80+index*104));
   for(const node of nodes)if(!spec.has(node.id))put(node,execweaveLane(node),0,100);
+
+  // Push every component that cannot reach the spine below it. The spine is the
+  // component holding the first root; with no root at all it is the largest, which
+  // keeps a runtime-only graph from being demoted to its own band.
+  const componentOf=execweaveComponents(nodes,edges);
+  if(componentOf.size){
+    const sizes=new Map();
+    for(const value of componentOf.values())sizes.set(value,(sizes.get(value)||0)+1);
+    let primary=roots.length?componentOf.get(roots[0].id):undefined;
+    if(primary===undefined){
+      let best=-1;
+      for(const [value,size] of [...sizes.entries()].sort((a,b)=>a[0]-b[0]))if(size>best){best=size;primary=value}
+    }
+    const secondary=[...sizes.keys()].filter(value=>value!==primary).sort((a,b)=>a-b);
+    if(secondary.length){
+      let floor=-Infinity;
+      for(const [id,value] of componentOf)if(value===primary){const s=spec.get(id);if(s)floor=Math.max(floor,s.y+(height.get(id)||EXECWEAVE_NODE_H))}
+      if(!Number.isFinite(floor))floor=0;
+      for(const value of secondary){
+        const members=[...componentOf.entries()].filter(entry=>entry[1]===value).map(entry=>entry[0]);
+        let top=Infinity,bottom=-Infinity;
+        for(const id of members){const s=spec.get(id);if(s){top=Math.min(top,s.y);bottom=Math.max(bottom,s.y+(height.get(id)||EXECWEAVE_NODE_H))}}
+        if(!Number.isFinite(top))continue;
+        const shift=floor+EXECWEAVE_BAND_GAP-top;
+        for(const id of members){const s=spec.get(id);if(s)s.y+=shift}
+        floor=bottom+shift;
+      }
+    }
+  }
 
   const bundleGroups=new Map();
   for(const edge of edges){
@@ -195,6 +228,25 @@ function execweaveBuildTopology(){
     list.forEach((edge,index)=>targetPort.set(edgeId(edge),{index,total:list.length}));
   }
   return{spec,bundleByEdge,sourcePort,targetPort,width,height,laneX,crowded:edges.length>=16||nodes.length>=12};
+}
+function execweaveComponents(nodes,edges){
+  const adjacent=new Map();
+  for(const node of nodes)adjacent.set(node.id,[]);
+  for(const edge of edges){
+    if(!adjacent.has(edge.source)||!adjacent.has(edge.target))continue;
+    adjacent.get(edge.source).push(edge.target);adjacent.get(edge.target).push(edge.source);
+  }
+  const componentOf=new Map();let index=0;
+  for(const node of [...nodes].sort(execweaveStableNodeSort)){
+    if(componentOf.has(node.id))continue;
+    const queue=[node.id];componentOf.set(node.id,index);
+    while(queue.length){
+      const id=queue.pop();
+      for(const next of adjacent.get(id)||[])if(!componentOf.has(next)){componentOf.set(next,index);queue.push(next)}
+    }
+    index++;
+  }
+  return componentOf;
 }
 function execweavePortY(position,port,id){const h=execweaveHeightOf(id);if(!port||port.total<=1)return position.y+h/2;const span=h-20;return position.y+10+(span*port.index)/(port.total-1)}
 function execweaveDesiredPosition(id){const value=execweaveTopology.spec.get(id);return value?{x:value.x,y:value.y}:{x:0,y:0}}
