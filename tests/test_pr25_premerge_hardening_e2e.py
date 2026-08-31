@@ -13,13 +13,16 @@ pytestmark = pytest.mark.viewer_e2e
 
 _CORE_SEAM = (
     "window.__execweaveCore={getActivities:()=>activities.slice(),getGraph:()=>graph,"
-    "getPositions:()=>new Map(positions),selectEdge,selectNode,focusNode,markLatest,"
-    "setCameraMode};"
+    "getDisplayGraph:()=>({...graph,nodes:[...nodeById.values()],edges:[...edgeById.values()],"
+    "node_count:nodeById.size,edge_count:edgeById.size}),getPositions:()=>new Map(positions),"
+    "selectEdge,selectNode,focusNode,markLatest,setCameraMode};"
 )
 _CORE_TEST_SEAM = (
     "window.__execweaveCore={getActivities:()=>activities.slice(),getGraph:()=>graph,"
-    "getPositions:()=>new Map(positions),selectEdge,selectNode,focusNode,markLatest,"
-    "setCameraMode,applyDelta,graphBounds,execweaveMeasure};"
+    "getDisplayGraph:()=>({...graph,nodes:[...nodeById.values()],edges:[...edgeById.values()],"
+    "node_count:nodeById.size,edge_count:edgeById.size}),getPositions:()=>new Map(positions),"
+    "selectEdge,selectNode,focusNode,markLatest,setCameraMode,applyDelta,graphBounds,"
+    "execweaveMeasure};"
 )
 
 
