@@ -8,7 +8,7 @@ Current release gate: **FAIL**.
 
 | ID | Severity | Status | Area | Provider | Release blocker |
 |---|---|---|---|---|---|
-| AUD-001 | P0 | CONFIRMED | conversation identity | system-wide; reproduced with OpenCode | yes |
+| AUD-001 | P0 | CONFIRMED | conversation identity | system-wide; reproduced with OpenCode + Antigravity | yes |
 | AUD-002 | P1 | CONFIRMED | model/runtime identity | Ollama / llama.cpp / vLLM / LM Studio | yes |
 | AUD-003 | P1 | CONFIRMED | gateway identity | LiteLLM / OpenRouter | yes |
 | AUD-004 | P1 | CONFIRMED | provider identity | OpenCode | yes |
@@ -21,13 +21,17 @@ Current release gate: **FAIL**.
 
 ## AUD-001 — P0 — Independent root sessions merge into one synthesized provider-root conversation
 
-`tests/test_conversation_identity_merge.py::test_two_same_provider_root_sessions_share_the_synthesized_root_thread` already demonstrates the defect. It creates `agent:opencode:session:ses_one` and `agent:opencode:session:ses_two`, then asserts that conversation reconstruction returns exactly one preview with `thread_id == "opencode:root"` containing both `ANSWER ONE` and `ANSWER TWO`.
+The defect now has two independent provider characterizations.
 
-This is not a harmless label collision. It is content from two independent execution identities being combined into one conversation view. The current test calls it a known limitation; the v0.8.3 audit changes the classification to **P0 CONFIRMED** because cross-session conversation mixing is evidence corruption and can become a cross-agent/private-context leak.
+`tests/test_conversation_identity_merge.py::test_two_same_provider_root_sessions_share_the_synthesized_root_thread` creates `agent:opencode:session:ses_one` and `agent:opencode:session:ses_two`, then asserts that conversation reconstruction returns one preview with `thread_id == "opencode:root"` containing both `ANSWER ONE` and `ANSWER TWO`.
 
-Root cause: `conversation_preview._agent_identity()` synthesizes `<provider>:root` for every root that does not carry a propagated provider-native thread identity. `_conversation_records_core` then merges on the shared provider + `/root` scope + synthesized thread.
+PR #26 additionally constructs two distinct Antigravity conversation-scoped agents and demonstrates that they collapse into one `antigravity:root` preview containing both root answers. This rules out an OpenCode-only explanation.
 
-Required remediation contract: independent provider session IDs stay independent unless positive evidence proves equivalence. The existing characterization test should be inverted after the fix.
+This is not a harmless label collision. It is content from two independent execution identities being combined into one conversation view. The v0.8.3 audit classifies it as **P0 CONFIRMED** because cross-session mixing is evidence corruption and can become a cross-agent/private-context leak.
+
+Root cause: `conversation_preview._agent_identity()` synthesizes `<provider>:root` for a root without a provider-native thread. `_conversation_records_core._conversation_identity_keys()` can then treat that ExecWeave-derived thread together with `/root` scope as positive merge identity.
+
+Required remediation contract: independent provider execution/session IDs stay independent unless positive provider evidence proves equivalence. `THREAD_ID_EXECWEAVE_DERIVED` is a presentation identity, not cross-agent positive evidence. Existing OpenCode and Antigravity characterizations must be inverted after the fix while Codex positive-evidence multi-source merging stays green.
 
 ## AUD-002 — P1 — Local model-runtime request IDs are not endpoint scoped
 
@@ -35,23 +39,27 @@ Required remediation contract: independent provider session IDs stay independent
 
 Two vLLM instances at different endpoints that both return `req-1` therefore create two runtime nodes and one shared request node. GraphAccumulator is ID-keyed, so this becomes a false graph join. The same identity construction is shared by Ollama, llama.cpp and LM Studio runtime response paths.
 
+PR #26 directly characterizes the collision with two vLLM endpoints and one native request ID.
+
 Required remediation contract: endpoint is part of the request identity domain. A native request ID is authoritative only inside that endpoint/runtime namespace.
 
 ## AUD-003 — P1 — Gateway request/deployment IDs are not endpoint scoped
 
 `inference_gateway._gateway_entity()` includes endpoint digest, while request identity is `inference-request:<gateway_name>:<native_id>` and deployment identity is `inference-deployment:<gateway>:<hash(deployment)>`.
 
-Separate LiteLLM proxies or OpenRouter-compatible gateway endpoints can therefore collide if native IDs/deployment labels match. This is especially dangerous because the rendered graph appears to prove that two gateways served/routed the same request when they did not.
+Separate LiteLLM proxies or OpenRouter-compatible gateway endpoints can therefore collide if native IDs/deployment labels match. PR #26 now characterizes both a LiteLLM request-ID collision and a distinct deployment-ID collision across two endpoints.
 
-Required remediation contract: gateway endpoint (or an equivalent stable instance scope) participates in request/deployment identity and in any reconciliation path.
+This is especially dangerous because the rendered graph appears to prove that two gateways served/routed the same request or deployment when they did not.
+
+Required remediation contract: sanitized gateway endpoint (or equivalent stable instance scope) participates in request/deployment identity and in every reconciliation path, including OpenRouter response/generation lookup. Same-endpoint reconciliation must remain intact while cross-endpoint joins disappear.
 
 ## AUD-004 — P1 — OpenCode emits generic and session-scoped agent identities for one session
 
 `opencode_adapter._agent()` always returns `agent:OpenCode`. `opencode_full_fidelity._agent(payload)` and `agent_trace.opencode_session_agent(session_id)` use `agent:opencode:session:<sessionID>` when the provider exposed the session.
 
-One plugin cycle can therefore attach model/tool semantics to a generic root while conversation/event evidence goes to a different session-scoped root. The graph does not merge them because their IDs differ.
+The strengthened PR #26 characterization also proves that `opencode_full_fidelity._metadata()` can source generic `agent:OpenCode` while chat content from the same payload is session-scoped. One processing cycle can therefore split semantic model evidence, provider metadata and conversation evidence across different graph roots.
 
-Required remediation contract: a single canonical OpenCode agent identity function must be used by semantic, full-fidelity, metadata, agent-trace and conversation paths.
+Required remediation contract: a single canonical OpenCode agent identity helper must be used by semantic, full-fidelity, metadata, agent-trace, model, tool and conversation paths. Session ID present means session-scoped identity; generic identity is reserved for genuinely unscoped evidence. Two independent sessions must remain distinct.
 
 ## AUD-005 — P1 — Antigravity Stop archives fabricate provider-root provenance
 
@@ -59,15 +67,20 @@ Required remediation contract: a single canonical OpenCode agent identity functi
 
 This matters because the same conversation may be a child discovered through a parent's `invoke_subagent`. If linkage abstains because the implementation wire changed or is torn, the child Stop transcript now carries an affirmative root claim that the provider never supplied.
 
-Required remediation contract: transcript/conversation identity must be separable from topology. Root provenance requires a positive root fact; no-parent-observed is not the same evidence as provider-reported-root.
+Required remediation contract: transcript/conversation identity must be separable from topology. Root provenance requires a positive root fact; no-parent-observed is not the same evidence as provider-reported-root. Validated child evidence must remain authoritative regardless of event order.
 
 ## AUD-006 — P1 — Antigravity semantic and conversation evidence disagree on agent identity
 
-The current PostToolUse fallback already has `conversationId`, but `_post_tool_observation()` emits source `agent:Antigravity`. Stop archive evidence uses `agent:antigravity:conversation:<conversationId>`.
+Both PostToolUse paths are confirmed affected:
 
-That produces two agent nodes for one logical conversation and can split tool/model evidence away from the conversation panel. In multi-agent runs it also gives the generic node ownership over observations originating from different child conversations.
+- the exact `toolCall` path in `antigravity_adapter_base` emits source `agent:Antigravity`;
+- the no-tool-identity fallback in `antigravity_adapter` also emits source `agent:Antigravity`.
 
-Required remediation contract: every evidence producer that has an exact provider conversation ID must use the same canonical conversation-agent identity or an explicit identity-equivalence edge with positive evidence.
+Both payload shapes already carry exact `conversationId`. Stop/archive evidence for that same exact ID uses `agent:antigravity:conversation:<conversationId>`.
+
+That produces two agent nodes for one logical conversation and can split tool evidence away from the conversation panel. In multi-agent runs it also gives the generic node ownership over observations originating from different child conversations.
+
+Validated Antigravity child linkage already uses `agent:antigravity:conversation:<childId>`, so remediation does not require a new ID scheme. Required contract: every evidence producer with exact provider conversation ID uses one canonical conversation-agent identity. Child linkage should attach evidence-scoped topology instead of relying on a legacy bare `agent_path`, while invalid/torn linkage continues to abstain.
 
 ## AUD-007 — P2 — Provider Capability Stage Integrity does not inventory the shipped provider surface
 
@@ -91,11 +104,15 @@ When a provider response has no request ID, multiple adapters hash a subset of r
 
 The code defect is direct; the production frequency is provider-dependent, so this is **STRONGLY SUPPORTED** rather than promoted to a release-blocking confirmed bug without a representative provider fixture.
 
+Because AUD-002/AUD-003 already require endpoint-scoped inference identity changes, the relevant occurrence-identity portion of AUD-009 should be fixed or explicitly resolved in the same R2 remediation batch rather than left as a second incompatible fallback scheme.
+
 ## SUS-001 — P1 — Antigravity historical turns disappear in a real run
 
-The user supplied a real observation where earlier rounds disappeared instead of remaining as folded history. This audit has not yet reproduced that loss from a sanitized Antigravity transcript fixture, so it remains **SUSPECTED**, not a confirmed root cause claim.
+A real Antigravity observation showed earlier rounds disappearing instead of remaining as folded history. This audit has not yet reproduced that loss from a sanitized Antigravity transcript fixture, so it remains **SUSPECTED**, not a confirmed root cause claim.
 
-The regression needed is a three-turn provider transcript, repeated Stop/poll updates, graph/conversation projection and Chromium assertion that rounds 1/2 remain present/folded while round 3 is open.
+The required regression is a real/sanitized three-turn provider transcript/hook sequence exercised through archive -> graph -> conversation records -> dashboard -> Chromium with repeated Stop/poll updates. Rounds 1/2 must remain present/folded, round 3 open, manual historical fold state sticky, and root/child content isolated.
+
+A synthetic parser fixture may supplement coverage but cannot close SUS-001 by itself.
 
 # Known limitations
 
@@ -121,8 +138,13 @@ The conversation-record projection retains a UI preview of first 10 + last 70 wh
 
 # False positives investigated and dismissed
 
-- **viewer.html separate renderer:** dismissed. `viewer_projection.py` routes static output through `dashboard_shell` and the shared dashboard shell.
+- **viewer.html separate renderer:** dismissed. `viewer_projection.py` routes static output through `dashboard_shell` and the shared live dashboard shell.
 - **finished page still uses `/final` + `document.write()`:** dismissed on emitted `LIVE_HTML`; `live_view.py` patches the legacy path out.
 - **historical fold state has no Chromium test:** dismissed. `tests/test_dashboard_round_fold_state_e2e.py` exercises open/close persistence, polling, payload changes and agent switching.
 - **Cursor lacks subagent support:** dismissed. Subagent lifecycle is handled in `cursor_delegation_base.py` using exact provider `subagent_id`.
 - **timestamp-prefix agent labels are current behavior:** dismissed. `tests/test_agent_node_labels.py` guards namespaced path/nickname labeling.
+- **`collaborationspawn_agent` needs a synthetic separator:** dismissed. It is provider-native observed naming; changing it would fabricate presentation data not observed from the provider.
+
+# Remediation reference
+
+See `remediation-plan.md` for the R1–R6 implementation batches, required regressions, expected files, and explicit anti-patterns. PR #26 remains audit-only; green audit CI proves these characterizations are reproducible, not that the defects are fixed.
