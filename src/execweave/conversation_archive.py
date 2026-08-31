@@ -318,7 +318,6 @@ def antigravity_conversation_archive_events(
             "provider": "antigravity",
             "conversation_id": conversation_id,
             "identity_semantics": "provider_conversation_id",
-            **root_topology(),
         },
     )
     return _archive(
