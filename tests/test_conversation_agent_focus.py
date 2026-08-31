@@ -30,13 +30,13 @@ def test_static_viewer_node_click_focuses_that_agent() -> None:
     assert "document.addEventListener('click'" in source
     assert "event.target.closest?.('.node')" in source
     assert "syncSelection();refresh()" in source
-    assert "if(node?.type==='agent')render(node);else selectedNode=null" in source
+    assert "const node=graphNode(selected.dataset.id);if(node)render(node)" in source
 
 
 def test_live_dashboard_selection_focuses_that_agent() -> None:
     assert "window.__execweaveAgentPanel" in _LIVE_HTML
     assert "function syncSelection()" in _LIVE_HTML
-    assert "if(node?.type==='agent')render(node);else selectedNode=null" in _LIVE_HTML
+    assert "const node=graphNode(selected.dataset.id);if(node)render(node)" in _LIVE_HTML
 
 
 def test_both_viewer_variants_carry_the_focus_implementation() -> None:

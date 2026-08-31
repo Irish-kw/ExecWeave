@@ -138,8 +138,110 @@ function foldedRound(round,when,label){
   fold.append(head,roundView(round));
   return fold;
 }
+// A run graph is mostly not agents, and until now selecting one of those nodes showed
+// its type and two timestamps. What each kind of node actually carries is listed here,
+// and nothing that is not in the data is invented.
+function displayGraph(){const core=window.__execweaveCore;return core?.getDisplayGraph?.()||core?.getGraph?.()||{}}
+function edgesTouching(id){return (displayGraph().edges||[]).filter(edge=>String(edge?.source||'')===id||String(edge?.target||'')===id)}
+function nodeNamed(id){return (displayGraph().nodes||[]).find(node=>String(node?.id||'')===String(id))||null}
+function moment(stamp){if(!stamp)return '';const at=new Date(stamp);if(Number.isNaN(at.getTime()))return String(stamp);
+  const pad=value=>String(value).padStart(2,'0');
+  return `${pad(at.getHours())}:${pad(at.getMinutes())}:${pad(at.getSeconds())}`}
+function span(node){const from=moment(node?.first_seen),to=moment(node?.last_seen);
+  return from&&to&&from!==to?`${from} → ${to}`:from||to||''}
+function commandText(value){
+  if(Array.isArray(value))return value.join(' ');
+  return value==null?'':String(value);
+}
+function fileHistory(id){
+  const rows=[];
+  for(const edge of edgesTouching(id)){
+    for(const kind of (edge?.event_types||[])){
+      const what=String(kind).replace(/^filesystem\./,'');
+      const count=Number(edge?.count||0);
+      rows.push(`${moment(edge?.first_seen)}  ${what}${count>1?`  \u00d7${count}`:''}`);
+    }
+  }
+  return rows.sort().join('\n');
+}
+function reachedBy(id){
+  const names=new Set();
+  for(const edge of edgesTouching(id)){
+    const other=String(edge?.source||'')===id?edge?.target:edge?.source;
+    const node=nodeNamed(other);
+    if(node&&node.type!=='network_endpoint')names.add(`${node.name||other}`);
+  }
+  return [...names].join('\n');
+}
+function foldedList(a){
+  const members=Array.isArray(a.viewer_folded_members)?a.viewer_folded_members:[];
+  return members
+    .slice()
+    .sort((x,y)=>String(y?.last_seen||'').localeCompare(String(x?.last_seen||'')))
+    .map(item=>`${moment(item?.last_seen||item?.first_seen)}  ${item?.name||item?.id}`)
+    .join('\n');
+}
+function occurrenceList(a){
+  const rows=Array.isArray(a.viewer_occurrences)?a.viewer_occurrences:[];
+  if(rows.length<2)return '';
+  return rows
+    .slice()
+    .sort((x,y)=>String(y?.first_seen||'').localeCompare(String(x?.first_seen||'')))
+    .map(item=>`${moment(item?.first_seen)}${item?.pid?`  pid ${item.pid}`:''}`)
+    .join('\n');
+}
+function nodeCards(node){
+  const a=attrs(node),kind=String(node?.type||'');
+  const rows=[];
+  const add=(label,value)=>{const text=commandText(value);if(text)rows.push([label,text])};
+  if(a.viewer_folded){
+    // The budget folds the older nodes of a type into this one rather than dropping
+    // them, so it has to say what it holds.
+    add('Folded',`${a.viewer_folded_count} earlier ${String(a.viewer_folded_type||'').replace(/_/g,' ')} nodes`);
+    add('Holding',foldedList(a));
+    add('Observed at',span(node));
+    return rows;
+  }
+  if(kind==='process'){
+    add('Command',a.cmdline);
+    add('Executable',a.exe);
+    add('Process',[a.pid&&`pid ${a.pid}`,a.ppid&&`parent ${a.ppid}`].filter(Boolean).join('  \u00b7  '));
+    add('Ran',occurrenceList(a));
+  }else if(kind==='file'){
+    add('Path',node?.name);
+    add('Observed',fileHistory(String(node?.id||'')));
+  }else if(kind==='tool_call'){
+    add('Tool',a.tool_name||node?.name);
+    add('Inputs',Array.isArray(a.input_keys)?a.input_keys.join(', '):a.input_keys);
+    add('Call',a.tool_use_id);
+    add('Model',a.codex_model);
+    add('Working directory',a.codex_cwd);
+  }else if(kind==='session'){
+    add('Command',a.command);
+    add('Working directory',a.cwd);
+    add('Backend',a.backend);
+  }else if(kind==='network_endpoint'){
+    add('Address',node?.name);
+    add('Reached by',reachedBy(String(node?.id||'')));
+  }else{
+    add('Name',node?.name);
+    add('Provider',a.provider);
+    add('Session',a.session_id);
+  }
+  add('Observed at',span(node));
+  return rows;
+}
+function renderNode(node){
+  const rows=nodeCards(node);
+  if(!rows.length)return false;
+  selectedNode=null;detailsEmpty.hidden=true;details.replaceChildren();
+  const view=document.createElement('div');view.className='execweave-agent-view';
+  for(const[label,text]of rows)view.appendChild(card(label,text));
+  details.appendChild(view);return true;
+}
 function render(node){
-  if(!node||String(node.type||'')!=='agent')return false;
+  if(!node)return false;
+  if(String(node.type||'')!=='agent')return renderNode(node);
   selectedNode=node;detailsEmpty.hidden=true;details.replaceChildren();
   const path=nodePath(node),preview=recordFor(node)?.conversation_preview||{},messages=Array.isArray(preview.messages)?preview.messages:[];
   const isRoot=path==='/root'||attrs(node).agent_role==='root'||attrs(node).root_agent_path==='/root';
@@ -157,7 +259,7 @@ function render(node){
   details.appendChild(list);return true;
 }
 function graphNode(id){const core=window.__execweaveCore;if(!core)return null;const graph=core.getDisplayGraph?.()||core.getGraph?.()||{};return (graph.nodes||[]).find(node=>String(node?.id||'')===String(id||''))||null}
-function syncSelection(){const selected=document.querySelector('.node.selected');if(!selected){selectedNode=null;return}const node=graphNode(selected.dataset.id);if(node?.type==='agent')render(node);else selectedNode=null}
+function syncSelection(){const selected=document.querySelector('.node.selected');if(!selected){selectedNode=null;return}const node=graphNode(selected.dataset.id);if(node)render(node);else selectedNode=null}
 function setEntries(next){entries=Array.isArray(next)?next:[];if(selectedNode)render(selectedNode)}
 async function refresh(){if(window.__execweaveStaticMode||refreshing)return;refreshing=true;try{const headers={};if(window.__execweaveToken)headers['X-ExecWeave-Token']=window.__execweaveToken;const response=await fetch('/conversations.json',{cache:'no-store',headers});if(response.ok){const payload=await response.json();setEntries(payload?.entries)}}catch(_){}finally{refreshing=false}}
 const nodes=document.getElementById('nodes');if(nodes)new MutationObserver(syncSelection).observe(nodes,{subtree:true,attributes:true,attributeFilter:['class']});

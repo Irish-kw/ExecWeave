@@ -177,11 +177,18 @@ def _audit(page: Any, graph: dict[str, Any]) -> dict[str, tuple[list[str], list[
         results[path] = labels, bodies
         _assert_no_dashboard_clutter(page)
 
+    # A non-agent node describes itself — v0.8.0 gives it its command, its address and
+    # what was observed of it — and never carries a conversation.
     for node_id in ("process:codex", "endpoint:203.0.113.7:443"):
         _click_id(page, node_id)
-        assert not page.locator("#details .execweave-agent-card").count()
+        labels, _ = _cards(page)
+        assert labels, f"{node_id} shows nothing at all"
+        conversation = {"Prompt", "Final response", "Task", "Thinking", "Response"}
+        assert not conversation & set(labels), f"{node_id} shows conversation cards: {labels}"
         visible = page.locator("#details").inner_text()
-        assert not any(marker in visible for marker in ALL_MARKERS)
+        assert not any(marker in visible for marker in ALL_MARKERS), (
+            f"{node_id}, which is not an agent, shows an agent's turn"
+        )
 
     return results
 
@@ -546,3 +553,45 @@ def test_each_round_keeps_its_own_question_and_answer(tmp_path: Path) -> None:
         "the earlier round lost the answer it was given"
     )
     assert child_folds == 0, "a subagent with one round must not grow a fold"
+
+
+def test_a_crowded_type_folds_its_older_nodes_instead_of_dropping_them(tmp_path: Path) -> None:
+    """A run that edits a codebase produces one file node per path.
+
+    Drawing all of them buries the graph, and hiding them loses evidence. Past a
+    per-type budget the most recent stay drawn and the older ones collapse into one
+    node that says how many it holds and lists them, the same way an agent's older
+    rounds fold rather than disappear.
+    """
+    from execweave.viewer_projection import write_graph_html
+
+    total = 40
+    graph = build_run(tmp_path, files=total)
+    viewer = tmp_path / "viewer.html"
+    write_graph_html(graph, viewer)
+
+    manager, executable = _browser()
+    with manager as playwright:
+        browser = _launch(playwright, executable)
+        try:
+            page = browser.new_page(viewport={"width": 1440, "height": 1000})
+            page.goto(viewer.as_uri())
+            page.wait_for_selector(".node", timeout=15000)
+            drawn = page.eval_on_selector_all(".node", "nodes=>nodes.map(n=>n.dataset.id)")
+            drawn_files = [value for value in drawn if str(value).startswith("file:")]
+            folds = [value for value in drawn if "folded" in str(value)]
+            assert len(folds) == 1, f"expected one fold node, drew {folds}"
+            _click_id(page, folds[0])
+            labels, bodies = _cards(page)
+        finally:
+            browser.close()
+
+    assert drawn_files, "every file node was folded away; the newest must stay drawn"
+    assert len(drawn_files) < total, "nothing folded, so the budget did not apply"
+    held = dict(zip(labels, bodies))
+    assert "Folded" in held and "Holding" in held, f"the fold node says nothing: {labels}"
+    listed = [line for line in held["Holding"].splitlines() if line.strip()]
+    assert len(drawn_files) + len(listed) == total, (
+        f"{len(drawn_files)} drawn plus {len(listed)} folded does not account for {total}"
+    )
+    assert "src/module_" in listed[0], f"the fold must name what it holds: {listed[0]}"

@@ -134,6 +134,7 @@ def build_run(
     per_agent_rollouts: bool = True,
     snapshots: int = 1,
     rounds: int = 1,
+    files: int = 0,
 ) -> dict[str, Any]:
     """Build the run. With ``per_agent_rollouts`` off, only the root rollout exists.
 
@@ -177,6 +178,20 @@ def build_run(
         "relation": "OBSERVED_PROCESS"})
     edges.append({"source": "process:codex", "target": "endpoint:203.0.113.7:443",
         "relation": "OBSERVED_CONNECTION"})
+
+    # A run that edits a codebase produces one file node per path. Past the canvas
+    # budget the older ones fold into a single node rather than being dropped.
+    for index in range(files):
+        file_id = f"file:/repo/src/module_{index:02d}.py"
+        at = f"2026-01-01T00:{index:02d}"
+        nodes.append({"id": file_id, "type": "file", "name": f"src/module_{index:02d}.py",
+            "first_seen": f"{at}:00Z", "last_seen": f"{at}:30Z", "attributes": {}})
+        edges.append({"source": "agent:OpenAI Codex", "target": file_id,
+            "relation": "OBSERVED_FILE_CHANGE", "event_types": ["filesystem.created"],
+            "count": 1, "first_seen": f"{at}:00Z", "last_seen": f"{at}:00Z"})
+        edges.append({"source": "agent:OpenAI Codex", "target": file_id,
+            "relation": "OBSERVED_FILE_CHANGE", "event_types": ["filesystem.modified"],
+            "count": 3, "first_seen": f"{at}:10Z", "last_seen": f"{at}:30Z"})
 
     for sequence, (source_id, text) in enumerate(documents):
         raw = text.encode("utf-8")

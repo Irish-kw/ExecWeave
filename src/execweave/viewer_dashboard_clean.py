@@ -67,7 +67,14 @@ function execweaveDashboardGraph(data){
     return{...node,attributes:{...(node.attributes||{}),viewer_aggregated_tool_call_count:toolCounts.get(node.id)}};
   });
 
-  const canonicalTypes=new Set(['process']);
+  const canonicalTypes=new Set(['process','file']);
+  // Reaching the budget does not hide anything. The most recent nodes of a type stay
+  // drawn and the older ones collapse into one node that lists what it holds, the same
+  // way an agent's older rounds fold instead of disappearing. A run that touches one
+  // path a thousand times canonicalises to a single node; a run that touches a thousand
+  // paths folds all but the newest few.
+  const foldableTypes=new Set(['process','file','network_endpoint']);
+  const FOLD_BUDGET=12;
   const canonicalGroups=new Map();
   const canonicalKey=node=>{
     const type=String(node?.type||'');
@@ -95,6 +102,33 @@ function execweaveDashboardGraph(data){
     nodes.push({...base,first_seen:firstSeen||base.first_seen,last_seen:lastSeen||base.last_seen,attributes:{...(base.attributes||{}),viewer_canonicalized:true,viewer_occurrence_count:group.length,viewer_occurrence_ids:group.map(item=>item.id),viewer_occurrences:occurrenceRows,viewer_pids:pids,viewer_ppids:ppids}});
   }
 
+  let foldedNodeCount=0;
+  const byType=new Map();
+  for(const node of nodes){const type=String(node?.type||'');if(!foldableTypes.has(type))continue;
+    if(!byType.has(type))byType.set(type,[]);byType.get(type).push(node)}
+  const folds=[];
+  for(const[type,members]of byType){
+    if(members.length<=FOLD_BUDGET)continue;
+    const recency=node=>String(node?.last_seen||node?.first_seen||'');
+    const ordered=[...members].sort((a,b)=>recency(b).localeCompare(recency(a)));
+    const older=ordered.slice(FOLD_BUDGET);
+    if(!older.length)continue;
+    const keep=new Set(ordered.slice(0,FOLD_BUDGET).map(node=>node.id));
+    const foldId=`viewer:folded:${type}`;
+    for(const node of older)canonicalId.set(node.id,foldId);
+    foldedNodeCount+=older.length;
+    folds.push({
+      id:foldId,type,name:`${older.length} earlier ${type.replace(/_/g,' ')}${older.length===1?'':'s'}`,
+      first_seen:older.reduce((value,node)=>earlier(value,node.first_seen),null),
+      last_seen:older.reduce((value,node)=>later(value,node.last_seen),null),
+      attributes:{viewer_folded:true,viewer_folded_type:type,viewer_folded_count:older.length,
+        viewer_folded_members:older.map(node=>({id:node.id,name:node.name||node.id,
+          first_seen:node.first_seen||null,last_seen:node.last_seen||null}))},
+    });
+    for(let index=nodes.length-1;index>=0;index--)if(!keep.has(nodes[index].id)&&String(nodes[index].type||'')===type)nodes.splice(index,1);
+  }
+  nodes.push(...folds);
+
   let nodeIds=new Set(nodes.map(node=>node.id));
   let edges=allEdges.map(edge=>{
     if(!edge)return null;
@@ -116,7 +150,7 @@ function execweaveDashboardGraph(data){
   const incident=new Set();for(const edge of edges){incident.add(edge.source);incident.add(edge.target)}
   visibleNodes=nodes.filter(node=>node.type!=='tool'||incident.has(node.id));
   nodeIds=new Set(visibleNodes.map(node=>node.id));edges=edges.filter(edge=>nodeIds.has(edge.source)&&nodeIds.has(edge.target));
-  return{...data,nodes:visibleNodes,edges,node_count:visibleNodes.length,edge_count:edges.length,dashboard_projection:{hidden_detail_node_count:hiddenDetailIds.size,hidden_internal_staging_node_count:internalStagingIds.size,canonicalized_process_occurrence_count:canonicalizedProcessOccurrenceCount,collapsed_tool_call_count:[...groups.values()].reduce((sum,item)=>sum+item.count,0)}};
+  return{...data,nodes:visibleNodes,edges,node_count:visibleNodes.length,edge_count:edges.length,dashboard_projection:{hidden_detail_node_count:hiddenDetailIds.size,hidden_internal_staging_node_count:internalStagingIds.size,canonicalized_process_occurrence_count:canonicalizedProcessOccurrenceCount,folded_node_count:foldedNodeCount,collapsed_tool_call_count:[...groups.values()].reduce((sum,item)=>sum+item.count,0)}};
 }
 """.strip()
 

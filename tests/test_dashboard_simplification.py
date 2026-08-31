@@ -169,7 +169,7 @@ def test_dashboard_process_canonicalization_is_presentation_only() -> None:
         "file:staging",
         "network:104.18.25.193:443",
     } <= raw_ids
-    assert "canonicalTypes=new Set(['process'])" in html
+    assert "canonicalTypes=new Set(['process','file'])" in html
     assert "mergeTypes=new Set(['model','directory','network_endpoint'])" in html
     assert "node.type==='process'&&occurrenceCount>1" in html
     assert "viewer_occurrence_count" in html
