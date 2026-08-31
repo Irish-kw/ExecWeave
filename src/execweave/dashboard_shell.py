@@ -7,7 +7,6 @@ from .live_view import LIVE_HTML as _BASE_LIVE_HTML
 from .viewer_agent_panel import inject_agent_panel
 from .viewer_dashboard_clean import fold_budget_bootstrap, inject_live_dashboard_clean
 from .viewer_dashboard_focus import inject_live_dashboard_focus
-from .viewer_dashboard_hardening_v2 import harden_dashboard_html
 from .viewer_live_layout import inject_live_dashboard_layout
 
 
@@ -15,8 +14,7 @@ def _build_dashboard_html() -> str:
     html = inject_live_dashboard_layout(
         inject_live_dashboard_focus(inject_live_dashboard_clean(_BASE_LIVE_HTML))
     )
-    html = inject_agent_panel(html)
-    return harden_dashboard_html(html)
+    return inject_agent_panel(html)
 
 
 DASHBOARD_HTML = _build_dashboard_html()
