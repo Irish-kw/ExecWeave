@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from execweave.antigravity_adapter import antigravity_hook_to_semantic_events
 from execweave.content_store import FullFidelityContentStore
 from execweave.conversation_archive import antigravity_conversation_archive_events
 from execweave.inference_gateway import litellm_response_to_events
@@ -122,3 +123,39 @@ def test_aud_005_characterizes_antigravity_fabricated_root_provenance(
     assert events
     attrs = events[0]["source"]["attributes"]
     assert attrs.get("root_topology_evidence") == "provider_session_root"
+
+
+def test_aud_006_characterizes_antigravity_tool_conversation_identity_split(
+    tmp_path: Path,
+) -> None:
+    """AUD-006: one exact conversation id currently produces two graph agent ids."""
+    conversation_id = "shared-conversation"
+    semantic = antigravity_hook_to_semantic_events(
+        {"conversationId": conversation_id, "stepIdx": 7},
+        hook_event="PostToolUse",
+        timestamp=_TIMESTAMP,
+    )
+
+    transcript = (
+        tmp_path
+        / "antigravity"
+        / "brain"
+        / conversation_id
+        / ".system_generated"
+        / "logs"
+        / "transcript.jsonl"
+    )
+    transcript.parent.mkdir(parents=True)
+    transcript.write_text("{}\n", encoding="utf-8")
+    archived = antigravity_conversation_archive_events(
+        {"conversationId": conversation_id, "transcriptPath": str(transcript)},
+        store=FullFidelityContentStore(tmp_path / "run"),
+        timestamp=_TIMESTAMP,
+    )
+
+    assert semantic and archived
+    semantic_agent = semantic[0]["source"]["id"]
+    conversation_agent = archived[0]["source"]["id"]
+    assert semantic_agent == "agent:Antigravity"
+    assert conversation_agent == f"agent:antigravity:conversation:{conversation_id}"
+    assert semantic_agent != conversation_agent
