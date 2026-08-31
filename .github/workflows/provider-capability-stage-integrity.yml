@@ -40,8 +40,4 @@ jobs:
         run: >-
           python scripts/check_release_stage_integrity.py
           --baseline-ref "${{ github.event.pull_request.base.sha || inputs.baseline_ref }}"
-          --allow-test-change "tests/multi_agent_run_fixture.py=v0.8.0 the browser check for folding needs a run with many distinct paths, so the shared fixture gains a files= knob. This module is the fixture builder and declares no test node IDs; nothing existing is removed"
-          --allow-test-change "tests/test_conversation_agent_focus.py=v0.8.0 selection no longer stops at agents, so the two assertions that pinned the agent-only branch now pin the line that renders whatever node was clicked. The test IDs and their subject, that a click focuses the clicked node, are unchanged"
-          --allow-test-change "tests/test_dashboard_information_architecture.py=v0.8.0 file joins process in the canonical set, so the two assertions naming that set name both types. The test IDs and the property they hold, that canonicalisation is presentation only, are unchanged"
-          --allow-test-change "tests/test_dashboard_simplification.py=v0.8.0 the same canonical-set assertion names both types for the same reason; the raw-id check above it still proves the underlying graph keeps every node"
-          --allow-test-change "tests/test_viewer_agent_isolation_e2e.py=v0.8.0 adds two browser checks: a non-agent node showing its own detail, and a crowded type folding its older members with every one still reachable. The existing browser test IDs are unchanged in subject and still assert the visible contract"
+          --allow-test-change "tests/test_v069_dashboard_release.py=the release metadata assertions move from 0.7.9 to 0.8.0. The test keeps the function name it was written under because the node-ID floor refuses renames, and the English README anchor it pins is unchanged"

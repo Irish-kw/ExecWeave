@@ -31,7 +31,7 @@ ExecWeave 是一個 source-available、local-first 的可觀測性專案，會�
 python -m pip install -U execweave
 ```
 
-目前正式版本是 **v0.7.9**。
+目前正式版本是 **v0.8.0**。
 
 開發安裝：
 
@@ -67,7 +67,7 @@ execweave record --open -- python my_agent.py
 
 `execweave top -- codex` 會讓 Agent 保持在啟動 terminal 中互動，並依主機環境開啟或附加 detached Top dashboard。
 
-**v0.7.9 — 執行中與執行後，同一套 Dashboard。** Live、完成後的畫面與 viewer.html 原本是同一批證據的三種渲染，而且執行結束時會去抓另一份文件覆蓋讀者正在看的頁面。現在只有一套 shell：完成只讓當前畫面轉為結束狀態，viewer.html 就是同一套 Dashboard 的離線存檔。選取一個 agent 只回答一個問題就停——root 顯示它的 Prompt 與 Final response，subagent 顯示 Task、provider 有公開明文時的 Thinking、以及 Response——而 process、file、網路端點或 model 完全不顯示任何對話，因為對話屬於 agent。provider 加密的 turn 讀作「已觀測但未公開明文」，而不是從未記錄；provider 加在每個 subagent 前面的內容永遠不會被當成某個 agent 的交辦；引用了 routing 字眼的回答也完整保留。每個 agent 各自擁有的 provider-neutral、agent-local multi-agent conversation 會跨該次執行寫出的所有存檔聚合，因此被記錄多次的 agent 仍然顯示得出它說了什麼。發布前的檢查會用真實瀏覽器把出貨的 Dashboard 在 live 與 finished 兩種狀態下走過每一種可操作的選取。
+**v0.8.0 — 每一輪、每一個 node，都說得出自己有什麼。** 一次執行很少只有一個問題，面板卻只放得下一個：它把最舊的提問配上最新的回答，於是兩輪的執行會把第一個問題和第二個問題的回答排在一起，而第一輪自己的回答根本點不到。現在以輪為單位——最新的一輪展開，較舊的摺疊成一行，標明它自己的時間與問題；subagent 的摺疊行沿用它所屬 root 輪次的時間與敘述。另外有兩個 subagent 一直遺失自己的 Response：那條避免把 provider 共用前言當成某個 agent 交辦的規則，會比對任何同時出現在兩個 agent 底下的長文字，而 child 的回答本來就同時出現在它自己的紀錄與父層的紀錄裡。該規則現在只看送進來的訊息，所以 agent 寫的東西不管在執行中重複幾次都仍然是它自己的。選取 process、file 或網路端點不再畫出空面板：各自說明自己是什麼——指令列連同它的 pid 與父行程、路徑連同動過它的歷程、位址連同連上它的行程。而某個類型多到超過額度時，最新的仍然畫出來，較舊的收合成單一 node，並且仍然列出它收了哪些，因此動到上千個路徑的執行依然讀得下去，也不會漏掉任何一個。 每個 agent 各自擁有的 provider-neutral、agent-local multi-agent conversation 仍是原本那份紀錄；變的是讀者現在讀得到全部，而不是其中一段。
 
 統一 dashboard 把 execution graph、logs 與 conversation records 放進同一條 inspection flow。Finalized run 會產生 `conversations.md` 與 `conversations.json`，經驗證的 provider transcript 也會複製進 run-local SHA-256 content store。Claude Code、OpenAI Codex、Cursor、OpenCode 與 Google Antigravity 都依各自實際曝露的 evidence 強度建立 multi-agent trace；若 gateway 或 local runtime 只提供 root request/response，ExecWeave 就只顯示 root conversation，不會虛構 subagent 或 hidden routing。
 
@@ -276,7 +276,7 @@ Conversation isolation 是 attribution/display 規則，不是 redaction boundar
 
 ## 目前狀態
 
-v0.7.9 整合 cross-platform runtime collection、materialized execution graph、standalone/live dashboard、保守的 provider↔runtime correlation、content-addressed full-fidelity provider evidence、可歸屬的 multi-agent execution trace、run-local conversation access，provider-neutral projection 上的 agent-local conversation isolation，以及 standalone 與 live dashboard 上的 per-agent conversation focus。各 integration 只保留 provider 實際曝露的最強 identity/routing evidence，證據不足時選擇 abstain。Observed evidence 與 inference 仍從設計上分離。
+v0.8.0 整合 cross-platform runtime collection、materialized execution graph、standalone/live dashboard、保守的 provider↔runtime correlation、content-addressed full-fidelity provider evidence、可歸屬的 multi-agent execution trace、run-local conversation access，provider-neutral projection 上的 agent-local conversation isolation，以及 standalone 與 live dashboard 上的 per-round agent conversation 面板、會自我說明並依類型摺疊的 non-agent node。各 integration 只保留 provider 實際曝露的最強 identity/routing evidence，證據不足時選擇 abstain。Observed evidence 與 inference 仍從設計上分離。
 
 ## 文件
 
