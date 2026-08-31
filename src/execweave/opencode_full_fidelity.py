@@ -7,7 +7,7 @@ from typing import Any
 
 from .content_evidence import content_observation_event, filter_transport_credentials
 from .content_store import FullFidelityContentStore
-from .agent_topology import root_topology
+from .agent_trace import opencode_root_agent, opencode_session_agent
 
 _CONTENT_FIELDS = frozenset(
     {
@@ -29,20 +29,13 @@ def _entity(kind: str, ident: str, name: str, **attrs: Any) -> dict[str, Any]:
 def _agent(payload: dict[str, Any] | None = None) -> dict[str, Any]:
     if isinstance(payload, dict):
         session_id = payload.get("sessionID")
+        agent_name = payload.get("agent")
         if isinstance(session_id, str) and session_id:
-            agent_name = payload.get("agent")
-            name = agent_name if isinstance(agent_name, str) and agent_name else "OpenCode session"
-            return _entity(
-                "agent",
-                f"agent:opencode:session:{session_id}",
-                name,
-                provider="opencode",
-                session_id=session_id,
-                native_agent_name=agent_name if isinstance(agent_name, str) else None,
-                identity_semantics="provider_session_id",
-                **root_topology(),
+            return opencode_session_agent(
+                session_id,
+                agent_name=agent_name if isinstance(agent_name, str) else None,
             )
-    return _entity("agent", "agent:OpenCode", "OpenCode", provider="opencode")
+    return opencode_root_agent()
 
 
 def _scope(payload: dict[str, Any]) -> str:
@@ -108,7 +101,7 @@ def _metadata(payload: dict[str, Any], store: FullFidelityContentStore, timestam
     return content_observation_event(
         timestamp=timestamp,
         provider="opencode",
-        source=_agent(),
+        source=_agent(payload),
         reference=ref,
         relation="OBSERVED_PROVIDER_METADATA",
         observed_field="plugin_metadata",
