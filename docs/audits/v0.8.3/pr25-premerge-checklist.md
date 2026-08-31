@@ -5,8 +5,8 @@ This document is a pre-merge gate for PR #25 (`release/0.8.3-graph-ergonomics`).
 ## Snapshot
 
 - Checked against `main`: `1ec0dcb0171f9346f8232a99e857cbd6b3168f08`
-- PR #25 head: `8362e74acd91d703991efd8cac2f0826c86cad3a`
-- PR state: open, ready for review, mergeable
+- PR #25 audited head: `8362e74acd91d703991efd8cac2f0826c86cad3a`
+- PR state at audit: open, ready for review, mergeable
 - Branch relation to `main`: **ahead 17 / behind 0**
 - Unresolved review threads: **0**
 - Release metadata: remains `0.8.2` by design
@@ -22,6 +22,8 @@ All PR-triggered workflows on `8362e74acd91d703991efd8cac2f0826c86cad3a` complet
 - `Documentation i18n` — success
 
 PR #25 reports 894 passed / 6 skipped, Ruff clean, stage-integrity baseline subset preserved, and i18n failures = 0. Browser coverage includes adaptive sizing, lane separation, reversible focus, routing/crossing regression, and tool-traffic presentation.
+
+A green Stage Integrity workflow is not by itself sufficient for merge readiness: the audit also checks whether the workflow change permanently broadens an exception.
 
 ## Changed-file scope
 
@@ -42,9 +44,34 @@ PR #25 changes 12 paths:
 
 PR #26 changes only files under `docs/audits/v0.8.3/` plus `tests/test_v083_system_audit_characterization.py`. There is **no changed-path overlap** between PR #25 and PR #26 at this snapshot.
 
+## Merge-process blocker found after green CI
+
+### PM-001 — Stage Integrity allowance does not close itself
+
+Status: **CONFIRMED — MUST FIX BEFORE MERGE**
+
+PR #25 modifies `.github/workflows/provider-capability-stage-integrity.yml` so that whenever `tests/test_conversation_agent_focus.py` appears in the diff, the workflow automatically passes:
+
+`--allow-test-change tests/test_conversation_agent_focus.py=...`
+
+The condition is based only on the changed path. Unlike the release-metadata allowance above it, it is not restricted to `release/*`, and it is not restricted to PR #25's exact branch.
+
+`check_release_stage_integrity.py::_assert_existing_tests_untouched()` treats an `--allow-test-change PATH=REASON` entry as permission for that existing test file to be modified. The node-ID floor still prevents deleting/renaming its tests and the skip/xfail gate still applies, but the file's assertions may change.
+
+Therefore the PR description's statement that the allowance "closes itself once this lands" is not true for the current implementation: after the workflow lands on `main`, any later PR that edits `tests/test_conversation_agent_focus.py` will automatically obtain the same exception.
+
+Required remediation before merge:
+
+- scope the temporary allowance to the exact PR #25 branch (`HEAD_REF == release/0.8.3-graph-ergonomics`) **and** require the file to actually be changed, or use an equivalently narrow one-PR condition;
+- do not weaken `check_release_stage_integrity.py`;
+- rerun Provider Capability Stage Integrity and the full applicable PR #25 workflow matrix on the new head;
+- PR #26 must re-fetch and audit the new head before restoring the pre-merge gate to PASS.
+
+A blocking comment documenting PM-001 was posted on PR #25.
+
 ## Interaction with PR #26 findings
 
-PR #25 is mergeable as an isolated dashboard/ergonomics improvement, but it does **not** remediate the release-blocking identity findings from PR #26:
+PR #25's product implementation does **not** remediate the release-blocking identity findings from PR #26:
 
 - `AUD-001` cross-session root conversation merge
 - `AUD-002` local-runtime request identity missing endpoint scope
@@ -61,29 +88,30 @@ Two specific interaction notes must survive the merge:
 
 ## PR #25 pre-merge gate
 
-`PR25_PREMERGE_GATE = PASS`
+`PR25_PREMERGE_GATE = BLOCKED_PENDING_PM_001`
 
-This PASS means only that PR #25 itself is ready to merge into `main` if the atomic checks immediately before merge still match this snapshot.
+The graph ergonomics/tool-traffic implementation itself is not rejected. The blocker is the permanent scope of a CI test-change allowance introduced by the PR.
 
-It does **not** mean `V0.8.3_RELEASE_GATE = PASS`.
+It remains true that `V0.8.3_RELEASE_GATE = FAIL` independently of this merge-process blocker.
 
-## Atomic checks immediately before merge
+## Atomic checks after PM-001 is fixed
 
-Before merging PR #25, perform these checks again from GitHub, in this order:
+When Claude pushes a remediation, do not reuse the old audited SHA. Repeat these checks from GitHub in this order:
 
 1. Fetch latest `main`.
 2. Fetch latest PR #25 metadata/head.
-3. Require PR #25 expected head SHA to still be `8362e74acd91d703991efd8cac2f0826c86cad3a`; if Claude pushes again, stop and audit the new head instead of merging the old snapshot.
+3. Confirm the new diff scopes the conversation-focus allowance to PR #25 only and still requires the file to actually change.
 4. Require PR #25 to remain `mergeable=true`, open, and non-draft.
-5. Compare PR #25 head against latest `main`; require `behind_by=0`. If `main` moved, stop and re-evaluate against the new base before merge.
-6. Re-read workflow runs for the exact expected head; require every applicable workflow to be completed/success.
+5. Compare the new PR #25 head against latest `main`; require `behind_by=0`. If `main` moved, re-evaluate against the new base.
+6. Re-read workflow runs for the exact new head; require every applicable workflow to be completed/success.
 7. Re-check unresolved review threads; require zero unresolved threads or an explicit decision on each.
-8. Do not change release metadata, create a tag, create a GitHub Release, or publish PyPI as part of this merge.
-9. Merge with an expected-head guard so GitHub rejects the operation if the branch moved between the final read and the write.
+8. Re-confirm PR #25 and PR #26 changed paths do not conflict.
+9. Do not change release metadata, create a tag, create a GitHub Release, or publish PyPI as part of this merge.
+10. Only after the gate returns to PASS, merge with an expected-head guard so GitHub rejects the operation if the branch moves between final read and write.
 
 ## Immediately after merge
 
-After PR #25 lands:
+After PR #25 eventually lands:
 
 1. Fetch `main` and record the new main SHA / merge SHA.
 2. Verify PR #25 is actually merged and its head matches the audited expected SHA.
@@ -95,12 +123,13 @@ After PR #25 lands:
 ## Gate summary
 
 ```text
-PR25_PREMERGE_GATE=PASS
-PR25_EXPECTED_HEAD=8362e74acd91d703991efd8cac2f0826c86cad3a
-PR25_BEHIND_MAIN=0
-PR25_UNRESOLVED_REVIEW_THREADS=0
-PR25_WORKFLOWS=ALL_GREEN
+PR25_PREMERGE_GATE=BLOCKED_PENDING_PM_001
+PR25_AUDITED_HEAD=8362e74acd91d703991efd8cac2f0826c86cad3a
+PR25_BEHIND_MAIN_AT_AUDIT=0
+PR25_UNRESOLVED_REVIEW_THREADS_AT_AUDIT=0
+PR25_WORKFLOWS_AT_AUDIT=ALL_GREEN
 PR25_PR26_PATH_CONFLICT=NONE
-PR25_MERGE_AUTHORIZATION=NOT_YET_EXECUTED
+PM_001=CONFIRMED
+PR25_MERGE_AUTHORIZATION=NO
 V0.8.3_RELEASE_GATE=FAIL
 ```
