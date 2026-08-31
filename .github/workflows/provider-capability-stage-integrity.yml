@@ -55,10 +55,17 @@ jobs:
           if [[ "$HEAD_REF" == release/* && -n "$release_metadata_changed" ]]; then
             args+=(--allow-test-change "tests/test_v069_dashboard_release.py=release metadata assertions may advance only on a release/* pull request; the historical test name remains stable because the node-ID floor refuses renames")
           fi
-          # Same shape as above: named only while the file actually changes, so the
-          # allowance closes itself once this work lands.
+          # PR #25 changes one historical source assertion only because tool traffic is
+          # appended inside the same render pass. Grant that exact exception only to the
+          # exact PR #25 branch and only while the file actually differs from the base.
+          # Once PR #25 lands, future branches cannot inherit this allowance merely by
+          # changing the same test file.
+          conversation_focus_changed=""
           if git diff --name-only "$BASELINE_REF...HEAD" \
               | grep -qx 'tests/test_conversation_agent_focus.py'; then
-            args+=(--allow-test-change "tests/test_conversation_agent_focus.py=surfacing tool traffic appends one more card inside the same render pass, so the source assertion that pinned the final line names the new line. The test ID and its subject, that the panel builds and returns in one pass, are unchanged")
+            conversation_focus_changed=yes
+          fi
+          if [[ "$HEAD_REF" == "release/0.8.3-graph-ergonomics" && -n "$conversation_focus_changed" ]]; then
+            args+=(--allow-test-change "tests/test_conversation_agent_focus.py=PR #25 only: surfacing tool traffic appends one more card inside the same render pass, so the source assertion that pinned the final line names the new line. The test ID and subject are unchanged")
           fi
           python scripts/check_release_stage_integrity.py "${args[@]}"
