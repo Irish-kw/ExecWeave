@@ -277,7 +277,7 @@ function render(node){
   details.appendChild(list);return true;
 }
 function graphNode(id){const core=window.__execweaveCore;if(!core)return null;const graph=core.getDisplayGraph?.()||core.getGraph?.()||{};return (graph.nodes||[]).find(node=>String(node?.id||'')===String(id||''))||null}
-function syncSelection(){const selected=document.querySelector('.node.selected');if(!selected){selectedNode=null;selectedConversationSignature='';return}const node=graphNode(selected.dataset.id);if(node)render(node);else{selectedNode=null;selectedConversationSignature=''}}
+function syncSelection(){const selected=document.querySelector('.node.selected');if(!selected){selectedNode=null;selectedConversationSignature='';return}const node=graphNode(selected.dataset.id);if(node)render(node);else selectedNode=null;if(!node)selectedConversationSignature=''}
 function setEntries(next){
   const candidate=Array.isArray(next)?next:[];
   if(!selectedNode){entries=candidate;return}
