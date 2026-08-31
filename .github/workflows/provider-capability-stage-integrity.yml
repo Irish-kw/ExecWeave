@@ -40,4 +40,4 @@ jobs:
         run: >-
           python scripts/check_release_stage_integrity.py
           --baseline-ref "${{ github.event.pull_request.base.sha || inputs.baseline_ref }}"
-          --allow-test-change "tests/test_viewer_agent_isolation_e2e.py=the fold budget becomes a run setting, so a browser check drives --fold-budget and counts what the page draws. The existing fold test is unchanged and still asserts the default; nothing is renamed or removed"
+          --allow-test-change "tests/test_v069_dashboard_release.py=the release metadata assertions move from 0.8.0 to 0.8.1. The test keeps the function name it was written under because the node-ID floor refuses renames, and the English README anchor it pins is unchanged"

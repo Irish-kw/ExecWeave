@@ -31,7 +31,7 @@ ExecWeave 是一個 source-available、local-first 的可觀測性專案，會�
 python -m pip install -U execweave
 ```
 
-目前正式版本是 **v0.8.0**。
+目前正式版本是 **v0.8.1**。
 
 開發安裝：
 
@@ -67,7 +67,7 @@ execweave record --open -- python my_agent.py
 
 `execweave top -- codex` 會讓 Agent 保持在啟動 terminal 中互動，並依主機環境開啟或附加 detached Top dashboard。
 
-**v0.8.0 — 每一輪、每一個 node，都說得出自己有什麼。** 一次執行很少只有一個問題，面板卻只放得下一個：它把最舊的提問配上最新的回答，於是兩輪的執行會把第一個問題和第二個問題的回答排在一起，而第一輪自己的回答根本點不到。現在以輪為單位——最新的一輪展開，較舊的摺疊成一行，標明它自己的時間與問題；subagent 的摺疊行沿用它所屬 root 輪次的時間與敘述。另外有兩個 subagent 一直遺失自己的 Response：那條避免把 provider 共用前言當成某個 agent 交辦的規則，會比對任何同時出現在兩個 agent 底下的長文字，而 child 的回答本來就同時出現在它自己的紀錄與父層的紀錄裡。該規則現在只看送進來的訊息，所以 agent 寫的東西不管在執行中重複幾次都仍然是它自己的。選取 process、file 或網路端點不再畫出空面板：各自說明自己是什麼——指令列連同它的 pid 與父行程、路徑連同動過它的歷程、位址連同連上它的行程。而某個類型多到超過額度時，最新的仍然畫出來，較舊的收合成單一 node，並且仍然列出它收了哪些，因此動到上千個路徑的執行依然讀得下去，也不會漏掉任何一個。 每個 agent 各自擁有的 provider-neutral、agent-local multi-agent conversation 仍是原本那份紀錄；變的是讀者現在讀得到全部，而不是其中一段。
+**v0.8.1 — 每一輪、每一個 node，都說得出自己有什麼。** 一次執行很少只有一個問題，面板卻只放得下一個：它把最舊的提問配上最新的回答，於是兩輪的執行會把第一個問題和第二個問題的回答排在一起，而第一輪自己的回答根本點不到。現在以輪為單位——最新的一輪展開，較舊的摺疊成一行，標明它自己的時間與問題；subagent 的摺疊行沿用它所屬 root 輪次的時間與敘述。另外有兩個 subagent 一直遺失自己的 Response：那條避免把 provider 共用前言當成某個 agent 交辦的規則，會比對任何同時出現在兩個 agent 底下的長文字，而 child 的回答本來就同時出現在它自己的紀錄與父層的紀錄裡。該規則現在只看送進來的訊息，所以 agent 寫的東西不管在執行中重複幾次都仍然是它自己的。選取 process、file 或網路端點不再畫出空面板：各自說明自己是什麼——指令列連同它的 pid 與父行程、路徑連同動過它的歷程、位址連同連上它的行程。而某個類型多到超過額度時，最新的仍然畫出來，較舊的收合成單一 node，並且仍然列出它收了哪些，因此動到上千個路徑的執行依然讀得下去，也不會漏掉任何一個。 每個 agent 各自擁有的 provider-neutral、agent-local multi-agent conversation 仍是原本那份紀錄；變的是讀者現在讀得到全部，而不是其中一段。 某個類型從哪裡開始摺疊，由每個會產生 Dashboard 的命令上的 `--fold-budget N` 決定，因此寫入上百個檔案的部署可以自己選數字，不必去改套件。
 
 統一 dashboard 把 execution graph、logs 與 conversation records 放進同一條 inspection flow。Finalized run 會產生 `conversations.md` 與 `conversations.json`，經驗證的 provider transcript 也會複製進 run-local SHA-256 content store。Claude Code、OpenAI Codex、Cursor、OpenCode 與 Google Antigravity 都依各自實際曝露的 evidence 強度建立 multi-agent trace；若 gateway 或 local runtime 只提供 root request/response，ExecWeave 就只顯示 root conversation，不會虛構 subagent 或 hidden routing。
 
@@ -276,7 +276,7 @@ Conversation isolation 是 attribution/display 規則，不是 redaction boundar
 
 ## 目前狀態
 
-v0.8.0 整合 cross-platform runtime collection、materialized execution graph、standalone/live dashboard、保守的 provider↔runtime correlation、content-addressed full-fidelity provider evidence、可歸屬的 multi-agent execution trace、run-local conversation access，provider-neutral projection 上的 agent-local conversation isolation，以及 standalone 與 live dashboard 上的 per-round agent conversation 面板、會自我說明並依類型摺疊的 non-agent node。各 integration 只保留 provider 實際曝露的最強 identity/routing evidence，證據不足時選擇 abstain。Observed evidence 與 inference 仍從設計上分離。
+v0.8.1 整合 cross-platform runtime collection、materialized execution graph、standalone/live dashboard、保守的 provider↔runtime correlation、content-addressed full-fidelity provider evidence、可歸屬的 multi-agent execution trace、run-local conversation access，provider-neutral projection 上的 agent-local conversation isolation，以及 standalone 與 live dashboard 上的 per-round agent conversation 面板、會自我說明並依類型摺疊的 non-agent node。各 integration 只保留 provider 實際曝露的最強 identity/routing evidence，證據不足時選擇 abstain。Observed evidence 與 inference 仍從設計上分離。
 
 ## 文件
 
