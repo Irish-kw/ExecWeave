@@ -102,9 +102,33 @@ def test_a_short_label_keeps_the_minimum_width(tmp_path: Path) -> None:
     assert tool["width"] == 160, f"a short label must not widen its node: {tool}"
 
 
+def _graph_with_wide_node_upstream(label: str) -> dict[str, Any]:
+    """A wide node in the first lane, with populated lanes to its right.
+
+    The wide node has to sit upstream of something, or nothing is ever at risk of
+    being reached into and the derivation is never exercised. It also cannot be an
+    agent: the projection labels an agent by its path, so a long ``name`` on one is
+    discarded before it reaches the page.
+    """
+    graph = _graph_with("read")
+    graph["nodes"].append({"id": "process:1", "type": "process", "name": label, "attributes": {}})
+    graph["nodes"].append({"id": "model:m", "type": "model", "name": "gpt", "attributes": {}})
+    graph["edges"].append(
+        {"id": "e3", "source": "process:1", "target": "agent:/root",
+         "relation": "STARTED_AGENT", "attributes": {}}
+    )
+    graph["edges"].append(
+        {"id": "e4", "source": "agent:/root", "target": "model:m",
+         "relation": "USED_MODEL", "attributes": {}}
+    )
+    return graph
+
+
 def test_a_wide_node_never_reaches_into_the_next_lane(tmp_path: Path) -> None:
     """The lane a node sits in must start clear of the widest node before it."""
-    drawn = _drawn(tmp_path, _graph_with(LONG_LABEL))
+    drawn = _drawn(tmp_path, _graph_with_wide_node_upstream(LONG_LABEL))
+    widest = max(node["width"] for node in drawn)
+    assert widest > 160, "the fixture must actually contain a widened node"
     ordered = sorted(drawn, key=lambda node: node["x"])
     for left, right in zip(ordered, ordered[1:]):
         if left["x"] == right["x"]:
@@ -132,9 +156,9 @@ def test_lanes_keep_their_established_positions_when_nothing_is_wide(tmp_path: P
     assert by_lane.get("tool") == 1100, by_lane
 
 
-def test_the_edge_leaves_the_wide_node_at_its_own_right_edge(tmp_path: Path) -> None:
-    """Routing anchored on the old constant would start inside a widened node."""
-    viewer = _render(tmp_path, _graph_with(LONG_LABEL))
+def test_no_edge_leaves_a_wide_node_at_the_old_constant(tmp_path: Path) -> None:
+    """Routing anchored on the old 160 would start inside a widened node."""
+    viewer = _render(tmp_path, _graph_with_wide_node_upstream(LONG_LABEL))
     manager, executable = _browser()
     with manager as playwright:
         browser = _launch(playwright, executable)
@@ -142,12 +166,21 @@ def test_the_edge_leaves_the_wide_node_at_its_own_right_edge(tmp_path: Path) -> 
             page = browser.new_page(viewport={"width": 1600, "height": 900})
             page.goto(viewer.as_uri())
             drawn = _nodes(page)
-            path = page.eval_on_selector(".edge", "el => el.getAttribute('d')")
+            paths = json.loads(
+                page.evaluate(
+                    "() => JSON.stringify([...document.querySelectorAll('.edge')]"
+                    ".map(el => el.getAttribute('d')))"
+                )
+            )
         finally:
             browser.close()
 
-    root = next(node for node in drawn if node["id"] == "agent:/root")
-    start_x = float(path.split()[1])
-    assert start_x == pytest.approx(root["x"] + root["width"], abs=1), (
-        f"edge starts at {start_x}, root node spans {root['x']}..{root['x'] + root['width']}"
+    wide = next(node for node in drawn if node["id"] == "process:1")
+    assert wide["width"] > 160, "the fixture must contain a widened edge source"
+    starts = [float(d.split()[1]) for d in paths if d]
+    assert any(start == pytest.approx(wide["x"] + wide["width"], abs=1) for start in starts), (
+        f"no edge leaves {wide['id']} at its right edge {wide['x'] + wide['width']}: {starts}"
+    )
+    assert not any(start == pytest.approx(wide["x"] + 160, abs=1) for start in starts), (
+        f"an edge still starts at the old fixed width, inside the node: {starts}"
     )
