@@ -50,7 +50,9 @@ def test_both_viewer_variants_carry_the_focus_implementation() -> None:
 def test_focused_render_runs_before_the_whole_tree_is_built() -> None:
     source = PANEL.read_text(encoding="utf-8")
     assert "details.replaceChildren();" in source
-    assert "details.appendChild(list);return true" in source
+    # The subject is that the panel finishes building and returns in one pass. The
+    # tool traffic card is appended in that same pass, before the return.
+    assert "details.appendChild(list);appendTools();return true" in source
     assert "execweaveRenderRichConversationRecords" not in DASHBOARD_HTML
     assert "execweaveRenderFocusedConversation" not in DASHBOARD_HTML
 

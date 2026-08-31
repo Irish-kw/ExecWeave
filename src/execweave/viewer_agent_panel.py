@@ -160,6 +160,54 @@ function foldedRound(round,when,label,state){
 // its type and two timestamps. What each kind of node actually carries is listed here,
 // and nothing that is not in the data is invented.
 function displayGraph(){const core=window.__execweaveCore;return core?.getDisplayGraph?.()||core?.getGraph?.()||{}}
+// tool_call and observed_content are hidden from the graph on purpose: a run makes one
+// tool_call per invocation and drawing them buries everything else. Hiding them from
+// the graph is not a reason to hide them from the reader, and the unprojected graph
+// still carries both, so the panel reads that.
+function rawGraph(){const core=window.__execweaveCore;return core?.getGraph?.()||displayGraph()}
+function rawEdges(){return Array.isArray(rawGraph().edges)?rawGraph().edges:[]}
+function rawNode(id){return (rawGraph().nodes||[]).find(node=>String(node?.id||'')===String(id))||null}
+function relatedTo(id,relation,{from=true}={}){
+  const wanted=String(relation).toUpperCase();
+  return rawEdges()
+    .filter(edge=>String(edge?.relation||'').toUpperCase()===wanted&&String(from?edge?.source:edge?.target)===String(id))
+    .map(edge=>rawNode(from?edge.target:edge.source))
+    .filter(Boolean);
+}
+// What one call actually left behind. The command is a graph attribute and can be
+// shown outright; the stored input is a digest and a size, and is described as that
+// rather than as content the page has read.
+function toolCallLine(call,sameDay){
+  const a=attrs(call),name=a.tool_name||call?.name||'tool';
+  const when=clock(call?.first_seen||call?.last_seen||'',sameDay);
+  const command=relatedTo(call.id,'DECLARED_COMMAND').map(node=>attrs(node).command||node?.name).filter(Boolean)[0];
+  const stored=relatedTo(call.id,'HAS_TOOL_INPUT').map(node=>attrs(node))[0];
+  const parts=[when,name].filter(Boolean);
+  let line=parts.join('  \u00b7  ');
+  if(command)line+=`\n    ${commandText(command)}`;
+  else if(Array.isArray(a.input_keys)&&a.input_keys.length)line+=`\n    ${a.input_keys.join(', ')}`;
+  if(stored?.sha256){
+    const size=Number(stored.size_bytes);
+    const complete=stored.complete_from_source===true?'complete':'partial';
+    line+=`\n    input recorded \u00b7 ${Number.isFinite(size)?size:'?'} bytes \u00b7 ${complete} \u00b7 ${String(stored.sha256).slice(0,12)}`;
+  }
+  return line;
+}
+function toolCallsFor(agentId){
+  const calls=relatedTo(agentId,'REQUESTED_TOOL_CALL');
+  if(!calls.length)return '';
+  const ordered=[...calls].sort((a,b)=>String(b?.first_seen||'').localeCompare(String(a?.first_seen||'')));
+  const stamps=ordered.map(call=>String(call?.first_seen||'')).filter(Boolean);
+  const sameDay=stamps.length<2||stamps.every(value=>value.slice(0,10)===stamps[0].slice(0,10));
+  return ordered.map(call=>toolCallLine(call,sameDay)).join('\n');
+}
+function callersOf(toolId){
+  const calls=rawEdges().filter(edge=>String(edge?.relation||'').toUpperCase()==='USES_TOOL'&&String(edge?.target)===String(toolId))
+    .map(edge=>rawNode(edge.source)).filter(Boolean);
+  const names=new Set();
+  for(const call of calls)for(const agent of relatedTo(call.id,'REQUESTED_TOOL_CALL',{from:false}))names.add(agent?.name||agent?.id);
+  return{count:calls.length,agents:[...names].sort()};
+}
 function edgesTouching(id){return (displayGraph().edges||[]).filter(edge=>String(edge?.source||'')===id||String(edge?.target||'')===id)}
 function nodeNamed(id){return (displayGraph().nodes||[]).find(node=>String(node?.id||'')===String(id))||null}
 function moment(stamp){if(!stamp)return '';const at=new Date(stamp);if(Number.isNaN(at.getTime()))return String(stamp);
@@ -234,6 +282,12 @@ function nodeCards(node){
     add('Call',a.tool_use_id);
     add('Model',a.codex_model);
     add('Working directory',a.codex_cwd);
+  }else if(kind==='tool'){
+    add('Tool',node?.name);
+    add('Provider',a.provider);
+    const traffic=callersOf(String(node?.id||''));
+    add('Calls',traffic.count?String(traffic.count):'');
+    add('Requested by',traffic.agents.join('\n'));
   }else if(kind==='session'){
     add('Command',a.command);
     add('Working directory',a.cwd);
@@ -264,7 +318,9 @@ function render(node){
   const path=nodePath(node),preview=recordFor(node)?.conversation_preview||{},messages=Array.isArray(preview.messages)?preview.messages:[];
   const isRoot=path==='/root'||attrs(node).agent_role==='root'||attrs(node).root_agent_path==='/root';
   const rounds=isRoot?rootRounds(messages,path||'/root'):childRounds(messages,path);
-  if(rounds.length<2){details.appendChild(roundView(rounds[0]||{cards:isRoot?[['Prompt',''],['Final response','']]:[['Task',''],['Thinking',''],['Response','']]}));return true}
+  const tools=toolCallsFor(String(node.id||''));
+  const appendTools=()=>{if(tools)details.appendChild(card('Tools',tools))};
+  if(rounds.length<2){details.appendChild(roundView(rounds[0]||{cards:isRoot?[['Prompt',''],['Final response','']]:[['Task',''],['Thinking',''],['Response','']]}));appendTools();return true}
   // A subagent borrows the moment and the wording of the root round it belongs to, so
   // the folds on both panels name the same thing.
   const runs=isRoot?rounds:runRounds();
@@ -274,7 +330,7 @@ function render(node){
   const ordered=[...rounds].reverse(),state=foldStateFor(node);
   list.appendChild(roundView(ordered[0]));
   for(const round of ordered.slice(1)){const named=naming(round);list.appendChild(foldedRound(round,clock(named.start||round.start,sameDay),named.label||'',state))}
-  details.appendChild(list);return true;
+  details.appendChild(list);appendTools();return true;
 }
 function graphNode(id){const core=window.__execweaveCore;if(!core)return null;const graph=core.getDisplayGraph?.()||core.getGraph?.()||{};return (graph.nodes||[]).find(node=>String(node?.id||'')===String(id||''))||null}
 function syncSelection(){const selected=document.querySelector('.node.selected');if(!selected){selectedNode=null;selectedConversationSignature='';return}const node=graphNode(selected.dataset.id);if(node)render(node);else selectedNode=null;if(!node)selectedConversationSignature=''}
