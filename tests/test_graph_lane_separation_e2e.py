@@ -57,8 +57,12 @@ def test_files_and_endpoints_no_longer_share_a_column(tmp_path: Path) -> None:
     )
 
 
-def test_every_file_keeps_its_own_row(tmp_path: Path) -> None:
-    """The two lanes shared a row counter, so endpoints pushed files down."""
+def test_each_evidence_lane_starts_at_its_own_first_row(tmp_path: Path) -> None:
+    """The lanes shared one row counter, so whichever came second began part-way down.
+
+    Checking only that files start at the top cannot see this: files were first in the
+    shared list. Both lanes have to start at the same first row.
+    """
     graph = _spine()
     for index in range(3):
         graph["nodes"].append(
@@ -68,12 +72,25 @@ def test_every_file_keeps_its_own_row(tmp_path: Path) -> None:
             {"id": f"fe{index}", "source": "agent:/root/a", "target": f"file:{index}",
              "relation": "WROTE_FILE", "attributes": {}}
         )
-    files = sorted(
-        (node for node in _drawn(tmp_path, graph) if node["lane"] == "file"),
-        key=lambda node: node["y"],
+    for index in range(2):
+        graph["nodes"].append(
+            {"id": f"endpoint:{index}", "type": "network_endpoint",
+             "name": f"10.0.0.{index}:443", "attributes": {}}
+        )
+        graph["edges"].append(
+            {"id": f"ne{index}", "source": "agent:/root/a", "target": f"endpoint:{index}",
+             "relation": "REACHED", "attributes": {}}
+        )
+
+    drawn = _drawn(tmp_path, graph)
+    files = [node for node in drawn if node["lane"] == "file"]
+    endpoints = [node for node in drawn if node["lane"] == "endpoint"]
+    assert len(files) == 3 and len(endpoints) == 2, (files, endpoints)
+    assert min(node["y"] for node in files) == 80, files
+    assert min(node["y"] for node in endpoints) == 80, (
+        f"the endpoint lane starts below its first row, so it is still sharing a "
+        f"counter with the file lane: {endpoints}"
     )
-    assert len(files) == 3, files
-    assert files[0]["y"] == 80, f"the first file must start the lane: {files[0]}"
 
 
 def test_disconnected_evidence_sits_below_the_spine(tmp_path: Path) -> None:
