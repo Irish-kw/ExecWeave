@@ -46,7 +46,4 @@ jobs:
           if [[ "$HEAD_REF" == release/* ]]; then
             args+=(--allow-test-change "tests/test_v069_dashboard_release.py=release metadata assertions may advance only on a release/* pull request; the historical test name remains stable because the node-ID floor refuses renames")
           fi
-          if [[ "$HEAD_REF" == "fix/0.8.2-fold-state-e2e-race" ]]; then
-            args+=(--allow-test-change "tests/test_dashboard_round_fold_state_e2e.py=the existing multi-call browser assertion raced the required 800 ms live poll; this branch keeps the same behavior contract but samples the changed-payload redraw atomically")
-          fi
           python scripts/check_release_stage_integrity.py "${args[@]}"
