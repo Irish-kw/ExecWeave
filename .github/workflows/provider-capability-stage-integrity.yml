@@ -43,7 +43,16 @@ jobs:
           HEAD_REF: "${{ github.head_ref }}"
         run: |
           args=(--baseline-ref "$BASELINE_REF")
-          if [[ "$HEAD_REF" == release/* ]]; then
+          # A release/* branch may advance the release metadata assertions, but the
+          # branch name alone is not the grant: the whole 0.8.x series of feature work
+          # lives under release/*, and an allowance those branches never use is an open
+          # allowance, which the checker refuses. The file has to actually change.
+          release_metadata_changed=""
+          if git diff --name-only "$BASELINE_REF...HEAD" \
+              | grep -qx 'tests/test_v069_dashboard_release.py'; then
+            release_metadata_changed=yes
+          fi
+          if [[ "$HEAD_REF" == release/* && -n "$release_metadata_changed" ]]; then
             args+=(--allow-test-change "tests/test_v069_dashboard_release.py=release metadata assertions may advance only on a release/* pull request; the historical test name remains stable because the node-ID floor refuses renames")
           fi
           python scripts/check_release_stage_integrity.py "${args[@]}"
