@@ -43,7 +43,11 @@ def harden_dashboard_html(html: str) -> str:
     for(const edge of edgeById.values())updateEdgeElement(edge);
   }""",
         """  if(geometryChanged){
-    for(const [id] of nodeElements){const node=nodeById.get(id);if(node)updateNodeElement(node)}
+    for(const [id,group] of nodeElements){
+      const p=positions.get(id),node=nodeById.get(id);
+      if(p)group.setAttribute('transform',`translate(${p.x} ${p.y})`);
+      if(node)updateNodeElement(node);
+    }
     for(const edge of edgeById.values())updateEdgeElement(edge);
   }""",
         label="delta geometry rerender",
