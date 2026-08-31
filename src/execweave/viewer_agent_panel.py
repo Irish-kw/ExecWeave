@@ -173,14 +173,40 @@ function reachedBy(id){
   }
   return [...names].join('\n');
 }
+function foldedList(a){
+  const members=Array.isArray(a.viewer_folded_members)?a.viewer_folded_members:[];
+  return members
+    .slice()
+    .sort((x,y)=>String(y?.last_seen||'').localeCompare(String(x?.last_seen||'')))
+    .map(item=>`${moment(item?.last_seen||item?.first_seen)}  ${item?.name||item?.id}`)
+    .join('\n');
+}
+function occurrenceList(a){
+  const rows=Array.isArray(a.viewer_occurrences)?a.viewer_occurrences:[];
+  if(rows.length<2)return '';
+  return rows
+    .slice()
+    .sort((x,y)=>String(y?.first_seen||'').localeCompare(String(x?.first_seen||'')))
+    .map(item=>`${moment(item?.first_seen)}${item?.pid?`  pid ${item.pid}`:''}`)
+    .join('\n');
+}
 function nodeCards(node){
   const a=attrs(node),kind=String(node?.type||'');
   const rows=[];
   const add=(label,value)=>{const text=commandText(value);if(text)rows.push([label,text])};
+  if(a.viewer_folded){
+    // The budget folds the older nodes of a type into this one rather than dropping
+    // them, so it has to say what it holds.
+    add('Folded',`${a.viewer_folded_count} earlier ${String(a.viewer_folded_type||'').replace(/_/g,' ')} nodes`);
+    add('Holding',foldedList(a));
+    add('Observed at',span(node));
+    return rows;
+  }
   if(kind==='process'){
     add('Command',a.cmdline);
     add('Executable',a.exe);
     add('Process',[a.pid&&`pid ${a.pid}`,a.ppid&&`parent ${a.ppid}`].filter(Boolean).join('  \u00b7  '));
+    add('Ran',occurrenceList(a));
   }else if(kind==='file'){
     add('Path',node?.name);
     add('Observed',fileHistory(String(node?.id||'')));

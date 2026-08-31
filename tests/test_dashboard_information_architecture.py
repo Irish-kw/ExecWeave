@@ -118,7 +118,7 @@ def test_low_level_dashboard_cleanup_remains_presentation_only() -> None:
     html = render_graph_html(_mechanical_graph())
     assert "hiddenTypes=new Set(['agent_trace_capability','session','command'" in html
     assert "mergeTypes=new Set(['model','directory','network_endpoint'])" in html
-    assert "canonicalTypes=new Set(['process'])" in html
+    assert "canonicalTypes=new Set(['process','file'])" in html
     assert "node.type==='process'&&occurrenceCount>1" in html
     assert "viewer_occurrence_count" in html
     assert "viewer_edge_occurrence_count" in html
@@ -140,7 +140,7 @@ def test_low_level_dashboard_cleanup_remains_presentation_only() -> None:
 def test_process_model_directory_and_network_nodes_are_retained_but_canonicalized() -> None:
     html = render_graph_html(_mechanical_graph())
 
-    assert "canonicalTypes=new Set(['process'])" in html
+    assert "canonicalTypes=new Set(['process','file'])" in html
     assert "mergeTypes=new Set(['model','directory','network_endpoint'])" in html
     assert "if(type==='model')" in html
     assert "if(type==='directory')" in html
