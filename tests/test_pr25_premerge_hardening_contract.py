@@ -11,6 +11,8 @@ def test_shared_dashboard_contains_premerge_hardening() -> None:
         assert "execweaveMeasureCache=new Map()" in html
         assert "agentOrder=new Map(childOrder)" in html
         assert "geometryChanged=laneShifted||dimensionsChanged" in html
+        assert "dimensionsChanged=[...priorWidth.keys()].some(" in html
+        assert "dimensionsChanged=[...nodeById.keys()].some(" not in html
         assert "group.setAttribute('transform',`translate(${p.x} ${p.y})`)" in html
         assert "function execweaveCameraWidth(id)" in html
         assert "function execweaveCameraHeight(id)" in html
