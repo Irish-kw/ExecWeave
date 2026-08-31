@@ -177,11 +177,18 @@ def _audit(page: Any, graph: dict[str, Any]) -> dict[str, tuple[list[str], list[
         results[path] = labels, bodies
         _assert_no_dashboard_clutter(page)
 
+    # A non-agent node describes itself — v0.8.0 gives it its command, its address and
+    # what was observed of it — and never carries a conversation.
     for node_id in ("process:codex", "endpoint:203.0.113.7:443"):
         _click_id(page, node_id)
-        assert not page.locator("#details .execweave-agent-card").count()
+        labels, _ = _cards(page)
+        assert labels, f"{node_id} shows nothing at all"
+        conversation = {"Prompt", "Final response", "Task", "Thinking", "Response"}
+        assert not conversation & set(labels), f"{node_id} shows conversation cards: {labels}"
         visible = page.locator("#details").inner_text()
-        assert not any(marker in visible for marker in ALL_MARKERS)
+        assert not any(marker in visible for marker in ALL_MARKERS), (
+            f"{node_id}, which is not an agent, shows an agent's turn"
+        )
 
     return results
 
