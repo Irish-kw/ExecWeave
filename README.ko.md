@@ -30,7 +30,7 @@ ExecWeave는 source-available, local-first observability 프로젝트입니다. 
   <img src="docs/assets/codex.gif" alt="ExecWeave animated live demo" width="100%">
 </p>
 
-이 README는 **v0.8.4**을 설명합니다.
+이 README는 **v0.8.5**을 설명합니다.
 
 ## 왜 ExecWeave인가
 
