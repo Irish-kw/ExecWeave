@@ -347,7 +347,8 @@ function nodeCards(node){
     add('Tool',node?.name);
     add('Provider',a.provider);
     const traffic=callersOf(String(node?.id||''));
-    add('Calls',traffic.count?String(traffic.count):'');
+    const occurrences=Array.isArray(a.viewer_tool_call_occurrences)?a.viewer_tool_call_occurrences:[];
+    add('Calls',occurrences.length?String(occurrences.length):(traffic.count?String(traffic.count):''));
     add('Requested by',traffic.agents.join('\n'));
   }else if(kind==='session'){
     add('Command',a.command);
@@ -364,6 +365,32 @@ function nodeCards(node){
   add('Observed at',span(node));
   return rows;
 }
+function toolOccurrenceSection(node){
+  const occurrences=Array.isArray(attrs(node).viewer_tool_call_occurrences)?attrs(node).viewer_tool_call_occurrences:[];
+  if(!occurrences.length)return null;
+  const section=document.createElement('section');section.className='execweave-tool-occurrences';
+  const title=document.createElement('strong');title.textContent=`Invocations · ${occurrences.length} call${occurrences.length===1?'':'s'}`;section.appendChild(title);
+  occurrences.forEach((occurrence,index)=>{
+    const fold=document.createElement('details');fold.className='execweave-tool-occurrence';
+    const summary=document.createElement('summary');
+    const owner=nodeNamed(occurrence?.owner_id)?.name||occurrence?.owner_id||'unknown';
+    const when=moment(occurrence?.first_seen||occurrence?.last_seen);
+    summary.textContent=[when,owner,`call ${index+1}`].filter(Boolean).join(' · ');
+    const pre=document.createElement('pre');
+    pre.textContent=JSON.stringify({
+      first_seen:occurrence?.first_seen||null,
+      last_seen:occurrence?.last_seen||null,
+      first_sequence:occurrence?.first_sequence??null,
+      last_sequence:occurrence?.last_sequence??null,
+      input:occurrence?.input??null,
+      output:occurrence?.output??null,
+      call_ids:occurrence?.call_ids||[],
+      content_references:occurrence?.content_references||[]
+    },null,2);
+    fold.append(summary,pre);section.appendChild(fold);
+  });
+  return section;
+}
 function renderNode(node){
   const rows=nodeCards(node);
   if(!rows.length)return false;
@@ -371,7 +398,9 @@ function renderNode(node){
   selectedNode=null;selectedConversationSignature='';detailsEmpty.hidden=true;details.replaceChildren();
   const view=document.createElement('div');view.className='execweave-agent-view';
   for(const[label,text]of rows)view.appendChild(card(label,text));
-  details.appendChild(view);return true;
+  details.appendChild(view);
+  const occurrences=toolOccurrenceSection(node);if(occurrences)details.appendChild(occurrences);
+  return true;
 }
 function render(node){
   if(!node)return false;
