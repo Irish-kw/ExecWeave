@@ -1,59 +1,22 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
 from . import _conversation_records_core as _core
-from . import conversation_preview as _preview_module
 from ._conversation_records_core import *  # noqa: F403
 from .agent_topology import THREAD_ID_EXECWEAVE_DERIVED, THREAD_ID_PROVIDER_NATIVE
 from .conversation_message_identity import dedupe_codex_message_observations
+from .conversation_records_antigravity import (
+    _antigravity_step_ordinals,
+    _project_antigravity_addressed_tasks,
+)
+from .conversation_records_codex import _same_merged_execution
+from .conversation_records_common import history_message_key as _history_message_key
+from .conversation_records_ollama import _ollama_current_turn, _ollama_root_agent_id
 
 _core_conversation_preview = _core.conversation_preview
 _core_merge_conversation_previews = _core._merge_conversation_previews
-
-
-def _antigravity_step_ordinals(path: str | Path) -> list[int | None]:
-    """Recover stable step indexes for user-visible Antigravity transcript records."""
-    source_path = Path(path).expanduser().resolve(strict=False)
-    try:
-        lines = source_path.read_text(encoding="utf-8").splitlines()
-    except (OSError, UnicodeError):
-        return []
-
-    ordinals: list[int | None] = []
-    for line in lines:
-        if not line.strip():
-            continue
-        try:
-            record = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(record, dict):
-            continue
-        role = str(record.get("source") or "").strip().lower()
-        record_type = str(record.get("type") or "").strip().lower()
-        text = _preview_module._text_parts(record.get("content") or record.get("text"))
-        visible_user = role in {"user_explicit", "user", "human"} and record_type in {
-            "user_input",
-            "user_message",
-            "",
-        }
-        visible_assistant = role in {"model", "assistant"} and record_type == "planner_response"
-        if not text or not (visible_user or visible_assistant):
-            continue
-        record_ordinal = record.get("ordinal")
-        if isinstance(record_ordinal, int) and not isinstance(record_ordinal, bool):
-            ordinals.append(record_ordinal)
-            continue
-        step_index = record.get("step_index")
-        ordinals.append(
-            step_index
-            if isinstance(step_index, int) and not isinstance(step_index, bool)
-            else None
-        )
-    return ordinals
 
 
 def _conversation_preview(
@@ -189,169 +152,6 @@ def _repair_parent_thread_aliases(entries: list[dict[str, Any]]) -> None:
             preview["parent_thread_id"] = next(iter(candidates))
 
 
-def _same_merged_execution(
-    representative_entry: dict[str, Any],
-    merged_preview: dict[str, Any],
-    observed_entry: dict[str, Any],
-    observed_preview: dict[str, Any],
-) -> bool:
-    if str(observed_entry.get("provider") or "").lower() != "codex":
-        return False
-    if observed_preview.get("agent_path") != merged_preview.get("agent_path"):
-        return False
-
-    representative_source = representative_entry.get("source_id")
-    observed_source = observed_entry.get("source_id")
-    if (
-        isinstance(representative_source, str)
-        and representative_source
-        and observed_source == representative_source
-    ):
-        return True
-
-    evidence_thread_ids = {
-        value
-        for value in merged_preview.get("evidence_thread_ids") or []
-        if isinstance(value, str) and value
-    }
-    published_thread = merged_preview.get("thread_id")
-    if isinstance(published_thread, str) and published_thread:
-        evidence_thread_ids.add(published_thread)
-    observed_thread = observed_preview.get("thread_id")
-    return isinstance(observed_thread, str) and observed_thread in evidence_thread_ids
-
-
-
-def _history_message_key(message: dict[str, Any]) -> tuple[object, ...]:
-    return (
-        message.get("ordinal"),
-        message.get("kind"),
-        message.get("sender"),
-        message.get("recipient"),
-        message.get("text"),
-        message.get("content_state"),
-        message.get("phase"),
-        message.get("task_name"),
-    )
-
-
-def _project_antigravity_addressed_tasks(
-    entries: list[dict[str, Any]],
-    graph: dict[str, Any],
-) -> None:
-    """Project exact parent-addressed send_message text into the child timeline.
-
-    Raw Antigravity topology already carries positive ``parent_scope_id`` evidence on
-    each validated child node. Raw send_message conversation evidence carries exact
-    provider sender and recipient conversation IDs. Join those two facts only for
-    presentation: an addressed parent message becomes a child task opener, while raw
-    evidence remains unchanged and delivery/consumption remain explicitly unobserved.
-    """
-    prefix = "agent:antigravity:conversation:"
-    topology: dict[str, tuple[str, str]] = {}
-    for node in graph.get("nodes", []):
-        if not isinstance(node, dict) or node.get("type") != "agent":
-            continue
-        node_id = node.get("id")
-        attrs = node.get("attributes")
-        attrs = attrs if isinstance(attrs, dict) else {}
-        if not isinstance(node_id, str) or not node_id.startswith(prefix):
-            continue
-        if str(attrs.get("provider") or "").lower() != "antigravity":
-            continue
-        parent_path = attrs.get("parent_agent_path")
-        parent_scope = attrs.get("parent_scope_id")
-        if not isinstance(parent_path, str) or not parent_path:
-            continue
-        if not isinstance(parent_scope, str) or not parent_scope:
-            continue
-        topology[node_id.removeprefix(prefix)] = (parent_scope, parent_path)
-
-    children: dict[str, dict[str, Any]] = {}
-    for entry in entries:
-        if str(entry.get("provider") or "").lower() != "antigravity":
-            continue
-        source_id = entry.get("source_id")
-        preview = entry.get("conversation_preview")
-        if not isinstance(source_id, str) or not source_id.startswith(prefix):
-            continue
-        child_id = source_id.removeprefix(prefix)
-        if child_id not in topology or not isinstance(preview, dict):
-            continue
-        children[child_id] = entry
-
-    additions: dict[str, list[dict[str, Any]]] = {child_id: [] for child_id in children}
-    for entry in entries:
-        if str(entry.get("provider") or "").lower() != "antigravity":
-            continue
-        preview = entry.get("conversation_preview")
-        if not isinstance(preview, dict):
-            continue
-        for message in preview.get("messages") or []:
-            if not isinstance(message, dict) or message.get("kind") != "send_message":
-                continue
-            sender = message.get("sender")
-            recipient = message.get("recipient")
-            if not isinstance(sender, str) or not sender.startswith("antigravity:"):
-                continue
-            if not isinstance(recipient, str) or not recipient.startswith("antigravity:"):
-                continue
-            sender_id = sender.removeprefix("antigravity:")
-            child_id = recipient.removeprefix("antigravity:")
-            child_entry = children.get(child_id)
-            if child_entry is None:
-                continue
-            parent_scope, parent_path = topology[child_id]
-            if sender_id != parent_scope:
-                # Exact sibling/other-agent messages are messages, not parent tasks.
-                continue
-            child_preview = child_entry["conversation_preview"]
-            task = dict(message)
-            task.update(
-                {
-                    "kind": "task",
-                    "phase": "assignment",
-                    "sender": parent_path,
-                    "recipient": str(child_preview.get("agent_path") or ""),
-                    "content_role": "antigravity_addressed_task",
-                    "provider_sender_id": sender_id,
-                    "provider_recipient_id": child_id,
-                    "delivery_observed": False,
-                    "consumption_observed": False,
-                }
-            )
-            additions[child_id].append(task)
-
-    for child_id, tasks in additions.items():
-        if not tasks:
-            continue
-        preview = children[child_id]["conversation_preview"]
-        combined = [
-            dict(message)
-            for message in preview.get("messages") or []
-            if isinstance(message, dict)
-        ] + tasks
-        combined.sort(
-            key=lambda message: (
-                str(message.get("timestamp") or ""),
-                message.get("ordinal")
-                if isinstance(message.get("ordinal"), int)
-                else 2**63 - 1,
-            )
-        )
-        seen: set[tuple[object, ...]] = set()
-        messages: list[dict[str, Any]] = []
-        for message in combined:
-            key = _history_message_key(message)
-            if key in seen:
-                continue
-            seen.add(key)
-            messages.append(message)
-        preview["message_count"] = len(messages)
-        preview["messages_truncated"] = False
-        preview["messages"] = messages
-
-
 def _restore_complete_histories(
     entries: list[dict[str, Any]],
     snapshots: list[tuple[dict[str, Any], dict[str, Any]]],
@@ -406,42 +206,6 @@ def _restore_complete_histories(
         merged["message_count"] = len(messages)
         merged["messages_truncated"] = False
         merged["messages"] = messages
-
-
-def _ollama_current_turn(preview: dict[str, Any]) -> None:
-    """Reduce a cumulative Ollama chat request to the exact turn this exchange created."""
-    messages = [message for message in preview.get("messages") or [] if isinstance(message, dict)]
-    users = [
-        message
-        for message in messages
-        if message.get("sender") == "user"
-        and message.get("content_role") == "ollama_request_surface"
-    ]
-    response_assistants = [
-        message
-        for message in messages
-        if message.get("content_role") == "ollama_response_surface"
-        and str(message.get("kind") or "").startswith("assistant")
-    ]
-    if not users:
-        return
-    current = [users[-1]]
-    if response_assistants:
-        current.append(response_assistants[-1])
-    preview["message_count"] = len(current)
-    preview["messages_truncated"] = False
-    preview["messages"] = current
-
-
-def _ollama_root_agent_id(graph: dict[str, Any]) -> str | None:
-    candidates = []
-    for node in graph.get("nodes", []):
-        if not isinstance(node, dict) or node.get("type") != "agent":
-            continue
-        node_id = node.get("id")
-        if isinstance(node_id, str) and node_id.lower() == "agent:ollama":
-            candidates.append(node_id)
-    return candidates[0] if len(candidates) == 1 else None
 
 
 def _merge_conversation_previews(entries: list[dict[str, Any]]) -> None:

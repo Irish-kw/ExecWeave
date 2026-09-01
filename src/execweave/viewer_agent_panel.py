@@ -1,5 +1,14 @@
 from __future__ import annotations
 
+from .viewer_agent_panel_antigravity import ANTIGRAVITY_CHILD_ROUNDS_JS
+from .viewer_agent_panel_claude import CLAUDE_CHILD_ROUNDS_JS
+from .viewer_agent_panel_codex import CODEX_CHILD_ROUNDS_JS
+from .viewer_agent_panel_cursor import CURSOR_CHILD_ROUNDS_JS
+from .viewer_agent_panel_default import DEFAULT_CHILD_ROUNDS_JS
+from .viewer_agent_panel_gemini import GEMINI_CHILD_ROUNDS_JS
+from .viewer_agent_panel_ollama import OLLAMA_CHILD_ROUNDS_JS
+from .viewer_agent_panel_opencode import OPENCODE_CHILD_ROUNDS_JS
+
 _AGENT_PANEL_CSS = r"""
 #inspector .inspector-section:first-child{display:none!important}
 #inspector .inspector-section:nth-child(2)>.eyebrow{display:none!important}
@@ -160,34 +169,21 @@ function rootRounds(messages,path){
     };
   });
 }
+/*EXECWEAVE_CHILD_POLICY*/
 function childRounds(messages,path){
-  const parent=path.includes('/')?(path.slice(0,path.lastIndexOf('/'))||'/root'):'/root';
-  const isTask=message=>{const sender=String(message?.sender||'');return isObserved(message)&&!isInjected(message)&&String(message?.recipient||'')===path&&sender!==path&&(/task|assign/i.test(String(message?.kind||''))||String(message?.phase||'')==='assignment')&&(!sender||sender==='user'||sender===parent)};
-  // One spawn is recorded twice — in the parent's rollout and in the child's own — and
-  // the provider may add its own framing beside it. Those are one assignment, not
-  // several rounds, so openers are grouped by the root round they belong to.
-  const runs=runRounds();
-  const groups=[];
-  for(const opener of messages.filter(isTask)){
-    const owner=roundOf(stampOf(opener),runs);
-    const key=owner?String(owner.start||''):'';
-    const last=groups[groups.length-1];
-    if(last&&last.key===key)last.openers.push(opener);
-    else groups.push({key,openers:[opener]});
-  }
-  const openers=groups.map(group=>group.openers[0]);
-  return windows(messages,openers).map((window,index)=>{
-    const inside=window.messages;
-    const spoken=groups[index]?.openers.find(opener=>!!messageText(opener));
-    const thoughts=inside.filter(message=>isObserved(message)&&!isInjected(message)&&own(message,path)&&(/reason|think|commentary/i.test(`${message?.kind||''} ${message?.phase||''}`)));
-    let responses=inside.filter(message=>isObserved(message)&&!isInjected(message)&&own(message,path)&&(String(message?.phase||'')==='final_answer'||/final[_ -]?response|agent_result|result/i.test(String(message?.kind||''))));
-    if(!responses.length)responses=inside.filter(message=>isObserved(message)&&!isInjected(message)&&own(message,path)&&!thoughts.includes(message)&&String(message?.recipient||'')!==path&&!/task|assign/i.test(String(message?.kind||'')));
-    return{
-      key:messageKey(window.opener),
-      start:stampOf(window.opener),
-      cards:[['Task',displayText(spoken||window.opener)],['Thinking',uniqueTexts(thoughts).join('\n\n')],['Response',displayText(responses.at(-1))]],
-    };
-  });
+  const record=selectedNode?recordFor(selectedNode):null;
+  const preview=record?.conversation_preview||{};
+  const provider=String(preview.provider||attrs(selectedNode).provider||record?.provider||'').toLowerCase();
+  const policy=({
+    codex:execweaveCodexChildRounds,
+    antigravity:execweaveAntigravityChildRounds,
+    claude:execweaveClaudeChildRounds,
+    ollama:execweaveOllamaChildRounds,
+    cursor:execweaveCursorChildRounds,
+    gemini:execweaveGeminiChildRounds,
+    opencode:execweaveOpencodeChildRounds
+  })[provider]||execweaveDefaultChildRounds;
+  return policy(messages,path);
 }
 function roundView(round){const view=document.createElement('div');view.className='execweave-agent-round';for(const[label,text]of round.cards)view.appendChild(card(label,text));return view}
 function stableRoundKey(round){
@@ -439,7 +435,22 @@ if(!window.__execweaveStaticMode)setInterval(()=>{if(selectedNode)refresh()},800
 const previous=window.__execweaveDashboard||{};window.__execweaveDashboard={...previous,onPayload(data){previous.onPayload?.(data);if(selectedNode)refresh()},onFinished(){previous.onFinished?.();if(selectedNode)refresh()}};
 window.__execweaveAgentPanel={render,setEntries,refresh};
 })();
-""".strip()
+""".strip().replace(
+    "/*EXECWEAVE_CHILD_POLICY*/",
+    "\n".join(
+        (
+            DEFAULT_CHILD_ROUNDS_JS,
+            CODEX_CHILD_ROUNDS_JS,
+            ANTIGRAVITY_CHILD_ROUNDS_JS,
+            CLAUDE_CHILD_ROUNDS_JS,
+            OLLAMA_CHILD_ROUNDS_JS,
+            CURSOR_CHILD_ROUNDS_JS,
+            GEMINI_CHILD_ROUNDS_JS,
+            OPENCODE_CHILD_ROUNDS_JS,
+        )
+    ),
+    1,
+)
 
 
 def inject_agent_panel(html: str) -> str:
