@@ -315,7 +315,10 @@ def test_validated_antigravity_assignment_uses_common_child_topology() -> None:
     attrs = child["attributes"]
     assert attrs[agent_topology.ATTR_ROLE] == agent_topology.AGENT_ROLE_SUBAGENT
     assert attrs[agent_topology.ATTR_PARENT_SCOPE] == ROOT_CONVERSATION
-    assert attrs[agent_topology.ATTR_PARENT_EVIDENCE] == agent_topology.EVIDENCE_VALIDATED_CHILD_TRANSCRIPT
+    assert (
+        attrs[agent_topology.ATTR_PARENT_EVIDENCE]
+        == agent_topology.EVIDENCE_VALIDATED_CHILD_TRANSCRIPT
+    )
     assert "agent_path" not in attrs, "a validated child must not be downgraded to a legacy bare path"
     assert attrs["agent_nickname"] == "security reviewer"
 
@@ -329,7 +332,12 @@ def test_validated_antigravity_assignment_uses_common_child_topology() -> None:
 def test_provider_shaped_fixture_contains_two_root_rounds_and_eight_unique_children() -> None:
     graph, entries, updated = _fixture()
     del updated
-    assert len([node for node in graph["nodes"] if node["id"].startswith("agent:antigravity:conversation:child-")]) == 8
+    children = [
+        node
+        for node in graph["nodes"]
+        if node["id"].startswith("agent:antigravity:conversation:child-")
+    ]
+    assert len(children) == 8
     root_entries = [entry for entry in entries if entry["source_id"] == ROOT_ID]
     assert len(root_entries) == 2, "the fixture must exercise cumulative root Stop snapshots"
     assert [message["text"] for message in root_entries[-1]["conversation_preview"]["messages"]] == [
@@ -390,8 +398,8 @@ def test_antigravity_two_round_eight_child_dashboard_isolation_and_fold_state(
                 "()=>(document.getElementById('details')?.innerText||'').includes('ROOT PROMPT TWO')"
             )
             root_text = page.locator("#details").inner_text()
-            for expected in ("ROOT PROMPT ONE", "ROOT FINAL ONE", "ROOT PROMPT TWO", "ROOT FINAL TWO"):
-                assert expected in root_text
+            assert "ROOT PROMPT TWO" in root_text and "ROOT FINAL TWO" in root_text
+            assert "Prompt" in root_text and "Final response" in root_text
             for index in range(1, 9):
                 assert f"RESPONSE UNIQUE {index}" not in root_text
             assert "UNRESOLVED PRIVATE RESPONSE" not in root_text
@@ -401,6 +409,8 @@ def test_antigravity_two_round_eight_child_dashboard_isolation_and_fold_state(
             assert not old_round.first.evaluate("node=>node.open")
             old_round.first.locator("summary").click()
             assert old_round.first.evaluate("node=>node.open")
+            old_text = old_round.first.inner_text()
+            assert "ROOT PROMPT ONE" in old_text and "ROOT FINAL ONE" in old_text
 
             page.evaluate(
                 "payload=>window.__execweaveAgentPanel.setEntries(payload)",

@@ -16,7 +16,8 @@ execweaveDashboardGraph=function(data){
       const agentPath=String(attrs.agent_path||attrs.child_agent_path||attrs.root_agent_path||'').trim();
       const agentId=String(attrs.agent_id||attrs.subagent_id||'');
       const conversationId=String(attrs.conversation_id||'').trim();
-      const nativeLabel=String(attrs.agent_nickname||attrs.agent_type||attrs.subagent_type||attrs.native_agent_name||'').trim();
+      const nickname=String(attrs.agent_nickname||'').trim();
+      const nativeLabel=String(nickname||attrs.agent_type||attrs.subagent_type||attrs.native_agent_name||'').trim();
       const explicitRoot=attrs.agent_role==='root'||String(attrs.root_agent_path||'')==='/root'||providerRootIds.has(String(node.id||''));
       if(explicitRoot)name='/root';
       else if(provider==='antigravity'&&nativeLabel&&!['default','agent','subagent','antigravity subagent'].includes(nativeLabel.toLowerCase()))name=nativeLabel;
@@ -25,7 +26,8 @@ execweaveDashboardGraph=function(data){
       else if(['default','agent','subagent','antigravity conversation'].includes(String(node.name||'').toLowerCase())){
         // Never label by a timestamp-ordered id prefix: siblings spawned in the
         // same millisecond share it and render as the same node.
-        if(nativeLabel)name=`subagent · ${nativeLabel}`;
+        if(nickname)name=`subagent · ${nickname}`;
+        else if(nativeLabel)name=`subagent · ${nativeLabel}`;
         else if(agentId)name=`subagent · ${agentId.slice(0,13)}`;
         else name=`agent · ${String(node.id||'').split(':').at(-1).slice(0,13)}`;
       }
