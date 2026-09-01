@@ -83,6 +83,34 @@ jobs:
           records_path.write_text(records.replace(old, new), encoding='utf-8')
           PY
 
+      - name: Preserve legacy endpoint and root merge contracts
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          runtime_path = Path('src/execweave/model_runtime.py')
+          runtime = runtime_path.read_text(encoding='utf-8')
+          canonicalized = '''    host = split.hostname\n    if host.lower() == "localhost" or host == "::1":\n        host = "127.0.0.1"\n    if ":" in host and not host.startswith("["):\n        host = f"[{host}]"\n'''
+          preserved = '''    host = split.hostname\n    if ":" in host and not host.startswith("["):\n        host = f"[{host}]"\n'''
+          assert runtime.count(canonicalized) == 1
+          runtime_path.write_text(runtime.replace(canonicalized, preserved, 1), encoding='utf-8')
+
+          records_path = Path('src/execweave/conversation_records.py')
+          records = records_path.read_text(encoding='utf-8')
+          old = '''        if not observed:\n            continue\n        indexed = list(enumerate(observed))\n'''
+          new = '''        if not observed:\n            continue\n        if provider == "ollama" and not any(\n            message.get("content_role")\n            in {"ollama_request_surface", "ollama_response_surface"}\n            for message in observed\n        ):\n            # Legacy/provider-neutral root records have no wire-surface provenance.\n            # Leave the core incremental merge untouched instead of applying the\n            # Ollama cumulative-history repair to unrelated synthetic/root records.\n            continue\n        indexed = list(enumerate(observed))\n'''
+          assert records.count(old) == 1
+          records_path.write_text(records.replace(old, new, 1), encoding='utf-8')
+
+          test_path = Path('tests/test_provider_conversation_history_integrity.py')
+          tests = test_path.read_text(encoding='utf-8')
+          start = tests.index('def test_loopback_ollama_endpoint_aliases_have_one_identity() -> None:\n')
+          end = tests.index('\n\ndef _ollama_graph(', start)
+          replacement = '''def test_loopback_ollama_endpoint_evidence_is_preserved() -> None:\n    assert sanitize_endpoint("http://localhost:11434") == "http://localhost:11434"\n    assert sanitize_endpoint("http://127.0.0.1:11434") == "http://127.0.0.1:11434"\n    assert sanitize_endpoint("http://[::1]:11434") == "http://[::1]:11434"\n'''
+          tests = tests[:start] + replacement + tests[end:]
+          test_path.write_text(tests, encoding='utf-8')
+          PY
+
       - name: Ruff
         run: python -m ruff check .
 
