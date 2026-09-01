@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from . import antigravity_full_fidelity_collaboration_base as _base
+from .agent_topology import EVIDENCE_VALIDATED_CHILD_TRANSCRIPT, subagent_topology
 from .antigravity_subagent_linkage import validated_subagent_links
 from .content_evidence import content_observation_event
 from .content_store import FullFidelityContentStore
@@ -51,18 +52,23 @@ def _assignment_event(
             "identity_semantics": "provider_invoke_subagent_spec_index",
         },
     )
+    child_label = role or type_name or "Antigravity subagent"
     child = _entity(
         "agent",
         f"agent:antigravity:conversation:{child_id}",
-        name=role or type_name or "Antigravity subagent",
+        name=child_label,
         attributes={
             "provider": "antigravity",
             "conversation_id": child_id,
-            "agent_path": f"/root/{child_id}",
-            "agent_type": role or type_name or "Antigravity subagent",
+            "agent_type": child_label,
+            "agent_nickname": role or type_name,
             "identity_semantics": "provider_transcript_result_conversation_id",
             "execution_observed": False,
             "lifecycle_authority": "child_provider_hooks",
+            **subagent_topology(
+                evidence=EVIDENCE_VALIDATED_CHILD_TRANSCRIPT,
+                parent_scope_id=conversation_id,
+            ),
         },
     )
     return {
