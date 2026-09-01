@@ -15,14 +15,7 @@ _core_merge_conversation_previews = _core._merge_conversation_previews
 
 
 def _antigravity_step_ordinals(path: str | Path) -> list[int | None]:
-    """Recover stable provider record positions for visible Antigravity messages.
-
-    Antigravity Stop archives are cumulative snapshots of the same transcript. The
-    archive edge sequence therefore changes between snapshots and cannot identify a
-    transcript record. Live-verified transcript records expose ``step_index``; use it
-    when an explicit ``ordinal`` is absent so old turns keep the same identity across
-    repeated Stop archives.
-    """
+    """Recover stable step indexes for user-visible Antigravity transcript records."""
     source_path = Path(path).expanduser().resolve(strict=False)
     try:
         lines = source_path.read_text(encoding="utf-8").splitlines()
@@ -39,13 +32,17 @@ def _antigravity_step_ordinals(path: str | Path) -> list[int | None]:
             continue
         if not isinstance(record, dict):
             continue
-        role = str(record.get("source") or "").lower()
-        if role not in {"user", "human", "assistant", "model"}:
-            continue
+        role = str(record.get("source") or "").strip().lower()
+        record_type = str(record.get("type") or "").strip().lower()
         text = _preview_module._text_parts(record.get("content") or record.get("text"))
-        if not text:
+        visible_user = role in {"user_explicit", "user", "human"} and record_type in {
+            "user_input",
+            "user_message",
+            "",
+        }
+        visible_assistant = role in {"model", "assistant"} and record_type == "planner_response"
+        if not text or not (visible_user or visible_assistant):
             continue
-
         record_ordinal = record.get("ordinal")
         if isinstance(record_ordinal, int) and not isinstance(record_ordinal, bool):
             ordinals.append(record_ordinal)
@@ -224,6 +221,112 @@ def _same_merged_execution(
     return isinstance(observed_thread, str) and observed_thread in evidence_thread_ids
 
 
+
+def _history_message_key(message: dict[str, Any]) -> tuple[object, ...]:
+    return (
+        message.get("ordinal"),
+        message.get("kind"),
+        message.get("sender"),
+        message.get("recipient"),
+        message.get("text"),
+        message.get("content_state"),
+        message.get("phase"),
+        message.get("task_name"),
+    )
+
+
+def _restore_complete_histories(
+    entries: list[dict[str, Any]],
+    snapshots: list[tuple[dict[str, Any], dict[str, Any]]],
+) -> None:
+    """Never silently drop middle rounds for providers whose history is user-facing."""
+    for entry in entries:
+        provider = str(entry.get("provider") or "").lower()
+        if provider not in {"antigravity", "ollama"}:
+            continue
+        merged = entry.get("conversation_preview")
+        source_id = entry.get("source_id")
+        if not isinstance(merged, dict) or not isinstance(source_id, str) or not source_id:
+            continue
+        observed: list[dict[str, Any]] = []
+        for observed_entry, observed_preview in snapshots:
+            if str(observed_entry.get("provider") or "").lower() != provider:
+                continue
+            if observed_entry.get("source_id") != source_id:
+                continue
+            for message in observed_preview.get("messages") or []:
+                if isinstance(message, dict):
+                    observed.append(dict(message))
+        if not observed:
+            continue
+        if provider == "ollama" and not any(
+            message.get("content_role")
+            in {"ollama_request_surface", "ollama_response_surface"}
+            for message in observed
+        ):
+            # Legacy/provider-neutral root records have no wire-surface provenance.
+            # Leave the core incremental merge untouched instead of applying the
+            # Ollama cumulative-history repair to unrelated synthetic/root records.
+            continue
+        indexed = list(enumerate(observed))
+        indexed.sort(
+            key=lambda pair: (
+                str(pair[1].get("timestamp") or ""),
+                pair[1].get("ordinal")
+                if isinstance(pair[1].get("ordinal"), int)
+                else 2**63 - 1,
+                pair[0],
+            )
+        )
+        seen: set[tuple[object, ...]] = set()
+        messages: list[dict[str, Any]] = []
+        for _, message in indexed:
+            key = _history_message_key(message)
+            if key in seen:
+                continue
+            seen.add(key)
+            messages.append(message)
+        merged["message_count"] = len(messages)
+        merged["messages_truncated"] = False
+        merged["messages"] = messages
+
+
+def _ollama_current_turn(preview: dict[str, Any]) -> None:
+    """Reduce a cumulative Ollama chat request to the exact turn this exchange created."""
+    messages = [message for message in preview.get("messages") or [] if isinstance(message, dict)]
+    users = [
+        message
+        for message in messages
+        if message.get("sender") == "user"
+        and message.get("content_role") == "ollama_request_surface"
+    ]
+    response_assistants = [
+        message
+        for message in messages
+        if message.get("content_role") == "ollama_response_surface"
+        and str(message.get("kind") or "").startswith("assistant")
+    ]
+    if not users:
+        return
+    current = [users[-1]]
+    if response_assistants:
+        current.append(response_assistants[-1])
+    preview["message_count"] = len(current)
+    preview["messages_truncated"] = False
+    preview["messages"] = current
+
+
+def _ollama_root_agent_id(graph: dict[str, Any]) -> str | None:
+    candidates = []
+    for node in graph.get("nodes", []):
+        if not isinstance(node, dict) or node.get("type") != "agent":
+            continue
+        node_id = node.get("id")
+        if isinstance(node_id, str) and node_id.lower() == "agent:ollama":
+            candidates.append(node_id)
+    return candidates[0] if len(candidates) == 1 else None
+
+
 def _merge_conversation_previews(entries: list[dict[str, Any]]) -> None:
     """Merge execution identity first, then reconcile duplicate Codex observations.
 
@@ -232,6 +335,28 @@ def _merge_conversation_previews(entries: list[dict[str, Any]]) -> None:
     aliases that changed during publication, then lets complementary Codex observations
     render once while retaining provenance. Raw evidence entries are never removed.
     """
+    # Preserve which side of an Ollama exchange produced each visible message.
+    # Cumulative request.messages can contain historical assistant text, so publication
+    # must select the assistant observed on the response surface rather than guessing
+    # from list position.
+    for entry in entries:
+        if str(entry.get("provider") or "").lower() != "ollama":
+            continue
+        preview = entry.get("conversation_preview")
+        if not isinstance(preview, dict):
+            continue
+        kind = str(entry.get("content_kind") or "").lower()
+        relation = str(entry.get("relation") or "").upper()
+        if "assistant_messages" in kind or relation == "OBSERVED_ASSISTANT_MESSAGES":
+            role = "ollama_response_surface"
+        elif "request_messages" in kind or "request_prompt" in kind or "request_input" in kind:
+            role = "ollama_request_surface"
+        else:
+            continue
+        for message in preview.get("messages") or []:
+            if isinstance(message, dict):
+                message["content_role"] = role
+
     snapshots: list[tuple[dict[str, Any], dict[str, Any]]] = []
     for entry in entries:
         preview = entry.get("conversation_preview")
@@ -253,6 +378,7 @@ def _merge_conversation_previews(entries: list[dict[str, Any]]) -> None:
 
     _core_merge_conversation_previews(entries)
     _repair_parent_thread_aliases(entries)
+    _restore_complete_histories(entries, snapshots)
 
     for entry in entries:
         if str(entry.get("provider") or "").lower() != "codex":
@@ -294,8 +420,48 @@ def _merge_conversation_previews(entries: list[dict[str, Any]]) -> None:
         merged_preview["messages"] = messages
 
 
+
+_core_conversation_record_entries = _core.conversation_record_entries
+
+
+def conversation_record_entries(
+    graph: dict[str, Any],
+    run_root: str | Path | None = None,
+) -> list[dict[str, Any]]:
+    """Publish root-only Ollama turns under the one run root without changing raw evidence."""
+    entries = _core_conversation_record_entries(graph, run_root)
+    root_id = _ollama_root_agent_id(graph)
+    if root_id is None:
+        return entries
+
+    normalized = False
+    for entry in entries:
+        if str(entry.get("provider") or "").lower() != "ollama":
+            continue
+        preview = entry.get("conversation_preview")
+        if not isinstance(preview, dict) or preview.get("is_root") is not True:
+            continue
+        if entry.get("source_type") != "inference_request":
+            continue
+        _ollama_current_turn(preview)
+        preview["provider_native_id"] = root_id
+        original_source_id = entry.get("source_id")
+        if isinstance(original_source_id, str) and original_source_id != root_id:
+            entry["evidence_source_id"] = original_source_id
+            entry["evidence_source_type"] = entry.get("source_type")
+        entry["source_id"] = root_id
+        entry["source_name"] = "Ollama"
+        entry["source_type"] = "agent"
+        normalized = True
+
+    if normalized:
+        _merge_conversation_previews(entries)
+    return entries
+
+
 # Functions defined in the core module resolve these globals at call time. Rebinding
 # keeps the public API stable while tightening identity before the observation stage.
 _core.conversation_preview = _conversation_preview
 _core._conversation_identity_keys = _conversation_identity_keys
 _core._merge_conversation_previews = _merge_conversation_previews
+_core.conversation_record_entries = conversation_record_entries

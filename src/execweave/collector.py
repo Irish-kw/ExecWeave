@@ -10,6 +10,7 @@ from typing import Iterable
 import psutil
 
 from .auto_specialized import (
+    auto_specialized_launch,
     auto_specialized_probe,
     prepare_post_command_specialized_probe,
     run_post_command_specialized_probe,
@@ -95,6 +96,7 @@ def infer_agent_name(command: Iterable[str]) -> str:
         "gemini": "Gemini CLI",
         "cursor": "Cursor",
         "opencode": "OpenCode",
+        "ollama": "Ollama",
     }
     return known.get(executable, basename)
 
@@ -167,20 +169,25 @@ class RuntimeCollector:
         return_code = 1
         post_command_probe = prepare_post_command_specialized_probe(command)
         try:
-            process = subprocess.Popen(launch_command, cwd=str(self.watch_root))
-            root = psutil.Process(process.pid)
-            snapshot = _safe_process_snapshot(root)
-            if snapshot is not None:
-                self._record_process_start(snapshot, parent=session, relation="LAUNCHED")
+            with auto_specialized_launch(command) as launch_environment:
+                process = subprocess.Popen(
+                    launch_command,
+                    cwd=str(self.watch_root),
+                    env=launch_environment,
+                )
+                root = psutil.Process(process.pid)
+                snapshot = _safe_process_snapshot(root)
+                if snapshot is not None:
+                    self._record_process_start(snapshot, parent=session, relation="LAUNCHED")
 
-            with auto_specialized_probe(command):
-                while process.poll() is None:
+                with auto_specialized_probe(command):
+                    while process.poll() is None:
+                        self._sample_process_tree(root)
+                        time.sleep(self.poll_interval)
+
                     self._sample_process_tree(root)
-                    time.sleep(self.poll_interval)
-
-                self._sample_process_tree(root)
-                self._mark_disappeared_processes(set())
-            return_code = int(process.returncode or 0)
+                    self._mark_disappeared_processes(set())
+                return_code = int(process.returncode or 0)
             run_post_command_specialized_probe(
                 post_command_probe,
                 return_code=return_code,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -269,6 +270,18 @@ def _structured_messages(
     return messages
 
 
+_ANTIGRAVITY_USER_REQUEST_RE = re.compile(
+    r"<USER_REQUEST>\s*(?P<body>.*?)\s*</USER_REQUEST>",
+    re.DOTALL,
+)
+
+
+def _antigravity_user_text(text: str) -> str:
+    """Return the actual user request, excluding Antigravity's metadata envelope."""
+    match = _ANTIGRAVITY_USER_REQUEST_RE.search(text)
+    return match.group("body").strip() if match is not None else text.strip()
+
+
 def _line_transcript_messages(
     path: Path,
     *,
@@ -291,26 +304,71 @@ def _line_transcript_messages(
             continue
         if not isinstance(record, dict):
             continue
+
+        if antigravity:
+            role = str(record.get("source") or "").strip().lower()
+            record_type = str(record.get("type") or "").strip().lower()
+            text = _text_parts(record.get("content") or record.get("text"))
+            record_timestamp = record.get("created_at") or record.get("timestamp") or timestamp
+            step_index = record.get("step_index")
+            record_ordinal = (
+                step_index
+                if isinstance(step_index, int) and not isinstance(step_index, bool)
+                else (ordinal if isinstance(ordinal, int) else 0) + index
+            )
+
+            # Current Antigravity uses USER_EXPLICIT / USER_INPUT for real user turns.
+            # Keep the older USER/HUMAN spelling for archived compatibility.
+            if role in {"user_explicit", "user", "human"} and record_type in {
+                "user_input",
+                "user_message",
+                "",
+            }:
+                if text:
+                    messages.append(
+                        _message(
+                            timestamp=record_timestamp,
+                            ordinal=record_ordinal,
+                            kind="user_message",
+                            sender="user",
+                            recipient=agent_path,
+                            text=_antigravity_user_text(text),
+                        )
+                    )
+                continue
+
+            # PLANNER_RESPONSE is Antigravity's user-visible model surface. GENERIC
+            # records are tool/runtime results (define_subagent, manage_subagents,
+            # schedule, send_message acknowledgements, ...), so they must never be
+            # eligible for the conversation Final response card.
+            if role in {"model", "assistant"} and record_type == "planner_response":
+                if text:
+                    messages.append(
+                        _message(
+                            timestamp=record_timestamp,
+                            ordinal=record_ordinal,
+                            kind="assistant_message",
+                            sender=agent_path,
+                            recipient=None,
+                            text=text,
+                            phase="planner_response",
+                        )
+                    )
+                continue
+            continue
+
         record_timestamp = record.get("timestamp") or timestamp
         record_ordinal = record.get("ordinal")
         if not isinstance(record_ordinal, int):
             record_ordinal = (ordinal if isinstance(ordinal, int) else 0) + index
-
-        if antigravity:
-            role = str(record.get("source") or "").lower()
-            text = _text_parts(record.get("content") or record.get("text"))
-            phase = str(record.get("type") or "").lower() or "response"
+        record_type = str(record.get("type") or "").lower()
+        payload = record.get("message")
+        if isinstance(payload, dict):
+            role = str(payload.get("role") or record_type).lower()
+            text = _text_parts(payload.get("content"))
         else:
-            record_type = str(record.get("type") or "").lower()
-            payload = record.get("message")
-            if isinstance(payload, dict):
-                role = str(payload.get("role") or record_type).lower()
-                text = _text_parts(payload.get("content"))
-            else:
-                role = record_type
-                text = _text_parts(record.get("content") or record.get("text"))
-            phase = "response"
-
+            role = record_type
+            text = _text_parts(record.get("content") or record.get("text"))
         if not text:
             continue
         if role in {"user", "human"}:
@@ -333,7 +391,7 @@ def _line_transcript_messages(
                     sender=agent_path,
                     recipient=None,
                     text=text,
-                    phase=phase,
+                    phase="response",
                 )
             )
     return messages
@@ -722,7 +780,8 @@ def conversation_preview(
 
     if not messages:
         return None
-    truncated = len(messages) > _MAX_PREVIEW_MESSAGES
+    preserve_history = content_kind.startswith("antigravity.conversation_transcript")
+    truncated = not preserve_history and len(messages) > _MAX_PREVIEW_MESSAGES
     if truncated:
         messages = messages[:10] + messages[-(_MAX_PREVIEW_MESSAGES - 10) :]
     return {

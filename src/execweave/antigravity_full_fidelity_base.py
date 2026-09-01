@@ -11,12 +11,24 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _agent() -> dict[str, Any]:
+def _agent(payload: dict[str, Any]) -> dict[str, Any]:
+    conversation_id = payload.get("conversationId")
+    if isinstance(conversation_id, str) and conversation_id:
+        return {
+            "type": "agent",
+            "id": f"agent:antigravity:conversation:{conversation_id}",
+            "name": "Antigravity conversation",
+            "attributes": {
+                "provider": "antigravity",
+                "conversation_id": conversation_id,
+                "identity_semantics": "provider_conversation_id",
+            },
+        }
     return {
         "type": "agent",
         "id": "agent:Antigravity",
         "name": "Antigravity",
-        "attributes": {},
+        "attributes": {"provider": "antigravity"},
     }
 
 
@@ -70,7 +82,7 @@ def antigravity_hook_to_content_events(
             content_observation_event(
                 timestamp=observed_at,
                 provider="antigravity",
-                source=_agent(),
+                source=_agent(payload),
                 reference=reference,
                 relation="OBSERVED_PROVIDER_METADATA",
                 observed_field="hook_metadata",
@@ -122,7 +134,7 @@ def antigravity_hook_to_content_events(
             content_observation_event(
                 timestamp=observed_at,
                 provider="antigravity",
-                source=_agent(),
+                source=_agent(payload),
                 reference=reference,
                 relation="OBSERVED_TOOL_ERROR",
                 observed_field="error",

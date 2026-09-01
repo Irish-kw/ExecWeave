@@ -29,7 +29,7 @@ if(!details||!detailsEmpty)return;
 let entries=Array.isArray(window.__execweaveStaticConversations)?window.__execweaveStaticConversations:[];
 let selectedNode=null,refreshing=false,selectedConversationSignature='';
 const foldStateByAgent=new Map();
-const ROOT_NODE_IDS=new Set(['agent:Claude Code','agent:OpenAI Codex','agent:Codex','agent:Cursor','agent:OpenCode','agent:Gemini CLI','agent:Antigravity']);
+const ROOT_NODE_IDS=new Set(['agent:Claude Code','agent:OpenAI Codex','agent:Codex','agent:Cursor','agent:OpenCode','agent:Gemini CLI','agent:Antigravity','agent:Ollama','agent:ollama']);
 const ENCRYPTED_NOTICE='Observed — plaintext not exposed by provider.';
 const attrs=node=>node&&typeof node.attributes==='object'&&node.attributes?node.attributes:{};
 const nodePath=node=>String(attrs(node).agent_path||attrs(node).child_agent_path||attrs(node).root_agent_path||node?.name||'').trim();
