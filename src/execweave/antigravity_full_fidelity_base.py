@@ -111,7 +111,12 @@ def antigravity_hook_to_content_events(
                 f"{payload.get('stepIdx', 'unknown')}"
             ),
             "name": name,
-            "attributes": {"provider": "antigravity", "tool_name": name},
+            "attributes": {
+                "provider": "antigravity",
+                "tool_name": name,
+                "conversation_id": payload.get("conversationId"),
+                "step_index": payload.get("stepIdx"),
+            },
         }
         events.append(
             content_observation_event(

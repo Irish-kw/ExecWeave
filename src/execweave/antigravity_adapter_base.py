@@ -165,7 +165,10 @@ def _tool_call(payload: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any],
         attributes={
             "provider": "antigravity",
             "tool_name": name,
+            "conversation_id": conversation_id,
             "step_index": step,
+            "arguments": canonical_args,
+            "arguments_observed": isinstance(args, dict),
         },
     )
     tool = _entity(
