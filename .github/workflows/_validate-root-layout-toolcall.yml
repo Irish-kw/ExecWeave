@@ -31,6 +31,8 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev,e2e]"
           python -m playwright install --with-deps chromium
+      - name: Format permanent regression
+        run: ruff format tests/test_dashboard_root_layout_toolcall_aggregation.py
       - name: Ruff
         run: |
           ruff check \
