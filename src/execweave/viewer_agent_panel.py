@@ -41,7 +41,8 @@ const displayText=message=>isEncrypted(message)?ENCRYPTED_NOTICE:messageText(mes
 const isInjected=message=>String(message?.content_role||'')==='shared_injected_context';
 const own=(message,path)=>!message?.sender||String(message.sender)===path;
 const previewHasRootAuthority=preview=>!!preview&&preview.is_root===true&&String(preview.topology_state||'')!=='derived'&&String(preview.topology_evidence||'')!=='no_parent_evidence_observed';
-const nodeHasRootAuthority=node=>attrs(node).agent_role==='root'||String(attrs(node).root_agent_path||'')==='/root'||ROOT_NODE_IDS.has(String(node?.id||''));
+const nodeHasChildAuthority=node=>!!String(attrs(node).parent_agent_path||'').trim();
+const nodeHasRootAuthority=node=>!nodeHasChildAuthority(node)&&(attrs(node).agent_role==='root'||String(attrs(node).root_agent_path||'')==='/root'||ROOT_NODE_IDS.has(String(node?.id||'')));
 const entryHasRootAuthority=entry=>ROOT_NODE_IDS.has(String(entry?.source_id||''))||previewHasRootAuthority(entry?.conversation_preview);
 function messageKey(message){return JSON.stringify([message?.timestamp??null,message?.ordinal??null,message?.sender??null,message?.recipient??null,message?.kind??null,message?.phase??null,message?.content_state??null,message?.content_role??null,messageText(message)])}
 function messageOrder(message,index){const stamp=String(message?.timestamp||''),ordinal=Number.isInteger(message?.ordinal)?message.ordinal:Number.MAX_SAFE_INTEGER;return{message,index,stamp,ordinal}}

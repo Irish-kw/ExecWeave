@@ -18,7 +18,8 @@ execweaveDashboardGraph=function(data){
       const conversationId=String(attrs.conversation_id||'').trim();
       const nickname=String(attrs.agent_nickname||'').trim();
       const nativeLabel=String(nickname||attrs.agent_type||attrs.subagent_type||attrs.native_agent_name||'').trim();
-      const explicitRoot=attrs.agent_role==='root'||String(attrs.root_agent_path||'')==='/root'||providerRootIds.has(String(node.id||''));
+      const explicitChild=!!String(attrs.parent_agent_path||'').trim();
+      const explicitRoot=!explicitChild&&(attrs.agent_role==='root'||String(attrs.root_agent_path||'')==='/root'||providerRootIds.has(String(node.id||'')));
       if(explicitRoot)name='/root';
       else if(provider==='antigravity'&&nativeLabel&&!['default','agent','subagent','antigravity subagent'].includes(nativeLabel.toLowerCase()))name=nativeLabel;
       else if(agentPath)name=agentPath;
