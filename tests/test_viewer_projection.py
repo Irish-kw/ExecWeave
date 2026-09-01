@@ -154,7 +154,7 @@ def test_edge_without_string_id_is_not_eligible_for_collapse() -> None:
     assert len(projected["edges"]) == 4
 
 
-def test_low_port_loopback_stays_separate_non_loopback_folds_into_external() -> None:
+def test_low_ports_and_non_loopback_addresses_do_not_collapse() -> None:
     raw = _graph(
         {
             "process:p1": [
