@@ -95,4 +95,44 @@ jobs:
               && -n "$model_runtime_identity_changed" ]]; then
             args+=(--allow-test-change "tests/test_model_runtime.py=AUD-002 only: the historical llama.cpp request ID assertion now includes the sanitized endpoint scope; the test node ID and runtime privacy contract are unchanged")
           fi
+          # fix/provider-isolation: viewer now folds non-loopback IPs into one External
+          # node and Arrange/first-frame use Dagre. Existing tests keep their node IDs
+          # and now assert the new projection and layout. Grant only this branch and
+          # only files that actually differ from the base.
+          if [[ "$HEAD_REF" == "fix/provider-isolation" ]]; then
+            while IFS= read -r path; do
+              case "$path" in
+                tests/test_viewer_projection.py)
+                  args+=(--allow-test-change "tests/test_viewer_projection.py=non-loopback endpoints now fold into viewer-cluster:external; loopback stays separate. Test node ID is unchanged")
+                  ;;
+                tests/test_live.py)
+                  args+=(--allow-test-change "tests/test_live.py=process-tree layout spreads a small depth Map into Math.max; coordinate arrays still must not be spread")
+                  ;;
+                tests/test_dashboard_simplification.py)
+                  args+=(--allow-test-change "tests/test_dashboard_simplification.py=projected node set now contains External instead of the raw outbound IP")
+                  ;;
+                tests/test_dashboard_ux_and_hook_projection.py)
+                  args+=(--allow-test-change "tests/test_dashboard_ux_and_hook_projection.py=live graph projection folds the public endpoint; hook process remains hidden")
+                  ;;
+                tests/test_viewer_agent_isolation_e2e.py)
+                  args+=(--allow-test-change "tests/test_viewer_agent_isolation_e2e.py=non-agent click target is External after IP collapse")
+                  ;;
+                tests/test_dashboard_readability_e2e.py)
+                  args+=(--allow-test-change "tests/test_dashboard_readability_e2e.py=Dagre reflows existing nodes when a live node is added; identity of those nodes is unchanged")
+                  ;;
+                tests/test_pr25_premerge_hardening_e2e.py)
+                  args+=(--allow-test-change "tests/test_pr25_premerge_hardening_e2e.py=Dagre LR placement replaces the old barycentre Y order; files stay to the right of owners and do not overlap")
+                  ;;
+                tests/test_codex_child_panel_policy.py)
+                  args+=(--allow-test-change "tests/test_codex_child_panel_policy.py=Windows node subprocess must decode panel JS as UTF-8")
+                  ;;
+                tests/test_antigravity_child_panel_policy.py)
+                  args+=(--allow-test-change "tests/test_antigravity_child_panel_policy.py=Windows node subprocess must decode panel JS as UTF-8")
+                  ;;
+                tests/test_ollama_panel_policy.py)
+                  args+=(--allow-test-change "tests/test_ollama_panel_policy.py=Windows node subprocess must decode panel JS as UTF-8")
+                  ;;
+              esac
+            done < <(git diff --name-only "$BASELINE_REF...HEAD" -- tests)
+          fi
           python scripts/check_release_stage_integrity.py "${args[@]}"
