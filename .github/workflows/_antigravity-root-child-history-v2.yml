@@ -22,6 +22,7 @@ jobs:
         run: |
           python .github/_tmp_antigravity_root_child_history_v2.py
           python .github/_tmp_antigravity_root_child_history_v2_fix.py
+          python .github/_tmp_antigravity_root_child_history_v2_testfix.py
       - name: Install
         run: python -m pip install -e ".[dev,e2e]"
       - name: Ruff
@@ -44,7 +45,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git rm .github/_tmp_antigravity_root_child_history_v2.py .github/_tmp_antigravity_root_child_history_v2_fix.py .github/workflows/_antigravity-root-child-history-v2.yml
+          git rm .github/_tmp_antigravity_root_child_history_v2.py .github/_tmp_antigravity_root_child_history_v2_fix.py .github/_tmp_antigravity_root_child_history_v2_testfix.py .github/workflows/_antigravity-root-child-history-v2.yml
           git add src/execweave/antigravity_subagent_linkage.py src/execweave/conversation_records.py src/execweave/viewer_agent_panel.py src/execweave/viewer_dashboard_focus.py tests/test_antigravity_root_child_history_v2.py
           git diff --cached --check
           git commit -m "fix: preserve Antigravity root and child task history"
