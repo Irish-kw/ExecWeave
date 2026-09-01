@@ -1,0 +1,74 @@
+name: Apply conversation integrity patch
+
+on:
+  push:
+    branches:
+      - fix/antigravity-real-transcript-history
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-conversation-integrity-patch
+  cancel-in-progress: false
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/antigravity-real-transcript-history
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install
+        run: python -m pip install -e '.[dev,e2e]'
+
+      - name: Apply guarded patch
+        run: python scripts/_apply_conversation_integrity_patch.py
+
+      - name: Ruff
+        run: python -m ruff check .
+
+      - name: Focused non-browser regressions
+        run: python -m pytest -q tests/test_provider_conversation_history_integrity.py -m 'not viewer_e2e'
+
+      - name: Full non-browser suite
+        run: python -m pytest -q -m 'not viewer_e2e'
+
+      - name: Install Chromium
+        run: python -m playwright install --with-deps chromium
+
+      - name: Required browser regressions
+        env:
+          EXECWEAVE_E2E_REQUIRED: '1'
+        run: python -m pytest -v tests/test_provider_conversation_history_integrity.py -m viewer_e2e
+
+      - name: Commit production and permanent tests
+        run: |
+          set -euo pipefail
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            src/execweave/conversation_preview.py \
+            src/execweave/conversation_records.py \
+            src/execweave/antigravity_full_fidelity_base.py \
+            src/execweave/model_runtime.py \
+            src/execweave/model_runtime_full_fidelity.py \
+            src/execweave/auto_specialized.py \
+            src/execweave/collector.py \
+            src/execweave/strace_backend.py \
+            src/execweave/viewer_dashboard_focus.py \
+            src/execweave/viewer_agent_panel.py \
+            tests/test_provider_conversation_history_integrity.py
+          git commit -m 'fix: preserve provider conversation history'
+          git push origin HEAD:fix/antigravity-real-transcript-history
