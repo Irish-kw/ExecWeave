@@ -15,6 +15,8 @@ LIVE_READABILITY_STYLE = r"""
 .label.context-dim{opacity:0!important}
 .label.context-visible{fill:var(--text)}
 .label.aggregate-label{fill:var(--text);font-size:9px;font-weight:700}
+.node{cursor:grab;touch-action:none}.node.dragging{cursor:grabbing}
+.execweave-tool-occurrences{margin-top:12px;border-top:1px solid var(--border);padding-top:10px}.execweave-tool-occurrences>strong{display:block;margin-bottom:7px}.execweave-tool-occurrence{border:1px solid var(--border);border-radius:8px;background:var(--panel2);margin:6px 0}.execweave-tool-occurrence>summary{cursor:pointer;padding:7px 9px;color:var(--muted);font-size:11px}.execweave-tool-occurrence>pre{margin:0;padding:9px;border-top:1px solid var(--border);max-height:280px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:11px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 """.strip()
 
 
@@ -104,7 +106,7 @@ function execweaveAgentPath(node){const a=execweaveAttrs(node);return String(a.a
 function execweaveRelation(edge){return String(edge?.relation||'').toUpperCase()}
 function execweaveIsSpawn(edge){const value=execweaveRelation(edge);return value==='SPAWNED_AGENT'||value.includes('SPAWNED_AGENT')||value.includes('SPAWN_AGENT')}
 function execweaveIsStopped(edge){const value=execweaveRelation(edge);return value==='SUBAGENT_STOPPED'||value.includes('SUBAGENT_STOPPED')}
-function execweaveIsRoot(node){const a=execweaveAttrs(node);return node?.type==='agent'&&(a.agent_role==='root'||a.root_agent_path==='/root'||a.agent_path==='/root'||execweaveAgentPath(node)==='/root')}
+function execweaveIsRoot(node){const a=execweaveAttrs(node);if(node?.type!=='agent')return false;if(Object.prototype.hasOwnProperty.call(a,'viewer_root'))return a.viewer_root===true;return a.agent_role==='root'||a.root_agent_path==='/root'||a.agent_path==='/root'||execweaveAgentPath(node)==='/root'}
 function execweaveLane(node){
   const type=String(node?.type||'').toLowerCase();
   if(type==='agent')return execweaveIsRoot(node)?'root':'agent';
@@ -406,4 +408,55 @@ const execweaveBaseSelectNode=selectNode;
 selectNode=function(id,options={}){execweaveBaseSelectNode(id,options);if(nodeById.has(id))execweaveFocusNodeEdges(id)};
 const execweaveBaseSelectEdge=selectEdge;
 selectEdge=function(id,options={}){execweaveBaseSelectEdge(id,options);if(edgeById.has(id))execweaveFocusOneEdge(id)};
+
+// Manual placement and automatic arrangement are complementary. Polling preserves a
+// reader's manual position, while Arrange deliberately throws manual positions away
+// and recomputes the existing topology-aware lane layout.
+let execweaveNodeDrag=null;
+function execweaveGraphPoint(event){const rect=svg.getBoundingClientRect();return{x:(event.clientX-rect.left-transform.x)/transform.scale,y:(event.clientY-rect.top-transform.y)/transform.scale}}
+function execweaveRefreshIncidentEdges(id){const edgeIds=new Set([...(incomingByNode.get(id)||[]),...(outgoingByNode.get(id)||[])]);for(const edgeIdValue of edgeIds){const edge=edgeById.get(edgeIdValue);if(edge)updateEdgeElement(edge)}}
+const execweaveBaseCreateNodeElement=createNodeElement;
+createNodeElement=function(node){
+  const existed=nodeElements.has(node.id);execweaveBaseCreateNodeElement(node);const group=nodeElements.get(node.id);
+  if(!group||existed||group.dataset.execweaveDragBound==='1')return;
+  group.dataset.execweaveDragBound='1';
+  group.addEventListener('click',event=>{if(group.dataset.execweaveSuppressClick==='1'){delete group.dataset.execweaveSuppressClick;event.preventDefault();event.stopImmediatePropagation()}},true);
+  group.addEventListener('pointerdown',event=>{
+    if(event.button!==0)return;const current=positions.get(node.id);if(!current)return;
+    event.stopPropagation();userTookCamera();stopAnimation();const point=execweaveGraphPoint(event);
+    execweaveNodeDrag={id:node.id,pointerId:event.pointerId,dx:point.x-current.x,dy:point.y-current.y,startX:event.clientX,startY:event.clientY,moved:false};
+    group.classList.add('dragging');try{group.setPointerCapture(event.pointerId)}catch(_){}
+  });
+  group.addEventListener('pointermove',event=>{
+    const drag=execweaveNodeDrag;if(!drag||drag.id!==node.id||drag.pointerId!==event.pointerId)return;
+    if(Math.abs(event.clientX-drag.startX)>3||Math.abs(event.clientY-drag.startY)>3)drag.moved=true;
+    const point=execweaveGraphPoint(event),next={x:point.x-drag.dx,y:point.y-drag.dy};positions.set(node.id,next);group.setAttribute('transform',`translate(${next.x} ${next.y})`);execweaveRefreshIncidentEdges(node.id);updateJumpLatest();
+  });
+  const finish=event=>{
+    const drag=execweaveNodeDrag;if(!drag||drag.id!==node.id||drag.pointerId!==event.pointerId)return;
+    if(drag.moved){group.dataset.execweaveSuppressClick='1';setTimeout(()=>{if(group.dataset.execweaveSuppressClick==='1')delete group.dataset.execweaveSuppressClick},250)}
+    execweaveNodeDrag=null;group.classList.remove('dragging');try{group.releasePointerCapture(event.pointerId)}catch(_){}
+  };
+  group.addEventListener('pointerup',finish);group.addEventListener('pointercancel',finish);
+};
+function execweaveArrangeGraph(){
+  execweaveTopology=execweaveBuildTopology();const next=new Map();
+  const ordered=[...nodeById.keys()].sort((a,b)=>{const av=execweaveTopology.spec.get(a)||{},bv=execweaveTopology.spec.get(b)||{};return Number(av.rank||0)-Number(bv.rank||0)||Number(av.order||0)-Number(bv.order||0)||String(a).localeCompare(String(b))});
+  for(const id of ordered)next.set(id,execweavePlaceStable(id,execweaveDesiredPosition(id),next,id));
+  positions=next;layerRows=new Map();
+  for(const [id,p] of positions){const spec=execweaveTopology.spec.get(id);if(spec)layerRows.set(spec.rank,Math.max(layerRows.get(spec.rank)||0,spec.order+1));const group=nodeElements.get(id);if(group)group.setAttribute('transform',`translate(${p.x} ${p.y})`);const node=nodeById.get(id);if(node)updateNodeElement(node)}
+  for(const edge of edgeById.values())updateEdgeElement(edge);
+  svg.classList.toggle('execweave-crowded',execweaveTopology.crowded);applySearch();fit(true);updateJumpLatest();return new Map(positions);
+}
+window.__execweaveArrangeGraph=execweaveArrangeGraph;
+const execweaveArrangeButton=document.getElementById('arrange');if(execweaveArrangeButton)execweaveArrangeButton.onclick=()=>execweaveArrangeGraph();
+function execweaveToolOccurrenceSection(node){
+  const occurrences=Array.isArray(execweaveAttrs(node).viewer_tool_call_occurrences)?execweaveAttrs(node).viewer_tool_call_occurrences:[];if(!occurrences.length)return null;
+  const section=document.createElement('section');section.className='execweave-tool-occurrences';const title=document.createElement('strong');title.textContent=`Invocations · ${occurrences.length} call${occurrences.length===1?'':'s'}`;section.appendChild(title);
+  occurrences.forEach((occurrence,index)=>{const fold=document.createElement('details');fold.className='execweave-tool-occurrence';const summary=document.createElement('summary');const when=prettyTime(occurrence.first_seen||occurrence.last_seen),owner=entityLabel(occurrence.owner_id);summary.textContent=`${when} · ${owner} · call ${index+1}`;const pre=document.createElement('pre');pre.textContent=JSON.stringify({first_seen:occurrence.first_seen,last_seen:occurrence.last_seen,first_sequence:occurrence.first_sequence,last_sequence:occurrence.last_sequence,input:occurrence.input,output:occurrence.output,call_ids:occurrence.call_ids,content_references:occurrence.content_references},null,2);fold.append(summary,pre);section.appendChild(fold)});
+  return section;
+}
+const execweaveBaseShow=show;
+show=function(value,kind='Selection'){execweaveBaseShow(value,kind);if(kind==='Node'&&value?.type==='tool'){const section=execweaveToolOccurrenceSection(value);if(section){const raw=details.querySelector('.raw-toggle');if(raw)details.insertBefore(section,raw);else details.appendChild(section)}}};
+
 """.strip()

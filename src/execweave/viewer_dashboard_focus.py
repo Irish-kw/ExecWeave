@@ -6,11 +6,11 @@ execweaveDashboardGraph=function(data){
   const projected=execweaveDashboardGraphBase(data);
   const hiddenTypes=new Set(['agent_trace_capability','session','command','inference_call','code_cell','agent_message']);
   const mergeTypes=new Set(['model','directory','network_endpoint']);
-  const providerRootIds=new Set(['agent:Claude Code','agent:OpenAI Codex','agent:Codex','agent:Cursor','agent:OpenCode','agent:Gemini CLI','agent:Antigravity','agent:Ollama','agent:ollama']);
+  const providerRootIds=new Set(['agent:Claude Code','agent:OpenAI Codex','agent:Codex','agent:Cursor','agent:OpenCode','agent:Gemini CLI','agent:Antigravity','agent:antigravity','agent:Ollama','agent:ollama']);
   const before=Array.isArray(projected.nodes)?projected.nodes:[];
+  const isAgyScoped=node=>node?.type==='agent'&&String(node?.attributes?.provider||'').toLowerCase()==='antigravity'&&String(node?.id||'').toLowerCase().startsWith('agent:antigravity:conversation:');
   let prepared=before.filter(node=>node&&!hiddenTypes.has(String(node.type||''))).map(node=>{
-    const attrs=node.attributes||{};
-    let name=node.name;
+    const attrs=node.attributes||{};let name=node.name;
     if(node.type==='agent'){
       const provider=String(attrs.provider||'').toLowerCase();
       const agentPath=String(attrs.agent_path||attrs.child_agent_path||attrs.root_agent_path||'').trim();
@@ -19,14 +19,13 @@ execweaveDashboardGraph=function(data){
       const nickname=String(attrs.agent_nickname||'').trim();
       const nativeLabel=String(nickname||attrs.agent_type||attrs.subagent_type||attrs.native_agent_name||'').trim();
       const explicitChild=!!String(attrs.parent_agent_path||'').trim();
+      const scopedAgy=provider==='antigravity'&&isAgyScoped(node);
       const explicitRoot=!explicitChild&&(attrs.agent_role==='root'||String(attrs.root_agent_path||'')==='/root'||providerRootIds.has(String(node.id||'')));
-      if(explicitRoot)name='/root';
+      if(explicitRoot&&!scopedAgy)name='/root';
       else if(provider==='antigravity'&&nativeLabel&&!['default','agent','subagent','antigravity subagent'].includes(nativeLabel.toLowerCase()))name=nativeLabel;
-      else if(agentPath)name=agentPath;
+      else if(agentPath&&!(scopedAgy&&agentPath==='/root'))name=agentPath;
       else if(provider==='antigravity'&&conversationId)name=`conversation · ${conversationId.slice(0,8)}`;
       else if(['default','agent','subagent','antigravity conversation'].includes(String(node.name||'').toLowerCase())){
-        // Never label by a timestamp-ordered id prefix: siblings spawned in the
-        // same millisecond share it and render as the same node.
         if(nickname)name=`subagent · ${nickname}`;
         else if(nativeLabel)name=`subagent · ${nativeLabel}`;
         else if(agentId)name=`subagent · ${agentId.slice(0,13)}`;
@@ -35,24 +34,42 @@ execweaveDashboardGraph=function(data){
     }
     const occurrenceCount=Number(attrs.viewer_occurrence_count||0);
     if(node.type==='process'&&occurrenceCount>1&&!/\s×\d+$/.test(String(name||'')))name=`${name||node.id} ×${occurrenceCount}`;
+      if(node.type==='tool'&&occurrenceCount>1&&!/\s×\d+$/.test(String(name||'')))name=`${name||node.id} ×${occurrenceCount}`;
     return name===node.name?node:{...node,name};
   });
   const presentationAlias=new Map();
-  const antigravityRoot=prepared.find(node=>String(node?.id||'')==='agent:Antigravity');
-  const antigravityScoped=prepared.filter(node=>{
+  const agyScopeToken=value=>{
+    let text=String(value||'').trim();if(!text)return'';
+    const prefix='agent:antigravity:conversation:';
+    if(text.toLowerCase().startsWith(prefix))text=text.slice(prefix.length);
+    return text.toLowerCase();
+  };
+  const antigravityScoped=prepared.filter(isAgyScoped);
+  const antigravityGeneric=prepared.filter(node=>node?.type==='agent'&&String(node?.attributes?.provider||'').toLowerCase()==='antigravity'&&!isAgyScoped(node));
+  const parentScopes=new Set();
+  for(const node of antigravityScoped){
     const attrs=node?.attributes||{};
-    return node?.type==='agent'&&String(attrs.provider||'').toLowerCase()==='antigravity'&&
-      String(node.id||'').startsWith('agent:antigravity:conversation:');
+    if(!String(attrs.parent_agent_path||'').trim()&&!String(attrs.parent_scope_id||'').trim())continue;
+    for(const value of [attrs.parent_scope_id,attrs.parent_native_id,attrs.parent_conversation_id]){const token=agyScopeToken(value);if(token)parentScopes.add(token)}
+  }
+  const evidenceMains=antigravityScoped.filter(node=>{
+    const attrs=node?.attributes||{};if(String(attrs.parent_agent_path||'').trim())return false;
+    const tokens=[agyScopeToken(node.id),agyScopeToken(attrs.conversation_id)].filter(Boolean);
+    return tokens.some(token=>parentScopes.has(token));
   });
-  const parentScopes=new Set(antigravityScoped.filter(node=>String(node?.attributes?.parent_agent_path||'').trim()).map(node=>String(node?.attributes?.parent_scope_id||'')).filter(Boolean));
-  const evidenceMains=antigravityScoped.filter(node=>{const attrs=node?.attributes||{};return !String(attrs.parent_agent_path||'').trim()&&parentScopes.has(String(attrs.conversation_id||''));});
   const fallbackMains=antigravityScoped.filter(node=>{const attrs=node?.attributes||{};return !String(attrs.parent_agent_path||'').trim()&&!attrs.routing_identity_only;});
-  const antigravityMains=evidenceMains.length?evidenceMains:fallbackMains;
-  if(antigravityRoot&&antigravityMains.length===1){
-    const main=antigravityMains[0];presentationAlias.set(antigravityRoot.id,main.id);
-    prepared=prepared.filter(node=>node.id!==antigravityRoot.id).map(node=>node.id===main.id?{...node,name:'/root'}:node);
-  }else if(antigravityRoot&&antigravityScoped.length){
-    prepared=prepared.filter(node=>node.id!==antigravityRoot.id);
+  const uniqueById=list=>[...new Map(list.map(node=>[String(node.id),node])).values()];
+  const antigravityMains=uniqueById(evidenceMains.length?evidenceMains:(fallbackMains.length===1?fallbackMains:[]));
+  if(antigravityMains.length===1){
+    const main=antigravityMains[0];
+    for(const generic of antigravityGeneric)presentationAlias.set(generic.id,main.id);
+    prepared=prepared.filter(node=>!antigravityGeneric.some(generic=>generic.id===node.id)).map(node=>{
+      if(!isAgyScoped(node))return node;
+      const root=node.id===main.id;
+      return{...node,name:root?'/root':node.name,attributes:{...(node.attributes||{}),viewer_root:root,viewer_root_selection:root?(evidenceMains.length?'positive_parent_scope':'unique_parentless_conversation'):'not_selected'}};
+    });
+  }else if(antigravityScoped.length){
+    prepared=prepared.filter(node=>!antigravityGeneric.some(generic=>generic.id===node.id)).map(node=>isAgyScoped(node)?{...node,attributes:{...(node.attributes||{}),viewer_root:false,viewer_root_selection:'ambiguous'}}:node);
   }
   const ollamaRoots=prepared.filter(node=>node?.type==='agent'&&['agent:Ollama','agent:ollama'].includes(String(node.id||'')));
   const ollamaRuntimes=prepared.filter(node=>node?.type==='model_runtime'&&String(node?.attributes?.provider||'').toLowerCase()==='ollama');
