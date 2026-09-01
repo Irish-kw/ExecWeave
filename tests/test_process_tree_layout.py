@@ -1,4 +1,6 @@
 from pathlib import Path
+import json
+import subprocess
 
 from execweave.live_view import LIVE_HTML
 from execweave.live_view_process_layout import LIVE_PROCESS_LAYOUT_SCRIPT
@@ -63,3 +65,44 @@ def test_process_layout_module_is_loaded_after_readability() -> None:
         "{LIVE_PROCESS_LAYOUT_SCRIPT}{LIVE_SCRIPT_B}"
     )
     assert seam in source
+
+
+def test_live_html_embeds_dagre_directed_graph_layout() -> None:
+    assert "execweaveLayoutDirectedGraph" in LIVE_HTML
+    assert "dagre.layout" in LIVE_HTML
+    source = _arrange_positions_source()
+    assert "fit(" not in source
+    assert "execweaveLayoutDirectedGraph(execweaveTopology)" in source
+
+
+def test_two_fixed_size_nodes_do_not_overlap_after_dagre_layout() -> None:
+    start = LIVE_PROCESS_LAYOUT_SCRIPT.index("const EXECWEAVE_DAG_GAP=24;")
+    end = LIVE_PROCESS_LAYOUT_SCRIPT.index("const execweaveBuildTopologyBase=execweaveBuildTopology;")
+    layout_js = LIVE_PROCESS_LAYOUT_SCRIPT[start:end]
+    vendor = SRC / "vendor" / "dagre.min.js"
+    script = (
+        "global.dagre=require(process.argv[1]);\n"
+        "global.nodeById=new Map([['a',{id:'a'}],['b',{id:'b'}]]);\n"
+        "global.edgeById=new Map([['e',{id:'e',source:'a',target:'b'}]]);\n"
+        "global.execweaveWidthOf=id=>id==='a'?160:220;\n"
+        "global.execweaveHeightOf=id=>id==='a'?50:64;\n"
+        "global.execweaveSeparateLane=()=>{};\n"
+        + layout_js
+        + """
+const topo={spec:new Map([['a',{x:0,y:0}],['b',{x:0,y:0}]])};
+execweaveLayoutDirectedGraph(topo);
+const boxes=['a','b'].map(id=>({id,x:topo.spec.get(id).x,y:topo.spec.get(id).y,w:execweaveWidthOf(id),h:execweaveHeightOf(id)}));
+const A=boxes[0],B=boxes[1];
+const ix=Math.max(0,Math.min(A.x+A.w,B.x+B.w)-Math.max(A.x,B.x));
+const iy=Math.max(0,Math.min(A.y+A.h,B.y+B.h)-Math.max(A.y,B.y));
+process.stdout.write(JSON.stringify({area:ix*iy,boxes}));
+"""
+    )
+    completed = subprocess.run(
+        ["node", "-e", script, str(vendor)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    payload = json.loads(completed.stdout)
+    assert payload["area"] == 0, payload

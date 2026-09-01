@@ -1,11 +1,16 @@
 from __future__ import annotations
 
-# Injected after LIVE_READABILITY_SCRIPT. The lane layout parks types in columns and
-# routes same-column edges as cubic S-curves. Process trees go left-to-right by spawn
-# depth; related agent/tool/file/External nodes are then pulled toward their neighbors.
-# Arrange recomputes every visible node and edge and does not call fit().
+from pathlib import Path
 
-LIVE_PROCESS_LAYOUT_SCRIPT = r"""
+# Injected after LIVE_READABILITY_SCRIPT. Process trees stay left-to-right by spawn
+# depth; Arrange and the first computed frame then run a layered LR DAG so visible
+# nodes do not overlap. Dagre is vendored; Fit remains the camera button.
+
+_DAGRE_JS = (Path(__file__).resolve().parent / "vendor" / "dagre.min.js").read_text(
+    encoding="utf-8"
+)
+
+_LIVE_PROCESS_LAYOUT_BODY = r"""
 (()=>{
 const PROCESS_COL_GAP=48;
 const PROCESS_ROW_GAP=72;
@@ -177,8 +182,76 @@ function execweaveLayoutRelated(topo){
   execweaveSeparateLane(topo);
   return topo;
 }
+const EXECWEAVE_DAG_GAP=24;
+function execweaveResolveOverlaps(topo){
+  for(let pass=0;pass<32;pass++){
+    const boxes=[...topo.spec.keys()].filter(id=>nodeById.has(id)).map(id=>({
+      id,
+      spec:topo.spec.get(id),
+      x:topo.spec.get(id).x,
+      y:topo.spec.get(id).y,
+      w:execweaveWidthOf(id),
+      h:execweaveHeightOf(id),
+    }));
+    boxes.sort((a,b)=>a.y-b.y||a.x-b.x||String(a.id).localeCompare(String(b.id)));
+    let moved=false;
+    for(let i=0;i<boxes.length;i++){
+      for(let j=0;j<i;j++){
+        const A=boxes[j],B=boxes[i];
+        const ix=Math.max(0,Math.min(A.x+A.w,B.x+B.w)-Math.max(A.x,B.x));
+        const iy=Math.max(0,Math.min(A.y+A.h,B.y+B.h)-Math.max(A.y,B.y));
+        if(ix*iy<=0)continue;
+        B.spec.y=A.y+A.h+EXECWEAVE_DAG_GAP;
+        B.y=B.spec.y;
+        moved=true;
+      }
+    }
+    if(!moved)return;
+  }
+}
+function execweaveLayoutDirectedGraph(topo){
+  if(!topo||!topo.spec)return topo;
+  const engine=(typeof dagre!=='undefined'&&dagre&&dagre.graphlib&&typeof dagre.layout==='function')?dagre:null;
+  if(!engine){
+    console.warn('execweaveLayoutDirectedGraph: dagre unavailable, using process-tree layout');
+    execweaveSeparateLane(topo);
+    return topo;
+  }
+  try{
+    const graph=new engine.graphlib.Graph();
+    graph.setGraph({rankdir:'LR',nodesep:EXECWEAVE_DAG_GAP,ranksep:48,marginx:16,marginy:16,edgesep:16});
+    graph.setDefaultEdgeLabel(()=>({}));
+    const ids=[];
+    for(const id of topo.spec.keys()){
+      if(!nodeById.has(id))continue;
+      graph.setNode(id,{width:execweaveWidthOf(id),height:execweaveHeightOf(id)});
+      ids.push(id);
+    }
+    const seen=new Set();
+    for(const edge of edgeById.values()){
+      if(!topo.spec.has(edge.source)||!topo.spec.has(edge.target)||edge.source===edge.target)continue;
+      const key=`${edge.source}\0${edge.target}`;
+      if(seen.has(key))continue;
+      seen.add(key);
+      graph.setEdge(edge.source,edge.target);
+    }
+    engine.layout(graph);
+    for(const id of ids){
+      const placed=graph.node(id),spec=topo.spec.get(id);
+      if(!placed||!spec)continue;
+      spec.x=placed.x-placed.width/2;
+      spec.y=placed.y-placed.height/2;
+    }
+    execweaveResolveOverlaps(topo);
+  }catch(error){
+    console.warn('execweaveLayoutDirectedGraph: dagre failed, using process-tree layout',error);
+    execweaveSeparateLane(topo);
+  }
+  return topo;
+}
 const execweaveBuildTopologyBase=execweaveBuildTopology;
-execweaveBuildTopology=function(){return execweaveLayoutRelated(execweaveLayoutProcessTree(execweaveBuildTopologyBase()))};
+execweaveBuildTopology=function(){return execweaveLayoutDirectedGraph(execweaveLayoutRelated(execweaveLayoutProcessTree(execweaveBuildTopologyBase())))};
+window.execweaveLayoutDirectedGraph=execweaveLayoutDirectedGraph;
 const execweaveRouteBase=execweaveRoute;
 execweaveRoute=function(edge){
   const sourceSpec=execweaveTopology.spec.get(edge.source)||{};
@@ -204,6 +277,11 @@ function execweaveArrangePositions(){
     return Number(av.rank||0)-Number(bv.rank||0)||Number(av.processDepth||0)-Number(bv.processDepth||0)||Number(av.order||0)-Number(bv.order||0)||String(a).localeCompare(String(b));
   });
   for(const id of ordered)next.set(id,execweavePlaceStable(id,execweaveDesiredPosition(id),next,id));
+  execweaveLayoutDirectedGraph(execweaveTopology);
+  for(const id of ordered){
+    const spec=execweaveTopology.spec.get(id);
+    if(spec)next.set(id,{x:spec.x,y:spec.y});
+  }
   positions=next;layerRows=new Map();
   for(const [id,p] of positions){
     const spec=execweaveTopology.spec.get(id);
@@ -225,3 +303,5 @@ const arrangeButton=document.getElementById('arrange');
 if(arrangeButton)arrangeButton.onclick=()=>execweaveArrangePositions();
 })();
 """.strip()
+
+LIVE_PROCESS_LAYOUT_SCRIPT = f"{_DAGRE_JS}\n{_LIVE_PROCESS_LAYOUT_BODY}"
