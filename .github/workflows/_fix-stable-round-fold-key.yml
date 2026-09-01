@@ -1,0 +1,89 @@
+name: Fix stable historical round fold identity
+
+on:
+  push:
+    branches:
+      - fix/antigravity-real-transcript-history
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fix-stable-historical-round-fold-identity
+  cancel-in-progress: false
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/antigravity-real-transcript-history
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install
+        run: python -m pip install -e '.[dev,e2e]'
+
+      - name: Make historical round key observation-time independent
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/execweave/viewer_agent_panel.py')
+          text = path.read_text(encoding='utf-8')
+          old = "function stableRoundKey(round){return String(round?.key||JSON.stringify([round?.start??null,round?.cards?.[0]?.[0]??null,round?.cards?.[0]?.[1]??null]))}"
+          new = '''function stableRoundKey(round){
+            const raw=String(round?.key||'');
+            if(raw){
+              try{
+                const parts=JSON.parse(raw);
+                // messageKey starts with observation timestamp followed by the provider
+                // ordinal. A cumulative provider snapshot can re-observe the same turn at
+                // a later timestamp, but its stable ordinal and content remain unchanged.
+                // Fold state is already scoped by exact agent identity, so when an ordinal
+                // exists the observation timestamp must not re-identify the historical round.
+                if(Array.isArray(parts)&&Number.isInteger(parts[1]))return JSON.stringify(['ordinal',...parts.slice(1)]);
+              }catch(_error){}
+              return raw;
+            }
+            return JSON.stringify([round?.start??null,round?.cards?.[0]?.[0]??null,round?.cards?.[0]?.[1]??null]);
+          }'''
+          assert text.count(old) == 1
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+
+      - name: Ruff
+        run: python -m ruff check .
+
+      - name: Install Chromium
+        run: python -m playwright install --with-deps chromium
+
+      - name: Historical Antigravity fold regression
+        env:
+          EXECWEAVE_E2E_REQUIRED: '1'
+        run: >-
+          python -m pytest -v
+          tests/test_antigravity_history_replay.py::test_antigravity_history_survives_new_stop_and_manual_fold_state_in_chromium
+
+      - name: All viewer regressions
+        env:
+          EXECWEAVE_E2E_REQUIRED: '1'
+        run: python -m pytest -m viewer_e2e -v
+
+      - name: Commit production fix
+        run: |
+          set -euo pipefail
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/execweave/viewer_agent_panel.py
+          git commit -m 'fix: keep historical round folds stable across snapshots'
+          git push origin HEAD:fix/antigravity-real-transcript-history
