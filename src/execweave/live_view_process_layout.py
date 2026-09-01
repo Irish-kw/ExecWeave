@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-# Injected after LIVE_READABILITY_SCRIPT. The lane layout parks every process in one
-# runtime column and routes same-rank edges as cubic S-curves, which is the braid in
-# the process stack. This pass places a process by spawn depth so parent	o child is
-# mostly horizontal. Arrange is redefined without fit(): Fit is the camera button.
+# Injected after LIVE_READABILITY_SCRIPT. The lane layout parks types in columns and
+# routes same-column edges as cubic S-curves. Process trees go left-to-right by spawn
+# depth; related agent/tool/file/External nodes are then pulled toward their neighbors.
+# Arrange recomputes every visible node and edge and does not call fit().
 
 LIVE_PROCESS_LAYOUT_SCRIPT = r"""
 (()=>{
@@ -100,8 +100,102 @@ function execweaveLayoutProcessTree(topo){
   }
   return topo;
 }
+function execweaveNodeType(node){return String(node?.type||'').toLowerCase()}
+function execweaveIsEndpointNode(node){
+  const type=execweaveNodeType(node);
+  return type.includes('network')||type.includes('endpoint')||type.includes('socket')||type.includes('host')||node?.name==='External';
+}
+function execweaveNeighborIds(id,topo){
+  const out=[];
+  for(const edge of edgeById.values()){
+    if(!topo.spec.has(edge.source)||!topo.spec.has(edge.target))continue;
+    if(edge.source===id)out.push(edge.target);
+    else if(edge.target===id)out.push(edge.source);
+  }
+  return out;
+}
+function execweaveAlignRelatedY(id,topo,prefer){
+  const spec=topo.spec.get(id);if(!spec)return;
+  const ys=[];
+  for(const other of execweaveNeighborIds(id,topo)){
+    const node=nodeById.get(other),os=topo.spec.get(other);
+    if(!node||!os)continue;
+    const type=execweaveNodeType(node);
+    if(prefer&&![...prefer].some(token=>type.includes(token)||(token==='agent'&&type==='agent')))continue;
+    ys.push(os.y);
+  }
+  if(!ys.length)return;
+  spec.y=ys.reduce((sum,value)=>sum+value,0)/ys.length;
+}
+function execweavePullBesideNeighbors(id,topo,prefer){
+  const spec=topo.spec.get(id);if(!spec)return;
+  let right=-Infinity,hits=0;
+  for(const other of execweaveNeighborIds(id,topo)){
+    const node=nodeById.get(other),os=topo.spec.get(other);
+    if(!node||!os)continue;
+    const type=execweaveNodeType(node);
+    if(prefer&&![...prefer].some(token=>type.includes(token)||(token==='agent'&&type==='agent')))continue;
+    right=Math.max(right,os.x+(typeof execweaveWidthOf==='function'?execweaveWidthOf(other):EXECWEAVE_NODE_W));
+    hits++;
+  }
+  if(!hits||!Number.isFinite(right))return;
+  const desired=right+PROCESS_COL_GAP;
+  if(spec.x>desired)spec.x=desired;
+}
+function execweaveSeparateLane(topo){
+  const byLane=new Map();
+  for(const [id,spec] of topo.spec){
+    if(!byLane.has(spec.lane))byLane.set(spec.lane,[]);
+    byLane.get(spec.lane).push(id);
+  }
+  for(const ids of byLane.values()){
+    ids.sort((a,b)=>(topo.spec.get(a).y-topo.spec.get(b).y)||String(a).localeCompare(String(b)));
+    for(let index=1;index<ids.length;index++){
+      const prev=topo.spec.get(ids[index-1]),cur=topo.spec.get(ids[index]);
+      const prevH=typeof execweaveHeightOf==='function'?execweaveHeightOf(ids[index-1]):EXECWEAVE_NODE_H;
+      const floor=prev.y+prevH+24;
+      if(cur.y<floor)cur.y=floor;
+    }
+  }
+}
+function execweaveLayoutRelated(topo){
+  if(!topo||!topo.spec)return topo;
+  for(const node of nodeById.values()){
+    if(!topo.spec.has(node.id))continue;
+    const type=execweaveNodeType(node);
+    if(type==='agent'&&!execweaveIsRoot(node))execweaveAlignRelatedY(node.id,topo,['agent']);
+    else if(type.includes('tool'))execweaveAlignRelatedY(node.id,topo,['agent']);
+    else if(type.includes('file')||type.includes('path'))execweaveAlignRelatedY(node.id,topo,['agent','process']);
+    else if(execweaveIsEndpointNode(node))execweaveAlignRelatedY(node.id,topo,['process','session','runtime','agent']);
+  }
+  for(const node of nodeById.values()){
+    if(!topo.spec.has(node.id))continue;
+    const type=execweaveNodeType(node);
+    if(type.includes('tool')||type.includes('model'))execweavePullBesideNeighbors(node.id,topo,['agent']);
+    else if(execweaveIsEndpointNode(node))execweavePullBesideNeighbors(node.id,topo,['process','session','runtime']);
+  }
+  execweaveSeparateLane(topo);
+  return topo;
+}
 const execweaveBuildTopologyBase=execweaveBuildTopology;
-execweaveBuildTopology=function(){return execweaveLayoutProcessTree(execweaveBuildTopologyBase())};
+execweaveBuildTopology=function(){return execweaveLayoutRelated(execweaveLayoutProcessTree(execweaveBuildTopologyBase()))};
+const execweaveRouteBase=execweaveRoute;
+execweaveRoute=function(edge){
+  const sourceSpec=execweaveTopology.spec.get(edge.source)||{};
+  const targetSpec=execweaveTopology.spec.get(edge.target)||{};
+  const bundle=execweaveTopology.bundleByEdge.get(edgeId(edge));
+  if(bundle&&bundle.size>1)return execweaveRouteBase(edge);
+  if(execweaveIsStopped(edge))return execweaveRouteBase(edge);
+  const sp=positions.get(edge.source)||{x:0,y:0},tp=positions.get(edge.target)||{x:0,y:0};
+  const sameColumn=Math.abs(sp.x-tp.x)<8;
+  if(!sameColumn)return execweaveRouteBase(edge);
+  const sourcePort=execweaveTopology.sourcePort.get(edgeId(edge)),targetPort=execweaveTopology.targetPort.get(edgeId(edge));
+  const sx=sp.x+execweaveWidthOf(edge.source),sy=execweavePortY(sp,sourcePort,edge.source);
+  const tx=tp.x+execweaveWidthOf(edge.target),ty=execweavePortY(tp,targetPort,edge.target);
+  const offset=36+((sourcePort?.index||0)%8)*12;
+  const rail=Math.max(sx,tx)+offset;
+  return{d:`M ${sx} ${sy} H ${rail} V ${ty} H ${tx}`,labelX:rail+8,labelY:(sy+ty)/2,kind:'column',bundle:null};
+};
 function execweaveArrangePositions(){
   execweaveTopology=execweaveBuildTopology();
   const next=new Map();
