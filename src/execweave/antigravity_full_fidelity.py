@@ -209,7 +209,12 @@ def antigravity_hook_to_content_events(
                 store=store,
             )
         )
-    elif hook_event == "Stop":
+    # Codex snapshots provider transcripts on lifecycle events that already
+    # name the rollout path, not only on a terminal Stop. Antigravity exposes
+    # the same validated brain path on PreInvocation / PostInvocation; waiting
+    # for Stop leaves live and finished dashboards with conversation identity
+    # and no prompt/response text when Stop never arrives.
+    if hook_event in {"PreInvocation", "PostInvocation", "Stop"}:
         events.extend(
             antigravity_conversation_archive_events(
                 payload,
