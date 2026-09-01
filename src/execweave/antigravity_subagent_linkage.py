@@ -115,7 +115,9 @@ def _request_specs(value: object) -> list[dict[str, Any]] | None:
     if not isinstance(value, list) or not value:
         return None
     specs: list[dict[str, Any]] = []
-    allowed = {"Prompt", "Role", "TypeName", "Workspace"}
+    # Current Antigravity includes Model in each invoke_subagent spec.
+    # Keep the allow-list strict while accepting that live-verified field.
+    allowed = {"Model", "Prompt", "Role", "TypeName", "Workspace"}
     for raw in value:
         if not isinstance(raw, dict) or not set(raw).issubset(allowed):
             return None
@@ -127,6 +129,9 @@ def _request_specs(value: object) -> list[dict[str, Any]] | None:
         if not isinstance(role, str) or not role:
             return None
         if not isinstance(type_name, str) or not type_name:
+            return None
+        model = raw.get("Model")
+        if model is not None and (not isinstance(model, str) or not model):
             return None
         workspace = raw.get("Workspace")
         if workspace is not None and (not isinstance(workspace, str) or not workspace):
@@ -211,9 +216,12 @@ def _matching_request(record: dict[str, Any], specs: list[dict[str, Any]]) -> bo
 
 
 def _matching_result(record: dict[str, Any]) -> list[dict[str, Any]] | None:
-    if record.get("source") != "MODEL":
+    if record.get("source") != "MODEL" or record.get("status") != "DONE":
         return None
-    if record.get("type") != "INVOKE_SUBAGENT" or record.get("status") != "DONE":
+    # Older builds labelled the immediate result INVOKE_SUBAGENT; the current
+    # live wire labels that same record GENERIC. GENERIC is accepted only if its
+    # payload passes _parse_result_content's exact provider prefix/schema checks.
+    if record.get("type") not in {"INVOKE_SUBAGENT", "GENERIC"}:
         return None
     return _parse_result_content(record.get("content"))
 
