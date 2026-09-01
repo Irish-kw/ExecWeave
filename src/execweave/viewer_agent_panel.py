@@ -296,6 +296,17 @@ function reachedBy(id){
   }
   return [...names].join('\n');
 }
+function externalEndpointLine(item){
+  const address=String(item?.address||'').trim();
+  if(!address)return '';
+  const bits=[];
+  const from=moment(item?.first_seen),to=moment(item?.last_seen);
+  if(from&&to&&from!==to)bits.push(`${from} → ${to}`);
+  else if(from||to)bits.push(from||to);
+  const count=Number(item?.event_count||0);
+  if(count)bits.push(`${count} event${count===1?'':'s'}`);
+  return bits.length?`${address}\n  ${bits.join('  ·  ')}`:address;
+}
 function foldedList(a){
   const members=Array.isArray(a.viewer_folded_members)?a.viewer_folded_members:[];
   return members
@@ -351,8 +362,13 @@ function nodeCards(node){
     add('Working directory',a.cwd);
     add('Backend',a.backend);
   }else if(kind==='network_endpoint'){
-    add('Address',node?.name);
-    add('Reached by',reachedBy(String(node?.id||'')));
+    const endpoints=Array.isArray(a.endpoints)?a.endpoints:[];
+    if(endpoints.length){
+      add('Endpoints',endpoints.map(externalEndpointLine).filter(Boolean).join('\n'));
+    }else{
+      add('Address',node?.name);
+    }
+    add('Reached by',reachedBy(String(node?.id||'')));}
   }else{
     add('Name',node?.name);
     add('Provider',a.provider);

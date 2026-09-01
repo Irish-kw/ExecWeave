@@ -30,6 +30,26 @@ def split_host_port(raw: str) -> tuple[str, str] | None:
     return host, port_text
 
 
+def format_endpoint_address(raw: str) -> str:
+    """Record one endpoint as IP:Port; IPv6 uses [addr]:port."""
+    label = raw.strip()
+    if label.startswith("endpoint:"):
+        label = label[len("endpoint:") :]
+    elif label.startswith("network_endpoint:"):
+        label = label[len("network_endpoint:") :]
+    split = split_host_port(label)
+    if split is None:
+        return label
+    host, port_text = split
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return f"{host}:{port_text}"
+    if address.version == 6:
+        return f"[{host}]:{port_text}"
+    return f"{host}:{port_text}"
+
+
 def is_loopback_host(host: str) -> bool:
     try:
         address = ipaddress.ip_address(host)
@@ -70,18 +90,35 @@ def collapse_external_endpoints(
         if isinstance(edge, dict)
         and (edge.get("source") in member_ids or edge.get("target") in member_ids)
     ]
-    endpoints: list[dict[str, Any]] = []
+    endpoints_by_address: dict[str, dict[str, Any]] = {}
     for node in sorted(members, key=lambda item: str(item.get("name") or item.get("id") or "")):
         label = endpoint_label(node) or str(node.get("id"))
-        endpoints.append(
-            {
+        address = format_endpoint_address(str(label))
+        existing = endpoints_by_address.get(address)
+        first_seen = node.get("first_seen")
+        last_seen = node.get("last_seen")
+        event_count = int(node.get("event_count") or 0)
+        if existing is None:
+            endpoints_by_address[address] = {
                 "id": node.get("id"),
-                "address": label,
-                "first_seen": node.get("first_seen"),
-                "last_seen": node.get("last_seen"),
-                "event_count": int(node.get("event_count") or 0),
+                "address": address,
+                "first_seen": first_seen if isinstance(first_seen, str) and first_seen else None,
+                "last_seen": last_seen if isinstance(last_seen, str) and last_seen else None,
+                "event_count": event_count,
             }
-        )
+            continue
+        existing["event_count"] = int(existing.get("event_count") or 0) + event_count
+        if isinstance(first_seen, str) and first_seen:
+            previous = existing.get("first_seen")
+            if not isinstance(previous, str) or first_seen < previous:
+                existing["first_seen"] = first_seen
+        if isinstance(last_seen, str) and last_seen:
+            previous = existing.get("last_seen")
+            if not isinstance(previous, str) or last_seen > previous:
+                existing["last_seen"] = last_seen
+    endpoints = [
+        endpoints_by_address[address] for address in sorted(endpoints_by_address)
+    ]
     first_seen_values = _string_values([node.get("first_seen") for node in members])
     last_seen_values = _string_values([node.get("last_seen") for node in members])
     event_types = sorted(
