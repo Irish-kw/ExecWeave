@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
+from .auto_specialized import auto_specialized_launch
 from .collector import infer_agent_name
 from .schema import Entity, RuntimeEvent
 from .sink import JsonlSink
@@ -652,7 +653,13 @@ class StraceRuntimeCollector:
         ]
         return_code = 1
         try:
-            completed = subprocess.run(strace_command, cwd=str(self.watch_root), check=False)
+            with auto_specialized_launch(command) as launch_environment:
+                completed = subprocess.run(
+                    strace_command,
+                    cwd=str(self.watch_root),
+                    env=launch_environment,
+                    check=False,
+                )
             return_code = int(completed.returncode)
             records = read_trace_records(self.trace_root)
             parser = StraceParser(

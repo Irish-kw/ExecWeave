@@ -54,6 +54,14 @@ def _is_ollama_serve(command: list[str]) -> bool:
     )
 
 
+def _is_ollama_run(command: list[str]) -> bool:
+    return (
+        len(command) >= 2
+        and _command_name(command[0]) == "ollama"
+        and command[1].lower() == "run"
+    )
+
+
 def _is_llamacpp_server(command: list[str]) -> bool:
     return bool(command) and _command_name(command[0]) == "llama-server"
 
@@ -282,6 +290,48 @@ def run_post_command_specialized_probe(
         except _PROBE_ERRORS:
             if attempt + 1 < _POST_PROBE_ATTEMPTS:
                 time.sleep(_POST_PROBE_RETRY_SECONDS)
+
+
+
+@contextmanager
+def auto_specialized_launch(command: list[str]) -> Iterator[dict[str, str]]:
+    """Prepare child-only launch wiring for supported transparent local integrations."""
+    environment = dict(os.environ)
+    configured_sidecar = os.environ.get(_SEMANTIC_ENV)
+    if not configured_sidecar or not _is_ollama_run(command):
+        yield environment
+        return
+    upstream = _ollama_endpoint_from_environment()
+    if upstream is None:
+        yield environment
+        return
+
+    from .http_proxy import ExecWeaveHTTPProxyServer, ProxyConfig
+
+    sidecar = Path(configured_sidecar).expanduser().resolve()
+    try:
+        server = ExecWeaveHTTPProxyServer(
+            ("127.0.0.1", 0),
+            ProxyConfig(upstream=upstream, sidecar=sidecar, mode="ollama"),
+        )
+    except OSError:
+        yield environment
+        return
+    thread = threading.Thread(
+        target=server.serve_forever,
+        kwargs={"poll_interval": 0.05},
+        name="execweave-ollama-run-relay",
+        daemon=True,
+    )
+    thread.start()
+    host, port = server.server_address[:2]
+    environment["OLLAMA_HOST"] = f"http://{host}:{port}"
+    try:
+        yield environment
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2.0)
 
 
 @contextmanager

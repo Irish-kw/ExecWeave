@@ -157,6 +157,9 @@ def _assistant_messages(response: object) -> list[Any]:
     native = response.get("message")
     if isinstance(native, dict):
         messages.append(native)
+    generated = response.get("response")
+    if isinstance(generated, str) and generated:
+        messages.append({"role": "assistant", "content": generated})
     choices = response.get("choices")
     if isinstance(choices, list):
         for choice in choices:

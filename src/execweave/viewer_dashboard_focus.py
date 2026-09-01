@@ -6,9 +6,9 @@ execweaveDashboardGraph=function(data){
   const projected=execweaveDashboardGraphBase(data);
   const hiddenTypes=new Set(['agent_trace_capability','session','command','inference_call','code_cell','agent_message']);
   const mergeTypes=new Set(['model','directory','network_endpoint']);
-  const providerRootIds=new Set(['agent:Claude Code','agent:OpenAI Codex','agent:Codex','agent:Cursor','agent:OpenCode','agent:Gemini CLI','agent:Antigravity']);
+  const providerRootIds=new Set(['agent:Claude Code','agent:OpenAI Codex','agent:Codex','agent:Cursor','agent:OpenCode','agent:Gemini CLI','agent:Antigravity','agent:Ollama','agent:ollama']);
   const before=Array.isArray(projected.nodes)?projected.nodes:[];
-  const prepared=before.filter(node=>node&&!hiddenTypes.has(String(node.type||''))).map(node=>{
+  let prepared=before.filter(node=>node&&!hiddenTypes.has(String(node.type||''))).map(node=>{
     const attrs=node.attributes||{};
     let name=node.name;
     if(node.type==='agent'){
@@ -37,6 +37,23 @@ execweaveDashboardGraph=function(data){
     if(node.type==='process'&&occurrenceCount>1&&!/\s×\d+$/.test(String(name||'')))name=`${name||node.id} ×${occurrenceCount}`;
     return name===node.name?node:{...node,name};
   });
+  const presentationAlias=new Map();
+  const antigravityRoot=prepared.find(node=>String(node?.id||'')==='agent:Antigravity');
+  const antigravityMains=prepared.filter(node=>{
+    const attrs=node?.attributes||{};
+    return node?.type==='agent'&&String(attrs.provider||'').toLowerCase()==='antigravity'&&
+      String(node.id||'').startsWith('agent:antigravity:conversation:')&&!String(attrs.parent_agent_path||'').trim();
+  });
+  if(antigravityRoot&&antigravityMains.length===1){
+    const main=antigravityMains[0];presentationAlias.set(antigravityRoot.id,main.id);
+    prepared=prepared.filter(node=>node.id!==antigravityRoot.id).map(node=>node.id===main.id?{...node,name:'/root'}:node);
+  }
+  const ollamaRoots=prepared.filter(node=>node?.type==='agent'&&['agent:Ollama','agent:ollama'].includes(String(node.id||'')));
+  const ollamaRuntimes=prepared.filter(node=>node?.type==='model_runtime'&&String(node?.attributes?.provider||'').toLowerCase()==='ollama');
+  if(ollamaRoots.length===1&&ollamaRuntimes.length===1){
+    const root=ollamaRoots[0],runtime=ollamaRuntimes[0];presentationAlias.set(runtime.id,root.id);
+    prepared=prepared.filter(node=>node.id!==runtime.id).map(node=>node.id===root.id?{...node,name:'/root'}:node);
+  }
   const normalized=value=>String(value||'').trim().replaceAll('\\\\','/').replace(/\/+$/,'').toLowerCase();
   const canonicalKey=node=>{
     const type=String(node?.type||''),attrs=node?.attributes||{};
@@ -47,7 +64,7 @@ execweaveDashboardGraph=function(data){
     return `${type}\u0000${normalized(host||attrs.endpoint||node.name)}\u0000${normalized(port)}`;
   };
   const groups=new Map();for(const node of prepared){const key=canonicalKey(node);if(!groups.has(key))groups.set(key,[]);groups.get(key).push(node)}
-  const canonicalId=new Map(),nodes=[];let mergedContextNodeCount=0;
+  const canonicalId=new Map(presentationAlias),nodes=[];let mergedContextNodeCount=0;
   const earlier=(a,b)=>!a?b:!b?a:(String(a)<=String(b)?a:b),later=(a,b)=>!a?b:!b?a:(String(a)>=String(b)?a:b);
   for(const group of groups.values()){
     group.sort((a,b)=>String(a.first_seen||'').localeCompare(String(b.first_seen||''))||String(a.id).localeCompare(String(b.id)));

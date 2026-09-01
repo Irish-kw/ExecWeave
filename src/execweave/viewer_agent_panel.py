@@ -29,7 +29,7 @@ if(!details||!detailsEmpty)return;
 let entries=Array.isArray(window.__execweaveStaticConversations)?window.__execweaveStaticConversations:[];
 let selectedNode=null,refreshing=false,selectedConversationSignature='';
 const foldStateByAgent=new Map();
-const ROOT_NODE_IDS=new Set(['agent:Claude Code','agent:OpenAI Codex','agent:Codex','agent:Cursor','agent:OpenCode','agent:Gemini CLI','agent:Antigravity']);
+const ROOT_NODE_IDS=new Set(['agent:Claude Code','agent:OpenAI Codex','agent:Codex','agent:Cursor','agent:OpenCode','agent:Gemini CLI','agent:Antigravity','agent:Ollama','agent:ollama']);
 const ENCRYPTED_NOTICE='Observed — plaintext not exposed by provider.';
 const attrs=node=>node&&typeof node.attributes==='object'&&node.attributes?node.attributes:{};
 const nodePath=node=>String(attrs(node).agent_path||attrs(node).child_agent_path||attrs(node).root_agent_path||node?.name||'').trim();
@@ -94,6 +94,14 @@ function foldStateFor(node){
   const key=agentKey(node);let state=foldStateByAgent.get(key);
   if(!state){state=new Map();foldStateByAgent.set(key,state)}
   return state;
+}
+function rememberVisibleFoldState(){
+  if(!selectedNode)return;
+  const state=foldStateFor(selectedNode);
+  for(const fold of details.querySelectorAll('.execweave-agent-older[data-fold-key]')){
+    const key=String(fold.dataset.foldKey||'');
+    if(key)state.set(key,fold.open);
+  }
 }
 function uniqueTexts(messages){const seen=new Set(),out=[];for(const message of messages){const text=displayText(message);if(!text||seen.has(text))continue;seen.add(text);out.push(text)}return out}
 function card(label,text){const box=document.createElement('section');box.className='execweave-agent-card';const head=document.createElement('div');head.className='execweave-agent-label';head.textContent=label;const body=document.createElement('pre');body.className='execweave-agent-body';body.textContent=text||'Not observed.';if(!text)body.classList.add('execweave-agent-empty');box.append(head,body);return box}
@@ -171,7 +179,22 @@ function childRounds(messages,path){
   });
 }
 function roundView(round){const view=document.createElement('div');view.className='execweave-agent-round';for(const[label,text]of round.cards)view.appendChild(card(label,text));return view}
-function stableRoundKey(round){return String(round?.key||JSON.stringify([round?.start??null,round?.cards?.[0]?.[0]??null,round?.cards?.[0]?.[1]??null]))}
+function stableRoundKey(round){
+  const raw=String(round?.key||'');
+  if(raw){
+    try{
+      const parts=JSON.parse(raw);
+      // messageKey starts with observation timestamp followed by the provider
+      // ordinal. A cumulative provider snapshot can re-observe the same turn at
+      // a later timestamp, but its stable ordinal and content remain unchanged.
+      // Fold state is already scoped by exact agent identity, so when an ordinal
+      // exists the observation timestamp must not re-identify the historical round.
+      if(Array.isArray(parts)&&Number.isInteger(parts[1]))return JSON.stringify(['ordinal',...parts.slice(1)]);
+    }catch(_error){}
+    return raw;
+  }
+  return JSON.stringify([round?.start??null,round?.cards?.[0]?.[0]??null,round?.cards?.[0]?.[1]??null]);
+}
 function foldedRound(round,when,label,state){
   const fold=document.createElement('details');fold.className='execweave-agent-older';
   const key=stableRoundKey(round);fold.dataset.foldKey=key;fold.open=state.get(key)===true;
@@ -333,6 +356,7 @@ function nodeCards(node){
 function renderNode(node){
   const rows=nodeCards(node);
   if(!rows.length)return false;
+  rememberVisibleFoldState();
   selectedNode=null;selectedConversationSignature='';detailsEmpty.hidden=true;details.replaceChildren();
   const view=document.createElement('div');view.className='execweave-agent-view';
   for(const[label,text]of rows)view.appendChild(card(label,text));
@@ -341,6 +365,7 @@ function renderNode(node){
 function render(node){
   if(!node)return false;
   if(String(node.type||'')!=='agent')return renderNode(node);
+  rememberVisibleFoldState();
   selectedNode=node;selectedConversationSignature=conversationSignature(node);detailsEmpty.hidden=true;details.replaceChildren();
   const record=recordFor(node),preview=record?.conversation_preview||{},path=String(preview.agent_path||nodePath(node)||'').trim(),messages=Array.isArray(preview.messages)?preview.messages:[];
   const isRoot=nodeHasRootAuthority(node)||previewUsesRootRenderer(preview);
