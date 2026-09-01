@@ -47,6 +47,31 @@ jobs:
       - name: Apply guarded patch
         run: python scripts/_apply_conversation_integrity_patch.py
 
+      - name: Normalize generated literals and root publication scope
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          preview_path = Path('src/execweave/conversation_preview.py')
+          preview = preview_path.read_text(encoding='utf-8')
+          old_regex = r'r"<USER_REQUEST>\\s*(?P<body>.*?)\\s*</USER_REQUEST>"'
+          new_regex = r'r"<USER_REQUEST>\s*(?P<body>.*?)\s*</USER_REQUEST>"'
+          assert preview.count(old_regex) == 1
+          preview_path.write_text(preview.replace(old_regex, new_regex), encoding='utf-8')
+
+          test_path = Path('tests/test_provider_conversation_history_integrity.py')
+          tests = test_path.read_text(encoding='utf-8')
+          assert r'\\n' in tests
+          test_path.write_text(tests.replace(r'\\n', r'\n'), encoding='utf-8')
+
+          records_path = Path('src/execweave/conversation_records.py')
+          records = records_path.read_text(encoding='utf-8')
+          old = '''        _ollama_current_turn(preview)\n        original_source_id = entry.get("source_id")\n'''
+          new = '''        _ollama_current_turn(preview)\n        preview["provider_native_id"] = root_id\n        original_source_id = entry.get("source_id")\n'''
+          assert records.count(old) == 1
+          records_path.write_text(records.replace(old, new), encoding='utf-8')
+          PY
+
       - name: Ruff
         run: python -m ruff check .
 
