@@ -171,7 +171,22 @@ function childRounds(messages,path){
   });
 }
 function roundView(round){const view=document.createElement('div');view.className='execweave-agent-round';for(const[label,text]of round.cards)view.appendChild(card(label,text));return view}
-function stableRoundKey(round){return String(round?.key||JSON.stringify([round?.start??null,round?.cards?.[0]?.[0]??null,round?.cards?.[0]?.[1]??null]))}
+function stableRoundKey(round){
+  const raw=String(round?.key||'');
+  if(raw){
+    try{
+      const parts=JSON.parse(raw);
+      // messageKey starts with observation timestamp followed by the provider
+      // ordinal. A cumulative provider snapshot can re-observe the same turn at
+      // a later timestamp, but its stable ordinal and content remain unchanged.
+      // Fold state is already scoped by exact agent identity, so when an ordinal
+      // exists the observation timestamp must not re-identify the historical round.
+      if(Array.isArray(parts)&&Number.isInteger(parts[1]))return JSON.stringify(['ordinal',...parts.slice(1)]);
+    }catch(_error){}
+    return raw;
+  }
+  return JSON.stringify([round?.start??null,round?.cards?.[0]?.[0]??null,round?.cards?.[0]?.[1]??null]);
+}
 function foldedRound(round,when,label,state){
   const fold=document.createElement('details');fold.className='execweave-agent-older';
   const key=stableRoundKey(round);fold.dataset.foldKey=key;fold.open=state.get(key)===true;
