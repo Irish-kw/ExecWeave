@@ -26,7 +26,7 @@ jobs:
           python-version: "3.12"
       - name: Apply candidate patch
         run: python scripts/_apply_root_layout_toolcall_patch.py
-      - name: Preserve existing Dashboard source contracts
+      - name: Preserve existing contracts and wire tool inspector
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -46,6 +46,69 @@ jobs:
           if text.count(old) != 1:
               raise SystemExit(f"occurrence label compatibility seam: {text.count(old)} matches")
           focus.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          panel = Path("src/execweave/viewer_agent_panel.py")
+          text = panel.read_text(encoding="utf-8")
+          old = """  }else if(kind==='tool'){
+              add('Tool',node?.name);
+              add('Provider',a.provider);
+              const traffic=callersOf(String(node?.id||''));
+              add('Calls',traffic.count?String(traffic.count):'');
+              add('Requested by',traffic.agents.join('\\n'));
+          }else if(kind==='session'){"""
+          new = """  }else if(kind==='tool'){
+              add('Tool',node?.name);
+              add('Provider',a.provider);
+              const traffic=callersOf(String(node?.id||''));
+              const occurrences=Array.isArray(a.viewer_tool_call_occurrences)?a.viewer_tool_call_occurrences:[];
+              add('Calls',occurrences.length?String(occurrences.length):(traffic.count?String(traffic.count):''));
+              const occurrenceOwners=[...new Set(occurrences.map(item=>nodeNamed(item?.owner_id)?.name||item?.owner_id).filter(Boolean))];
+              add('Requested by',(occurrenceOwners.length?occurrenceOwners:traffic.agents).join('\\n'));
+          }else if(kind==='session'){"""
+          if text.count(old) != 1:
+              raise SystemExit(f"tool node card seam: {text.count(old)} matches")
+          text = text.replace(old, new, 1)
+
+          old = """function renderNode(node){
+            const rows=nodeCards(node);
+            if(!rows.length)return false;
+            rememberVisibleFoldState();
+            selectedNode=null;selectedConversationSignature='';detailsEmpty.hidden=true;details.replaceChildren();
+            const view=document.createElement('div');view.className='execweave-agent-view';
+            for(const[label,text]of rows)view.appendChild(card(label,text));
+            details.appendChild(view);return true;
+          }"""
+          new = """function toolOccurrenceSection(node){
+            const occurrences=Array.isArray(attrs(node).viewer_tool_call_occurrences)?attrs(node).viewer_tool_call_occurrences:[];
+            if(!occurrences.length)return null;
+            const section=document.createElement('section');section.className='execweave-tool-occurrences';
+            const title=document.createElement('strong');title.textContent=`Invocations · ${occurrences.length} call${occurrences.length===1?'':'s'}`;section.appendChild(title);
+            occurrences.forEach((occurrence,index)=>{
+              const fold=document.createElement('details');fold.className='execweave-tool-occurrence';
+              const summary=document.createElement('summary');
+              const owner=nodeNamed(occurrence?.owner_id)?.name||occurrence?.owner_id||'unknown';
+              const when=moment(occurrence?.first_seen||occurrence?.last_seen);
+              summary.textContent=[when,owner,`call ${index+1}`].filter(Boolean).join(' · ');
+              const pre=document.createElement('pre');
+              pre.textContent=JSON.stringify({first_seen:occurrence?.first_seen||null,last_seen:occurrence?.last_seen||null,first_sequence:occurrence?.first_sequence??null,last_sequence:occurrence?.last_sequence??null,input:occurrence?.input??null,output:occurrence?.output??null,call_ids:occurrence?.call_ids||[],content_references:occurrence?.content_references||[]},null,2);
+              fold.append(summary,pre);section.appendChild(fold);
+            });
+            return section;
+          }
+          function renderNode(node){
+            const rows=nodeCards(node);
+            if(!rows.length)return false;
+            rememberVisibleFoldState();
+            selectedNode=null;selectedConversationSignature='';detailsEmpty.hidden=true;details.replaceChildren();
+            const view=document.createElement('div');view.className='execweave-agent-view';
+            for(const[label,text]of rows)view.appendChild(card(label,text));
+            details.appendChild(view);
+            const occurrences=toolOccurrenceSection(node);if(occurrences)details.appendChild(occurrences);
+            return true;
+          }"""
+          if text.count(old) != 1:
+              raise SystemExit(f"tool inspector render seam: {text.count(old)} matches")
+          panel.write_text(text.replace(old, new, 1), encoding="utf-8")
           PY
       - name: Install test dependencies
         run: |
@@ -61,6 +124,7 @@ jobs:
             src/execweave/antigravity_full_fidelity_base.py \
             src/execweave/viewer_dashboard_clean.py \
             src/execweave/viewer_dashboard_focus.py \
+            src/execweave/viewer_agent_panel.py \
             src/execweave/live_view_markup.py \
             src/execweave/live_view_readability.py \
             tests/test_dashboard_root_layout_toolcall_aggregation.py
@@ -96,6 +160,7 @@ jobs:
             src/execweave/antigravity_full_fidelity_base.py \
             src/execweave/viewer_dashboard_clean.py \
             src/execweave/viewer_dashboard_focus.py \
+            src/execweave/viewer_agent_panel.py \
             src/execweave/live_view_markup.py \
             src/execweave/live_view_readability.py \
             tests/test_dashboard_root_layout_toolcall_aggregation.py
