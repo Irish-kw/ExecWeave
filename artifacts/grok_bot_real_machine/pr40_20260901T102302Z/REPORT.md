@@ -127,14 +127,14 @@ FINISHED_TOOL_CALL_COUNT=19
 LIVE_SCREENSHOT=screenshots/live-both-rounds-graph.webp
 DRAG_SCREENSHOT=screenshots/after-drag.webp
 ARRANGE_SCREENSHOT=screenshots/after-arrange.webp
-FINISHED_SCREENSHOT=(captured after viewer.html materialization; see screenshots/ and computerUse assets)
+FINISHED_SCREENSHOT=screenshots/finished-live-search-cleared.webp
 TOOL_INSPECTOR_SCREENSHOT=screenshots/tool-invocations-expanded.webp
 VIEWER_HTML=viewer.html (copy) and raw/run2/viewer.html
 RAW_EXECWEAVE_DIR=raw/run2/
 STDOUT_LOG=execweave_stdout.log
 STDERR_LOG=(none separate; live TUI/PTY)
 SHA256_MANIFEST=SHA256SUMS.txt
-RAW_ARTIFACT_PUSH=(set after git push)
+RAW_ARTIFACT_PUSH=PASS
 
 ## Verifier integrity
 
