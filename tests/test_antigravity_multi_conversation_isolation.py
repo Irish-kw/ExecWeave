@@ -290,7 +290,7 @@ def test_antigravity_two_round_eight_child_dashboard_isolation_and_fold_state(tm
                 click(node_id)
                 page.wait_for_function(
                     "needle=>(document.getElementById('details')?.innerText||'').includes(needle)",
-                    f"RESPONSE UNIQUE {index}",
+                    arg=f"RESPONSE UNIQUE {index}",
                 )
                 text = page.locator("#details").inner_text()
                 upper = text.upper()
