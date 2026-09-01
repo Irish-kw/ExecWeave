@@ -30,7 +30,7 @@ ExecWeave — source-available, local-first проект наблюдаемос�
   <img src="docs/assets/codex.gif" alt="ExecWeave animated live demo" width="100%">
 </p>
 
-Этот README описывает **v0.8.3**.
+Этот README описывает **v0.8.4**.
 
 ## Почему ExecWeave
 

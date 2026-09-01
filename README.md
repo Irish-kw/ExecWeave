@@ -30,7 +30,7 @@ ExecWeave is a source-available, local-first observability project that turns AI
   <img src="docs/assets/codex.gif" alt="ExecWeave animated live demo" width="100%">
 </p>
 
-This README documents **v0.8.3**.
+This README documents **v0.8.4**.
 
 ## Why ExecWeave
 
