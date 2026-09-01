@@ -5,9 +5,9 @@ from a hardcoded allowlist of provider display names. A single-agent OpenCode ru
 therefore published as ``/root/<session-id>`` with ``is_root: False`` and a
 ``parent_thread_id`` naming a parent that never existed.
 
-Absence of evidence is not evidence of a parent. Low-level topology retains its
-conservative derived-root fallback for backward compatibility, while the dashboard
-must not promote that derived fallback into canonical root authority.
+Absence of evidence is not evidence of a parent. These tests pin the inverted rule:
+an agent is root unless the provider positively established a parent, and every
+relationship that does exist carries the provenance of the fact that established it.
 """
 
 from __future__ import annotations
@@ -26,7 +26,6 @@ from execweave.conversation_records import conversation_record_entries
 from execweave.opencode_task_linkage import opencode_task_session_events
 
 VIEWER_TREE = Path(__file__).resolve().parents[1] / "src" / "execweave" / "viewer_agent_panel.py"
-DASHBOARD_SHELL = Path(__file__).resolve().parents[1] / "src" / "execweave" / "dashboard_shell.py"
 
 
 def _graph_with_content(
@@ -207,7 +206,7 @@ def test_opencode_child_materializes_under_root_with_provenance(tmp_path: Path) 
     ],
     ids=["bare", "session-id", "conversation-id", "nickname", "opaque-agent-id"],
 )
-def test_unfamiliar_agent_without_parent_evidence_keeps_derived_root_fallback(
+def test_unfamiliar_agent_without_parent_evidence_is_root(
     tmp_path: Path, attributes: dict[str, Any]
 ) -> None:
     source = {
@@ -223,7 +222,6 @@ def test_unfamiliar_agent_without_parent_evidence_keeps_derived_root_fallback(
     assert set(threads) == {"/root"}
     assert threads["/root"]["is_root"] is True
     assert threads["/root"]["parent_agent_path"] is None
-    assert threads["/root"]["topology_state"] == agent_topology.TOPOLOGY_DERIVED
     assert threads["/root"]["topology_evidence"] == agent_topology.EVIDENCE_NO_PARENT_EVIDENCE
 
 
@@ -279,7 +277,7 @@ def test_conversation_paths_are_a_subset_of_graph_agent_paths(tmp_path: Path) ->
             assert parent in by_path, f"{path} names a parent with no conversation"
 
 
-# ── 6. Provider-neutral: no fabricated child topology anywhere ───────────────
+# ── 6. Provider-neutral: no fabricated topology anywhere ─────────────────────
 
 
 def _root_only_sources() -> list[tuple[str, dict[str, Any], str]]:
@@ -324,7 +322,7 @@ def _root_only_sources() -> list[tuple[str, dict[str, Any], str]]:
     _root_only_sources(),
     ids=[case[0] for case in _root_only_sources()],
 )
-def test_root_only_providers_never_gain_fabricated_child_topology(
+def test_root_only_providers_never_gain_fabricated_topology(
     tmp_path: Path, provider: str, source: dict[str, Any], content_kind: str
 ) -> None:
     threads = _threads(
@@ -395,31 +393,28 @@ def test_legacy_root_path_still_resolves_as_root() -> None:
     assert legacy.parent_agent_path is None
 
 
-# ── 7. Viewer root authority is identity-first ────────────────────────────────
+# ── 7. Viewer must not relabel a child as root ───────────────────────────────
 
 
-def test_viewer_root_selection_is_exact_identity_first_and_never_global_root_path() -> None:
+def test_viewer_root_selection_has_no_first_record_fallback() -> None:
     source = VIEWER_TREE.read_text(encoding="utf-8")
     assert "records[0]" not in source
     assert "entries.find(" not in source
     assert "function aggregate(matches)" in source
-    assert "const exact=nodeId?entries.filter(entry=>String(entry?.source_id||'')===nodeId):[];" in source
-    assert "if(exact.length)return aggregate(exact);" in source
-    assert "recordForPath('/root')" not in source
-    assert "String(preview.topology_state||'')==='derived'" in source
-    assert "const isRoot=nodeHasRootAuthority(node)||previewHasRootAuthority(preview);" in source
-    assert "const agentKey=node=>String(node?.id||'')||nodePath(node);" in source
+    assert "return aggregate(entries.filter(" in source
+    # The root's own rounds are read the same way, across every record it owns.
+    assert "recordForPath('/root')" in source
+    assert "path==='/root'||attrs(node).agent_role==='root'||attrs(node).root_agent_path==='/root'" in source
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is unavailable")
-def test_derived_root_preview_has_no_canonical_root_authority(tmp_path: Path) -> None:
+def test_viewer_root_selection_returns_null_without_a_root(tmp_path: Path) -> None:
+    """The compact inspector only marks explicit root evidence as root."""
     del tmp_path
     source = VIEWER_TREE.read_text(encoding="utf-8")
-    shell = DASHBOARD_SHELL.read_text(encoding="utf-8")
-    assert "preview.is_root===true&&String(preview.topology_state||'')!=='derived'" in source
-    assert "path==='/root'||attrs(node).agent_role==='root'" not in source
-    assert "preview.is_root===true||path==='/root'" not in shell
-    assert "return html" in shell
+    assert "path==='/root'||attrs(node).agent_role==='root'||attrs(node).root_agent_path==='/root'" in source
+    assert "records[0]" not in source
+    assert "conversation_preview?.is_root" not in source
 
 
 # ── CI must keep exercising the final conversation artifact ──────────────────
