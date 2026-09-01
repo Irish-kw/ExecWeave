@@ -39,14 +39,20 @@ execweaveDashboardGraph=function(data){
   });
   const presentationAlias=new Map();
   const antigravityRoot=prepared.find(node=>String(node?.id||'')==='agent:Antigravity');
-  const antigravityMains=prepared.filter(node=>{
+  const antigravityScoped=prepared.filter(node=>{
     const attrs=node?.attributes||{};
     return node?.type==='agent'&&String(attrs.provider||'').toLowerCase()==='antigravity'&&
-      String(node.id||'').startsWith('agent:antigravity:conversation:')&&!String(attrs.parent_agent_path||'').trim();
+      String(node.id||'').startsWith('agent:antigravity:conversation:');
   });
+  const parentScopes=new Set(antigravityScoped.filter(node=>String(node?.attributes?.parent_agent_path||'').trim()).map(node=>String(node?.attributes?.parent_scope_id||'')).filter(Boolean));
+  const evidenceMains=antigravityScoped.filter(node=>{const attrs=node?.attributes||{};return !String(attrs.parent_agent_path||'').trim()&&parentScopes.has(String(attrs.conversation_id||''));});
+  const fallbackMains=antigravityScoped.filter(node=>{const attrs=node?.attributes||{};return !String(attrs.parent_agent_path||'').trim()&&!attrs.routing_identity_only;});
+  const antigravityMains=evidenceMains.length?evidenceMains:fallbackMains;
   if(antigravityRoot&&antigravityMains.length===1){
     const main=antigravityMains[0];presentationAlias.set(antigravityRoot.id,main.id);
     prepared=prepared.filter(node=>node.id!==antigravityRoot.id).map(node=>node.id===main.id?{...node,name:'/root'}:node);
+  }else if(antigravityRoot&&antigravityScoped.length){
+    prepared=prepared.filter(node=>node.id!==antigravityRoot.id);
   }
   const ollamaRoots=prepared.filter(node=>node?.type==='agent'&&['agent:Ollama','agent:ollama'].includes(String(node.id||'')));
   const ollamaRuntimes=prepared.filter(node=>node?.type==='model_runtime'&&String(node?.attributes?.provider||'').toLowerCase()==='ollama');
