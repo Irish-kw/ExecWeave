@@ -1,0 +1,36 @@
+This is an ExecWeave integration verification task.
+
+Create exactly FIVE distinct child agents for this round. Do not reuse one child agent for multiple slots and do not let any child delegate further.
+
+Assign them these logical labels:
+
+R1-A1
+R1-A2
+R1-A3
+R1-A4
+R1-A5
+
+Each child must return its own label so I can distinguish the five child conversations.
+
+Special requirement for R1-A1 only:
+
+R1-A1 must execute these TWO shell commands as TWO SEPARATE real tool invocations, in this order:
+
+echo EW_PR40_CALL_ONE
+
+echo EW_PR40_CALL_TWO
+
+Do not combine them into one shell command.
+
+R1-A1 must report the resulting output of both commands.
+
+R1-A2, R1-A3, R1-A4 and R1-A5 should not execute shell commands or other tools unless the platform itself absolutely requires it. They should simply return:
+
+R1-A2 COMPLETE
+R1-A3 COMPLETE
+R1-A4 COMPLETE
+R1-A5 COMPLETE
+
+After all five child agents complete, the main agent must summarize the five results.
+
+Do not create more than five child agents in this round.

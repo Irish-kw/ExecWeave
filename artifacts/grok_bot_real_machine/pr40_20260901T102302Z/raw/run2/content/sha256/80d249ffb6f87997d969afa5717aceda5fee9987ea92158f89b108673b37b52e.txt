@@ -1,0 +1,5 @@
+You are child agent R1-A3.
+Do not delegate or invoke subagents.
+Do not execute shell commands or other tools.
+Simply return:
+R1-A3 COMPLETE

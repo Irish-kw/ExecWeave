@@ -1,0 +1,5 @@
+Script started on 2026-09-01 10:24:56+00:00 [COMMAND="/workspace/execweave-venv/bin/execweave live --open --watch-root /workspace/agy-pr40 --output-dir /workspace/ExecWeave/artifacts/grok_bot_real_machine/pr40_20260901T102302Z/raw/run --linger 1800 -- /home/box/.local/bin/agy" <not executed on terminal>]
+ExecWeave specialized: active (antigravity; bootstrap updated, evidence appears when hooks fire).
+ExecWeave live: http://127.0.0.1:43287/?t=ITnLGOdyNYogVLLKdWBVlsizMDcs0B_hD_r7msSVoK8
+^@[?2026$p[?2027$p[>4m[=0;1u[?1049h[?25l[?5W[?2004h[>4;2m[=1;1u[?u[H[2J
+Script done on 2026-09-01 10:29:02+00:00 [COMMAND_EXIT_CODE="0"]

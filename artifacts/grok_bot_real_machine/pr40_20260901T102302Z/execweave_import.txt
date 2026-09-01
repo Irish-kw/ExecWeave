@@ -1,0 +1,2 @@
+/workspace/ExecWeave/src/execweave/__init__.py
+0.8.6

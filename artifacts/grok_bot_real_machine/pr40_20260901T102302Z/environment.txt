@@ -1,0 +1,15 @@
+OS=Debian GNU/Linux 13 (trixie)
+KERNEL=6.12.94+
+ARCH=x86_64
+HOSTNAME=cursor
+PYTHON_VERSION=Python 3.13.5
+PYTHON_EXECUTABLE=/workspace/execweave-venv/bin/python
+BROWSER_VERSION=Google Chrome 151.0.7922.169
+EXECWEAVE_GIT_SHA=f79d73d3231b6862419fab484111b449b2778c07
+EXECWEAVE_VERSION=0.8.6
+EXECWEAVE_IMPORT_PATH=/workspace/ExecWeave/src/execweave/__init__.py
+EXECWEAVE_EXECUTABLE=/workspace/execweave-venv/bin/execweave
+ANTIGRAVITY_VERSION=1.1.23
+ANTIGRAVITY_EXECUTABLE=/home/box/.local/bin/agy
+RUN_TIMESTAMP=2026-09-01T10:24:10+00:00
+TZ_NOTE=box clock UTC; user timezone Asia/Taipei

@@ -1,0 +1,8 @@
+You are child agent R1-A1.
+Do not delegate or invoke subagents.
+Execute these TWO shell commands as TWO SEPARATE real tool invocations using run_command, in this exact order:
+1. echo EW_PR40_CALL_ONE
+2. echo EW_PR40_CALL_TWO
+
+Do not combine them into one command.
+Report your label R1-A1 and the resulting output of both commands.

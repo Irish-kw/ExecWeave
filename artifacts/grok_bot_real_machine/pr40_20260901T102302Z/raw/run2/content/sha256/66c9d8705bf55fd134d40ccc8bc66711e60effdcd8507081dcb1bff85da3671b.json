@@ -1,0 +1,1 @@
+{"Message":"Label: R1-A1\nExecution Summary:\n1. `echo EW_PR40_CALL_ONE` -> `EW_PR40_CALL_ONE`\n2. `echo EW_PR40_CALL_TWO` -> `EW_PR40_CALL_TWO`","Recipient":"58d4e2ea-7635-4d05-9a77-73ac366594e9","toolAction":"Reporting execution results","toolSummary":"Reporting output to parent agent"}

@@ -1,0 +1,1 @@
+{"kind":"send_message","recipient":"antigravity:58d4e2ea-7635-4d05-9a77-73ac366594e9","sender":"antigravity:a767b64f-de19-4df0-99d8-d534b9c9b0da","text":"Label: R1-A1\nExecution Summary:\n1. `echo EW_PR40_CALL_ONE` -> `EW_PR40_CALL_ONE`\n2. `echo EW_PR40_CALL_TWO` -> `EW_PR40_CALL_TWO`"}

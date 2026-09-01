@@ -1,0 +1,1 @@
+{"kind":"task","recipient":"unresolved-subagent:R1-A4 Worker","sender":"antigravity:58d4e2ea-7635-4d05-9a77-73ac366594e9","task_name":"R1-A4 Worker","text":"You are child agent R1-A4.\nDo not delegate or invoke subagents.\nDo not execute shell commands or other tools.\nSimply return:\nR1-A4 COMPLETE"}

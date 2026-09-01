@@ -1,0 +1,19 @@
+export PATH=/workspace/execweave-venv/bin:/home/box/.local/bin:$PATH
+export DISPLAY=:3
+export GEMINI_FORCE_FILE_STORAGE=true
+cd /workspace/agy-pr40
+/workspace/execweave-venv/bin/execweave live --open --watch-root /workspace/agy-pr40 --output-dir /workspace/ExecWeave/artifacts/grok_bot_real_machine/pr40_20260901T102302Z/raw/run --linger 1800 -- /home/box/.local/bin/agy
+
+LIVE_DASHBOARD_URL recorded from stdout
+NOTE: first background script PTY inject did not reach Agy TUI (hidden pts/0). Will relaunch in xfce4-terminal for real typing.
+http://127.0.0.1:43287/?t=ITnLGOdyNYogVLLKdWBVlsizMDcs0B_hD_r7msSVoK8
+RUN2 visible xfce4-terminal launch: /workspace/ExecWeave/artifacts/grok_bot_real_machine/pr40_20260901T102302Z/launch_visible_agy.sh
+execweave pid 28212 agy pid 28322
+LIVE seen at http://127.0.0.1:33191 (token in Chrome URL)
+RUN2_LIVE=http://127.0.0.1:33191/?t=eeY90SUlMFHkpzJ1db8LV7HdWwFD6PdJ79F7-CZQMJI
+USER_TRUSTED_WORKSPACE=YES agy-pr40
+AGY_EFFORT_CHANGED=/effort low  Gemini 3.7 Flash (Low)
+ROUND1_SUBMITTED=YES 5_subagents bash_echo_one_and_two_approved effort=low
+ROUND1_COMPLETE=YES PROVIDER_CREATED_CHILDREN_R1=5 LIVE_ROOT_VISIBLE=NO run_command_x2=YES
+ROUND2_SUBMITTED=YES SAME_CONVERSATION=YES PROVIDER_CREATED_CHILDREN_R2=3
+UI_DONE /root=NO dragged=58d4e2ea arrange=YES run_command_calls=2 output=null

@@ -1,0 +1,16 @@
+REPO=Irish-kw/ExecWeave
+BRANCH=fix/root-layout-toolcall-aggregation
+START_SHA=f79d73d3231b6862419fab484111b449b2778c07
+MAIN_SHA=abf1e6b50f0581ce6f8d055f9a12fd8448d02d80
+PR_NUMBER=40
+WORKTREE_CLEAN_BEFORE_RUN=NO
+--- git status --short ---
+?? artifacts/
+--- git rev-parse HEAD ---
+f79d73d3231b6862419fab484111b449b2778c07
+--- git rev-parse origin/main ---
+abf1e6b50f0581ce6f8d055f9a12fd8448d02d80
+--- git rev-parse origin/fix/root-layout-toolcall-aggregation ---
+f79d73d3231b6862419fab484111b449b2778c07
+--- git log -1 --oneline HEAD ---
+f79d73d fix: root identity layout and tool call aggregation

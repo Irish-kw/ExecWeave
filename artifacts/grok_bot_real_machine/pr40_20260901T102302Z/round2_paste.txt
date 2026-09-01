@@ -1,0 +1,21 @@
+Second verification round.
+
+Create exactly THREE NEW child agents. Do not reuse any of the five child agents from the previous round and do not let the children delegate further.
+
+Assign them these logical labels:
+
+R2-A1
+R2-A2
+R2-A3
+
+They should not execute shell commands or other tools unless the platform itself absolutely requires it.
+
+Each must independently return:
+
+R2-A1 COMPLETE
+R2-A2 COMPLETE
+R2-A3 COMPLETE
+
+After all three new child agents complete, the main agent must summarize this second round.
+
+Do not create additional child agents.
