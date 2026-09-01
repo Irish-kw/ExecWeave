@@ -53,7 +53,13 @@ function windows(messages,openers){
 }
 """
     script = harness + "\n" + OLLAMA_CHILD_ROUNDS_JS + f"\nprocess.stdout.write(JSON.stringify(execweaveOllamaChildRounds({json.dumps(messages)},{json.dumps(path)})));\n"
-    completed = subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True)
+    completed = subprocess.run(
+        ["node", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
     return json.loads(completed.stdout)
 
 

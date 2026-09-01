@@ -59,6 +59,7 @@ function windows(messages,openers){
         check=True,
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     payload = json.loads(completed.stdout)
     assert isinstance(payload, list)
