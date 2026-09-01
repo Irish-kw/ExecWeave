@@ -8,6 +8,32 @@ from . import conversation_preview as _preview_module
 from .conversation_records_common import history_message_key as _history_message_key
 
 
+def apply_stable_ordinals(
+    path: str | Path,
+    *,
+    content_kind: str,
+    provider: str,
+    preview: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Keep user-visible Antigravity turns on the transcript's own step indexes."""
+    if (
+        not isinstance(preview, dict)
+        or provider.strip().lower() != "antigravity"
+        or not content_kind.startswith("antigravity.conversation_transcript")
+    ):
+        return preview
+    messages = preview.get("messages")
+    if not isinstance(messages, list):
+        return preview
+    stable_ordinals = _antigravity_step_ordinals(path)
+    if len(stable_ordinals) != len(messages):
+        return preview
+    for message, stable_ordinal in zip(messages, stable_ordinals, strict=True):
+        if isinstance(message, dict) and stable_ordinal is not None:
+            message["ordinal"] = stable_ordinal
+    return preview
+
+
 def _antigravity_step_ordinals(path: str | Path) -> list[int | None]:
     """Recover stable step indexes for user-visible Antigravity transcript records."""
     source_path = Path(path).expanduser().resolve(strict=False)

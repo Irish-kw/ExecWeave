@@ -8,8 +8,8 @@ from ._conversation_records_core import *  # noqa: F403
 from .agent_topology import THREAD_ID_EXECWEAVE_DERIVED, THREAD_ID_PROVIDER_NATIVE
 from .conversation_message_identity import dedupe_codex_message_observations
 from .conversation_records_antigravity import (
-    _antigravity_step_ordinals,
     _project_antigravity_addressed_tasks,
+    apply_stable_ordinals,
 )
 from .conversation_records_codex import _same_merged_execution
 from .conversation_records_common import history_message_key as _history_message_key
@@ -36,23 +36,12 @@ def _conversation_preview(
         timestamp=timestamp,
         ordinal=ordinal,
     )
-    if (
-        not isinstance(preview, dict)
-        or provider.strip().lower() != "antigravity"
-        or not content_kind.startswith("antigravity.conversation_transcript")
-    ):
-        return preview
-
-    messages = preview.get("messages")
-    if not isinstance(messages, list):
-        return preview
-    stable_ordinals = _antigravity_step_ordinals(path)
-    if len(stable_ordinals) != len(messages):
-        return preview
-    for message, stable_ordinal in zip(messages, stable_ordinals, strict=True):
-        if isinstance(message, dict) and stable_ordinal is not None:
-            message["ordinal"] = stable_ordinal
-    return preview
+    return apply_stable_ordinals(
+        path,
+        content_kind=content_kind,
+        provider=provider,
+        preview=preview,
+    )
 
 
 def _conversation_identity_keys(
