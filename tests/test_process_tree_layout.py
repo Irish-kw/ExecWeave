@@ -69,10 +69,14 @@ def test_process_layout_module_is_loaded_after_readability() -> None:
 
 def test_live_html_embeds_dagre_directed_graph_layout() -> None:
     assert "execweaveLayoutDirectedGraph" in LIVE_HTML
+    assert "execweaveSeparateOverlappingNodes" in LIVE_HTML
     assert "dagre.layout" in LIVE_HTML
+    assert "engine.layout(graph)" in LIVE_PROCESS_LAYOUT_SCRIPT
+    assert "crossing minimization" in LIVE_PROCESS_LAYOUT_SCRIPT
     source = _arrange_positions_source()
     assert "fit(" not in source
     assert "execweaveLayoutDirectedGraph(execweaveTopology)" in source
+    assert "execweaveSeparateOverlappingNodes(execweaveTopology)" in source
 
 
 def test_two_fixed_size_nodes_do_not_overlap_after_dagre_layout() -> None:
@@ -106,3 +110,47 @@ process.stdout.write(JSON.stringify({area:ix*iy,boxes}));
     )
     payload = json.loads(completed.stdout)
     assert payload["area"] == 0, payload
+
+
+def test_dagre_reorders_same_layer_nodes_to_reduce_edge_crossings() -> None:
+    start = LIVE_PROCESS_LAYOUT_SCRIPT.index("const EXECWEAVE_DAG_GAP=24;")
+    end = LIVE_PROCESS_LAYOUT_SCRIPT.index("const execweaveBuildTopologyBase=execweaveBuildTopology;")
+    layout_js = LIVE_PROCESS_LAYOUT_SCRIPT[start:end]
+    vendor = SRC / "vendor" / "dagre.min.js"
+    script = (
+        "global.dagre=require(process.argv[1]);\n"
+        "const ids=['p1','p2','c1','c2'];\n"
+        "global.nodeById=new Map(ids.map(id=>[id,{id}]));\n"
+        "global.edgeById=new Map([['e1',{source:'p1',target:'c2'}],['e2',{source:'p2',target:'c1'}]]);\n"
+        "global.execweaveWidthOf=()=>120;\n"
+        "global.execweaveHeightOf=()=>40;\n"
+        "global.execweaveSeparateLane=()=>{};\n"
+        + layout_js
+        + """
+const topo={spec:new Map(ids.map(id=>[id,{x:0,y:0}]))};
+execweaveLayoutDirectedGraph(topo);
+execweaveSeparateOverlappingNodes(topo);
+const y=id=>topo.spec.get(id).y;
+const parentSign=Math.sign(y('p1')-y('p2'));
+const childSign=Math.sign(y('c2')-y('c1'));
+const boxes=ids.map(id=>({id,x:topo.spec.get(id).x,y:y(id),w:120,h:40}));
+let area=0;
+for(let i=0;i<boxes.length;i++)for(let j=i+1;j<boxes.length;j++){
+  const A=boxes[i],B=boxes[j];
+  const ix=Math.max(0,Math.min(A.x+A.w,B.x+B.w)-Math.max(A.x,B.x));
+  const iy=Math.max(0,Math.min(A.y+A.h,B.y+B.h)-Math.max(A.y,B.y));
+  area+=ix*iy;
+}
+process.stdout.write(JSON.stringify({parentSign,childSign,area,y:{p1:y('p1'),p2:y('p2'),c1:y('c1'),c2:y('c2')}}));
+"""
+    )
+    completed = subprocess.run(
+        ["node", "-e", script, str(vendor)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    payload = json.loads(completed.stdout)
+    assert payload["area"] == 0, payload
+    assert payload["parentSign"] != 0
+    assert payload["parentSign"] == payload["childSign"], payload

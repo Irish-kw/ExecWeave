@@ -183,7 +183,8 @@ function execweaveLayoutRelated(topo){
   return topo;
 }
 const EXECWEAVE_DAG_GAP=24;
-function execweaveResolveOverlaps(topo){
+function execweaveSeparateOverlappingNodes(topo){
+  if(!topo||!topo.spec)return topo;
   for(let pass=0;pass<32;pass++){
     const boxes=[...topo.spec.keys()].filter(id=>nodeById.has(id)).map(id=>({
       id,
@@ -206,8 +207,9 @@ function execweaveResolveOverlaps(topo){
         moved=true;
       }
     }
-    if(!moved)return;
+    if(!moved)return topo;
   }
+  return topo;
 }
 function execweaveLayoutDirectedGraph(topo){
   if(!topo||!topo.spec)return topo;
@@ -235,6 +237,7 @@ function execweaveLayoutDirectedGraph(topo){
       seen.add(key);
       graph.setEdge(edge.source,edge.target);
     }
+    // dagre.layout runs Sugiyama: rank (layer assignment), order (crossing minimization / barycenter decross), then position.
     engine.layout(graph);
     for(const id of ids){
       const placed=graph.node(id),spec=topo.spec.get(id);
@@ -242,16 +245,21 @@ function execweaveLayoutDirectedGraph(topo){
       spec.x=placed.x-placed.width/2;
       spec.y=placed.y-placed.height/2;
     }
-    execweaveResolveOverlaps(topo);
   }catch(error){
     console.warn('execweaveLayoutDirectedGraph: dagre failed, using process-tree layout',error);
     execweaveSeparateLane(topo);
   }
   return topo;
 }
+function execweaveApplyDirectedGraph(topo){
+  execweaveLayoutDirectedGraph(topo);
+  execweaveSeparateOverlappingNodes(topo);
+  return topo;
+}
 const execweaveBuildTopologyBase=execweaveBuildTopology;
-execweaveBuildTopology=function(){return execweaveLayoutDirectedGraph(execweaveLayoutRelated(execweaveLayoutProcessTree(execweaveBuildTopologyBase())))};
+execweaveBuildTopology=function(){return execweaveApplyDirectedGraph(execweaveLayoutRelated(execweaveLayoutProcessTree(execweaveBuildTopologyBase())))};
 window.execweaveLayoutDirectedGraph=execweaveLayoutDirectedGraph;
+window.execweaveSeparateOverlappingNodes=execweaveSeparateOverlappingNodes;
 const execweaveRouteBase=execweaveRoute;
 execweaveRoute=function(edge){
   const sourceSpec=execweaveTopology.spec.get(edge.source)||{};
@@ -278,6 +286,7 @@ function execweaveArrangePositions(){
   });
   for(const id of ordered)next.set(id,execweavePlaceStable(id,execweaveDesiredPosition(id),next,id));
   execweaveLayoutDirectedGraph(execweaveTopology);
+  execweaveSeparateOverlappingNodes(execweaveTopology);
   for(const id of ordered){
     const spec=execweaveTopology.spec.get(id);
     if(spec)next.set(id,{x:spec.x,y:spec.y});
@@ -301,6 +310,39 @@ execweaveArrangeGraph=execweaveArrangePositions;
 window.__execweaveArrangeGraph=execweaveArrangePositions;
 const arrangeButton=document.getElementById('arrange');
 if(arrangeButton)arrangeButton.onclick=()=>execweaveArrangePositions();
+function execweaveWriteDirectedPositions(topo){
+  const next=new Map();
+  for(const id of nodeById.keys()){
+    const spec=topo.spec.get(id);
+    next.set(id,spec?{x:spec.x,y:spec.y}:execweaveDesiredPosition(id));
+  }
+  positions=next;layerRows=new Map();
+  for(const [id,p] of positions){
+    const spec=topo.spec.get(id);
+    if(spec)layerRows.set(spec.rank,Math.max(layerRows.get(spec.rank)||0,spec.order+1));
+    const group=nodeElements.get(id);
+    if(group)group.setAttribute('transform',`translate(${p.x} ${p.y})`);
+    const node=nodeById.get(id);
+    if(node)updateNodeElement(node);
+  }
+  for(const edge of edgeById.values())updateEdgeElement(edge);
+  svg.classList.toggle('execweave-crowded',!!topo.crowded);
+}
+const execweaveFullLayoutBase=fullLayout;
+fullLayout=function(){
+  const prior=positions;
+  const incoming=[...nodeById.keys()].some(id=>!prior.has(id));
+  if(prior.size&&!incoming){execweaveFullLayoutBase();return}
+  execweaveTopology=execweaveBuildTopology();
+  execweaveWriteDirectedPositions(execweaveTopology);
+};
+const execweavePlaceAddedBase=placeAddedNodes;
+placeAddedNodes=function(ids){
+  const incoming=(ids||[]).filter(id=>nodeById.has(id)&&!positions.has(id));
+  if(!incoming.length){execweavePlaceAddedBase(ids);return}
+  execweaveTopology=execweaveBuildTopology();
+  execweaveWriteDirectedPositions(execweaveTopology);
+};
 })();
 """.strip()
 
