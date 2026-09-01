@@ -1,0 +1,327 @@
+name: Antigravity root child history v2
+
+on:
+  push:
+    branches:
+      - fix/antigravity-root-child-history-v2
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/antigravity-root-child-history-v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Apply guarded production and regression patch
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path_s: str, old: str, new: str) -> None:
+              path = Path(path_s)
+              text = path.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"guard failed for {path_s}: expected 1 occurrence, got {count}")
+              path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          replace_once(
+              "src/execweave/antigravity_subagent_linkage.py",
+              '''    allowed = {"Prompt", "Role", "TypeName", "Workspace"}\n''',
+              '''    # Current Antigravity includes Model in each invoke_subagent spec.\n    # Keep the allow-list strict while accepting that live-verified field.\n    allowed = {"Model", "Prompt", "Role", "TypeName", "Workspace"}\n''',
+          )
+          replace_once(
+              "src/execweave/antigravity_subagent_linkage.py",
+              '''        workspace = raw.get("Workspace")\n        if workspace is not None and (not isinstance(workspace, str) or not workspace):\n            return None\n        specs.append(dict(raw))\n''',
+              '''        model = raw.get("Model")\n        if model is not None and (not isinstance(model, str) or not model):\n            return None\n        workspace = raw.get("Workspace")\n        if workspace is not None and (not isinstance(workspace, str) or not workspace):\n            return None\n        specs.append(dict(raw))\n''',
+          )
+          replace_once(
+              "src/execweave/antigravity_subagent_linkage.py",
+              '''def _matching_result(record: dict[str, Any]) -> list[dict[str, Any]] | None:\n    if record.get("source") != "MODEL":\n        return None\n    if record.get("type") != "INVOKE_SUBAGENT" or record.get("status") != "DONE":\n        return None\n    return _parse_result_content(record.get("content"))\n''',
+              '''def _matching_result(record: dict[str, Any]) -> list[dict[str, Any]] | None:\n    if record.get("source") != "MODEL" or record.get("status") != "DONE":\n        return None\n    # Older builds labelled the immediate result INVOKE_SUBAGENT; the current\n    # live wire labels that same record GENERIC. GENERIC is accepted only if its\n    # payload passes _parse_result_content's exact provider prefix/schema checks.\n    if record.get("type") not in {"INVOKE_SUBAGENT", "GENERIC"}:\n        return None\n    return _parse_result_content(record.get("content"))\n''',
+          )
+
+          replace_once(
+              "src/execweave/conversation_preview.py",
+              '''        "agent_nickname": (\n            attrs.get("agent_nickname")\n            if isinstance(attrs.get("agent_nickname"), str)\n            else None\n        ),\n        **topology.to_dict(),\n''',
+              '''        "agent_nickname": (\n            attrs.get("agent_nickname")\n            if isinstance(attrs.get("agent_nickname"), str)\n            else None\n        ),\n        "parent_scope_id": (\n            attrs.get("parent_scope_id")\n            if isinstance(attrs.get("parent_scope_id"), str)\n            else None\n        ),\n        **topology.to_dict(),\n''',
+          )
+
+          path = Path("src/execweave/conversation_records.py")
+          text = path.read_text(encoding="utf-8")
+          marker = '''def _restore_complete_histories(\n    entries: list[dict[str, Any]],\n    snapshots: list[tuple[dict[str, Any], dict[str, Any]]],\n) -> None:\n'''
+          if text.count(marker) != 1:
+              raise SystemExit("conversation_records helper marker changed")
+          helper = '''def _project_antigravity_addressed_tasks(\n    entries: list[dict[str, Any]],\n    snapshots: list[tuple[dict[str, Any], dict[str, Any]]],\n) -> None:\n    \"\"\"Project exact parent-addressed send_message text into the child timeline.\n\n    This is presentation-only. Antigravity exposes an exact recipient conversation ID\n    for send_message, but does not expose delivery/consumption. We therefore use the\n    message as a task opener only when the recipient already has positive child topology\n    and the exact sender matches that child's provider parent_scope_id. Raw evidence is\n    unchanged and the projected message explicitly remains delivery_observed=False.\n    \"\"\"\n    prefix = "agent:antigravity:conversation:"\n    children: dict[str, dict[str, Any]] = {}\n    for entry in entries:\n        if str(entry.get("provider") or "").lower() != "antigravity":\n            continue\n        source_id = entry.get("source_id")\n        preview = entry.get("conversation_preview")\n        if not isinstance(source_id, str) or not source_id.startswith(prefix):\n            continue\n        if not isinstance(preview, dict) or not preview.get("parent_agent_path"):\n            continue\n        parent_scope = preview.get("parent_scope_id")\n        if not isinstance(parent_scope, str) or not parent_scope:\n            continue\n        children[source_id.removeprefix(prefix)] = entry\n\n    additions: dict[str, list[dict[str, Any]]] = {child_id: [] for child_id in children}\n    for _observed_entry, observed_preview in snapshots:\n        for message in observed_preview.get("messages") or []:\n            if not isinstance(message, dict) or message.get("kind") != "send_message":\n                continue\n            sender = message.get("sender")\n            recipient = message.get("recipient")\n            if not isinstance(sender, str) or not sender.startswith("antigravity:"):\n                continue\n            if not isinstance(recipient, str) or not recipient.startswith("antigravity:"):\n                continue\n            sender_id = sender.removeprefix("antigravity:")\n            child_id = recipient.removeprefix("antigravity:")\n            child_entry = children.get(child_id)\n            if child_entry is None:\n                continue\n            child_preview = child_entry["conversation_preview"]\n            if child_preview.get("parent_scope_id") != sender_id:\n                # Exact sibling/other-agent messages are not parent task assignments.\n                continue\n            task = dict(message)\n            task.update(\n                {\n                    "kind": "task",\n                    "phase": "assignment",\n                    "sender": str(child_preview.get("parent_agent_path") or "/root"),\n                    "recipient": str(child_preview.get("agent_path") or ""),\n                    "content_role": "antigravity_addressed_task",\n                    "provider_sender_id": sender_id,\n                    "provider_recipient_id": child_id,\n                    "delivery_observed": False,\n                    "consumption_observed": False,\n                }\n            )\n            additions[child_id].append(task)\n\n    for child_id, tasks in additions.items():\n        if not tasks:\n            continue\n        preview = children[child_id]["conversation_preview"]\n        combined = [\n            dict(message)\n            for message in preview.get("messages") or []\n            if isinstance(message, dict)\n        ] + tasks\n        combined.sort(\n            key=lambda message: (\n                str(message.get("timestamp") or ""),\n                message.get("ordinal")\n                if isinstance(message.get("ordinal"), int)\n                else 2**63 - 1,\n            )\n        )\n        seen: set[tuple[object, ...]] = set()\n        messages: list[dict[str, Any]] = []\n        for message in combined:\n            key = _history_message_key(message)\n            if key in seen:\n                continue\n            seen.add(key)\n            messages.append(message)\n        preview["message_count"] = len(messages)\n        preview["messages_truncated"] = False\n        preview["messages"] = messages\n\n\n'''
+          text = text.replace(marker, helper + marker, 1)
+          old = '''    _core_merge_conversation_previews(entries)\n    _repair_parent_thread_aliases(entries)\n    _restore_complete_histories(entries, snapshots)\n'''
+          new = '''    _core_merge_conversation_previews(entries)\n    _repair_parent_thread_aliases(entries)\n    _restore_complete_histories(entries, snapshots)\n    _project_antigravity_addressed_tasks(entries, snapshots)\n'''
+          if text.count(old) != 1:
+              raise SystemExit("conversation_records post-merge marker changed")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          replace_once(
+              "src/execweave/viewer_agent_panel.py",
+              '''function canonicalRootRecord(){\n  const roots=entries.filter(entryHasRootAuthority);\n  const sourceIds=[...new Set(roots.map(entry=>String(entry?.source_id||'')).filter(Boolean))];\n  if(sourceIds.length!==1)return null;\n  return aggregate(roots.filter(entry=>String(entry?.source_id||'')===sourceIds[0]));\n}\n''',
+              '''function canonicalRootRecord(){\n  const roots=entries.filter(entryHasRootAuthority);\n  const sourceIds=[...new Set(roots.map(entry=>String(entry?.source_id||'')).filter(Boolean))];\n  if(sourceIds.length===1)return aggregate(roots.filter(entry=>String(entry?.source_id||'')===sourceIds[0]));\n  if(sourceIds.length)return null;\n  // Antigravity does not publish an explicit root bit for each conversation. After\n  // positive child topology is applied, exactly one exact conversation identity is\n  // parent-less. Use only that exact identity as a presentation root; never aggregate\n  // arbitrary /root paths or multiple independent conversations.\n  const agy=entries.filter(entry=>{\n    const preview=entry?.conversation_preview;\n    return String(entry?.provider||'').toLowerCase()==='antigravity'&&!!preview&&\n      String(entry?.source_id||'').startsWith('agent:antigravity:conversation:')&&\n      !String(preview.parent_agent_path||'').trim();\n  });\n  const agyIds=[...new Set(agy.map(entry=>String(entry?.source_id||'')).filter(Boolean))];\n  if(agyIds.length!==1)return null;\n  return aggregate(agy.filter(entry=>String(entry?.source_id||'')===agyIds[0]));\n}\n''',
+          )
+
+          replace_once(
+              "src/execweave/viewer_dashboard_focus.py",
+              '''  const presentationAlias=new Map();\n  const antigravityRoot=prepared.find(node=>String(node?.id||'')==='agent:Antigravity');\n  const antigravityMains=prepared.filter(node=>{\n    const attrs=node?.attributes||{};\n    return node?.type==='agent'&&String(attrs.provider||'').toLowerCase()==='antigravity'&&\n      String(node.id||'').startsWith('agent:antigravity:conversation:')&&!String(attrs.parent_agent_path||'').trim();\n  });\n  if(antigravityRoot&&antigravityMains.length===1){\n    const main=antigravityMains[0];presentationAlias.set(antigravityRoot.id,main.id);\n    prepared=prepared.filter(node=>node.id!==antigravityRoot.id).map(node=>node.id===main.id?{...node,name:'/root'}:node);\n  }\n''',
+              '''  const presentationAlias=new Map();\n  const antigravityRoot=prepared.find(node=>String(node?.id||'')==='agent:Antigravity');\n  const antigravityScoped=prepared.filter(node=>{\n    const attrs=node?.attributes||{};\n    return node?.type==='agent'&&String(attrs.provider||'').toLowerCase()==='antigravity'&&\n      String(node.id||'').startsWith('agent:antigravity:conversation:');\n  });\n  const parentScopes=new Set(antigravityScoped.filter(node=>String(node?.attributes?.parent_agent_path||'').trim()).map(node=>String(node?.attributes?.parent_scope_id||'')).filter(Boolean));\n  const evidenceMains=antigravityScoped.filter(node=>{const attrs=node?.attributes||{};return !String(attrs.parent_agent_path||'').trim()&&parentScopes.has(String(attrs.conversation_id||''));});\n  const fallbackMains=antigravityScoped.filter(node=>{const attrs=node?.attributes||{};return !String(attrs.parent_agent_path||'').trim()&&!attrs.routing_identity_only;});\n  const antigravityMains=evidenceMains.length?evidenceMains:fallbackMains;\n  if(antigravityRoot&&antigravityMains.length===1){\n    const main=antigravityMains[0];presentationAlias.set(antigravityRoot.id,main.id);\n    prepared=prepared.filter(node=>node.id!==antigravityRoot.id).map(node=>node.id===main.id?{...node,name:'/root'}:node);\n  }else if(antigravityRoot&&antigravityScoped.length){\n    // The generic provider-capability actor is not a second logical conversation.\n    // If several exact roots make aliasing ambiguous, hide the product node rather\n    // than presenting a false isolated /root. Exact conversation nodes remain intact.\n    prepared=prepared.filter(node=>node.id!==antigravityRoot.id);\n  }\n''',
+          )
+
+          tests = Path("tests/test_antigravity_root_child_history_v2.py")
+          if tests.exists():
+              raise SystemExit("new regression file already exists")
+          tests.write_text(r'''from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+
+import pytest
+
+from execweave.antigravity_full_fidelity import antigravity_hook_to_content_events
+from execweave.content_store import FullFidelityContentStore
+from execweave.conversation_records import conversation_record_entries
+from execweave.graph import GraphAccumulator
+from execweave.viewer_projection import write_graph_html
+
+ROOT = "root-current-wire"
+CHILD_A = "child-current-a"
+CHILD_B = "child-current-b"
+ROOT_ID = f"agent:antigravity:conversation:{ROOT}"
+CHILD_A_ID = f"agent:antigravity:conversation:{CHILD_A}"
+CHILD_B_ID = f"agent:antigravity:conversation:{CHILD_B}"
+
+
+def _brain_transcript(tmp_path: Path, conversation_id: str) -> Path:
+    path = tmp_path / "brain" / conversation_id / ".system_generated" / "logs" / "transcript.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _write(path: Path, rows: list[dict[str, object]]) -> None:
+    path.write_text("".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows), encoding="utf-8")
+
+
+def _root_rows(tmp_path: Path) -> tuple[list[dict[str, object]], list[dict[str, str]]]:
+    specs = [
+        {"Model": "inherit", "Prompt": "child A first task", "Role": "Role A", "TypeName": "worker", "Workspace": "inherit"},
+        {"Model": "inherit", "Prompt": "child B first task", "Role": "Role B", "TypeName": "worker", "Workspace": "inherit"},
+    ]
+    child_a = _brain_transcript(tmp_path, CHILD_A)
+    child_b = _brain_transcript(tmp_path, CHILD_B)
+    result = (
+        "Created the following subagents:\n"
+        + json.dumps({"conversationId": CHILD_A, "logAbsoluteUri": child_a.as_uri(), "workspaceUris": [tmp_path.as_uri()]})
+        + "\n"
+        + json.dumps({"conversationId": CHILD_B, "logAbsoluteUri": child_b.as_uri(), "workspaceUris": [tmp_path.as_uri()]})
+    )
+    rows: list[dict[str, object]] = [
+        {"step_index": 0, "source": "USER_EXPLICIT", "type": "USER_INPUT", "status": "DONE", "created_at": "2026-09-01T01:00:00Z", "content": "<USER_REQUEST>root first request</USER_REQUEST>"},
+        {"step_index": 1, "source": "MODEL", "type": "PLANNER_RESPONSE", "status": "DONE", "created_at": "2026-09-01T01:00:01Z", "tool_calls": [{"name": "invoke_subagent", "args": {"Subagents": specs}}]},
+        {"step_index": 2, "source": "MODEL", "type": "GENERIC", "status": "DONE", "created_at": "2026-09-01T01:00:02Z", "content": result},
+        {"step_index": 3, "source": "MODEL", "type": "PLANNER_RESPONSE", "status": "DONE", "created_at": "2026-09-01T01:00:03Z", "content": "root first response"},
+        {"step_index": 4, "source": "USER_EXPLICIT", "type": "USER_INPUT", "status": "DONE", "created_at": "2026-09-01T01:00:50Z", "content": "<USER_REQUEST>root second request</USER_REQUEST>"},
+        {"step_index": 5, "source": "MODEL", "type": "PLANNER_RESPONSE", "status": "DONE", "created_at": "2026-09-01T01:00:51Z", "content": "root dispatches a new child task"},
+    ]
+    return rows, specs
+
+
+def _build(tmp_path: Path) -> tuple[dict[str, object], Path]:
+    run_root = tmp_path / "run"
+    store = FullFidelityContentStore(run_root)
+    root_path = _brain_transcript(tmp_path, ROOT)
+    root_rows, specs = _root_rows(tmp_path)
+    _write(root_path, root_rows)
+    _write(_brain_transcript(tmp_path, CHILD_A), [
+        {"step_index": 0, "source": "MODEL", "type": "PLANNER_RESPONSE", "status": "DONE", "created_at": "2026-09-01T01:00:05Z", "content": "child A first response"},
+        {"step_index": 4, "source": "MODEL", "type": "PLANNER_RESPONSE", "status": "DONE", "created_at": "2026-09-01T01:01:05Z", "content": "child A second response"},
+    ])
+    _write(_brain_transcript(tmp_path, CHILD_B), [
+        {"step_index": 0, "source": "MODEL", "type": "PLANNER_RESPONSE", "status": "DONE", "created_at": "2026-09-01T01:00:06Z", "content": "child B first response"},
+    ])
+    graph = GraphAccumulator(session_id="agy-root-child-v2", source_path=run_root / "events.jsonl")
+
+    invoke_payload = {
+        "conversationId": ROOT,
+        "workspacePaths": [str(tmp_path)],
+        "transcriptPath": str(root_path),
+        "stepIdx": 1,
+        "toolCall": {"name": "invoke_subagent", "args": {"Subagents": specs}},
+    }
+    for event in antigravity_hook_to_content_events(invoke_payload, hook_event="PostToolUse", store=store, timestamp="2026-09-01T01:00:04Z"):
+        graph.apply(event)
+
+    # Archive the exact main transcript too: child round folding is keyed to the exact
+    # root conversation's USER_EXPLICIT round boundaries, never a path aggregate.
+    root_stop = {
+        "conversationId": ROOT,
+        "workspacePaths": [str(tmp_path)],
+        "transcriptPath": str(root_path),
+        "executionNum": 1,
+        "terminationReason": "done",
+        "fullyIdle": True,
+    }
+    for event in antigravity_hook_to_content_events(root_stop, hook_event="Stop", store=store, timestamp="2026-09-01T01:03:00Z"):
+        graph.apply(event)
+
+    for child_id in (CHILD_A, CHILD_B):
+        stop_payload = {
+            "conversationId": child_id,
+            "workspacePaths": [str(tmp_path)],
+            "transcriptPath": str(_brain_transcript(tmp_path, child_id)),
+            "executionNum": 1,
+            "terminationReason": "done",
+            "fullyIdle": True,
+        }
+        for event in antigravity_hook_to_content_events(stop_payload, hook_event="Stop", store=store, timestamp="2026-09-01T01:02:00Z"):
+            graph.apply(event)
+
+    followup = {
+        "conversationId": ROOT,
+        "stepIdx": 10,
+        "workspacePaths": [str(tmp_path)],
+        "toolCall": {"name": "send_message", "args": {"Recipient": CHILD_A, "Message": "child A second task"}},
+    }
+    for event in antigravity_hook_to_content_events(followup, hook_event="PostToolUse", store=store, timestamp="2026-09-01T01:01:00Z"):
+        graph.apply(event)
+
+    # A sibling-addressed note must not be promoted into a parent assignment round.
+    sibling_note = {
+        "conversationId": CHILD_B,
+        "stepIdx": 11,
+        "workspacePaths": [str(tmp_path)],
+        "toolCall": {"name": "send_message", "args": {"Recipient": CHILD_A, "Message": "sibling note, not a task"}},
+    }
+    for event in antigravity_hook_to_content_events(sibling_note, hook_event="PostToolUse", store=store, timestamp="2026-09-01T01:01:01Z"):
+        graph.apply(event)
+
+    materialized = graph.to_dict()
+    materialized["nodes"].append({"id": "agent:Antigravity", "type": "agent", "name": "Antigravity", "attributes": {"provider": "antigravity"}})
+    return materialized, run_root
+
+
+def _entry(entries: list[dict[str, object]], source_id: str) -> dict[str, object]:
+    matches = [entry for entry in entries if entry.get("source_id") == source_id and isinstance(entry.get("conversation_preview"), dict)]
+    assert len(matches) == 1, (source_id, len(matches))
+    return matches[0]
+
+
+def test_current_generic_result_and_model_field_produce_positive_child_topology(tmp_path: Path) -> None:
+    graph, run_root = _build(tmp_path)
+    for child_id in (CHILD_A_ID, CHILD_B_ID):
+        child = next(node for node in graph["nodes"] if node["id"] == child_id)
+        attrs = child["attributes"]
+        assert attrs["parent_agent_path"] == "/root"
+        assert attrs["parent_scope_id"] == ROOT
+        assert attrs["parent_relation_source"] == "provider_validated_child_transcript"
+
+    entries = conversation_record_entries(graph, run_root)
+    preview_a = _entry(entries, CHILD_A_ID)["conversation_preview"]
+    texts_a = [message["text"] for message in preview_a["messages"]]
+    assert texts_a == [
+        "child A first task",
+        "child A first response",
+        "child A second task",
+        "child A second response",
+    ]
+    second = next(message for message in preview_a["messages"] if message["text"] == "child A second task")
+    assert second["phase"] == "assignment"
+    assert second["content_role"] == "antigravity_addressed_task"
+    assert second["provider_sender_id"] == ROOT
+    assert second["provider_recipient_id"] == CHILD_A
+    assert second["delivery_observed"] is False
+    assert second["consumption_observed"] is False
+    assert "sibling note, not a task" not in texts_a
+
+    preview_b = _entry(entries, CHILD_B_ID)["conversation_preview"]
+    assert "child A second task" not in [message["text"] for message in preview_b["messages"]]
+
+
+def _required_browser(playwright: object):
+    try:
+        return playwright.chromium.launch()
+    except Exception as error:  # noqa: BLE001
+        if os.environ.get("EXECWEAVE_E2E_REQUIRED", "").lower() not in {"", "0", "false"}:
+            pytest.fail(f"Chromium required for Antigravity root/child history gate: {error}")
+        pytest.skip(f"Chromium unavailable: {error}")
+
+
+@pytest.mark.viewer_e2e
+def test_dashboard_has_one_root_and_reused_child_has_folded_history(tmp_path: Path) -> None:
+    sync_api = pytest.importorskip("playwright.sync_api")
+    graph, run_root = _build(tmp_path)
+    entries = conversation_record_entries(graph, run_root)
+    viewer = run_root / "viewer.html"
+    write_graph_html(graph, viewer)
+    with sync_api.sync_playwright() as playwright:
+        browser = _required_browser(playwright)
+        try:
+            page = browser.new_page(viewport={"width": 1440, "height": 1000})
+            page.goto(viewer.as_uri())
+            page.wait_for_selector(".node")
+            visible = page.eval_on_selector_all(".node", "nodes=>nodes.map(node=>({id:node.dataset.id,text:node.textContent}))")
+            ids = [item["id"] for item in visible]
+            assert "agent:Antigravity" not in ids
+            assert ROOT_ID in ids
+            assert "/root" in next(item for item in visible if item["id"] == ROOT_ID)["text"]
+            assert "Role A" in next(item for item in visible if item["id"] == CHILD_A_ID)["text"]
+            assert "Role B" in next(item for item in visible if item["id"] == CHILD_B_ID)["text"]
+
+            page.eval_on_selector(f'.node[data-id="{CHILD_A_ID}"]', "node=>node.dispatchEvent(new MouseEvent('click',{bubbles:true}))")
+            page.wait_for_function("()=>(document.getElementById('details')?.innerText||'').includes('child A second task')")
+            details = page.locator("#details")
+            text = details.inner_text()
+            assert "child A first task" in text
+            assert "child A first response" in text
+            assert "child A second task" in text
+            assert "child A second response" in text
+            assert "sibling note, not a task" not in text
+            assert details.locator(".execweave-agent-older").count() == 1
+            older = details.locator(".execweave-agent-older").first
+            assert not older.evaluate("node=>node.open")
+            older.locator("summary").click()
+            assert older.evaluate("node=>node.open")
+            page.evaluate("items=>window.__execweaveAgentPanel.setEntries(items)", entries)
+            assert details.locator(".execweave-agent-older").first.evaluate("node=>node.open")
+        finally:
+            browser.close()
+''', encoding="utf-8")
+          PY
+      - name: Install
+        run: python -m pip install -e ".[dev]"
+      - name: Ruff
+        run: python -m ruff check src tests
+      - name: Focused non-browser regressions
+        run: python -m pytest -q tests/test_antigravity_root_child_history_v2.py tests/test_antigravity_subagent_transcript_linkage.py tests/test_antigravity_linkage_projection.py tests/test_antigravity_multi_conversation_isolation.py tests/test_provider_conversation_history_integrity.py -m "not viewer_e2e"
+      - name: Install Chromium
+        run: python -m playwright install --with-deps chromium
+      - name: Required new browser regression
+        env:
+          EXECWEAVE_E2E_REQUIRED: "1"
+        run: python -m pytest -q tests/test_antigravity_root_child_history_v2.py -m viewer_e2e
+      - name: Full Viewer regressions
+        env:
+          EXECWEAVE_E2E_REQUIRED: "1"
+        run: python -m pytest -q -m viewer_e2e
+      - name: Full non-browser suite
+        run: python -m pytest -q -m "not viewer_e2e"
+      - name: Commit validated patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/execweave/antigravity_subagent_linkage.py src/execweave/conversation_preview.py src/execweave/conversation_records.py src/execweave/viewer_agent_panel.py src/execweave/viewer_dashboard_focus.py tests/test_antigravity_root_child_history_v2.py
+          git diff --cached --check
+          git commit -m "fix: preserve Antigravity root and child task history"
+          git push origin HEAD:fix/antigravity-root-child-history-v2
