@@ -95,6 +95,14 @@ function foldStateFor(node){
   if(!state){state=new Map();foldStateByAgent.set(key,state)}
   return state;
 }
+function rememberVisibleFoldState(){
+  if(!selectedNode)return;
+  const state=foldStateFor(selectedNode);
+  for(const fold of details.querySelectorAll('.execweave-agent-older[data-fold-key]')){
+    const key=String(fold.dataset.foldKey||'');
+    if(key)state.set(key,fold.open);
+  }
+}
 function uniqueTexts(messages){const seen=new Set(),out=[];for(const message of messages){const text=displayText(message);if(!text||seen.has(text))continue;seen.add(text);out.push(text)}return out}
 function card(label,text){const box=document.createElement('section');box.className='execweave-agent-card';const head=document.createElement('div');head.className='execweave-agent-label';head.textContent=label;const body=document.createElement('pre');body.className='execweave-agent-body';body.textContent=text||'Not observed.';if(!text)body.classList.add('execweave-agent-empty');box.append(head,body);return box}
 function stampOf(message){return String(message?.timestamp||'')}
@@ -348,6 +356,7 @@ function nodeCards(node){
 function renderNode(node){
   const rows=nodeCards(node);
   if(!rows.length)return false;
+  rememberVisibleFoldState();
   selectedNode=null;selectedConversationSignature='';detailsEmpty.hidden=true;details.replaceChildren();
   const view=document.createElement('div');view.className='execweave-agent-view';
   for(const[label,text]of rows)view.appendChild(card(label,text));
@@ -356,6 +365,7 @@ function renderNode(node){
 function render(node){
   if(!node)return false;
   if(String(node.type||'')!=='agent')return renderNode(node);
+  rememberVisibleFoldState();
   selectedNode=node;selectedConversationSignature=conversationSignature(node);detailsEmpty.hidden=true;details.replaceChildren();
   const record=recordFor(node),preview=record?.conversation_preview||{},path=String(preview.agent_path||nodePath(node)||'').trim(),messages=Array.isArray(preview.messages)?preview.messages:[];
   const isRoot=nodeHasRootAuthority(node)||previewUsesRootRenderer(preview);
