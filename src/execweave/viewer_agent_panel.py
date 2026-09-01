@@ -41,8 +41,10 @@ const displayText=message=>isEncrypted(message)?ENCRYPTED_NOTICE:messageText(mes
 const isInjected=message=>String(message?.content_role||'')==='shared_injected_context';
 const own=(message,path)=>!message?.sender||String(message.sender)===path;
 const previewHasRootAuthority=preview=>!!preview&&preview.is_root===true&&String(preview.topology_state||'')!=='derived'&&String(preview.topology_evidence||'')!=='no_parent_evidence_observed';
+const previewUsesRootRenderer=preview=>!!preview&&preview.is_root===true&&String(preview.agent_path||'')==='/root';
 const nodeHasChildAuthority=node=>!!String(attrs(node).parent_agent_path||'').trim();
-const nodeHasRootAuthority=node=>!nodeHasChildAuthority(node)&&(attrs(node).agent_role==='root'||String(attrs(node).root_agent_path||'')==='/root'||ROOT_NODE_IDS.has(String(node?.id||'')));
+const legacyRootSignal=(node,path)=>path==='/root'||attrs(node).agent_role==='root'||attrs(node).root_agent_path==='/root';
+const nodeHasRootAuthority=node=>!nodeHasChildAuthority(node)&&(legacyRootSignal(node,nodePath(node))||ROOT_NODE_IDS.has(String(node?.id||'')));
 const entryHasRootAuthority=entry=>ROOT_NODE_IDS.has(String(entry?.source_id||''))||previewHasRootAuthority(entry?.conversation_preview);
 function messageKey(message){return JSON.stringify([message?.timestamp??null,message?.ordinal??null,message?.sender??null,message?.recipient??null,message?.kind??null,message?.phase??null,message?.content_state??null,message?.content_role??null,messageText(message)])}
 function messageOrder(message,index){const stamp=String(message?.timestamp||''),ordinal=Number.isInteger(message?.ordinal)?message.ordinal:Number.MAX_SAFE_INTEGER;return{message,index,stamp,ordinal}}
@@ -63,7 +65,7 @@ function recordFor(node){
   const path=nodePath(node);if(!path)return null;
   return aggregate(entries.filter(entry=>{
     const preview=entry?.conversation_preview;
-    if(!preview||String(preview.agent_path||'')!==path)return false;
+    if(!preview||!(String(entry?.conversation_preview?.agent_path||'')===path))return false;
     if(String(preview.topology_state||'')==='derived')return false;
     if(path==='/root'&&!entryHasRootAuthority(entry))return false;
     return true;
@@ -74,6 +76,13 @@ function canonicalRootRecord(){
   const sourceIds=[...new Set(roots.map(entry=>String(entry?.source_id||'')).filter(Boolean))];
   if(sourceIds.length!==1)return null;
   return aggregate(roots.filter(entry=>String(entry?.source_id||'')===sourceIds[0]));
+}
+function recordForPath(path){
+  if(String(path)==='/root')return canonicalRootRecord();
+  return aggregate(entries.filter(entry=>{
+    const preview=entry?.conversation_preview;
+    return !!preview&&String(entry?.conversation_preview?.agent_path||'')===String(path)&&String(preview.topology_state||'')!=='derived';
+  }));
 }
 function conversationSignature(node){
   if(!node||String(node.type||'')!=='agent')return '';
@@ -102,7 +111,7 @@ function summarise(text){const line=String(text||'').split('\n').map(part=>part.
 // whose presentation path happens to be /root.
 function rootPrompts(messages,path){return messages.filter(message=>isObserved(message)&&!isInjected(message)&&(String(message?.kind||'')==='user_message'||String(message?.sender||'')==='user')&&(!message?.recipient||String(message.recipient)===path))}
 function runRounds(rootRecord=null){
-  const record=rootRecord||canonicalRootRecord(),preview=record?.conversation_preview||{};
+  const record=rootRecord||recordForPath('/root'),preview=record?.conversation_preview||{};
   const messages=Array.isArray(preview.messages)?preview.messages:[];
   const path=String(preview.agent_path||'/root');
   return rootPrompts(messages,path).map(message=>({key:messageKey(message),start:stampOf(message),label:summarise(messageText(message))}));
@@ -334,7 +343,7 @@ function render(node){
   if(String(node.type||'')!=='agent')return renderNode(node);
   selectedNode=node;selectedConversationSignature=conversationSignature(node);detailsEmpty.hidden=true;details.replaceChildren();
   const record=recordFor(node),preview=record?.conversation_preview||{},path=String(preview.agent_path||nodePath(node)||'').trim(),messages=Array.isArray(preview.messages)?preview.messages:[];
-  const isRoot=nodeHasRootAuthority(node)||previewHasRootAuthority(preview);
+  const isRoot=nodeHasRootAuthority(node)||previewUsesRootRenderer(preview);
   const rounds=isRoot?rootRounds(messages,path||'/root'):childRounds(messages,path);
   const tools=toolCallsFor(String(node.id||''));
   const appendTools=()=>{if(tools)details.appendChild(card('Tools',tools))};
