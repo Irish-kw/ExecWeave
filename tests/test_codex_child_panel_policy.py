@@ -318,3 +318,53 @@ def test_codex_child_fold_does_not_reuse_root_user_prompt() -> None:
     assert "第二輪仍只看該 child 自己的回覆" in second["Response"]
     assert rounds[0]["label"] == "Observed — plaintext not exposed by provider."
     assert "round.label?round:" in _AGENT_PANEL_JS
+
+
+def test_codex_first_spawn_task_and_new_task_are_one_round() -> None:
+    path = "/root/style_judge_3"
+    messages = [
+        {
+            "kind": "user_message",
+            "sender": "user",
+            "recipient": "/root",
+            "text": "開三個agent討論我帥不帥",
+            "timestamp": "2026-09-01T16:54:00Z",
+            "ordinal": 1,
+        },
+        {
+            "kind": "task",
+            "phase": "assignment",
+            "sender": "/root",
+            "recipient": path,
+            "text": None,
+            "content_state": "provider_encrypted",
+            "timestamp": "2026-09-01T16:54:10Z",
+            "ordinal": 2,
+        },
+        {
+            "kind": "new_task",
+            "sender": "/root",
+            "recipient": path,
+            "text": None,
+            "content_state": "provider_encrypted",
+            "timestamp": "2026-09-01T16:54:11Z",
+            "ordinal": 3,
+        },
+        {
+            "kind": "subagent_final_response",
+            "sender": path,
+            "recipient": "/root",
+            "phase": "final_answer",
+            "text": "從敢直接開三個 agent 來鑑定這點看，氣場是帥的。",
+            "timestamp": "2026-09-01T16:54:40Z",
+            "ordinal": 4,
+        },
+    ]
+    rounds = _eval_codex_rounds(messages, path)
+    assert len(rounds) == 1
+    cards = dict(rounds[0]["cards"])
+    assert cards["Task"] == "Observed — plaintext not exposed by provider."
+    assert cards["Thinking"] == ""
+    assert "氣場是帥的" in cards["Response"]
+    dumped = json.dumps(rounds, ensure_ascii=False)
+    assert "開三個agent討論我帥不帥" not in dumped
