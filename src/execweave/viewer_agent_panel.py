@@ -29,16 +29,20 @@ if(!details||!detailsEmpty)return;
 let entries=Array.isArray(window.__execweaveStaticConversations)?window.__execweaveStaticConversations:[];
 let selectedNode=null,refreshing=false,selectedConversationSignature='';
 const foldStateByAgent=new Map();
+const ROOT_NODE_IDS=new Set(['agent:Claude Code','agent:OpenAI Codex','agent:Codex','agent:Cursor','agent:OpenCode','agent:Gemini CLI','agent:Antigravity']);
 const ENCRYPTED_NOTICE='Observed — plaintext not exposed by provider.';
 const attrs=node=>node&&typeof node.attributes==='object'&&node.attributes?node.attributes:{};
 const nodePath=node=>String(attrs(node).agent_path||attrs(node).child_agent_path||attrs(node).root_agent_path||node?.name||'').trim();
-const agentKey=node=>nodePath(node)||String(node?.id||'');
+const agentKey=node=>String(node?.id||'')||nodePath(node);
 const messageText=message=>typeof message?.text==='string'?message.text.trim():'';
 const isEncrypted=message=>String(message?.content_state||'')==='provider_encrypted';
 const isObserved=message=>!!message&&(isEncrypted(message)||!!messageText(message));
 const displayText=message=>isEncrypted(message)?ENCRYPTED_NOTICE:messageText(message);
 const isInjected=message=>String(message?.content_role||'')==='shared_injected_context';
 const own=(message,path)=>!message?.sender||String(message.sender)===path;
+const previewHasRootAuthority=preview=>!!preview&&preview.is_root===true&&String(preview.topology_state||'')!=='derived'&&String(preview.topology_evidence||'')!=='no_parent_evidence_observed';
+const nodeHasRootAuthority=node=>attrs(node).agent_role==='root'||String(attrs(node).root_agent_path||'')==='/root'||ROOT_NODE_IDS.has(String(node?.id||''));
+const entryHasRootAuthority=entry=>ROOT_NODE_IDS.has(String(entry?.source_id||''))||previewHasRootAuthority(entry?.conversation_preview);
 function messageKey(message){return JSON.stringify([message?.timestamp??null,message?.ordinal??null,message?.sender??null,message?.recipient??null,message?.kind??null,message?.phase??null,message?.content_state??null,message?.content_role??null,messageText(message)])}
 function messageOrder(message,index){const stamp=String(message?.timestamp||''),ordinal=Number.isInteger(message?.ordinal)?message.ordinal:Number.MAX_SAFE_INTEGER;return{message,index,stamp,ordinal}}
 function aggregate(matches){
@@ -52,11 +56,23 @@ function aggregate(matches){
   return{...base,conversation_preview:{...preview,messages:ordered.map(item=>item.message)}};
 }
 function recordFor(node){
-  const path=nodePath(node),nodeId=String(node?.id||'');
-  return aggregate(entries.filter(entry=>String(entry?.source_id||'')===nodeId||String(entry?.conversation_preview?.agent_path||'')===path));
+  const nodeId=String(node?.id||'');
+  const exact=nodeId?entries.filter(entry=>String(entry?.source_id||'')===nodeId):[];
+  if(exact.length)return aggregate(exact);
+  const path=nodePath(node);if(!path)return null;
+  return aggregate(entries.filter(entry=>{
+    const preview=entry?.conversation_preview;
+    if(!preview||String(preview.agent_path||'')!==path)return false;
+    if(String(preview.topology_state||'')==='derived')return false;
+    if(path==='/root'&&!entryHasRootAuthority(entry))return false;
+    return true;
+  }));
 }
-function recordForPath(path){
-  return aggregate(entries.filter(entry=>String(entry?.conversation_preview?.agent_path||'')===String(path)));
+function canonicalRootRecord(){
+  const roots=entries.filter(entryHasRootAuthority);
+  const sourceIds=[...new Set(roots.map(entry=>String(entry?.source_id||'')).filter(Boolean))];
+  if(sourceIds.length!==1)return null;
+  return aggregate(roots.filter(entry=>String(entry?.source_id||'')===sourceIds[0]));
 }
 function conversationSignature(node){
   if(!node||String(node.type||'')!=='agent')return '';
@@ -81,13 +97,14 @@ function summarise(text){const line=String(text||'').split('\n').map(part=>part.
 // The root's rounds are the boundaries: a round opens on a user message and runs until
 // the next one. A subagent's round is attributed to the root round whose interval
 // contains its assignment, so the two panels fold on the same moment and can be read
-// side by side.
+// side by side. Root boundaries come from one exact root identity, never every record
+// whose presentation path happens to be /root.
 function rootPrompts(messages,path){return messages.filter(message=>isObserved(message)&&!isInjected(message)&&(String(message?.kind||'')==='user_message'||String(message?.sender||'')==='user')&&(!message?.recipient||String(message.recipient)===path))}
-function runRounds(){
-  // Every record the root owns, not the first one found: an agent is archived many
-  // times and the earliest archives carry nothing.
-  const messages=recordForPath('/root')?.conversation_preview?.messages||[];
-  return rootPrompts(messages,'/root').map(message=>({key:messageKey(message),start:stampOf(message),label:summarise(messageText(message))}));
+function runRounds(rootRecord=null){
+  const record=rootRecord||canonicalRootRecord(),preview=record?.conversation_preview||{};
+  const messages=Array.isArray(preview.messages)?preview.messages:[];
+  const path=String(preview.agent_path||'/root');
+  return rootPrompts(messages,path).map(message=>({key:messageKey(message),start:stampOf(message),label:summarise(messageText(message))}));
 }
 function roundOf(stamp,rounds){let found=null;for(const round of rounds){if(round.start&&stamp&&round.start<=stamp)found=round}return found||rounds[0]||null}
 function sameDayRun(rounds){const days=new Set(rounds.map(round=>String(round.start||'').slice(0,10)).filter(Boolean));return days.size<=1}
@@ -315,14 +332,14 @@ function render(node){
   if(!node)return false;
   if(String(node.type||'')!=='agent')return renderNode(node);
   selectedNode=node;selectedConversationSignature=conversationSignature(node);detailsEmpty.hidden=true;details.replaceChildren();
-  const path=nodePath(node),preview=recordFor(node)?.conversation_preview||{},messages=Array.isArray(preview.messages)?preview.messages:[];
-  const isRoot=path==='/root'||attrs(node).agent_role==='root'||attrs(node).root_agent_path==='/root';
+  const record=recordFor(node),preview=record?.conversation_preview||{},path=String(preview.agent_path||nodePath(node)||'').trim(),messages=Array.isArray(preview.messages)?preview.messages:[];
+  const isRoot=nodeHasRootAuthority(node)||previewHasRootAuthority(preview);
   const rounds=isRoot?rootRounds(messages,path||'/root'):childRounds(messages,path);
   const tools=toolCallsFor(String(node.id||''));
   const appendTools=()=>{if(tools)details.appendChild(card('Tools',tools))};
   if(rounds.length<2){details.appendChild(roundView(rounds[0]||{cards:isRoot?[['Prompt',''],['Final response','']]:[['Task',''],['Thinking',''],['Response','']]}));appendTools();return true}
-  // A subagent borrows the moment and the wording of the root round it belongs to, so
-  // the folds on both panels name the same thing.
+  // A subagent borrows the moment and the wording of the unique canonical root round
+  // it belongs to. If root identity is ambiguous, the child keeps its own timestamp.
   const runs=isRoot?rounds:runRounds();
   const sameDay=sameDayRun(runs.length?runs:rounds);
   const naming=round=>isRoot?round:(roundOf(round.start,runs)||{start:round.start,label:''});
