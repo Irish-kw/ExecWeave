@@ -368,7 +368,7 @@ function nodeCards(node){
     }else{
       add('Address',node?.name);
     }
-    add('Reached by',reachedBy(String(node?.id||'')));}
+    add('Reached by',reachedBy(String(node?.id||'')));
   }else{
     add('Name',node?.name);
     add('Provider',a.provider);
