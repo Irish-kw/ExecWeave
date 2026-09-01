@@ -26,6 +26,27 @@ jobs:
           python-version: "3.12"
       - name: Apply candidate patch
         run: python scripts/_apply_root_layout_toolcall_patch.py
+      - name: Preserve existing Dashboard source contracts
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          clean = Path("src/execweave/viewer_dashboard_clean.py")
+          text = clean.read_text(encoding="utf-8")
+          old = "['observed_content','tool_call','tool_call_observation','agent_turn'"
+          new = "['observed_content','tool_call','agent_turn','tool_call_observation'"
+          if text.count(old) != 1:
+              raise SystemExit(f"hidden type compatibility seam: {text.count(old)} matches")
+          clean.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          focus = Path("src/execweave/viewer_dashboard_focus.py")
+          text = focus.read_text(encoding="utf-8")
+          old = "if(['process','tool'].includes(String(node.type||''))&&occurrenceCount>1&&!/\\s×\\d+$/.test(String(name||'')))name=`${name||node.id} ×${occurrenceCount}`;"
+          new = "if(node.type==='process'&&occurrenceCount>1&&!/\\s×\\d+$/.test(String(name||'')))name=`${name||node.id} ×${occurrenceCount}`;\n      if(node.type==='tool'&&occurrenceCount>1&&!/\\s×\\d+$/.test(String(name||'')))name=`${name||node.id} ×${occurrenceCount}`;"
+          if text.count(old) != 1:
+              raise SystemExit(f"occurrence label compatibility seam: {text.count(old)} matches")
+          focus.write_text(text.replace(old, new, 1), encoding="utf-8")
+          PY
       - name: Install test dependencies
         run: |
           python -m pip install --upgrade pip
