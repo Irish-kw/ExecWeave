@@ -66,6 +66,17 @@ jobs:
 
           records_path = Path('src/execweave/conversation_records.py')
           records = records_path.read_text(encoding='utf-8')
+
+          start = records.index('def _ollama_current_turn(preview: dict[str, Any]) -> None:\n')
+          end = records.index('def _ollama_root_agent_id(', start)
+          current_turn = '''def _ollama_current_turn(preview: dict[str, Any]) -> None:\n    """Reduce a cumulative Ollama chat request to the exact turn this exchange created."""\n    messages = [message for message in preview.get("messages") or [] if isinstance(message, dict)]\n    users = [\n        message\n        for message in messages\n        if message.get("sender") == "user"\n        and message.get("content_role") == "ollama_request_surface"\n    ]\n    response_assistants = [\n        message\n        for message in messages\n        if message.get("content_role") == "ollama_response_surface"\n        and str(message.get("kind") or "").startswith("assistant")\n    ]\n    if not users:\n        return\n    current = [users[-1]]\n    if response_assistants:\n        current.append(response_assistants[-1])\n    preview["message_count"] = len(current)\n    preview["messages_truncated"] = False\n    preview["messages"] = current\n\n\n'''
+          records = records[:start] + current_turn + records[end:]
+
+          marker = '''    snapshots: list[tuple[dict[str, Any], dict[str, Any]]] = []\n'''
+          tagger = '''    # Preserve which side of an Ollama exchange produced each visible message.\n    # Cumulative request.messages can contain historical assistant text, so publication\n    # must select the assistant observed on the response surface rather than guessing\n    # from list position.\n    for entry in entries:\n        if str(entry.get("provider") or "").lower() != "ollama":\n            continue\n        preview = entry.get("conversation_preview")\n        if not isinstance(preview, dict):\n            continue\n        kind = str(entry.get("content_kind") or "").lower()\n        relation = str(entry.get("relation") or "").upper()\n        if "assistant_messages" in kind or relation == "OBSERVED_ASSISTANT_MESSAGES":\n            role = "ollama_response_surface"\n        elif "request_messages" in kind or "request_prompt" in kind or "request_input" in kind:\n            role = "ollama_request_surface"\n        else:\n            continue\n        for message in preview.get("messages") or []:\n            if isinstance(message, dict):\n                message["content_role"] = role\n\n'''
+          assert records.count(marker) == 1
+          records = records.replace(marker, tagger + marker, 1)
+
           old = '''        _ollama_current_turn(preview)\n        original_source_id = entry.get("source_id")\n'''
           new = '''        _ollama_current_turn(preview)\n        preview["provider_native_id"] = root_id\n        original_source_id = entry.get("source_id")\n'''
           assert records.count(old) == 1
