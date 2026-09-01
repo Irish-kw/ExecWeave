@@ -11,7 +11,10 @@ from .conversation_records_antigravity import (
     _project_antigravity_addressed_tasks,
     apply_stable_ordinals,
 )
-from .conversation_records_codex import _same_merged_execution
+from .conversation_records_codex import (
+    _same_merged_execution,
+    drop_root_user_prompts_from_codex_children,
+)
 from .conversation_records_common import history_message_key as _history_message_key
 from .conversation_records_ollama import _ollama_current_turn, _ollama_root_agent_id
 
@@ -289,6 +292,7 @@ def _merge_conversation_previews(entries: list[dict[str, Any]]) -> None:
         merged_preview["messages_truncated"] = truncated or input_truncated
         merged_preview["messages"] = messages
 
+    drop_root_user_prompts_from_codex_children(entries)
 
 
 _core_conversation_record_entries = _core.conversation_record_entries

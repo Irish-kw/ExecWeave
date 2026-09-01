@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 
 from execweave.codex_conversation import codex_rollout_previews
+from execweave.conversation_records_codex import drop_root_user_prompts_from_codex_children
 from execweave.viewer_agent_panel import _AGENT_PANEL_JS
 from execweave.viewer_agent_panel_codex import CODEX_CHILD_ROUNDS_JS
 from execweave.viewer_agent_panel_default import DEFAULT_CHILD_ROUNDS_JS
@@ -35,11 +36,14 @@ def test_codex_task_rule_is_not_in_default_or_other_providers() -> None:
 
 def _eval_codex_rounds(messages: list[dict[str, object]], path: str) -> list[dict[str, object]]:
     harness = r"""
-const isObserved=message=>!!message&&!!String(message?.text||'').trim();
+const ENCRYPTED_NOTICE='Observed — plaintext not exposed by provider.';
+const isEncrypted=message=>String(message?.content_state||'')==='provider_encrypted';
+const messageText=message=>typeof message?.text==='string'?message.text.trim():'';
+const isObserved=message=>!!message&&(isEncrypted(message)||!!messageText(message));
 const isInjected=message=>String(message?.content_role||'')==='shared_injected_context';
 const own=(message,path)=>!message?.sender||String(message.sender)===path;
-const messageText=message=>typeof message?.text==='string'?message.text.trim():'';
-const displayText=message=>messageText(message);
+const displayText=message=>isEncrypted(message)?ENCRYPTED_NOTICE:messageText(message);
+const summarise=text=>{const line=String(text||'').split('\n').map(part=>part.trim()).find(Boolean)||'';return line.length>52?line.slice(0,52)+'…':line};
 const uniqueTexts=messages=>{const seen=new Set(),out=[];for(const message of messages){const text=displayText(message);if(!text||seen.has(text))continue;seen.add(text);out.push(text)}return out};
 function messageKey(message){return JSON.stringify([message?.timestamp??null,message?.ordinal??null,message?.sender??null,message?.recipient??null,message?.kind??null])}
 function stampOf(message){return String(message?.timestamp||'')}
@@ -236,3 +240,81 @@ def test_fixture_child_task_is_addressed_only_to_that_child() -> None:
     )
     hydrology = _eval_codex_rounds(list(other.get("messages") or []), "/root/hydrology")
     assert "rain_forecast" not in json.dumps(hydrology)
+
+
+def test_codex_child_fold_does_not_reuse_root_user_prompt() -> None:
+    path = "/root/charisma_judge"
+    root_prompt = "開三個agent討論 1.我帥嗎"
+    messages = [
+        {
+            "kind": "user_message",
+            "sender": "user",
+            "recipient": "/root",
+            "text": root_prompt,
+            "timestamp": "2026-09-01T00:29:00Z",
+            "ordinal": 1,
+        },
+        {
+            "kind": "task",
+            "phase": "assignment",
+            "sender": "/root",
+            "recipient": path,
+            "text": None,
+            "content_state": "provider_encrypted",
+            "timestamp": "2026-09-01T00:29:05Z",
+            "ordinal": 2,
+        },
+        {
+            "kind": "subagent_final_response",
+            "sender": path,
+            "recipient": "/root",
+            "phase": "final_answer",
+            "text": "帥不帥得看臉，不能只看自我感覺。",
+            "timestamp": "2026-09-01T00:30:00Z",
+            "ordinal": 3,
+        },
+        {
+            "kind": "new_task",
+            "phase": "assignment",
+            "sender": "/root",
+            "recipient": path,
+            "text": None,
+            "content_state": "provider_encrypted",
+            "timestamp": "2026-09-01T00:31:00Z",
+            "ordinal": 4,
+        },
+        {
+            "kind": "subagent_final_response",
+            "sender": path,
+            "recipient": "/root",
+            "phase": "final_answer",
+            "text": "第二輪仍只看該 child 自己的回覆。",
+            "timestamp": "2026-09-01T00:32:00Z",
+            "ordinal": 5,
+        },
+    ]
+    preview = {"is_root": False, "agent_path": path, "messages": list(messages)}
+    drop_root_user_prompts_from_codex_children(
+        [{"provider": "codex", "conversation_preview": preview}]
+    )
+    assert all(
+        not (
+            str(message.get("sender") or "") == "user"
+            and str(message.get("recipient") or "") == "/root"
+        )
+        for message in preview["messages"]
+    )
+    rounds = _eval_codex_rounds(messages, path)
+    dumped = json.dumps(rounds, ensure_ascii=False)
+    assert root_prompt not in dumped
+    assert "開三個agent討論" not in dumped
+    assert len(rounds) == 2
+    first = dict(rounds[0]["cards"])
+    second = dict(rounds[1]["cards"])
+    assert first["Task"] == "Observed — plaintext not exposed by provider."
+    assert first["Thinking"] == ""
+    assert "帥不帥得看臉" in first["Response"]
+    assert second["Task"] == "Observed — plaintext not exposed by provider."
+    assert "第二輪仍只看該 child 自己的回覆" in second["Response"]
+    assert rounds[0]["label"] == "Observed — plaintext not exposed by provider."
+    assert "round.label?round:" in _AGENT_PANEL_JS
