@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any
 
 from . import antigravity_full_fidelity_collaboration_base as _base
+from . import antigravity_adapter_base as _semantic
 from .agent_topology import EVIDENCE_VALIDATED_CHILD_TRANSCRIPT, subagent_topology
 from .antigravity_subagent_linkage import (
     read_transcript_records,
@@ -159,6 +162,157 @@ def _child_task_content_event(
     )
 
 
+def _child_transcript_tool_events(
+    *,
+    link: dict[str, Any],
+    assignment: dict[str, Any],
+    parent_payload: dict[str, Any],
+    timestamp: str,
+) -> list[dict[str, Any]]:
+    """Project explicit tool calls recorded in a validated child transcript.
+
+    AGY does not emit a separate PostToolUse hook for every child conversation.
+    The child transcript is nevertheless a provider-owned, request/result-linked
+    record, so its explicit MODEL tool calls can be represented without guessing
+    ownership from timing or filesystem activity.
+    """
+    child_id = link.get("conversation_id")
+    transcript = link.get("transcript_path")
+    child = assignment.get("target")
+    if (
+        not isinstance(child_id, str)
+        or not child_id
+        or not isinstance(transcript, Path)
+        or not isinstance(child, dict)
+        or child.get("type") != "agent"
+    ):
+        return []
+    # ``Path`` is deliberately checked without accepting path-like strings here:
+    # only the linkage validator may authorize which child transcript is read.
+    records = read_transcript_records(transcript)
+    events: list[dict[str, Any]] = []
+    evidence = {
+        "backend": "semantic",
+        "attribution": "antigravity_child_transcript",
+        "evidence_source": "provider_validated_child_transcript",
+        "provider": "antigravity",
+        "causal": False,
+        "inferred": False,
+        "identity_exact": True,
+        "identity_method": "validated_parent_result_child_transcript_path",
+        "transcript_path": str(transcript),
+        "transcript_record_order_validated": True,
+        "child_tool_call_observed": True,
+    }
+    for ordinal, record in enumerate(records):
+        if (
+            record.get("source") != "MODEL"
+            or record.get("type") != "PLANNER_RESPONSE"
+            or record.get("status") != "DONE"
+        ):
+            continue
+        calls = record.get("tool_calls")
+        if not isinstance(calls, list):
+            continue
+        raw_step = record.get("step_index")
+        step = raw_step if isinstance(raw_step, int) and not isinstance(raw_step, bool) and raw_step >= 0 else ordinal
+        for call_index, raw_call in enumerate(calls):
+            if not isinstance(raw_call, dict):
+                continue
+            name = raw_call.get("name")
+            raw_args = raw_call.get("args")
+            if not isinstance(name, str) or not name or not isinstance(raw_args, dict):
+                continue
+            args: dict[str, Any] = {}
+            for key, value in raw_args.items():
+                if isinstance(value, str):
+                    try:
+                        decoded = json.loads(value)
+                    except json.JSONDecodeError:
+                        decoded = value
+                    args[key] = decoded if decoded is not None else value
+                else:
+                    args[key] = value
+            child_payload = dict(parent_payload)
+            child_payload.update(
+                {
+                    "conversationId": child_id,
+                    "transcriptPath": str(transcript),
+                    "stepIdx": step,
+                    "toolCall": {"name": name, "args": args},
+                }
+            )
+            call_entity, tool_entity, canonical_args = _semantic._tool_call(child_payload)
+            call_attributes = dict(call_entity.get("attributes") or {})
+            call_attributes.update(
+                {
+                    "attribution": "antigravity_child_transcript",
+                    "evidence_source": "provider_validated_child_transcript",
+                    "transcript_record_ordinal": ordinal,
+                    "transcript_tool_call_index": call_index,
+                    "transcript_path": str(transcript),
+                }
+            )
+            call_entity["attributes"] = call_attributes
+            events.append(
+                _semantic._event(
+                    timestamp=timestamp,
+                    event_type="semantic.antigravity.child.tool.observed",
+                    relation="REQUESTED_TOOL_CALL",
+                    source=child,
+                    target=call_entity,
+                    payload=child_payload,
+                    attributes=evidence,
+                )
+            )
+            events.append(
+                _semantic._event(
+                    timestamp=timestamp,
+                    event_type="semantic.antigravity.child.tool.selected",
+                    relation="USES_TOOL",
+                    source=call_entity,
+                    target=tool_entity,
+                    payload=child_payload,
+                    attributes=evidence,
+                )
+            )
+            command = _semantic._command_entity(canonical_args)
+            if command is not None:
+                events.append(
+                    _semantic._event(
+                        timestamp=timestamp,
+                        event_type="semantic.antigravity.child.command.declared",
+                        relation="DECLARED_COMMAND",
+                        source=call_entity,
+                        target=command,
+                        payload=child_payload,
+                        attributes=evidence,
+                    )
+                )
+            file_entity = _semantic._file_entity(child_payload, canonical_args)
+            if file_entity is not None:
+                file_attributes = dict(file_entity.get("attributes") or {})
+                file_attributes.update(
+                    {
+                        "declared_by_provider_transcript": True,
+                        "transcript_path": str(transcript),
+                    }
+                )
+                file_entity["attributes"] = file_attributes
+                events.append(
+                    _semantic._event(
+                        timestamp=timestamp,
+                        event_type="semantic.antigravity.child.file.declared",
+                        relation="DECLARED_TARGET",
+                        source=call_entity,
+                        target=file_entity,
+                        payload=child_payload,
+                        attributes=evidence,
+                    )
+                )
+    return events
+
+
 def _subagent_assignment_events(
     payload: dict[str, Any],
     *,
@@ -204,6 +358,14 @@ def _subagent_assignment_events(
         )
         events.append(assignment)
         events.append(_child_session_event(assignment=assignment, parent_id=conversation_id))
+        events.extend(
+            _child_transcript_tool_events(
+                link=link,
+                assignment=assignment,
+                parent_payload=payload,
+                timestamp=timestamp,
+            )
+        )
         task_content = _child_task_content_event(
             assignment=assignment,
             spec=spec,
@@ -254,6 +416,14 @@ def _transcript_assignment_events(
         )
         events.append(assignment)
         events.append(_child_session_event(assignment=assignment, parent_id=conversation_id))
+        events.extend(
+            _child_transcript_tool_events(
+                link=link,
+                assignment=assignment,
+                parent_payload=payload,
+                timestamp=timestamp,
+            )
+        )
         task_content = _child_task_content_event(
             assignment=assignment,
             spec=spec,

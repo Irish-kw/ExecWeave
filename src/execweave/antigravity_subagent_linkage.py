@@ -319,6 +319,12 @@ def transcript_subagent_links(
         if child_id == parent_id or child_id in seen:
             return []
         seen.add(child_id)
+        child_transcript = None
+        log_uri = result.get("logAbsoluteUri")
+        if isinstance(log_uri, str):
+            candidate = _canonical_file_uri_path(log_uri)
+            if candidate is not None and _transcript_root(candidate, child_id) is not None:
+                child_transcript = candidate
         links.append(
             {
                 "subagent_index": subagent_index,
@@ -326,6 +332,7 @@ def transcript_subagent_links(
                 "step_index": step_index,
                 "spec": spec,
                 "agent_path": derived_child_agent_path(spec, child_id),
+                "transcript_path": child_transcript,
             }
         )
     return links
@@ -410,6 +417,7 @@ def validated_subagent_links(
             {
                 "subagent_index": subagent_index,
                 "conversation_id": child_id,
+                "transcript_path": child_transcript,
             }
         )
     return links
