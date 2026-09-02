@@ -60,13 +60,13 @@ function windows(messages,openers){
 """
     script = (
         harness
-        + "\\n"
+        + "\n"
         + CODEX_CHILD_ROUNDS_JS
-        + "\\nconst messages="
+        + "\nconst messages="
         + json.dumps(messages)
-        + ";\\nconst rounds=execweaveCodexChildRounds(messages,"
+        + ";\nconst rounds=execweaveCodexChildRounds(messages,"
         + json.dumps(path)
-        + ");\\nprocess.stdout.write(JSON.stringify(rounds));\\n"
+        + ");\nprocess.stdout.write(JSON.stringify(rounds));\n"
     )
     completed = subprocess.run(
         ["node", "-e", script],
