@@ -7,7 +7,7 @@ duplicated child assignments and pasted child replies onto /root.
 
 from __future__ import annotations
 
-from execweave.conversation_records_antigravity import sanitize_antigravity_preview_messages
+from execweave.agy_preview_sanitize import sanitize_antigravity_preview_messages
 from execweave.live import _LIVE_HTML
 from execweave.viewer_dashboard_clean import _LIVE_SET_SNAPSHOT_CLEAN
 
@@ -23,7 +23,7 @@ def test_live_set_snapshot_enters_protective_mode_on_compact_payload() -> None:
 
 
 def test_agy_drops_duplicate_child_assignment_user_message() -> None:
-    assignment = "請扮演「理性客觀、以數據與邏輯為依據的極客 AI 評判官（Agent Alpha）。"
+    assignment = "請扮演「理性客觀、以數據與邏輯為依據的極客 AI 評判官（Agent Alpha。"
     reply = "經多維神經網路特徵提取與張量分析，使用者帥度指標高達 99.87%。"
     entries = [
         {
