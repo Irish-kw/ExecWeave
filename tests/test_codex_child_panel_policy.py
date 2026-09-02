@@ -43,7 +43,7 @@ const isObserved=message=>!!message&&(isEncrypted(message)||!!messageText(messag
 const isInjected=message=>String(message?.content_role||'')==='shared_injected_context';
 const own=(message,path)=>!message?.sender||String(message.sender)===path;
 const displayText=message=>isEncrypted(message)?ENCRYPTED_NOTICE:messageText(message);
-const summarise=text=>{const line=String(text||'').split('\n').map(part=>part.trim()).find(Boolean)||'';return line.length>52?line.slice(0,52)+'…':line};
+const summarise=text=>{const line=String(text||'').split('\\n').map(part=>part.trim()).find(Boolean)||'';return line.length>52?line.slice(0,52)+'…':line};
 const uniqueTexts=messages=>{const seen=new Set(),out=[];for(const message of messages){const text=displayText(message);if(!text||seen.has(text))continue;seen.add(text);out.push(text)}return out};
 function messageKey(message){return JSON.stringify([message?.timestamp??null,message?.ordinal??null,message?.sender??null,message?.recipient??null,message?.kind??null])}
 function stampOf(message){return String(message?.timestamp||'')}
@@ -60,19 +60,20 @@ function windows(messages,openers){
 """
     script = (
         harness
-        + "\n"
+        + "\\n"
         + CODEX_CHILD_ROUNDS_JS
-        + "\nconst messages="
+        + "\\nconst messages="
         + json.dumps(messages)
-        + ";\nconst rounds=execweaveCodexChildRounds(messages,"
+        + ";\\nconst rounds=execweaveCodexChildRounds(messages,"
         + json.dumps(path)
-        + ");\nprocess.stdout.write(JSON.stringify(rounds));\n"
+        + ");\\nprocess.stdout.write(JSON.stringify(rounds));\\n"
     )
     completed = subprocess.run(
         ["node", "-e", script],
         check=True,
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     payload = json.loads(completed.stdout)
     assert isinstance(payload, list)
