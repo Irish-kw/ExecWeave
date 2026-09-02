@@ -5,7 +5,6 @@ from typing import Any
 from . import antigravity_full_fidelity_collaboration_base as _base
 from .agent_topology import EVIDENCE_VALIDATED_CHILD_TRANSCRIPT, subagent_topology
 from .antigravity_subagent_linkage import (
-    derived_child_agent_path,
     read_transcript_records,
     transcript_subagent_links,
     validated_subagent_links,
@@ -59,7 +58,6 @@ def _assignment_event(
         },
     )
     child_label = role or type_name or "Antigravity subagent"
-    child_path = derived_child_agent_path(spec, child_id)
     child = _entity(
         "agent",
         f"agent:antigravity:conversation:{child_id}",
@@ -75,7 +73,6 @@ def _assignment_event(
             **subagent_topology(
                 evidence=EVIDENCE_VALIDATED_CHILD_TRANSCRIPT,
                 parent_scope_id=conversation_id,
-                agent_path=child_path,
             ),
         },
     )
