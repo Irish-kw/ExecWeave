@@ -2,6 +2,8 @@ from __future__ import annotations
 
 # Antigravity-only child rounds. Tasks come from invoke/send_message projection
 # (kind=task / subagent_task / assignment), not Codex user_message.
+# Child-addressed kind==='user_message' is not an opener; duplicate assignment
+# copies from the parent transcript stay kind=task.
 
 ANTIGRAVITY_CHILD_ROUNDS_JS = r"""
 function execweaveAntigravityChildRounds(messages,path){
