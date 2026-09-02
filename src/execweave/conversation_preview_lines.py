@@ -4,14 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .agent_topology import COMPLETENESS_PROVIDER_TRANSCRIPT
 from .conversation_preview_transcript import (
-    _MAX_PREVIEW_MESSAGES,
-    _ASSISTANT_FINAL_KINDS,
-    _ASSISTANT_RESPONSE_KINDS,
-    _SUBAGENT_SUMMARY_KINDS,
-    _SUBAGENT_TASK_KINDS,
-    _USER_KINDS,
     _antigravity_inbound_message_text,
     _antigravity_send_message_text,
     _antigravity_user_text,
