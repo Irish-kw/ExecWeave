@@ -146,6 +146,9 @@ def test_static_dashboard_cleans_only_canvas_and_keeps_embedded_evidence() -> No
     assert "'observed_content','tool_call','agent_turn'" in html
     assert "relation:'CALLED_TOOL'" in html
     assert "viewer_aggregated_tool_call_count" in html
+    assert "toolCallToTool=new Map" in html
+    assert "viewer_reanchored_from_tool_call" in html
+    assert "edge.relation==='DECLARED_TARGET'" in html
     assert "execweaveDashboardGraphBase" in html
     assert "'agent_trace_capability','session','command'" in html
     assert "mergeTypes=new Set(['model','directory','network_endpoint'])" in html

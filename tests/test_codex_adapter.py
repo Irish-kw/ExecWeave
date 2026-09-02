@@ -72,6 +72,72 @@ def test_non_bash_tool_does_not_fabricate_declared_command() -> None:
     assert "DECLARED_COMMAND" not in {event["relation"] for event in events}
 
 
+def test_apply_patch_declares_each_file_target_for_its_subagent() -> None:
+    payload = {
+        **_base("PreToolUse"),
+        "agent_id": "subagent-1",
+        "agent_type": "default",
+        "turn_id": "turn-patch",
+        "tool_name": "apply_patch",
+        "tool_use_id": "call-patch",
+        "tool_input": {
+            "command": (
+                "*** Begin Patch\n"
+                "*** Add File: Gibbs.md\n"
+                "+draft\n"
+                "*** Update File: src/execweave/graph.py\n"
+                "@@\n"
+                "*** Delete File: obsolete.md\n"
+                "*** End Patch"
+            )
+        },
+    }
+
+    events = codex_hook_to_semantic_events(
+        payload,
+        timestamp="2026-08-25T05:00:01Z",
+    )
+    declared = [event for event in events if event["relation"] == "DECLARED_TARGET"]
+
+    assert [event["target"]["name"] for event in declared] == [
+        "Gibbs.md",
+        "graph.py",
+        "obsolete.md",
+    ]
+    assert all(
+        event["source"]["id"] == "tool-call:codex:session-1:call-patch"
+        for event in declared
+    )
+    requested = next(event for event in events if event["relation"] == "REQUESTED_TOOL_CALL")
+    assert requested["source"]["id"] == "agent:codex:session-1:subagent:subagent-1"
+    assert [event["target"]["attributes"]["patch_operation"] for event in declared] == [
+        "add",
+        "update",
+        "delete",
+    ]
+
+
+def test_apply_patch_ignores_patch_body_lines_that_are_not_file_headers() -> None:
+    payload = {
+        **_base("PreToolUse"),
+        "tool_name": "apply_patch",
+        "tool_use_id": "call-patch",
+        "tool_input": {
+            "command": (
+                "*** Begin Patch\n"
+                "*** Add File: notes.md\n"
+                "+*** Update File: should-not-be-a-target.md\n"
+                "*** End Patch"
+            )
+        },
+    }
+
+    events = codex_hook_to_semantic_events(payload)
+
+    declared = [event for event in events if event["relation"] == "DECLARED_TARGET"]
+    assert [event["target"]["name"] for event in declared] == ["notes.md"]
+
+
 def test_post_tool_use_is_neutral_about_success_or_failure() -> None:
     payload = {
         **_base("PostToolUse"),

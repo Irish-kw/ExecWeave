@@ -163,6 +163,70 @@ def _command_entity(tool_input: dict[str, Any]) -> dict[str, Any] | None:
     )
 
 
+def _declared_file_entity(
+    payload: dict[str, Any],
+    raw_path: str,
+    *,
+    operation: str,
+) -> dict[str, Any] | None:
+    path = raw_path.strip()
+    if not path:
+        return None
+    candidate = Path(path).expanduser()
+    if not candidate.is_absolute():
+        cwd = payload.get("cwd")
+        if isinstance(cwd, str) and cwd:
+            candidate = Path(cwd) / candidate
+    try:
+        normalized = candidate.resolve(strict=False)
+    except OSError:
+        normalized = candidate.absolute()
+    return _entity(
+        "file",
+        f"file:{normalized}",
+        name=normalized.name or str(normalized),
+        attributes={
+            "declared_by_provider_hook": True,
+            "provider": "codex",
+            "patch_operation": operation,
+        },
+    )
+
+
+def _apply_patch_targets(command: object) -> list[tuple[str, str]]:
+    """Extract file targets from the provider's apply_patch envelope.
+
+    The patch body is deliberately not copied into semantic events. Only the
+    provider-declared path and operation are needed to connect a tool call to
+    the file node observed by the filesystem watcher.
+    """
+    if not isinstance(command, str) or not command:
+        return []
+    targets: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for line in command.splitlines():
+        stripped = line.strip()
+        operation: str | None = None
+        raw_path: str | None = None
+        for marker, marker_operation in (
+            ("*** Add File:", "add"),
+            ("*** Update File:", "update"),
+            ("*** Delete File:", "delete"),
+            ("*** Move to:", "move"),
+        ):
+            if stripped.startswith(marker):
+                operation = marker_operation
+                raw_path = stripped[len(marker) :].strip()
+                break
+        if operation is None or not raw_path:
+            continue
+        key = (operation, raw_path)
+        if key not in seen:
+            seen.add(key)
+            targets.append(key)
+    return targets
+
+
 def _session_start_events(payload: dict[str, Any], *, timestamp: str) -> list[dict[str, Any]]:
     model = payload.get("model")
     if not isinstance(model, str) or not model:
@@ -272,6 +336,24 @@ def _tool_pre_events(payload: dict[str, Any], *, timestamp: str) -> list[dict[st
                     attributes=common,
                 )
             )
+    if tool_name == "apply_patch" and isinstance(tool_input, dict):
+        for operation, raw_path in _apply_patch_targets(tool_input.get("command")):
+            target_file = _declared_file_entity(
+                payload,
+                raw_path,
+                operation=operation,
+            )
+            if target_file is not None:
+                events.append(
+                    _event(
+                        timestamp=timestamp,
+                        event_type="semantic.codex.file.declared",
+                        relation="DECLARED_TARGET",
+                        source=call,
+                        target=target_file,
+                        attributes={**common, "patch_operation": operation},
+                    )
+                )
     return events
 
 
