@@ -6,12 +6,12 @@ from typing import Any
 from . import _conversation_records_core as _core
 from ._conversation_records_core import *  # noqa: F403
 from .agent_topology import THREAD_ID_EXECWEAVE_DERIVED, THREAD_ID_PROVIDER_NATIVE
+from .agy_preview_sanitize import sanitize_antigravity_preview_messages
 from .conversation_message_identity import dedupe_codex_message_observations
 from .conversation_records_antigravity import (
     _project_antigravity_addressed_tasks,
     apply_antigravity_role_path_fallback,
     apply_stable_ordinals,
-    sanitize_antigravity_preview_messages,
 )
 from .conversation_records_codex import (
     _same_merged_execution,
