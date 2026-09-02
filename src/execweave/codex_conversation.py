@@ -105,3 +105,26 @@ def _resolved_agent_path(identity: dict[str, Any]) -> tuple[str | None, str]:
     if leaf is None:
         return None, PATH_EXECWEAVE_DERIVED
     return f"/root/{leaf}", PATH_EXECWEAVE_DERIVED
+
+
+def codex_rollout_identity(path: str | Path) -> dict[str, Any] | None:
+    """Read only leading Codex session metadata needed for exact thread identity."""
+    source = Path(path).expanduser().resolve(strict=False)
+    try:
+        with source.open("r", encoding="utf-8") as handle:
+            for index, line in enumerate(handle):
+                if index >= _MAX_IDENTITY_SCAN_LINES:
+                    break
+                if not line.strip():
+                    continue
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    return None
+                if record.get("type") != "session_meta":
+                    continue
+                payload = record.get("payload")
+                return _session_meta_identity(payload) if isinstance(payload, dict) else None
+    except (OSError, RuntimeError, UnicodeError):
+        return None
+    return None
