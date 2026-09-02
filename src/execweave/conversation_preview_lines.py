@@ -91,7 +91,7 @@ def _line_transcript_messages(
                 continue
             if role == "system" and record_type == "system_message":
                 inbound = _antigravity_inbound_message_text(text)
-                if inbound:
+                if inbound and agent_path != "/root":
                     messages.append(_message(timestamp=record_timestamp, ordinal=record_ordinal, kind="subagent_task", sender="user", recipient=agent_path, text=inbound, phase="assignment"))
                 continue
             continue
