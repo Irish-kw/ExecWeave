@@ -4,7 +4,13 @@ from typing import Any
 
 from . import antigravity_full_fidelity_collaboration_base as _base
 from .agent_topology import EVIDENCE_VALIDATED_CHILD_TRANSCRIPT, subagent_topology
-from .antigravity_subagent_linkage import validated_subagent_links
+from .antigravity_subagent_linkage import (
+    derived_child_agent_path,
+    read_transcript_records,
+    transcript_subagent_links,
+    validated_subagent_links,
+    validated_transcript_path,
+)
 from .content_evidence import content_observation_event
 from .content_store import FullFidelityContentStore
 from .conversation_archive import antigravity_conversation_archive_events
@@ -53,6 +59,7 @@ def _assignment_event(
         },
     )
     child_label = role or type_name or "Antigravity subagent"
+    child_path = derived_child_agent_path(spec, child_id)
     child = _entity(
         "agent",
         f"agent:antigravity:conversation:{child_id}",
@@ -68,6 +75,7 @@ def _assignment_event(
             **subagent_topology(
                 evidence=EVIDENCE_VALIDATED_CHILD_TRANSCRIPT,
                 parent_scope_id=conversation_id,
+                agent_path=child_path,
             ),
         },
     )
@@ -184,6 +192,55 @@ def _subagent_assignment_events(
     return events
 
 
+def _transcript_assignment_events(
+    payload: dict[str, Any],
+    *,
+    timestamp: str,
+    store: FullFidelityContentStore,
+) -> list[dict[str, Any]]:
+    """Assign children from a parent transcript even when PostToolUse was not invoke_subagent.
+
+    Field Agy runs have been observed to archive four conversation transcripts while
+    the only PostToolUse name on the wire is ``schedule``. The spawn request/result
+    still sits in the parent transcript. Scanning that validated file is the same
+    provider join as the hook-time path; it does not invent children.
+    """
+    conversation_id = payload.get("conversationId")
+    if not isinstance(conversation_id, str) or not conversation_id:
+        return []
+    transcript = validated_transcript_path(payload)
+    if transcript is None:
+        return []
+    links = transcript_subagent_links(
+        read_transcript_records(transcript),
+        parent_id=conversation_id,
+    )
+    events: list[dict[str, Any]] = []
+    for link in links:
+        spec = link["spec"]
+        child_id = link["conversation_id"]
+        if not isinstance(spec, dict) or not isinstance(child_id, str):
+            return []
+        assignment = _assignment_event(
+            timestamp=timestamp,
+            conversation_id=conversation_id,
+            step=link["step_index"],
+            subagent_index=link["subagent_index"],
+            child_id=child_id,
+            spec=spec,
+        )
+        events.append(assignment)
+        task_content = _child_task_content_event(
+            assignment=assignment,
+            spec=spec,
+            store=store,
+            timestamp=timestamp,
+        )
+        if task_content is not None:
+            events.append(task_content)
+    return events
+
+
 def antigravity_hook_to_content_events(
     payload: dict[str, Any],
     *,
@@ -202,13 +259,25 @@ def antigravity_hook_to_content_events(
 
         timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     if hook_event == "PostToolUse":
-        events.extend(
-            _subagent_assignment_events(
-                payload,
-                timestamp=timestamp,
-                store=store,
-            )
+        assigned = _subagent_assignment_events(
+            payload,
+            timestamp=timestamp,
+            store=store,
         )
+        events.extend(assigned)
+        tool_call = payload.get("toolCall")
+        tool_name = tool_call.get("name") if isinstance(tool_call, dict) else None
+        if not assigned and tool_name != "invoke_subagent":
+            # ``schedule`` still leaves the spawn pair in the parent transcript.
+            # Do not use this relaxed join to override an invoke_subagent hook
+            # that already abstained (mismatched URI, torn write, workspace).
+            events.extend(
+                _transcript_assignment_events(
+                    payload,
+                    timestamp=timestamp,
+                    store=store,
+                )
+            )
     # Codex snapshots provider transcripts on lifecycle events that already
     # name the rollout path, not only on a terminal Stop. Antigravity exposes
     # the same validated brain path on PreInvocation / PostInvocation; waiting
@@ -220,6 +289,13 @@ def antigravity_hook_to_content_events(
                 payload,
                 store=store,
                 timestamp=timestamp,
+            )
+        )
+        events.extend(
+            _transcript_assignment_events(
+                payload,
+                timestamp=timestamp,
+                store=store,
             )
         )
     return events
