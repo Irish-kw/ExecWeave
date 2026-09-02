@@ -1,11 +1,7 @@
 from __future__ import annotations
 
-import json
 import re
-from pathlib import Path
 from typing import Any
-
-from .agent_topology import COMPLETENESS_PROVIDER_TRANSCRIPT
 
 _MAX_PREVIEW_MESSAGES = 80
 _MAX_PREVIEW_TEXT_CHARS = 6000

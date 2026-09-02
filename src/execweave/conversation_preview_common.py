@@ -7,17 +7,23 @@ from .agent_topology import (
     THREAD_ID_EXECWEAVE_DERIVED,
     resolve_agent_topology,
 )
-from .conversation_preview_generic import (
+from .conversation_preview_generic import (  # noqa: F401
     _generic_content_messages,
     _response_messages,
     _routed_agent_message,
     finish_transcript_preview,
 )
-from .conversation_preview_lines import (
+from .conversation_preview_lines import (  # noqa: F401
     _line_transcript_messages,
     _structured_messages,
 )
-from .conversation_preview_transcript import (
+from .conversation_preview_transcript import (  # noqa: F401
+    _ANTIGRAVITY_USER_REQUEST_RE,
+    _ASSISTANT_FINAL_KINDS,
+    _ASSISTANT_RESPONSE_KINDS,
+    _SUBAGENT_SUMMARY_KINDS,
+    _SUBAGENT_TASK_KINDS,
+    _USER_KINDS,
     _antigravity_inbound_message_text,
     _antigravity_send_message_text,
     _antigravity_user_text,
