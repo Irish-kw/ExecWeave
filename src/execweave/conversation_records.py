@@ -11,6 +11,7 @@ from .conversation_records_antigravity import (
     _project_antigravity_addressed_tasks,
     apply_antigravity_role_path_fallback,
     apply_stable_ordinals,
+    sanitize_antigravity_preview_messages,
 )
 from .conversation_records_codex import (
     _same_merged_execution,
@@ -307,6 +308,7 @@ def conversation_record_entries(
     entries = _core_conversation_record_entries(graph, run_root)
     apply_antigravity_role_path_fallback(entries, graph, run_root)
     _project_antigravity_addressed_tasks(entries, graph)
+    sanitize_antigravity_preview_messages(entries)
     root_id = _ollama_root_agent_id(graph)
     if root_id is None:
         return entries
