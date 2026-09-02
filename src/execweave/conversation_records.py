@@ -9,6 +9,7 @@ from .agent_topology import THREAD_ID_EXECWEAVE_DERIVED, THREAD_ID_PROVIDER_NATI
 from .conversation_message_identity import dedupe_codex_message_observations
 from .conversation_records_antigravity import (
     _project_antigravity_addressed_tasks,
+    apply_antigravity_role_path_fallback,
     apply_stable_ordinals,
 )
 from .conversation_records_codex import (
@@ -304,6 +305,7 @@ def conversation_record_entries(
 ) -> list[dict[str, Any]]:
     """Publish root-only Ollama turns under the one run root without changing raw evidence."""
     entries = _core_conversation_record_entries(graph, run_root)
+    apply_antigravity_role_path_fallback(entries, graph, run_root)
     _project_antigravity_addressed_tasks(entries, graph)
     root_id = _ollama_root_agent_id(graph)
     if root_id is None:
