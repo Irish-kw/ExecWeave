@@ -23,13 +23,17 @@ def test_codex_task_rule_is_not_in_default_or_other_providers() -> None:
     assert "kind==='user_message'" in CODEX_CHILD_ROUNDS_JS
     assert "kind==='user_message'" not in DEFAULT_CHILD_ROUNDS_JS
     src = ROOT / "src" / "execweave"
+    # Default and Claude stay free of the Codex opener. Agy child-addressed
+    # user_message is an opener only when recipient===path.
     for name in (
         "viewer_agent_panel_default.py",
-        "viewer_agent_panel_antigravity.py",
         "viewer_agent_panel_claude.py",
     ):
         text = (src / name).read_text(encoding="utf-8")
         assert "kind==='user_message'" not in text
+    agy = (src / "viewer_agent_panel_antigravity.py").read_text(encoding="utf-8")
+    assert "kind==='user_message'" in agy
+    assert "recipient||'')===path" in agy
     assert "execweaveCodexChildRounds" in _AGENT_PANEL_JS
     assert "function execweaveDefaultChildRounds" in _AGENT_PANEL_JS
 
