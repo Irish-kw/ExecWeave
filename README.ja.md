@@ -1,3 +1,5 @@
+> Codex + AGY は完全な再構成が完了しました。残りの provider はまだ修正完了していません。
+
 # ExecWeave
 
 <!-- i18n-nav:start -->
@@ -30,7 +32,7 @@ ExecWeave は source-available / local-first の observability プロジェク�
   <img src="docs/assets/codex.gif" alt="ExecWeave animated live demo" width="100%">
 </p>
 
-この README は **v0.8.6** を説明します。
+この README は **v0.8.7** を説明します。
 
 ## ExecWeave を使う理由
 

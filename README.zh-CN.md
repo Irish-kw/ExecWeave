@@ -1,3 +1,5 @@
+> Codex + AGY 已完成完整重整；其余 provider 尚未修正完毕。
+
 # ExecWeave
 
 <!-- i18n-nav:start -->
@@ -30,7 +32,7 @@ ExecWeave 是一个 source-available、local-first 的可观测性项目，把 A
   <img src="docs/assets/codex.gif" alt="ExecWeave animated live demo" width="100%">
 </p>
 
-本 README 对应 **v0.8.6**。
+本 README 对应 **v0.8.7**。
 
 ## 为什么是 ExecWeave
 

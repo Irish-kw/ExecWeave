@@ -1,3 +1,5 @@
+> Codex + AGY wurden vollständig überarbeitet; die übrigen Provider sind noch nicht vollständig korrigiert.
+
 # ExecWeave
 
 <!-- i18n-nav:start -->
@@ -30,7 +32,7 @@ ExecWeave ist ein source-available, local-first Observability-Projekt, das Aktiv
   <img src="docs/assets/codex.gif" alt="ExecWeave animated live demo" width="100%">
 </p>
 
-Dieses README dokumentiert **v0.8.6**.
+Dieses README dokumentiert **v0.8.7**.
 
 ## Warum ExecWeave
 

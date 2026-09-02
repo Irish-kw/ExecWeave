@@ -1,3 +1,5 @@
+> Codex + AGY are now fully reworked; the remaining providers are not yet fully fixed.
+
 # ExecWeave
 
 <!-- i18n-nav:start -->
@@ -30,7 +32,7 @@ ExecWeave is a source-available, local-first observability project that turns AI
   <img src="docs/assets/codex.gif" alt="ExecWeave animated live demo" width="100%">
 </p>
 
-This README documents **v0.8.6**.
+This README documents **v0.8.7**.
 
 ## Why ExecWeave
 
