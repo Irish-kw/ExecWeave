@@ -99,6 +99,8 @@ jobs:
           # node and Arrange/first-frame use Dagre. Existing tests keep their node IDs
           # and now assert the new projection and layout. Grant only this branch and
           # only files that actually differ from the base.
+          # New test files (status A) do not need --allow-test-change; the checker
+          # treats an unused grant as a stale open allowance.
           if [[ "$HEAD_REF" == "fix/provider-isolation" ]]; then
             while IFS= read -r path; do
               case "$path" in
@@ -122,15 +124,6 @@ jobs:
                   ;;
                 tests/test_pr25_premerge_hardening_e2e.py)
                   args+=(--allow-test-change "tests/test_pr25_premerge_hardening_e2e.py=Dagre LR placement replaces the old barycentre Y order; files stay to the right of owners and do not overlap")
-                  ;;
-                tests/test_codex_child_panel_policy.py)
-                  args+=(--allow-test-change "tests/test_codex_child_panel_policy.py=Windows node subprocess must decode panel JS as UTF-8")
-                  ;;
-                tests/test_antigravity_child_panel_policy.py)
-                  args+=(--allow-test-change "tests/test_antigravity_child_panel_policy.py=Windows node subprocess must decode panel JS as UTF-8")
-                  ;;
-                tests/test_ollama_panel_policy.py)
-                  args+=(--allow-test-change "tests/test_ollama_panel_policy.py=Windows node subprocess must decode panel JS as UTF-8")
                   ;;
                 tests/test_per_agent_conversation_default.py)
                   args+=(--allow-test-change "tests/test_per_agent_conversation_default.py=isTask recipient/sender checks moved from viewer_agent_panel.py into viewer_agent_panel_default.py; historical test names are unchanged")
