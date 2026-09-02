@@ -90,6 +90,9 @@ jobs:
                 tests/test_dashboard_simplification.py)
                   args+=(--allow-test-change "tests/test_dashboard_simplification.py=projected node set now contains External instead of the raw outbound IP")
                   ;;
+                tests/test_codex_adapter.py)
+                  args+=(--allow-test-change "tests/test_codex_adapter.py=apply_patch now declares explicit file targets so the graph preserves the tool-call-to-file relationship; existing test node IDs remain unchanged")
+                  ;;
                 tests/test_dashboard_ux_and_hook_projection.py)
                   args+=(--allow-test-change "tests/test_dashboard_ux_and_hook_projection.py=live graph projection folds the public endpoint; hook process remains hidden")
                   ;;
