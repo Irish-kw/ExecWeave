@@ -126,9 +126,9 @@ def _legacy_layout(page: Any) -> None:
             const id=edge.id||`${edge.source}:${edge.relation}:${edge.target}`;
             const a=anchor(edge.source,true),b=anchor(edge.target,false),bend=Math.max(38,Math.abs(b.x-a.x)*.42);
             const d=`M ${a.x} ${a.y} C ${a.x+bend} ${a.y}, ${b.x-bend} ${b.y}, ${b.x} ${b.y}`;
-            for(const path of document.querySelectorAll(`[data-edge-id=\"${CSS.escape(id)}\"]`))
+            for(const path of document.querySelectorAll(`[data-edge-id="${CSS.escape(id)}"]`))
               if(path.tagName.toLowerCase()==='path')path.setAttribute('d',d);
-            const label=document.querySelector(`.label[data-edge-id=\"${CSS.escape(id)}\"]`);
+            const label=document.querySelector(`.label[data-edge-id="${CSS.escape(id)}"]`);
             if(label){
               label.setAttribute('x',(a.x+b.x)/2);label.setAttribute('y',(a.y+b.y)/2-6);
               label.textContent=edge.count>1?`${edge.relation} ×${edge.count}`:edge.relation;
