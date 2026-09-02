@@ -22,11 +22,24 @@ def _align_agent_panel_topology(html: str) -> str:
     return html
 
 
+def _guard_compact_live_snapshot(html: str) -> str:
+    """Keep compact live payloads in protective mode instead of projecting nodes=[]."""
+    needle = "function setSnapshot(data){const signature="
+    guarded = (
+        "function setSnapshot(data){"
+        "if(data.live_payload_compact){updateStats(data);enterProtectiveMode(data);return}"
+        "const signature="
+    )
+    if needle not in html:
+        return html
+    return html.replace(needle, guarded, 1)
+
+
 def _build_dashboard_html() -> str:
     html = inject_live_dashboard_layout(
         inject_live_dashboard_focus(inject_live_dashboard_clean(_BASE_LIVE_HTML))
     )
-    return _align_agent_panel_topology(inject_agent_panel(html))
+    return _align_agent_panel_topology(inject_agent_panel(_guard_compact_live_snapshot(html)))
 
 
 DASHBOARD_HTML = _build_dashboard_html()
