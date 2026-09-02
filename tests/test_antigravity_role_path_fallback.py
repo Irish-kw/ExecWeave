@@ -143,7 +143,7 @@ def test_schedule_post_tool_use_assigns_child_from_parent_transcript(tmp_path: P
     assert child["id"] == f"agent:antigravity:conversation:{CHILD}"
     assert child["attributes"]["parent_agent_path"] == ROOT_PATH
     assert child["attributes"]["parent_scope_id"] == PARENT
-    assert child["attributes"]["child_agent_path"] == CHILD_PATH
+    assert "child_agent_path" not in child["attributes"]
     assert child["attributes"]["agent_nickname"] == "security reviewer"
 
 
@@ -190,7 +190,7 @@ def test_projection_fallback_stamps_role_path_when_graph_has_no_parent(tmp_path:
         if node["id"] == f"agent:antigravity:conversation:{CHILD}"
     )
     assert child_node["attributes"]["parent_agent_path"] == ROOT_PATH
-    assert child_node["attributes"]["child_agent_path"] == CHILD_PATH
+    assert "child_agent_path" not in child_node["attributes"]
 
     for node in materialized["nodes"]:
         attrs = node.get("attributes")
