@@ -226,6 +226,106 @@ def _matching_result(record: dict[str, Any]) -> list[dict[str, Any]] | None:
     return _parse_result_content(record.get("content"))
 
 
+def sanitize_agent_path_leaf(value: str) -> str | None:
+    """Turn a provider Role/TypeName into a single path leaf under /root."""
+    leaf = " ".join(value.replace("\\", "-").replace("/", "-").split())
+    return leaf or None
+
+
+def derived_child_agent_path(spec: dict[str, Any], child_id: str) -> str:
+    """Prefer Role, then TypeName, then the provider conversation id."""
+    for key in ("Role", "TypeName"):
+        raw = spec.get(key)
+        if isinstance(raw, str) and raw:
+            leaf = sanitize_agent_path_leaf(raw)
+            if leaf is not None:
+                return f"/root/{leaf}"
+    leaf = sanitize_agent_path_leaf(child_id)
+    return f"/root/{leaf}" if leaf is not None else "/root/agent"
+
+
+def read_transcript_records(path: Path) -> list[dict[str, Any]]:
+    """Read a complete archived or live transcript without the live-hook tail cap."""
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError):
+        return []
+    records: list[dict[str, Any]] = []
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(record, dict):
+            records.append(record)
+    return records
+
+
+def transcript_subagent_links(
+    records: list[dict[str, Any]] | None,
+    *,
+    parent_id: str,
+) -> list[dict[str, Any]]:
+    """Join invoke_subagent request+result pairs already present in one transcript.
+
+    ``validated_subagent_links`` additionally proves the hook payload pointed at the
+    live brain file (workspace URIs, logAbsoluteUri layout). Once that file has been
+    copied into the run, those live-path checks are gone. The remaining provider
+    fact is the unique request/result pair naming child conversation ids.
+    Ambiguous or malformed transcripts still abstain.
+    """
+    if not isinstance(parent_id, str) or not parent_id or not records:
+        return []
+    candidates: list[tuple[list[dict[str, Any]], list[dict[str, Any]], int]] = []
+    for index, record in enumerate(records[:-1]):
+        calls = record.get("tool_calls")
+        if not isinstance(calls, list) or len(calls) != 1:
+            continue
+        call = calls[0]
+        if not isinstance(call, dict) or call.get("name") != "invoke_subagent":
+            continue
+        args = call.get("args")
+        if not isinstance(args, dict):
+            continue
+        specs = _request_specs(args.get("Subagents"))
+        if specs is None or not _matching_request(record, specs):
+            continue
+        results = _matching_result(records[index + 1])
+        if results is None:
+            continue
+        step = record.get("step_index")
+        step_index = (
+            step if isinstance(step, int) and not isinstance(step, bool) and step >= 0 else index
+        )
+        candidates.append((specs, results, step_index))
+    if len(candidates) != 1:
+        return []
+    specs, results, step_index = candidates[0]
+    if len(results) != len(specs):
+        return []
+    seen: set[str] = set()
+    links: list[dict[str, Any]] = []
+    for subagent_index, (spec, result) in enumerate(zip(specs, results, strict=True)):
+        child_id = result.get("conversationId")
+        if not isinstance(child_id, str) or not child_id:
+            return []
+        if child_id == parent_id or child_id in seen:
+            return []
+        seen.add(child_id)
+        links.append(
+            {
+                "subagent_index": subagent_index,
+                "conversation_id": child_id,
+                "step_index": step_index,
+                "spec": spec,
+                "agent_path": derived_child_agent_path(spec, child_id),
+            }
+        )
+    return links
+
+
 def validated_subagent_links(
     payload: dict[str, Any],
     *,
