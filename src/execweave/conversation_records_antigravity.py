@@ -5,6 +5,14 @@ from pathlib import Path
 from typing import Any
 
 from . import conversation_preview as _preview_module
+from .agent_topology import (
+    EVIDENCE_VALIDATED_CHILD_TRANSCRIPT,
+    PATH_EXECWEAVE_DERIVED,
+    ROOT_PATH,
+    THREAD_ID_EXECWEAVE_DERIVED,
+    TOPOLOGY_PROVIDER_REPORTED,
+)
+from .antigravity_subagent_linkage import read_transcript_records, transcript_subagent_links
 from .conversation_records_common import history_message_key as _history_message_key
 
 
@@ -74,6 +82,175 @@ def _antigravity_step_ordinals(path: str | Path) -> list[int | None]:
             else None
         )
     return ordinals
+
+
+def _conversation_id_from_source(source_id: object) -> str | None:
+    prefix = "agent:antigravity:conversation:"
+    if not isinstance(source_id, str) or not source_id.startswith(prefix):
+        return None
+    conversation_id = source_id.removeprefix(prefix)
+    return conversation_id or None
+
+
+def _restamp_agent_path(preview: dict[str, Any], previous: str, current: str) -> None:
+    if not previous or previous == current:
+        return
+    for message in preview.get("messages") or []:
+        if not isinstance(message, dict):
+            continue
+        if message.get("sender") == previous:
+            message["sender"] = current
+        if message.get("recipient") == previous:
+            message["recipient"] = current
+
+
+def _apply_child_identity(
+    preview: dict[str, Any],
+    *,
+    agent_path: str,
+    parent_scope_id: str,
+    nickname: str | None,
+) -> None:
+    previous = str(preview.get("agent_path") or ROOT_PATH)
+    preview["agent_path"] = agent_path
+    preview["agent_path_source"] = PATH_EXECWEAVE_DERIVED
+    preview["is_root"] = False
+    preview["topology_state"] = TOPOLOGY_PROVIDER_REPORTED
+    preview["parent_agent_path"] = ROOT_PATH
+    preview["topology_evidence"] = EVIDENCE_VALIDATED_CHILD_TRANSCRIPT
+    preview["parent_relation_source"] = EVIDENCE_VALIDATED_CHILD_TRANSCRIPT
+    preview["parent_thread_id"] = f"antigravity:{parent_scope_id}"
+    preview["thread_id"] = f"antigravity:{preview.get('provider_native_id') or agent_path}"
+    preview["thread_id_source"] = THREAD_ID_EXECWEAVE_DERIVED
+    if isinstance(nickname, str) and nickname:
+        preview["agent_nickname"] = nickname
+        preview["agent_label"] = nickname
+    else:
+        preview["agent_label"] = agent_path.rsplit("/", 1)[-1] or agent_path
+    _restamp_agent_path(preview, previous, agent_path)
+
+
+def apply_antigravity_role_path_fallback(
+    entries: list[dict[str, Any]],
+    graph: dict[str, Any],
+    run_root: str | Path | None,
+) -> None:
+    """When graph topology is missing, derive /root/<Role> from archived transcripts.
+
+    Same failure mode as Codex omitting agent_path: every conversation collapses to
+    /root, recipients never match, and child history has no opener. The parent
+    transcript already names child conversation ids in the invoke_subagent result.
+    """
+    if run_root is None:
+        return
+    root = Path(run_root).expanduser().resolve(strict=False)
+    by_id: dict[str, dict[str, Any]] = {}
+    for entry in entries:
+        if str(entry.get("provider") or "").lower() != "antigravity":
+            continue
+        conversation_id = _conversation_id_from_source(entry.get("source_id"))
+        preview = entry.get("conversation_preview")
+        relative = entry.get("path")
+        if conversation_id is None or not isinstance(preview, dict):
+            continue
+        if not isinstance(relative, str) or not relative:
+            continue
+        by_id[conversation_id] = entry
+
+    declared_children: set[str] = set()
+    for node in graph.get("nodes", []):
+        if not isinstance(node, dict) or node.get("type") != "agent":
+            continue
+        attrs = node.get("attributes")
+        attrs = attrs if isinstance(attrs, dict) else {}
+        if str(attrs.get("provider") or "").lower() != "antigravity":
+            continue
+        if isinstance(attrs.get("parent_agent_path"), str) and attrs.get("parent_agent_path"):
+            child_id = attrs.get("conversation_id")
+            if isinstance(child_id, str) and child_id:
+                declared_children.add(child_id)
+
+    for conversation_id, entry in list(by_id.items()):
+        relative = entry.get("path")
+        if not isinstance(relative, str):
+            continue
+        try:
+            transcript = (root / relative).resolve(strict=False)
+            transcript.relative_to(root)
+        except (OSError, RuntimeError, ValueError):
+            continue
+        if not transcript.is_file():
+            continue
+        links = transcript_subagent_links(
+            read_transcript_records(transcript),
+            parent_id=conversation_id,
+        )
+        for link in links:
+            child_id = link["conversation_id"]
+            child_entry = by_id.get(child_id)
+            if child_entry is None:
+                continue
+            if child_id in declared_children:
+                continue
+            child_preview = child_entry.get("conversation_preview")
+            if not isinstance(child_preview, dict):
+                continue
+            if child_preview.get("is_root") is False and str(
+                child_preview.get("agent_path") or ""
+            ).startswith("/root/"):
+                continue
+            spec = link["spec"]
+            nickname = spec.get("Role") if isinstance(spec.get("Role"), str) else spec.get("TypeName")
+            nickname = nickname if isinstance(nickname, str) else None
+            _apply_child_identity(
+                child_preview,
+                agent_path=str(link["agent_path"]),
+                parent_scope_id=conversation_id,
+                nickname=nickname,
+            )
+            prompt = spec.get("Prompt")
+            if isinstance(prompt, str) and prompt.strip():
+                task = {
+                    "timestamp": None,
+                    "ordinal": 0,
+                    "kind": "task",
+                    "phase": "assignment",
+                    "sender": ROOT_PATH,
+                    "recipient": child_preview["agent_path"],
+                    "text": prompt,
+                    "content_state": "plaintext",
+                    "content_role": "antigravity_addressed_task",
+                    "provider_sender_id": conversation_id,
+                    "provider_recipient_id": child_id,
+                    "delivery_observed": False,
+                    "consumption_observed": False,
+                    "task_name": nickname,
+                }
+                messages = [
+                    dict(message)
+                    for message in child_preview.get("messages") or []
+                    if isinstance(message, dict)
+                ]
+                messages.append(task)
+                messages.sort(
+                    key=lambda message: (
+                        str(message.get("timestamp") or ""),
+                        message.get("ordinal")
+                        if isinstance(message.get("ordinal"), int)
+                        else 2**63 - 1,
+                    )
+                )
+                seen: set[tuple[object, ...]] = set()
+                unique: list[dict[str, Any]] = []
+                for message in messages:
+                    key = _history_message_key(message)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    unique.append(message)
+                child_preview["messages"] = unique
+                child_preview["message_count"] = len(unique)
+                child_preview["messages_truncated"] = False
 
 
 def _project_antigravity_addressed_tasks(
