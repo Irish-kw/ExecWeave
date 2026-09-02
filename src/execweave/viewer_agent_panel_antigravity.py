@@ -11,7 +11,7 @@ function execweaveAntigravityChildRounds(messages,path){
     const kind=String(message?.kind||'');
     const phase=String(message?.phase||'');
     const role=String(message?.content_role||'');
-    return isObserved(message)&&!isInjected(message)&&String(message?.recipient||'')===path&&sender!==path&&(!sender||sender==='user'||sender===parent||sender.startsWith('antigravity:'))&&(role==='antigravity_addressed_task'||kind==='subagent_task'||kind==='user_message'||kind==='send_message'||/task|assign/i.test(kind)||phase==='assignment');
+    return isObserved(message)&&!isInjected(message)&&String(message?.recipient||'')===path&&sender!==path&&(!sender||sender==='user'||sender===parent||sender.startsWith('antigravity:'))&&(role==='antigravity_addressed_task'||kind==='subagent_task'||kind==='send_message'||(/task|assign/i.test(kind)&&kind!=='user_message')||phase==='assignment');
   };
   const openers=messages.filter(isTask);
   return windows(messages,openers).map(window=>{
