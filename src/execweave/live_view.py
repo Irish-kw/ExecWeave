@@ -4,6 +4,7 @@ import re
 
 from .live_view_extra_style import LIVE_EXTRA_STYLE
 from .live_view_markup import LIVE_MARKUP
+from .live_view_process_layout import LIVE_PROCESS_LAYOUT_SCRIPT
 from .live_view_readability import LIVE_READABILITY_SCRIPT, LIVE_READABILITY_STYLE
 from .live_view_script_a import LIVE_SCRIPT_A
 from .live_view_script_b import LIVE_SCRIPT_B
@@ -110,10 +111,10 @@ LIVE_HTML = harden_dashboard_html(
     inject_agent_panel(
         _restore_live_safety_contracts(
             f"""<!doctype html>
-<html lang="en">
+<html lang=\"en\">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta charset=\"utf-8\">
+<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">
 <title>ExecWeave Live</title>
 <style>
 {LIVE_STYLE}
@@ -124,7 +125,7 @@ LIVE_HTML = harden_dashboard_html(
 <body>
 {LIVE_MARKUP}
 <script>
-{LIVE_SCRIPT_A}{LIVE_READABILITY_SCRIPT}{LIVE_SCRIPT_B}{LIVE_SCRIPT_C}{LIVE_SCRIPT_D}
+{LIVE_SCRIPT_A}{LIVE_READABILITY_SCRIPT}{LIVE_PROCESS_LAYOUT_SCRIPT}{LIVE_SCRIPT_B}{LIVE_SCRIPT_C}{LIVE_SCRIPT_D}
 </script>
 </body>
 </html>"""

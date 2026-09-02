@@ -446,7 +446,7 @@ function execweaveArrangeGraph(){
   positions=next;layerRows=new Map();
   for(const [id,p] of positions){const spec=execweaveTopology.spec.get(id);if(spec)layerRows.set(spec.rank,Math.max(layerRows.get(spec.rank)||0,spec.order+1));const group=nodeElements.get(id);if(group)group.setAttribute('transform',`translate(${p.x} ${p.y})`);const node=nodeById.get(id);if(node)updateNodeElement(node)}
   for(const edge of edgeById.values())updateEdgeElement(edge);
-  svg.classList.toggle('execweave-crowded',execweaveTopology.crowded);applySearch();fit(true);updateJumpLatest();return new Map(positions);
+  svg.classList.toggle('execweave-crowded',execweaveTopology.crowded);applySearch();updateJumpLatest();return new Map(positions);
 }
 window.__execweaveArrangeGraph=execweaveArrangeGraph;
 const execweaveArrangeButton=document.getElementById('arrange');if(execweaveArrangeButton)execweaveArrangeButton.onclick=()=>execweaveArrangeGraph();

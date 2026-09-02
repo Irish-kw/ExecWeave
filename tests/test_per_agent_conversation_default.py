@@ -16,6 +16,7 @@ from execweave.viewer_agent_panel import inject_agent_panel
 
 SRC = Path(__file__).resolve().parents[1] / "src" / "execweave"
 PANEL = SRC / "viewer_agent_panel.py"
+PANEL_DEFAULT = SRC / "viewer_agent_panel_default.py"
 
 
 def _graph() -> dict[str, Any]:
@@ -95,10 +96,11 @@ def test_default_render_lists_one_isolated_section_per_agent() -> None:
 
 def test_a_message_authored_by_another_agent_is_not_shown_as_ones_own() -> None:
     source = PANEL.read_text(encoding="utf-8")
+    policy = PANEL_DEFAULT.read_text(encoding="utf-8")
     assert "const own=(message,path)=>!message?.sender||String(message.sender)===path" in source
-    assert "String(message?.recipient||'')===path" in source
+    assert "String(message?.recipient||'')===path" in policy
     assert "own(message,path)" in source
-    assert "sender!==path" in source
+    assert "sender!==path" in policy
 
 
 def test_no_phantom_agents_from_unread_topology_paths(tmp_path: Path) -> None:

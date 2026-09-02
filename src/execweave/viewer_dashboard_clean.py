@@ -82,7 +82,7 @@ _DASHBOARD_JS = r"""
 function execweaveDashboardGraph(data){
   const allNodes=Array.isArray(data?.nodes)?data.nodes:[],allEdges=Array.isArray(data?.edges)?data.edges:[];
   const allById=new Map(allNodes.filter(node=>node&&node.id).map(node=>[node.id,node]));
-  const hiddenTypes=new Set(['observed_content','tool_call','agent_turn','tool_call_observation','conversation_item','provider_session','permission_request','context_compaction','agent_turn_stop','compaction','compaction_request','terminal_operation']);
+  const hiddenTypes=new Set(['agent_execution','observed_content','tool_call','agent_turn','tool_call_observation','conversation_item','provider_session','permission_request','context_compaction','agent_turn_stop','compaction','compaction_request','terminal_operation']);
   const hiddenDetailIds=new Set(allNodes.filter(node=>node&&hiddenTypes.has(String(node.type||''))).map(node=>node.id).filter(Boolean));
   const internalStaging=node=>{
     const type=String(node?.type||'');
@@ -166,10 +166,11 @@ function execweaveDashboardGraph(data){
     }
     return rows;
   };
-  const invocationMap=new Map();
+  const toolCallToTool=new Map(),invocationMap=new Map();
   for(const call of allNodes){
     if(!['tool_call','tool_call_observation'].includes(String(call?.type||''))||!call.id)continue;
     const owner=ownerFor(call),tool=toolFor(call);if(!owner||!tool)continue;
+    toolCallToTool.set(call.id,tool);
     const key=`${owner}\u0000${tool}\u0000${callIdentity(call)}`,attrs=attrsOf(call),evidence=[...(incoming.get(call.id)||[]),...(outgoing.get(call.id)||[])];
     let occurrence=invocationMap.get(key);
     if(!occurrence){
@@ -264,10 +265,12 @@ function execweaveDashboardGraph(data){
   let nodeIds=new Set(nodes.map(node=>node.id));
   let edges=allEdges.map(edge=>{
     if(!edge)return null;
-    const source=canonicalId.get(edge.source)||edge.source,target=canonicalId.get(edge.target)||edge.target;
+    const declaredTool=edge.relation==='DECLARED_TARGET'?toolCallToTool.get(edge.source):null;
+    const rawSource=declaredTool||edge.source;
+    const source=canonicalId.get(rawSource)||rawSource,target=canonicalId.get(edge.target)||edge.target;
     if(!nodeIds.has(source)||!nodeIds.has(target))return null;
     if(source===edge.source&&target===edge.target)return edge;
-    return{...edge,source,target,viewer_canonicalized:true,viewer_original_source:edge.source,viewer_original_target:edge.target};
+    return{...edge,source,target,viewer_canonicalized:true,viewer_original_source:edge.source,viewer_original_target:edge.target,viewer_reanchored_from_tool_call:rawSource!==edge.source||undefined};
   }).filter(Boolean);
   for(const group of groups.values()){
     const owner=canonicalId.get(group.owner)||group.owner,tool=canonicalId.get(group.tool)||group.tool;

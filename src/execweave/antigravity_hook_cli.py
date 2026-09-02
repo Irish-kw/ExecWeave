@@ -16,6 +16,9 @@ from .antigravity_adapter import (
 from .antigravity_full_fidelity import antigravity_hook_to_content_events
 from .antigravity_trace_capability import antigravity_agent_trace_visibility_event
 from .content_store import FullFidelityContentStore
+from .conversation_archive import antigravity_conversation_archive_events
+
+_CAPTURE_ERRORS = (OSError, RuntimeError, TimeoutError, TypeError, ValueError)
 
 ANTIGRAVITY_OFFICIAL_HOOK_EVENTS = (
     "PreToolUse",
@@ -46,8 +49,6 @@ def _handler(event: str) -> dict[str, Any]:
 
 def _passive_response(event: str | None) -> dict[str, str]:
     if event == "Stop":
-        # Antigravity only re-enters the execution loop for decision="continue".
-        # Any other decision allows the provider's original stop to proceed.
         return {"decision": "stop"}
     return {}
 
@@ -126,8 +127,15 @@ def main(argv: list[str] | None = None) -> int:
             configured = os.environ.get("EXECWEAVE_SEMANTIC_SIDECAR")
             sidecar = Path(configured) if configured else _default_sidecar(payload)
         sidecar = Path(sidecar).expanduser().resolve()
+    except _CAPTURE_ERRORS as exc:
+        print(f"ExecWeave Antigravity hook warning [setup]: {exc}", file=sys.stderr)
+        print(json.dumps(_passive_response(args.event), sort_keys=True))
+        return 1 if args.strict else 0
 
-        observed_at = _now()
+    observed_at = _now()
+    # Match Codex: each capture stage is independent so a metadata/content
+    # failure cannot skip the provider-declared transcript snapshot.
+    try:
         summary = antigravity_hook_to_semantic_events(
             payload,
             hook_event=args.event,
@@ -142,7 +150,20 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
         append_semantic_records(sidecar, summary)
+    except _CAPTURE_ERRORS as exc:
+        print(f"ExecWeave Antigravity hook warning [summary_capture]: {exc}", file=sys.stderr)
+        if args.strict:
+            print(json.dumps(_passive_response(args.event), sort_keys=True))
+            return 1
+
+    try:
         store = FullFidelityContentStore(sidecar.parent)
+    except _CAPTURE_ERRORS as exc:
+        print(f"ExecWeave Antigravity hook warning [content_store]: {exc}", file=sys.stderr)
+        print(json.dumps(_passive_response(args.event), sort_keys=True))
+        return 1 if args.strict else 0
+
+    try:
         content = antigravity_hook_to_content_events(
             payload,
             hook_event=args.event,
@@ -150,10 +171,29 @@ def main(argv: list[str] | None = None) -> int:
             timestamp=observed_at,
         )
         append_semantic_records(sidecar, content)
-    except (OSError, RuntimeError, TimeoutError, TypeError, ValueError) as exc:
-        print(f"ExecWeave Antigravity hook warning: {exc}", file=sys.stderr)
+    except _CAPTURE_ERRORS as exc:
+        print(f"ExecWeave Antigravity hook warning [content_capture]: {exc}", file=sys.stderr)
         if args.strict:
+            print(json.dumps(_passive_response(args.event), sort_keys=True))
             return 1
+
+    if args.event in {"PreInvocation", "PostInvocation", "Stop"}:
+        try:
+            archived = antigravity_conversation_archive_events(
+                payload,
+                store=store,
+                timestamp=observed_at,
+            )
+            append_semantic_records(sidecar, archived)
+        except _CAPTURE_ERRORS as exc:
+            print(
+                f"ExecWeave Antigravity hook warning [conversation_archive]: {exc}",
+                file=sys.stderr,
+            )
+            if args.strict:
+                print(json.dumps(_passive_response(args.event), sort_keys=True))
+                return 1
+
     print(json.dumps(_passive_response(args.event), sort_keys=True))
     return 0
 

@@ -171,7 +171,7 @@ def test_bounds_and_focus_use_actual_node_dimensions(tmp_path: Path) -> None:
             page.wait_for_timeout(300)
             centered = page.evaluate(
                 """() => {
-                const node=document.querySelector('.node[data-id="process:wide"] rect')
+                const node=document.querySelector('.node[data-id=\"process:wide\"] rect')
                   .getBoundingClientRect();
                 const svg=document.getElementById('svg').getBoundingClientRect();
                 return {dx:(node.left+node.width/2)-(svg.left+svg.width/2),
@@ -236,11 +236,21 @@ def test_root_owned_evidence_participates_in_barycentre_order(tmp_path: Path) ->
         finally:
             browser.close()
 
-    assert (
-        rows["file:z-child0"]["y"]
-        < rows["file:a-root"]["y"]
-        < rows["file:b-child1"]["y"]
-    ), rows
+    files = [rows["file:z-child0"], rows["file:a-root"], rows["file:b-child1"]]
+    assert all(isinstance(row.get("x"), (int, float)) for row in files), rows
+    assert all(isinstance(row.get("y"), (int, float)) for row in files), rows
+    assert rows["file:z-child0"]["x"] > rows["agent:/root/a"]["x"], rows
+    assert rows["file:a-root"]["x"] > rows["agent:/root"]["x"], rows
+    assert rows["file:b-child1"]["x"] > rows["agent:/root/b"]["x"], rows
+    boxes = [
+        (row["x"], row["y"], row.get("width") or 160, row.get("height") or 50)
+        for row in files
+    ]
+    for index, (ax, ay, aw, ah) in enumerate(boxes):
+        for bx, by, bw, bh in boxes[index + 1 :]:
+            overlap_x = max(0, min(ax + aw, bx + bw) - max(ax, bx))
+            overlap_y = max(0, min(ay + ah, by + bh) - max(ay, by))
+            assert overlap_x * overlap_y == 0, rows
 
 
 def _observed_tool_graph() -> dict[str, Any]:

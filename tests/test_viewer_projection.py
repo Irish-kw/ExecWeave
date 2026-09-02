@@ -5,6 +5,7 @@ from copy import deepcopy
 from pathlib import Path
 
 from execweave.live import _LiveState
+from execweave.viewer_external_endpoints import EXTERNAL_NODE_ID
 from execweave.viewer_projection import project_viewer_graph, render_graph_html
 
 
@@ -166,7 +167,23 @@ def test_low_ports_and_non_loopback_addresses_do_not_collapse() -> None:
         }
     )
     projected = project_viewer_graph(raw)
-    assert "viewer_projection" not in projected
+    node_ids = {node["id"] for node in projected["nodes"] if isinstance(node, dict)}
+    assert "endpoint:127.0.0.1:49151" in node_ids
+    assert "endpoint:127.0.0.1:50004" in node_ids
+    assert EXTERNAL_NODE_ID in node_ids
+    assert "endpoint:192.168.1.2:50001" not in node_ids
+    assert "endpoint:10.0.0.1:50002" not in node_ids
+    assert "endpoint:8.8.8.8:50003" not in node_ids
+    external = next(node for node in projected["nodes"] if node["id"] == EXTERNAL_NODE_ID)
+    assert external["name"] == "External"
+    assert {item["address"] for item in external["attributes"]["endpoints"]} == {
+        "192.168.1.2:50001",
+        "10.0.0.1:50002",
+        "8.8.8.8:50003",
+    }
+    assert not any(
+        node.get("type") == "network_endpoint_cluster" for node in projected["nodes"]
+    )
 
 
 def test_ipv6_loopback_endpoints_collapse_with_bracketed_or_plain_names() -> None:

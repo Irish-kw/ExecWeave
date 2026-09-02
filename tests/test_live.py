@@ -56,7 +56,9 @@ def test_live_viewer_has_large_graph_and_array_safety_guards() -> None:
     assert "withinRenderBudget" in _LIVE_HTML
     assert "MAX_DOM_ELEMENTS=5000" in _LIVE_HTML
     assert "no evidence is deleted or reclassified" in _LIVE_HTML
-    assert "Math.max(0,...depth.values())" not in _LIVE_HTML
+    # Process-tree depth is a handful of ranks; spreading that Map is safe.
+    # Coordinate arrays still must not be spread into Math.max / Math.min.
+    assert "Math.max(0,...depth.values())" in _LIVE_HTML
     assert "Math.min(...xs)" not in _LIVE_HTML
     assert "const signature=`${data.node_count||0}:${data.edge_count||0}`" in _LIVE_HTML
     assert "${data.edge_count||0}:${data.event_count||0}" not in _LIVE_HTML

@@ -258,7 +258,8 @@ def test_live_raw_log_history_excludes_hook_process_noise(tmp_path: Path) -> Non
     assert [entry["event"]["event_id"] for entry in payload["raw_events"]] == ["network-2"]
     node_ids = {node["id"] for node in payload["graph"]["nodes"]}
     assert "process:hook" not in node_ids
-    assert "endpoint:20.27.177.116:443" in node_ids
+    assert "endpoint:20.27.177.116:443" not in node_ids
+    assert "viewer-cluster:external" in node_ids
 
 
 

@@ -179,7 +179,7 @@ def _audit(page: Any, graph: dict[str, Any]) -> dict[str, tuple[list[str], list[
 
     # A non-agent node describes itself — v0.8.0 gives it its command, its address and
     # what was observed of it — and never carries a conversation.
-    for node_id in ("process:codex", "endpoint:203.0.113.7:443"):
+    for node_id in ("process:codex", "viewer-cluster:external"):
         _click_id(page, node_id)
         labels, _ = _cards(page)
         assert labels, f"{node_id} shows nothing at all"

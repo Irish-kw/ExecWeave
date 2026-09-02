@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Any
 from .agent_topology import (
     EVIDENCE_CROSS_AGENT_ROUTING,
+    PATH_EXECWEAVE_DERIVED,
+    PATH_PROVIDER_DECLARED,
     THREAD_ID_EXECWEAVE_DERIVED,
     THREAD_ID_PROVIDER_NATIVE,
 )
@@ -77,6 +79,32 @@ def _session_meta_identity(payload: dict[str, Any]) -> dict[str, Any] | None:
             else None
         ),
     }
+
+
+def _sanitize_path_leaf(value: str) -> str | None:
+    leaf = " ".join(value.replace("\\", "-").replace("/", "-").split())
+    return leaf or None
+
+
+def _resolved_agent_path(identity: dict[str, Any]) -> tuple[str | None, str]:
+    """Prefer Codex's own path; otherwise /root/<nickname> when a parent exists.
+
+    Windows Codex sessions in the field have been observed to publish nickname and
+    parent_thread_id without agent_path. The dashboard child-round splitter addresses
+    messages by recipient === path, so a missing path drops every later fold.
+    """
+    declared = identity.get("agent_path")
+    if isinstance(declared, str) and declared:
+        return declared, PATH_PROVIDER_DECLARED
+    if identity.get("parent_thread_id") is None:
+        return "/root", PATH_EXECWEAVE_DERIVED
+    nickname = identity.get("agent_nickname")
+    if not isinstance(nickname, str):
+        return None, PATH_EXECWEAVE_DERIVED
+    leaf = _sanitize_path_leaf(nickname)
+    if leaf is None:
+        return None, PATH_EXECWEAVE_DERIVED
+    return f"/root/{leaf}", PATH_EXECWEAVE_DERIVED
 
 
 def codex_rollout_identity(path: str | Path) -> dict[str, Any] | None:
@@ -389,9 +417,7 @@ def codex_rollout_previews(path: str | Path) -> list[dict[str, Any]]:
     projected_ordinal = identity.get("history_base_end_ordinal")
     if not isinstance(projected_ordinal, int) or projected_ordinal < 0:
         projected_ordinal = 0
-    agent_path = identity.get("agent_path")
-    if not isinstance(agent_path, str) or not agent_path:
-        agent_path = "/root" if identity.get("parent_thread_id") is None else None
+    agent_path, agent_path_source = _resolved_agent_path(identity)
     parent_agent_path = _parent_agent_path(identity, agent_path)
     derived = _DerivedThreads(identity.get("thread_id"), agent_path)
     messages: list[dict[str, Any]] = []
@@ -580,6 +606,7 @@ def codex_rollout_previews(path: str | Path) -> list[dict[str, Any]]:
         "thread_id_source": THREAD_ID_PROVIDER_NATIVE,
         "parent_thread_id": identity.get("parent_thread_id"),
         "agent_path": agent_path,
+        "agent_path_source": agent_path_source,
         "agent_nickname": identity.get("agent_nickname"),
         "message_count": len(messages),
         "messages_truncated": truncated,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import execweave.live as live_module
+from execweave.viewer_external_endpoints import EXTERNAL_NODE_ID
 from execweave.viewer_projection import project_viewer_graph, render_graph_html
 
 
@@ -145,6 +146,9 @@ def test_static_dashboard_cleans_only_canvas_and_keeps_embedded_evidence() -> No
     assert "'observed_content','tool_call','agent_turn'" in html
     assert "relation:'CALLED_TOOL'" in html
     assert "viewer_aggregated_tool_call_count" in html
+    assert "toolCallToTool=new Map" in html
+    assert "viewer_reanchored_from_tool_call" in html
+    assert "edge.relation==='DECLARED_TARGET'" in html
     assert "execweaveDashboardGraphBase" in html
     assert "'agent_trace_capability','session','command'" in html
     assert "mergeTypes=new Set(['model','directory','network_endpoint'])" in html
@@ -167,8 +171,9 @@ def test_dashboard_process_canonicalization_is_presentation_only() -> None:
         "process:git:101",
         "process:git:102",
         "file:staging",
-        "network:104.18.25.193:443",
+        EXTERNAL_NODE_ID,
     } <= raw_ids
+    assert "network:104.18.25.193:443" not in raw_ids
     assert "canonicalTypes=new Set(['process','file'])" in html
     assert "mergeTypes=new Set(['model','directory','network_endpoint'])" in html
     assert "node.type==='process'&&occurrenceCount>1" in html
