@@ -43,10 +43,6 @@ jobs:
           HEAD_REF: "${{ github.head_ref }}"
         run: |
           args=(--baseline-ref "$BASELINE_REF")
-          # A release/* branch may advance the release metadata assertions, but the
-          # branch name alone is not the grant: the whole 0.8.x series of feature work
-          # lives under release/*, and an allowance those branches never use is an open
-          # allowance, which the checker refuses. The file has to actually change.
           release_metadata_changed=""
           if git diff --name-only "$BASELINE_REF...HEAD" \
               | grep -qx 'tests/test_v069_dashboard_release.py'; then
@@ -55,11 +51,6 @@ jobs:
           if [[ "$HEAD_REF" == release/* && -n "$release_metadata_changed" ]]; then
             args+=(--allow-test-change "tests/test_v069_dashboard_release.py=release metadata assertions may advance only on a release/* pull request; the historical test name remains stable because the node-ID floor refuses renames")
           fi
-          # PR #25 changes one historical source assertion only because tool traffic is
-          # appended inside the same render pass. Grant that exact exception only to the
-          # exact PR #25 branch and only while the file actually differs from the base.
-          # Once PR #25 lands, future branches cannot inherit this allowance merely by
-          # changing the same test file.
           conversation_focus_changed=""
           if git diff --name-only "$BASELINE_REF...HEAD" \
               | grep -qx 'tests/test_conversation_agent_focus.py'; then
@@ -68,11 +59,6 @@ jobs:
           if [[ "$HEAD_REF" == "release/0.8.3-graph-ergonomics" && -n "$conversation_focus_changed" ]]; then
             args+=(--allow-test-change "tests/test_conversation_agent_focus.py=PR #25 only: surfacing tool traffic appends one more card inside the same render pass, so the source assertion that pinned the final line names the new line. The test ID and subject are unchanged")
           fi
-          # AUD-001 repairs a historical assertion that deliberately characterized the
-          # cross-session root merge as a known limitation. Keep the node ID stable, and
-          # grant the assertion change only on the dedicated R1 branch or the exact PR #25
-          # integration branch that may absorb it. The file must actually differ, so this
-          # cannot become a standing exemption for unrelated work or future release lines.
           conversation_identity_changed=""
           if git diff --name-only "$BASELINE_REF...HEAD" \
               | grep -qx 'tests/test_conversation_identity_merge.py'; then
@@ -83,9 +69,6 @@ jobs:
                    || [[ "$HEAD_REF" == "release/0.8.3-graph-ergonomics" ]]; }; then
             args+=(--allow-test-change "tests/test_conversation_identity_merge.py=AUD-001 only: the historical root-collision assertion is no longer correct after derived presentation thread ids stop acting as cross-execution identity; the original test node ID is retained and the assertion now requires isolation")
           fi
-          # R2 changes the historical llama.cpp request-ID assertion because native
-          # request IDs are no longer globally authoritative: the endpoint scope is now
-          # part of the graph request identity. Grant only this branch/file combination.
           model_runtime_identity_changed=""
           if git diff --name-only "$BASELINE_REF...HEAD" \
               | grep -qx 'tests/test_model_runtime.py'; then
@@ -95,12 +78,6 @@ jobs:
               && -n "$model_runtime_identity_changed" ]]; then
             args+=(--allow-test-change "tests/test_model_runtime.py=AUD-002 only: the historical llama.cpp request ID assertion now includes the sanitized endpoint scope; the test node ID and runtime privacy contract are unchanged")
           fi
-          # fix/provider-isolation: viewer now folds non-loopback IPs into one External
-          # node and Arrange/first-frame use Dagre. Existing tests keep their node IDs
-          # and now assert the new projection and layout. Grant only this branch and
-          # only files that actually differ from the base.
-          # New test files (status A) do not need --allow-test-change; the checker
-          # treats an unused grant as a stale open allowance.
           if [[ "$HEAD_REF" == "fix/provider-isolation" ]]; then
             while IFS= read -r path; do
               case "$path" in
@@ -127,6 +104,9 @@ jobs:
                   ;;
                 tests/test_per_agent_conversation_default.py)
                   args+=(--allow-test-change "tests/test_per_agent_conversation_default.py=isTask recipient/sender checks moved from viewer_agent_panel.py into viewer_agent_panel_default.py; historical test names are unchanged")
+                  ;;
+                tests/test_antigravity_child_panel_policy.py)
+                  args+=(--allow-test-change "tests/test_antigravity_child_panel_policy.py=Agy child user_message is no longer a Task opener; duplicate assignment copies are dropped")
                   ;;
               esac
             done < <(git diff --name-only "$BASELINE_REF...HEAD" -- tests)
