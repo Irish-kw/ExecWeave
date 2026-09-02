@@ -141,9 +141,14 @@ def _request_specs(value: object) -> list[dict[str, Any]] | None:
 
 
 def _parse_result_content(value: object) -> list[dict[str, Any]] | None:
-    if not isinstance(value, str) or not value.startswith(_RESULT_PREFIX):
+    if not isinstance(value, str) or not value:
         return None
-    rest = value[len(_RESULT_PREFIX) :]
+    # Windows/Mac live Agy prefixes Created At / Completed At, then appends a
+    # prose trailer after the JSON objects. Banner-only fixtures hid both.
+    offset = value.find(_RESULT_PREFIX)
+    if offset < 0:
+        return None
+    rest = value[offset + len(_RESULT_PREFIX) :]
     decoder = json.JSONDecoder()
     index = 0
     results: list[dict[str, Any]] = []
@@ -155,7 +160,7 @@ def _parse_result_content(value: object) -> list[dict[str, Any]] | None:
         try:
             decoded, end = decoder.raw_decode(rest, index)
         except json.JSONDecodeError:
-            return None
+            break
         if not isinstance(decoded, dict):
             return None
         results.append(decoded)
