@@ -41,11 +41,6 @@ def _codex_preview(
     if preview.get("thread_id_source") is None and preview.get("thread_id"):
         result["thread_id_source"] = THREAD_ID_PROVIDER_NATIVE
 
-    # Codex's rollout/routing preview is closer to the provider than the graph source
-    # used to open it. A parent rollout can materialize a routing-only child, so the
-    # source identity may still name the parent. Prefer a provider-native rollout/thread
-    # id when one is present, and explicitly clear inherited parent identity when a
-    # routing-only child has no provider-native id of its own.
     thread_id = result.get("thread_id")
     if (
         result.get("thread_id_source") == THREAD_ID_PROVIDER_NATIVE
@@ -63,13 +58,17 @@ def _codex_preview(
         is_root = agent_path == ROOT_PATH
         result["agent_path"] = agent_path
         result["is_root"] = is_root
-        # Codex publishes child paths on session_meta and SubAgentActivity. The root
-        # rollout does not name itself, so "/root" there stays ExecWeave's rendering.
-        result["agent_path_source"] = (
-            PATH_EXECWEAVE_DERIVED if is_root else PATH_PROVIDER_DECLARED
-        )
+        incoming_source = preview.get("agent_path_source")
+        if incoming_source in {PATH_EXECWEAVE_DERIVED, PATH_PROVIDER_DECLARED}:
+            result["agent_path_source"] = incoming_source
+        else:
+            result["agent_path_source"] = (
+                PATH_EXECWEAVE_DERIVED if is_root else PATH_PROVIDER_DECLARED
+            )
         result["topology_state"] = (
-            TOPOLOGY_PROVIDER_REPORTED if is_root else TOPOLOGY_OBSERVED
+            TOPOLOGY_OBSERVED
+            if result["agent_path_source"] == PATH_PROVIDER_DECLARED and not is_root
+            else TOPOLOGY_PROVIDER_REPORTED
         )
         result["parent_agent_path"] = None if is_root else ROOT_PATH
         result["parent_relation_source"] = (
