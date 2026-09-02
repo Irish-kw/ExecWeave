@@ -141,3 +141,32 @@ def _agent_identity(provider: str, source: dict[str, Any] | None) -> dict[str, A
         ),
         **topology.to_dict(),
     }
+
+
+def _message(
+    *,
+    timestamp: object,
+    ordinal: object,
+    kind: str,
+    sender: str | None,
+    recipient: str | None,
+    text: str | None,
+    phase: str | None = None,
+    task_name: str | None = None,
+    content_state: str = "plaintext",
+) -> dict[str, Any]:
+    return {
+        "timestamp": timestamp if isinstance(timestamp, str) else None,
+        "ordinal": (
+            ordinal
+            if isinstance(ordinal, int) and not isinstance(ordinal, bool)
+            else None
+        ),
+        "kind": kind,
+        "sender": sender,
+        "recipient": recipient,
+        "text": _trim_text(text) if isinstance(text, str) and text.strip() else None,
+        "content_state": content_state,
+        "phase": phase,
+        "task_name": task_name,
+    }
