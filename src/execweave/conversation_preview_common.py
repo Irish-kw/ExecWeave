@@ -1,26 +1,27 @@
 from __future__ import annotations
 
-import json
-import re
 from pathlib import Path
 from typing import Any
 
 from .agent_topology import (
-    COMPLETENESS_PROVIDER_TRANSCRIPT,
     THREAD_ID_EXECWEAVE_DERIVED,
     resolve_agent_topology,
+)
+from .conversation_preview_generic import (
+    _generic_content_messages,
+    _response_messages,
+    _routed_agent_message,
+    finish_transcript_preview,
+)
+from .conversation_preview_lines import (
+    _line_transcript_messages,
+    _structured_messages,
 )
 from .conversation_preview_transcript import (
     _antigravity_inbound_message_text,
     _antigravity_send_message_text,
     _antigravity_user_text,
-    _generic_content_messages,
-    _line_transcript_messages,
-    _response_messages,
-    _routed_agent_message,
-    _structured_messages,
     _text_parts,
-    finish_transcript_preview,
 )
 
 _MAX_PREVIEW_MESSAGES = 80
@@ -44,29 +45,6 @@ _PROVIDER_LABELS = {
     "openai_compatible": "OpenAI-compatible",
 }
 
-_USER_KINDS = (
-    "user_prompt",
-    "user_message",
-    "request_prompt",
-    "prompt_submission_candidate",
-)
-_ASSISTANT_FINAL_KINDS = (
-    "assistant_final_response",
-    "subagent_final_response",
-    "completed_text",
-)
-_ASSISTANT_RESPONSE_KINDS = (
-    "assistant_response",
-    "assistant_display",
-)
-_SUBAGENT_TASK_KINDS = (
-    "subagent_task",
-    "subagent_description",
-    "subtask_prompt",
-    "subtask_description",
-)
-_SUBAGENT_SUMMARY_KINDS = ("subagent_summary", "subagent_final_response")
-
 
 def _trim_text(value: str) -> str:
     value = value.strip()
@@ -81,6 +59,8 @@ def _read_value(path: Path) -> Any:
     except (OSError, UnicodeError):
         return None
     if path.suffix.lower() == ".json":
+        import json
+
         try:
             return json.loads(text)
         except json.JSONDecodeError:
@@ -101,12 +81,6 @@ def _source_attributes(source: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def _agent_identity(provider: str, source: dict[str, Any] | None) -> dict[str, Any]:
-    """Project one agent node into the conversation schema, provenance intact.
-
-    Root/child classification comes from :func:`resolve_agent_topology`, which
-    requires positive provider evidence before calling anything a child. An agent
-    ExecWeave cannot place is root, not a fabricated subagent.
-    """
     source = source if isinstance(source, dict) else {}
     attrs = _source_attributes(source)
     source_id = source.get("id")
@@ -114,11 +88,9 @@ def _agent_identity(provider: str, source: dict[str, Any] | None) -> dict[str, A
     source_id_text = source_id if isinstance(source_id, str) else ""
     provider_label = _provider_label(provider)
     provider_key = provider.lower() or "provider"
-
     topology = resolve_agent_topology(source)
     agent_path = topology.agent_path
     is_root = topology.is_root
-
     native_label = (
         attrs.get("agent_nickname")
         or attrs.get("agent_type")
@@ -132,14 +104,12 @@ def _agent_identity(provider: str, source: dict[str, Any] | None) -> dict[str, A
         agent_label = native_label.strip()
     else:
         agent_label = agent_path.rsplit("/", 1)[-1] or "Agent"
-
     if is_root:
         thread_id = f"{provider_key}:root"
         parent_thread_id = None
     else:
         thread_id = f"{provider_key}:{source_id_text or agent_path}"
         parent_thread_id = f"{provider_key}:root"
-
     return {
         "thread_id": thread_id,
         "thread_id_source": THREAD_ID_EXECWEAVE_DERIVED,
@@ -169,11 +139,7 @@ def _message(
 ) -> dict[str, Any]:
     return {
         "timestamp": timestamp if isinstance(timestamp, str) else None,
-        "ordinal": (
-            ordinal
-            if isinstance(ordinal, int) and not isinstance(ordinal, bool)
-            else None
-        ),
+        "ordinal": ordinal if isinstance(ordinal, int) and not isinstance(ordinal, bool) else None,
         "kind": kind,
         "sender": sender,
         "recipient": recipient,
