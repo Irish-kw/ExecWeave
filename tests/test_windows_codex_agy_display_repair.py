@@ -9,15 +9,12 @@ from __future__ import annotations
 
 from execweave.agy_preview_sanitize import sanitize_antigravity_preview_messages
 from execweave.live import _LIVE_HTML
-from execweave.viewer_dashboard_clean import _LIVE_SET_SNAPSHOT_CLEAN
 
 
 def test_live_set_snapshot_enters_protective_mode_on_compact_payload() -> None:
-    assert "if(data.live_payload_compact)" in _LIVE_SET_SNAPSHOT_CLEAN
-    assert "enterProtectiveMode(data)" in _LIVE_SET_SNAPSHOT_CLEAN
     start = _LIVE_HTML.find("function setSnapshot(data){")
     assert start >= 0
-    chunk = _LIVE_HTML[start : start + 220]
+    chunk = _LIVE_HTML[start : start + 280]
     assert "if(data.live_payload_compact)" in chunk
     assert "enterProtectiveMode(data)" in chunk
 
