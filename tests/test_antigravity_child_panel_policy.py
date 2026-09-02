@@ -15,9 +15,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_agy_does_not_copy_codex_user_message_task_rule() -> None:
-    # Child-addressed user_message is an opener. Root user_message is not,
-    # because isTask still requires recipient===path.
-    assert "kind==='user_message'" in ANTIGRAVITY_CHILD_ROUNDS_JS
+    # Duplicate parent-assignment copies arrive as user_message; they are not
+    # Task openers. Root user_message is also excluded by recipient===path.
+    assert "kind!=='user_message'" in ANTIGRAVITY_CHILD_ROUNDS_JS
     assert "recipient||'')===path" in ANTIGRAVITY_CHILD_ROUNDS_JS
     assert "kind==='user_message'" in CODEX_CHILD_ROUNDS_JS
     assert "antigravity_addressed_task" in ANTIGRAVITY_CHILD_ROUNDS_JS
