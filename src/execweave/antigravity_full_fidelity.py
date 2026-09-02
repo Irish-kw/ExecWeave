@@ -104,6 +104,31 @@ def _assignment_event(
     }
 
 
+def _child_session_event(*, assignment: dict[str, Any], parent_id: str) -> dict[str, Any]:
+    """Connect the parent conversation agent to the child on the viewer graph."""
+    child = assignment.get("target")
+    child = child if isinstance(child, dict) else {}
+    parent = _entity(
+        "agent",
+        f"agent:antigravity:conversation:{parent_id}",
+        name="Antigravity conversation",
+        attributes={
+            "provider": "antigravity",
+            "conversation_id": parent_id,
+            "identity_semantics": "provider_conversation_id",
+        },
+    )
+    attributes = assignment.get("attributes")
+    return {
+        "timestamp": assignment.get("timestamp"),
+        "event_type": "semantic.antigravity.agent_session.child",
+        "relation": "HAS_CHILD_AGENT_SESSION",
+        "source": parent,
+        "target": child,
+        "attributes": dict(attributes) if isinstance(attributes, dict) else {},
+    }
+
+
 def _child_task_content_event(
     *,
     assignment: dict[str, Any],
@@ -178,6 +203,7 @@ def _subagent_assignment_events(
             spec=spec,
         )
         events.append(assignment)
+        events.append(_child_session_event(assignment=assignment, parent_id=conversation_id))
         task_content = _child_task_content_event(
             assignment=assignment,
             spec=spec,
@@ -227,6 +253,7 @@ def _transcript_assignment_events(
             spec=spec,
         )
         events.append(assignment)
+        events.append(_child_session_event(assignment=assignment, parent_id=conversation_id))
         task_content = _child_task_content_event(
             assignment=assignment,
             spec=spec,
