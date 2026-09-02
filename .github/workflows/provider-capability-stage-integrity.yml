@@ -132,6 +132,9 @@ jobs:
                 tests/test_ollama_panel_policy.py)
                   args+=(--allow-test-change "tests/test_ollama_panel_policy.py=Windows node subprocess must decode panel JS as UTF-8")
                   ;;
+                tests/test_per_agent_conversation_default.py)
+                  args+=(--allow-test-change "tests/test_per_agent_conversation_default.py=isTask recipient/sender checks moved from viewer_agent_panel.py into viewer_agent_panel_default.py; historical test names are unchanged")
+                  ;;
               esac
             done < <(git diff --name-only "$BASELINE_REF...HEAD" -- tests)
           fi
