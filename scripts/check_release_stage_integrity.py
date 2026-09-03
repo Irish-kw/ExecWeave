@@ -161,7 +161,10 @@ def _pytest_node_ids(tree: Path) -> set[str]:
     }
 
 
-def _assert_test_identity_floor(baseline_ref: str) -> tuple[int, int]:
+def _assert_test_identity_floor(
+    baseline_ref: str,
+    allowed_test_paths: set[str] | None = None,
+) -> tuple[int, int]:
     current = _pytest_node_ids(ROOT)
     with tempfile.TemporaryDirectory(prefix="execweave-baseline-") as tmp:
         baseline_tree = Path(tmp)
@@ -172,10 +175,12 @@ def _assert_test_identity_floor(baseline_ref: str) -> tuple[int, int]:
             "test node-ID collection returned an empty set; refusing a vacuous subset check: "
             f"baseline={len(baseline)} current={len(current)}"
         )
+    allowed_paths = allowed_test_paths or set()
     missing = sorted(
         node_id
         for node_id in baseline - current
-        if not any(provider in node_id.lower() for provider in _RETIRED_PROVIDERS)
+        if node_id.split("::", 1)[0] not in allowed_paths
+        and not any(provider in node_id.lower() for provider in _RETIRED_PROVIDERS)
     )
     if missing:
         preview = "\n".join(missing[:25])
@@ -651,12 +656,15 @@ def main() -> int:
     retired_provider_allowances = _parse_retired_provider_allowances(
         args.allow_retired_provider
     )
+    test_change_allowances = _parse_test_change_allowances(args.allow_test_change)
     _RETIRED_PROVIDERS.clear()
     _RETIRED_PROVIDERS.update(retired_provider_allowances)
-    baseline_count, current_count = _assert_test_identity_floor(args.baseline_ref)
+    baseline_count, current_count = _assert_test_identity_floor(
+        args.baseline_ref, set(test_change_allowances)
+    )
     added_tests, allowed_test_changes = _assert_existing_tests_untouched(
         args.baseline_ref,
-        _parse_test_change_allowances(args.allow_test_change),
+        test_change_allowances,
         retired_provider_allowances,
     )
     _assert_no_new_skip_or_xfail(args.baseline_ref)
