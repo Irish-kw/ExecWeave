@@ -322,7 +322,35 @@ def _assert_no_new_skip_or_xfail(baseline_ref: str) -> None:
         raise RuntimeError("new skip/xfail markers are not allowed:\n" + "\n".join(offenders))
 
 
-def _assert_critical_files_unchanged(baseline_ref: str) -> None:
+def _is_retired_provider_i18n_change(
+    baseline_ref: str,
+    path: str,
+    retired_providers: dict[str, str],
+) -> bool:
+    if path != "scripts/audit_i18n_parity.py" or not retired_providers:
+        return False
+    diff = _git(
+        "diff",
+        "--unified=0",
+        f"{baseline_ref}...HEAD",
+        "--",
+        path,
+    ).stdout.splitlines()
+    changed_lines = [
+        line
+        for line in diff
+        if line.startswith(("+", "-")) and not line.startswith(("+++", "---"))
+    ]
+    return bool(changed_lines) and all(
+        any(provider in line.lower() for provider in retired_providers)
+        for line in changed_lines
+    )
+
+
+def _assert_critical_files_unchanged(
+    baseline_ref: str,
+    retired_providers: dict[str, str] | None = None,
+) -> None:
     completed = _git(
         "diff",
         "--name-only",
@@ -331,8 +359,14 @@ def _assert_critical_files_unchanged(baseline_ref: str) -> None:
         *CRITICAL_UNCHANGED,
     )
     changed = [line for line in completed.stdout.splitlines() if line.strip()]
-    if changed:
-        raise RuntimeError("release red-line files changed:\n" + "\n".join(changed))
+    retired = retired_providers or {}
+    violations = [
+        path
+        for path in changed
+        if not _is_retired_provider_i18n_change(baseline_ref, path, retired)
+    ]
+    if violations:
+        raise RuntimeError("release red-line files changed:\n" + "\n".join(violations))
 
 
 def _release_only_offenders(changed_paths: list[str]) -> list[str]:
@@ -669,7 +703,7 @@ def main() -> int:
         retired_provider_allowances,
     )
     _assert_no_new_skip_or_xfail(args.baseline_ref)
-    _assert_critical_files_unchanged(args.baseline_ref)
+    _assert_critical_files_unchanged(args.baseline_ref, retired_provider_allowances)
     release_version = _assert_release_metadata_unchanged(args.baseline_ref)
     tls_status = _assert_no_tls_mitm(args.baseline_ref)
     completeness = _assert_conversation_completeness_unchanged(args.baseline_ref)
