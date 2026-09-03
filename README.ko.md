@@ -1,4 +1,4 @@
-> Codex + AGY는 전체 재정비가 완료되었습니다. 나머지 provider는 아직 수정이 완료되지 않았습니다.
+> Codex + AGY 및 나머지 지원 provider의 conversation history, dashboard graph, raw event, file target 정렬이 완료되었습니다.
 
 # ExecWeave
 
@@ -32,7 +32,7 @@ ExecWeave는 source-available, local-first observability 프로젝트입니다. 
   <img src="docs/assets/codex.gif" alt="ExecWeave animated live demo" width="100%">
 </p>
 
-이 README는 **v0.8.7**을 설명합니다.
+이 README는 **v0.8.8**을 설명합니다.
 
 ## 왜 ExecWeave인가
 

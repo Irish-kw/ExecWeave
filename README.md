@@ -1,4 +1,4 @@
-> Codex + AGY are now fully reworked; the remaining providers are not yet fully fixed.
+> Codex + AGY and the remaining supported providers now have aligned conversation history, dashboard graph, raw-event, and file-target coverage.
 
 # ExecWeave
 
@@ -32,7 +32,7 @@ ExecWeave is a source-available, local-first observability project that turns AI
   <img src="docs/assets/codex.gif" alt="ExecWeave animated live demo" width="100%">
 </p>
 
-This README documents **v0.8.7**.
+This README documents **v0.8.8**.
 
 ## Why ExecWeave
 

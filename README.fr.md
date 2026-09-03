@@ -1,4 +1,4 @@
-> Codex + AGY ont maintenant été entièrement remaniés ; les autres providers ne sont pas encore complètement corrigés.
+> Codex + AGY et les autres providers pris en charge disposent désormais d’une couverture alignée pour l’historique des conversations, le dashboard graph, les raw events et les file targets.
 
 # ExecWeave
 
@@ -32,7 +32,7 @@ ExecWeave est un projet d’observabilité source-available et local-first qui t
   <img src="docs/assets/codex.gif" alt="ExecWeave animated live demo" width="100%">
 </p>
 
-Ce README décrit **v0.8.7**.
+Ce README décrit **v0.8.8**.
 
 ## Pourquoi ExecWeave
 

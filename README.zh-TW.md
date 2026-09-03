@@ -1,4 +1,4 @@
-> Codex + AGY 已完成完整重整；其餘 provider 尚未修正完畢。
+> Codex + AGY 與其餘受支援 provider 現已完成 conversation history、dashboard graph、raw event 與 file target 對齊。
 
 # ExecWeave
 
@@ -32,7 +32,7 @@ ExecWeave 是一個 source-available、local-first 的可觀測性專案，會�
   <img src="docs/assets/codex.gif" alt="ExecWeave animated live demo" width="100%">
 </p>
 
-本 README 對應 **v0.8.7**。
+本 README 對應 **v0.8.8**。
 
 ## 為什麼是 ExecWeave
 
