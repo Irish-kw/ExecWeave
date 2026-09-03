@@ -111,4 +111,22 @@ jobs:
               esac
             done < <(git diff --name-only "$BASELINE_REF...HEAD" -- tests)
           fi
+          if [[ "$HEAD_REF" == "audit/remaining-providers-v0.8.7" ]]; then
+            while IFS= read -r path; do
+              case "$path" in
+                tests/test_antigravity_child_transcript_tools.py)
+                  args+=(--allow-test-change "tests/test_antigravity_child_transcript_tools.py=AGY child transcript coverage now includes apply_patch file targets and preserves the historical test node IDs")
+                  ;;
+                tests/test_antigravity_invocation_archive.py)
+                  args+=(--allow-test-change "tests/test_antigravity_invocation_archive.py=AGY PostToolUse archives root and validated child transcript history without requiring child Stop; historical test node IDs remain stable")
+                  ;;
+                tests/test_claude_adapter.py)
+                  args+=(--allow-test-change "tests/test_claude_adapter.py=Claude apply_patch now declares each changed file so tool-to-file graph linkage is testable; historical test node IDs remain stable")
+                  ;;
+                tests/test_external_endpoints_all_providers.py)
+                  args+=(--allow-test-change "tests/test_external_endpoints_all_providers.py=external endpoint fixture records the additional observed provider address; historical test node IDs remain stable")
+                  ;;
+              esac
+            done < <(git diff --name-only "$BASELINE_REF...HEAD" -- tests)
+          fi
           python scripts/check_release_stage_integrity.py "${args[@]}"

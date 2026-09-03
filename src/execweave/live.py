@@ -8,6 +8,7 @@ from collections import deque
 from . import live_core as _core
 from .conversation_records import conversation_index_payload
 from .dashboard_shell import DASHBOARD_HTML
+from .viewer_limits import resolve_viewer_limits
 from .viewer_projection import (
     internal_hook_process_ids_in_event,
     project_viewer_graph,
@@ -46,10 +47,13 @@ _RUN_CONTENT_ROUTE_RE = re.compile(r"^/content/sha256/[0-9a-f]{64}\.(?:json|txt|
 
 def _within_live_payload_budget(node_count: int, edge_count: int) -> bool:
     estimated_dom = node_count * 4 + edge_count * 3
+    max_nodes, max_edges, max_dom_elements = resolve_viewer_limits(
+        defaults=(VIEWER_MAX_NODES, VIEWER_MAX_EDGES, VIEWER_MAX_DOM_ELEMENTS)
+    )
     return (
-        node_count <= VIEWER_MAX_NODES
-        and edge_count <= VIEWER_MAX_EDGES
-        and estimated_dom <= VIEWER_MAX_DOM_ELEMENTS
+        node_count <= max_nodes
+        and edge_count <= max_edges
+        and estimated_dom <= max_dom_elements
     )
 
 

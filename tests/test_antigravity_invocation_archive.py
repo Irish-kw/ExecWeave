@@ -121,3 +121,117 @@ def test_antigravity_preinvocation_archives_existing_transcript(tmp_path: Path) 
         timestamp="2026-09-01T13:04:01Z",
     )
     assert [event["relation"] for event in events].count("HAS_CONVERSATION_TRANSCRIPT") == 1
+
+
+def test_antigravity_posttooluse_archives_root_and_validated_child_without_child_stop(
+    tmp_path: Path,
+) -> None:
+    """A parent result is enough to preserve root and child conversation history."""
+    root_id = "conversation-parent-posttool"
+    child_id = "conversation-child-posttool"
+    root_transcript = _brain_transcript(tmp_path, root_id)
+    child_transcript = _brain_transcript(tmp_path, child_id)
+    specs = [
+        {
+            "Model": "inherit",
+            "Prompt": "child task from parent",
+            "Role": "Worker",
+            "TypeName": "worker",
+            "Workspace": "inherit",
+        }
+    ]
+    root_result = (
+        "Created the following subagents:\n"
+        + json.dumps(
+            {
+                "conversationId": child_id,
+                "logAbsoluteUri": child_transcript.as_uri(),
+                "workspaceUris": [tmp_path.as_uri()],
+            }
+        )
+    )
+    root_transcript.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "step_index": 0,
+                        "source": "MODEL",
+                        "type": "PLANNER_RESPONSE",
+                        "status": "DONE",
+                        "tool_calls": [{"name": "invoke_subagent", "args": {"Subagents": specs}}],
+                    }
+                ),
+                json.dumps(
+                    {
+                        "step_index": 1,
+                        "source": "MODEL",
+                        "type": "GENERIC",
+                        "status": "DONE",
+                        "content": root_result,
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    child_transcript.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "step_index": 0,
+                        "source": "USER_EXPLICIT",
+                        "type": "USER_INPUT",
+                        "status": "DONE",
+                        "content": "<USER_REQUEST>child prompt</USER_REQUEST>",
+                    }
+                ),
+                json.dumps(
+                    {
+                        "step_index": 1,
+                        "source": "MODEL",
+                        "type": "PLANNER_RESPONSE",
+                        "status": "DONE",
+                        "content": "child response",
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    run_root = tmp_path / "run"
+    store = FullFidelityContentStore(run_root)
+    payload = {
+        "conversationId": root_id,
+        "workspacePaths": [str(tmp_path)],
+        "transcriptPath": str(root_transcript),
+        "stepIdx": 0,
+        "toolCall": {"name": "invoke_subagent", "args": {"Subagents": specs}},
+    }
+    events = antigravity_hook_to_content_events(
+        payload,
+        hook_event="PostToolUse",
+        store=store,
+        timestamp="2026-09-01T13:05:00Z",
+    )
+    assert [event["relation"] for event in events].count("HAS_CONVERSATION_TRANSCRIPT") == 2
+
+    graph = GraphAccumulator(session_id="agy-posttooluse", source_path=tmp_path / "events.jsonl")
+    for event in events:
+        graph.apply(event)
+    entries = conversation_record_entries(graph.to_dict(), run_root)
+    source_ids = {entry.get("source_id") for entry in entries}
+    assert f"agent:antigravity:conversation:{root_id}" in source_ids
+    child_entry = next(
+        entry
+        for entry in entries
+        if entry.get("source_id") == f"agent:antigravity:conversation:{child_id}"
+    )
+    preview = child_entry["conversation_preview"]
+    texts = [message["text"] for message in preview["messages"]]
+    assert "child prompt" in texts
+    assert "child response" in texts
+    assert "child task from parent" in texts

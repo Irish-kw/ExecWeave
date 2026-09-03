@@ -36,6 +36,44 @@ _VISIBILITY: dict[str, dict[str, str]] = {
         "subagent_visibility": "not_exposed_by_source",
         "reasoning_visibility": "not_exposed_by_source",
     },
+    # Model runtimes expose a request/response surface, not provider-owned
+    # subagent lifecycle identities. Keep this explicit so the viewer does not
+    # confuse a deliberate root-only boundary with an unsupported provider.
+    "ollama": {
+        "agent_identity_visibility": "provider_root_only",
+        "subagent_visibility": "not_exposed_by_source",
+        "reasoning_visibility": "not_exposed_by_source",
+    },
+    "llamacpp": {
+        "agent_identity_visibility": "provider_root_only",
+        "subagent_visibility": "not_exposed_by_source",
+        "reasoning_visibility": "not_exposed_by_source",
+    },
+    "llama.cpp": {
+        "agent_identity_visibility": "provider_root_only",
+        "subagent_visibility": "not_exposed_by_source",
+        "reasoning_visibility": "not_exposed_by_source",
+    },
+    "vllm": {
+        "agent_identity_visibility": "provider_root_only",
+        "subagent_visibility": "not_exposed_by_source",
+        "reasoning_visibility": "not_exposed_by_source",
+    },
+    "lmstudio": {
+        "agent_identity_visibility": "provider_root_only",
+        "subagent_visibility": "not_exposed_by_source",
+        "reasoning_visibility": "not_exposed_by_source",
+    },
+    "openai-compatible": {
+        "agent_identity_visibility": "provider_root_only",
+        "subagent_visibility": "not_exposed_by_source",
+        "reasoning_visibility": "not_exposed_by_source",
+    },
+    "openai_compatible": {
+        "agent_identity_visibility": "provider_root_only",
+        "subagent_visibility": "not_exposed_by_source",
+        "reasoning_visibility": "not_exposed_by_source",
+    },
 }
 
 
@@ -60,6 +98,13 @@ _PROVIDER_ROOT_AGENTS: dict[str, tuple[str, str]] = {
     "cursor": ("agent:Cursor", "Cursor"),
     "opencode": ("agent:OpenCode", "OpenCode"),
     "antigravity": ("agent:Antigravity", "Antigravity"),
+    "ollama": ("agent:Ollama", "Ollama"),
+    "llamacpp": ("agent:llama.cpp", "llama.cpp"),
+    "llama.cpp": ("agent:llama.cpp", "llama.cpp"),
+    "vllm": ("agent:vLLM", "vLLM"),
+    "lmstudio": ("agent:LM Studio", "LM Studio"),
+    "openai-compatible": ("agent:OpenAI-compatible", "OpenAI-compatible"),
+    "openai_compatible": ("agent:OpenAI-compatible", "OpenAI-compatible"),
 }
 
 

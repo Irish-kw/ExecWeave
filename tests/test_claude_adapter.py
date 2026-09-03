@@ -42,6 +42,35 @@ def test_pretooluse_bash_creates_tool_call_and_bounded_command() -> None:
     assert all(event["attributes"]["causal"] is False for event in events)
 
 
+def test_pretooluse_bash_apply_patch_declares_each_file_target() -> None:
+    patch = "\n".join(
+        [
+            "*** Begin Patch",
+            "*** Add File: notes/first.md",
+            "+first",
+            "*** Update File: notes/second.md",
+            "@@",
+            "-old",
+            "+new",
+            "*** End Patch",
+        ]
+    )
+    events = claude_hook_to_semantic_events(
+        {
+            **_base("PreToolUse"),
+            "cwd": "/repo",
+            "tool_name": "Bash",
+            "tool_use_id": "toolu_patch",
+            "tool_input": {"command": patch},
+        },
+        timestamp="2026-08-25T03:00:00Z",
+    )
+
+    declared = [event for event in events if event["relation"] == "DECLARED_TARGET"]
+    assert {event["target"]["name"] for event in declared} == {"first.md", "second.md"}
+    assert {event["attributes"]["patch_operation"] for event in declared} == {"add", "update"}
+
+
 def test_write_declares_file_target_without_storing_content() -> None:
     secret = "TOP-SECRET-CONTENT"
     payload = {

@@ -51,7 +51,13 @@ def test_child_transcript_write_to_file_is_owned_by_child_agent(tmp_path: Path) 
                             "TargetFile": json.dumps(str(target)),
                             "CodeContent": json.dumps("# child"),
                         },
-                    }
+                    },
+                    {
+                        "name": "apply_patch",
+                        "args": {
+                            "patch": "*** Begin Patch\n*** Add File: agent_child_apply_patch.md\n+# child patch\n*** End Patch"
+                        },
+                    },
                 ],
             }
         ],
@@ -124,12 +130,29 @@ def test_child_transcript_write_to_file_is_owned_by_child_agent(tmp_path: Path) 
         for edge in graph.to_dict()["edges"]
         if edge["source"] == child_agent and edge["relation"] == "REQUESTED_TOOL_CALL"
     ]
-    assert len(child_tool_calls) == 1
-    tool_call = child_tool_calls[0]["target"]
+    assert len(child_tool_calls) == 2
+    graph_nodes = {node["id"]: node for node in graph.to_dict()["nodes"]}
+    tool_call = next(
+        edge["target"]
+        for edge in child_tool_calls
+        if graph_nodes[edge["target"]]["attributes"]["tool_name"] == "write_to_file"
+    )
+    patch_tool_call = next(
+        edge["target"]
+        for edge in child_tool_calls
+        if graph_nodes[edge["target"]]["attributes"]["tool_name"] == "apply_patch"
+    )
     file_id = f"file:{target.resolve()}"
     assert any(
         edge["source"] == tool_call
         and edge["relation"] == "DECLARED_TARGET"
         and edge["target"] == file_id
+        for edge in graph.to_dict()["edges"]
+    )
+    patch_file_id = f"file:{(tmp_path / 'agent_child_apply_patch.md').resolve()}"
+    assert any(
+        edge["source"] == patch_tool_call
+        and edge["relation"] == "DECLARED_TARGET"
+        and edge["target"] == patch_file_id
         for edge in graph.to_dict()["edges"]
     )

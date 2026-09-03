@@ -64,6 +64,7 @@ def test_one_external_node_holds_ips_from_every_provider_process() -> None:
         "20.27.177.113:443",
         "172.217.113.4:443",
         "8.8.8.8:443",
+        "104.18.25.193:443",
         "13.107.42.14:443",
     }
     assert all(":" in item and item == format_endpoint_address(item) for item in addresses)

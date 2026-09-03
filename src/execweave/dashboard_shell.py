@@ -6,6 +6,7 @@ from typing import Any
 from .live_view import LIVE_HTML as _BASE_LIVE_HTML
 from .viewer_agent_panel import inject_agent_panel
 from .viewer_dashboard_clean import fold_budget_bootstrap, inject_live_dashboard_clean
+from .viewer_limits import resolve_viewer_limits, viewer_limits_bootstrap
 from .viewer_dashboard_focus import inject_live_dashboard_focus
 from .viewer_live_layout import inject_live_dashboard_layout
 
@@ -63,6 +64,7 @@ def render_static_dashboard_html(
     bootstrap = (
         "<script>window.__execweaveStaticMode=true;"
         f"{fold_budget_bootstrap()}"
+        f"{viewer_limits_bootstrap(resolve_viewer_limits())}"
         f"window.__execweaveStaticGraph={_safe_json(graph)};"
         f"window.__execweaveStaticConversations={_safe_json(conversation_entries or [])};"
         "</script>\n"

@@ -1,0 +1,116 @@
+name: Provider Dashboard Contract
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: provider-dashboard-contract-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+jobs:
+  provider:
+    name: ${{ matrix.provider }} history/dashboard/raw contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - provider: claude
+            tests: >-
+              tests/test_claude_child_transcript_tools.py
+              tests/test_claude_full_fidelity.py
+              tests/test_claude_hook_viewer.py
+              tests/test_provider_conversation_evidence.py
+          - provider: codex
+            tests: >-
+              tests/test_codex_archive_full_fidelity.py
+              tests/test_codex_real_multi_agent_conversation.py
+              tests/test_codex_conversation_isolation.py
+              tests/test_codex_child_panel_policy.py
+              tests/test_codex_rollout_trace.py
+              tests/test_provider_conversation_evidence.py
+          - provider: agy
+            tests: >-
+              tests/test_antigravity_root_child_history_v2.py
+              tests/test_antigravity_invocation_archive.py
+              tests/test_antigravity_child_transcript_tools.py
+              tests/test_antigravity_role_path_fallback.py
+              tests/test_agy_windows_wire_acceptance.py
+              tests/test_provider_conversation_evidence.py
+              tests/test_provider_conversation_history_integrity.py
+          - provider: cursor
+            tests: >-
+              tests/test_cursor_full_fidelity.py
+              tests/test_cursor_task_linkage.py
+              tests/test_cursor_delegation.py
+              tests/test_provider_conversation_evidence.py
+          - provider: opencode
+            tests: >-
+              tests/test_opencode_full_fidelity.py
+              tests/test_opencode_task_session_linkage.py
+              tests/test_opencode_event_lifecycle.py
+              tests/test_opencode_identity_unification.py
+              tests/test_provider_conversation_evidence.py
+          - provider: ollama
+            tests: >-
+              tests/test_model_runtime.py
+              tests/test_model_runtime_full_fidelity.py
+              tests/test_provider_conversation_history_integrity.py
+          - provider: llamacpp
+            tests: >-
+              tests/test_model_runtime.py
+              tests/test_model_runtime_full_fidelity.py
+              tests/test_conversation_provider_parity.py
+          - provider: vllm
+            tests: >-
+              tests/test_model_runtime.py
+              tests/test_model_runtime_full_fidelity.py
+              tests/test_conversation_provider_parity.py
+          - provider: lmstudio
+            tests: >-
+              tests/test_model_runtime.py
+              tests/test_model_runtime_full_fidelity.py
+              tests/test_conversation_provider_parity.py
+          - provider: anthropic
+            tests: >-
+              tests/test_anthropic.py
+              tests/test_inference_gateway_full_fidelity.py
+              tests/test_conversation_provider_parity.py
+          - provider: openrouter
+            tests: >-
+              tests/test_inference_gateway_full_fidelity.py
+              tests/test_conversation_provider_parity.py
+          - provider: litellm
+            tests: >-
+              tests/test_inference_gateway_full_fidelity.py
+              tests/test_conversation_provider_parity.py
+          - provider: openai-compatible
+            tests: >-
+              tests/test_model_runtime.py
+              tests/test_model_runtime_full_fidelity.py
+              tests/test_conversation_provider_parity.py
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install test dependencies
+        run: python -m pip install -e ".[dev]"
+      - name: Run provider history, dashboard, and raw-event contract
+        env:
+          EXECWEAVE_PROVIDER_MATRIX: ${{ matrix.provider }}
+        run: >-
+          python -m pytest -q
+          tests/test_provider_dashboard_contract.py
+          ${{ matrix.tests }}
+      - name: Check dashboard JavaScript syntax
+        run: python -m pytest -q tests/test_live_dashboard_js.py tests/test_live_dashboard.py

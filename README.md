@@ -244,6 +244,10 @@ Derived correlation never rewrites raw runtime or provider sidecar evidence.
 
 ## Limits and privacy
 
+The default dashboard safety budget is 1,500 nodes, 4,000 edges, and approximately 5,000 SVG elements. Override it for a rendered run with `--viewer-max-nodes N`, `--viewer-max-edges N`, and `--viewer-max-dom-elements N` on `view`, `record`, or `live`. The equivalent environment variables are `EXECWEAVE_VIEWER_MAX_NODES`, `EXECWEAVE_VIEWER_MAX_EDGES`, and `EXECWEAVE_VIEWER_MAX_DOM_ELEMENTS`.
+
+Every pull request also runs the Provider Dashboard Contract matrix. It checks provider-neutral root history, provider-reported subagent history where available, dashboard graph projection, External endpoint aggregation, file/tool edges such as `.md` targets, and raw process/filesystem/network events. The matrix covers Claude, Codex, AGY (Antigravity), Cursor, OpenCode, Ollama, llama.cpp, vLLM, LM Studio, and the supported gateway providers. Root-only model runtimes and gateways are tested as root-only by design.
+
 - The portable collector runs on Linux, macOS, and Windows. Portable filesystem observation is session-correlated rather than process-causal, and polling can miss sufficiently short-lived activity.
 - Linux also has a syscall-backed `strace` reference backend with stronger process-attributed syscall evidence for supported executions.
 - Native Linux eBPF, Windows ETW, and macOS Endpoint Security collectors remain planned work, not current claims.

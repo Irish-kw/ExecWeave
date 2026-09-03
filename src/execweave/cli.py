@@ -26,6 +26,7 @@ from .validate import validate_event_stream
 from .viewer import build_viewer_from_graph
 from .workflow import record_to_viewer
 from .viewer_dashboard_clean import add_fold_budget_argument, apply_fold_budget
+from .viewer_limits import apply_viewer_limits, viewer_limit_option
 
 
 def _add_collection_arguments(parser: argparse.ArgumentParser) -> None:
@@ -97,6 +98,31 @@ def _add_live_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_viewer_limit_arguments(parser: argparse.ArgumentParser) -> None:
+    """Expose browser safety budgets on every command that renders a dashboard."""
+    parser.add_argument(
+        "--viewer-max-nodes",
+        type=viewer_limit_option,
+        default=None,
+        metavar="N",
+        help="Maximum graph nodes rendered in the dashboard (default: 1500).",
+    )
+    parser.add_argument(
+        "--viewer-max-edges",
+        type=viewer_limit_option,
+        default=None,
+        metavar="N",
+        help="Maximum graph edges rendered in the dashboard (default: 4000).",
+    )
+    parser.add_argument(
+        "--viewer-max-dom-elements",
+        type=viewer_limit_option,
+        default=None,
+        metavar="N",
+        help="Maximum estimated SVG elements rendered (default: 5000).",
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="execweave",
@@ -132,6 +158,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Open the generated viewer after the command exits",
     )
     add_fold_budget_argument(record)
+    _add_viewer_limit_arguments(record)
     record.add_argument("command", nargs=argparse.REMAINDER, help="Command to execute")
 
     live = subparsers.add_parser(
@@ -140,6 +167,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_live_arguments(live)
     add_fold_budget_argument(live)
+    _add_viewer_limit_arguments(live)
     live.add_argument("command", nargs=argparse.REMAINDER, help="Command to execute")
 
     subparsers.add_parser("doctor", help="Show runtime collector availability")
@@ -294,6 +322,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Open the generated viewer in the default browser",
     )
     add_fold_budget_argument(view)
+    _add_viewer_limit_arguments(view)
     return parser
 
 
@@ -308,6 +337,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     apply_fold_budget(getattr(args, "fold_budget", None))
+    apply_viewer_limits(
+        getattr(args, "viewer_max_nodes", None),
+        getattr(args, "viewer_max_edges", None),
+        getattr(args, "viewer_max_dom_elements", None),
+    )
 
     if args.subcommand == "doctor":
         print(json.dumps(backend_diagnostics(), indent=2, sort_keys=True))

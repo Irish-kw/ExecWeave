@@ -303,7 +303,7 @@ def antigravity_conversation_archive_events(
     store: FullFidelityContentStore,
     timestamp: str,
 ) -> list[dict[str, Any]]:
-    """Snapshot only a validated Antigravity brain transcript supplied by the Stop hook."""
+    """Snapshot only a validated Antigravity brain transcript supplied by a hook."""
     conversation_id = payload.get("conversationId")
     if not isinstance(conversation_id, str) or not conversation_id:
         return []
