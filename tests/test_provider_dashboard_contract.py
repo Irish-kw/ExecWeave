@@ -37,12 +37,11 @@ NATIVE_SUBAGENT_PROVIDERS = {
 }
 
 
-def _require_provider(provider: str) -> None:
+def _selected_providers() -> tuple[str, ...]:
     selected = os.environ.get("EXECWEAVE_PROVIDER_MATRIX", "").strip().lower()
     if selected == "agy":
         selected = "antigravity"
-    if selected and selected != provider:
-        pytest.skip(f"provider matrix selected {selected}")
+    return (selected,) if selected in ALL_PROVIDERS else ALL_PROVIDERS
 
 
 def _content_node(provider: str, *, digest: str) -> dict[str, object]:
@@ -139,11 +138,10 @@ def _dashboard_graph(provider: str) -> dict[str, object]:
     }
 
 
-@pytest.mark.parametrize("provider", ALL_PROVIDERS)
+@pytest.mark.parametrize("provider", _selected_providers())
 def test_every_provider_keeps_dashboard_graph_raw_events_and_file_targets(
     provider: str,
 ) -> None:
-    _require_provider(provider)
     graph = _dashboard_graph(provider)
     projected = project_viewer_graph(graph)
     node_ids = {node["id"] for node in projected["nodes"]}
@@ -196,12 +194,11 @@ def _runtime_event(
     }
 
 
-@pytest.mark.parametrize("provider", ALL_PROVIDERS)
+@pytest.mark.parametrize("provider", _selected_providers())
 def test_every_provider_raw_log_retains_process_file_and_network_events(
     provider: str,
     tmp_path: Path,
 ) -> None:
-    _require_provider(provider)
     event_path = tmp_path / "events.jsonl"
     events = [
         _runtime_event(
