@@ -36,7 +36,7 @@ Der strace backend folgt mit `strace -ff` der Lineage des gestarteten Commands u
 
 ## Specialized hooks und direct API integrations
 
-Claude, Codex, Gemini, Cursor, OpenCode, model-runtime, gateway, proxy und direct-API integrations können an ihren expliziten integration points stärkere semantic content evidence liefern, legen aber keinen provider-hidden state offen.
+Claude, Codex, Antigravity, Cursor, OpenCode, model-runtime, gateway, proxy und direct-API integrations können an ihren expliziten integration points stärkere semantic content evidence liefern, legen aber keinen provider-hidden state offen.
 
 - Eine response-only integration beweist nur die an ExecWeave übergebenen response fields.
 - Ein caller-supplied request+response exchange beweist nur den bereitgestellten exchange und behauptet keine transparent wire interception.

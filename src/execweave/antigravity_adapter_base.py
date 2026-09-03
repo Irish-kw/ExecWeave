@@ -167,7 +167,7 @@ def _tool_call(payload: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any],
             "tool_name": name,
             "conversation_id": conversation_id,
             "step_index": step,
-            "arguments": canonical_args,
+            "input_keys": sorted(str(key) for key in canonical_args),
             "arguments_observed": isinstance(args, dict),
         },
     )
@@ -196,6 +196,35 @@ def _command_entity(args: dict[str, Any]) -> dict[str, Any] | None:
         name=label,
         attributes={"command": value, "declared_by_provider_hook": True},
     )
+
+
+def _apply_patch_targets(value: object) -> list[tuple[str, str]]:
+    """Extract provider-declared file targets from an apply_patch payload."""
+    if not isinstance(value, str) or not value:
+        return []
+    targets: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for line in value.splitlines():
+        stripped = line.strip()
+        operation: str | None = None
+        raw_path: str | None = None
+        for marker, marker_operation in (
+            ("*** Add File:", "add"),
+            ("*** Update File:", "update"),
+            ("*** Delete File:", "delete"),
+            ("*** Move to:", "move"),
+        ):
+            if stripped.startswith(marker):
+                operation = marker_operation
+                raw_path = stripped[len(marker) :].strip()
+                break
+        if operation is None or not raw_path:
+            continue
+        target = (operation, raw_path)
+        if target not in seen:
+            seen.add(target)
+            targets.append(target)
+    return targets
 
 
 def _file_entity(payload: dict[str, Any], args: dict[str, Any]) -> dict[str, Any] | None:
@@ -311,6 +340,7 @@ def antigravity_hook_to_semantic_events(
         return []
 
     call, tool, args = _tool_call(payload)
+    tool_name = tool.get("name")
     error = payload.get("error")
     has_error = isinstance(error, str) and bool(error.strip())
     events = [
@@ -331,7 +361,7 @@ def antigravity_hook_to_semantic_events(
             payload=payload,
         ),
     ]
-    command = _command_entity(args)
+    command = _command_entity(args) if tool_name != "apply_patch" else None
     if command is not None:
         events.append(
             _event(
@@ -343,18 +373,40 @@ def antigravity_hook_to_semantic_events(
                 payload=payload,
             )
         )
-    file_entity = _file_entity(payload, args)
-    if file_entity is not None:
-        events.append(
-            _event(
-                timestamp=observed_at,
-                event_type="semantic.antigravity.file.declared",
-                relation="DECLARED_TARGET",
-                source=call,
-                target=file_entity,
-                payload=payload,
+    patch_targets = (
+        _apply_patch_targets(args.get("patch") or args.get("command"))
+        if tool_name == "apply_patch"
+        else []
+    )
+    if patch_targets:
+        for operation, raw_path in patch_targets:
+            file_entity = _file_entity(payload, {"TargetFile": raw_path})
+            if file_entity is None:
+                continue
+            events.append(
+                _event(
+                    timestamp=observed_at,
+                    event_type="semantic.antigravity.file.declared",
+                    relation="DECLARED_TARGET",
+                    source=call,
+                    target=file_entity,
+                    payload=payload,
+                    attributes={"patch_operation": operation},
+                )
             )
-        )
+    else:
+        file_entity = _file_entity(payload, args)
+        if file_entity is not None:
+            events.append(
+                _event(
+                    timestamp=observed_at,
+                    event_type="semantic.antigravity.file.declared",
+                    relation="DECLARED_TARGET",
+                    source=call,
+                    target=file_entity,
+                    payload=payload,
+                )
+            )
     result_id = hashlib.sha256(
         f"{call['id']}\0{error if has_error else 'ok'}".encode("utf-8", errors="replace")
     ).hexdigest()[:24]

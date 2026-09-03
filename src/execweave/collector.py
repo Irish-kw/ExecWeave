@@ -93,7 +93,6 @@ def infer_agent_name(command: Iterable[str]) -> str:
         "codex": "OpenAI Codex",
         "agy": "Antigravity",
         "antigravity": "Antigravity",
-        "gemini": "Gemini CLI",
         "cursor": "Cursor",
         "opencode": "OpenCode",
         "ollama": "Ollama",

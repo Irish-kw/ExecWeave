@@ -65,6 +65,21 @@ def test_pre_tool_use_records_exact_tool_call_and_shell_command() -> None:
     assert "secret narrative" not in rendered
 
 
+def test_edit_tool_declares_file_target() -> None:
+    events = cursor_hook_to_semantic_events(
+        {
+            **_base("preToolUse"),
+            "tool_name": "Edit",
+            "tool_use_id": "edit-1",
+            "tool_input": {"file_path": "notes.md", "old_string": "a", "new_string": "b"},
+        }
+    )
+
+    declared = next(event for event in events if event["relation"] == "DECLARED_TARGET")
+    assert declared["source"]["id"] == "tool-call:cursor:conversation-1:edit-1"
+    assert declared["target"]["name"] == "notes.md"
+
+
 def test_post_tool_events_reuse_tool_use_id_without_storing_output() -> None:
     payload = {
         **_base("postToolUse"),

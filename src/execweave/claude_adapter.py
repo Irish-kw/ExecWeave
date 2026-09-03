@@ -182,10 +182,42 @@ def _command_entity(tool_input: dict[str, Any]) -> dict[str, Any] | None:
     )
 
 
+def _apply_patch_targets(value: object) -> list[tuple[str, str]]:
+    """Extract file targets from a shell apply_patch command without storing its body."""
+    if not isinstance(value, str) or not value:
+        return []
+    targets: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for line in value.splitlines():
+        stripped = line.strip()
+        operation: str | None = None
+        raw_path: str | None = None
+        for marker, marker_operation in (
+            ("*** Add File:", "add"),
+            ("*** Update File:", "update"),
+            ("*** Delete File:", "delete"),
+            ("*** Move to:", "move"),
+        ):
+            if stripped.startswith(marker):
+                operation = marker_operation
+                raw_path = stripped[len(marker) :].strip()
+                break
+        if operation is None or not raw_path:
+            continue
+        target = (operation, raw_path)
+        if target not in seen:
+            seen.add(target)
+            targets.append(target)
+    return targets
+
+
 def _declared_file_entity(payload: dict[str, Any], tool_input: dict[str, Any]) -> dict[str, Any] | None:
-    raw = tool_input.get("file_path")
-    if not isinstance(raw, str) or not raw:
-        raw = tool_input.get("path")
+    raw = None
+    for key in ("file_path", "filePath", "path", "notebook_path", "notebookPath"):
+        candidate = tool_input.get(key)
+        if isinstance(candidate, str) and candidate:
+            raw = candidate
+            break
     if not isinstance(raw, str) or not raw:
         return None
     candidate = Path(raw).expanduser()
@@ -281,7 +313,36 @@ def _tool_pre_events(payload: dict[str, Any], *, timestamp: str) -> list[dict[st
                         attributes=common,
                     )
                 )
-        if tool_name in {"Read", "Edit", "Write", "NotebookEdit"}:
+            for operation, raw_path in _apply_patch_targets(tool_input.get("command")):
+                target_file = _declared_file_entity(payload, {"file_path": raw_path})
+                if target_file is not None:
+                    events.append(
+                        _event(
+                            timestamp=timestamp,
+                            event_type="semantic.claude.file.declared",
+                            relation="DECLARED_TARGET",
+                            source=call,
+                            target=target_file,
+                            attributes={**common, "patch_operation": operation},
+                        )
+                    )
+        elif tool_name.strip().lower() == "apply_patch":
+            for operation, raw_path in _apply_patch_targets(
+                tool_input.get("patch") or tool_input.get("command")
+            ):
+                target_file = _declared_file_entity(payload, {"file_path": raw_path})
+                if target_file is not None:
+                    events.append(
+                        _event(
+                            timestamp=timestamp,
+                            event_type="semantic.claude.file.declared",
+                            relation="DECLARED_TARGET",
+                            source=call,
+                            target=target_file,
+                            attributes={**common, "patch_operation": operation},
+                        )
+                    )
+        if tool_name.strip().lower() in {"read", "edit", "write", "notebookedit"}:
             target_file = _declared_file_entity(payload, tool_input)
             if target_file is not None:
                 events.append(

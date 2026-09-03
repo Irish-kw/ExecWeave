@@ -430,7 +430,6 @@ def test_non_codex_providers_never_gain_derived_threads(tmp_path: Path) -> None:
         ("antigravity.conversation_transcript", "antigravity"),
         ("cursor.assistant_final_response", "cursor"),
         ("opencode.assistant_response", "opencode"),
-        ("gemini.assistant_final_response", "gemini"),
         ("inference_gateway.openrouter.response", "openrouter"),
         ("openai_compatible.assistant_response", "openai-compatible"),
     ):

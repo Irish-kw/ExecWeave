@@ -5,7 +5,6 @@ from .viewer_agent_panel_claude import CLAUDE_CHILD_ROUNDS_JS
 from .viewer_agent_panel_codex import CODEX_CHILD_ROUNDS_JS
 from .viewer_agent_panel_cursor import CURSOR_CHILD_ROUNDS_JS
 from .viewer_agent_panel_default import DEFAULT_CHILD_ROUNDS_JS
-from .viewer_agent_panel_gemini import GEMINI_CHILD_ROUNDS_JS
 from .viewer_agent_panel_ollama import OLLAMA_CHILD_ROUNDS_JS
 from .viewer_agent_panel_opencode import OPENCODE_CHILD_ROUNDS_JS
 
@@ -38,7 +37,7 @@ if(!details||!detailsEmpty)return;
 let entries=Array.isArray(window.__execweaveStaticConversations)?window.__execweaveStaticConversations:[];
 let selectedNode=null,refreshing=false,selectedConversationSignature='';
 const foldStateByAgent=new Map();
-const ROOT_NODE_IDS=new Set(['agent:Claude Code','agent:OpenAI Codex','agent:Codex','agent:Cursor','agent:OpenCode','agent:Gemini CLI','agent:Antigravity','agent:Ollama','agent:ollama']);
+const ROOT_NODE_IDS=new Set(['agent:Claude Code','agent:OpenAI Codex','agent:Codex','agent:Cursor','agent:OpenCode','agent:Antigravity','agent:Ollama','agent:ollama']);
 const ENCRYPTED_NOTICE='Observed — plaintext not exposed by provider.';
 const attrs=node=>node&&typeof node.attributes==='object'&&node.attributes?node.attributes:{};
 const nodePath=node=>String(attrs(node).agent_path||attrs(node).child_agent_path||attrs(node).root_agent_path||node?.name||'').trim();
@@ -180,7 +179,6 @@ function childRounds(messages,path){
     claude:execweaveClaudeChildRounds,
     ollama:execweaveOllamaChildRounds,
     cursor:execweaveCursorChildRounds,
-    gemini:execweaveGeminiChildRounds,
     opencode:execweaveOpencodeChildRounds
   })[provider]||execweaveDefaultChildRounds;
   return policy(messages,path);
@@ -461,7 +459,6 @@ window.__execweaveAgentPanel={render,setEntries,refresh};
             CLAUDE_CHILD_ROUNDS_JS,
             OLLAMA_CHILD_ROUNDS_JS,
             CURSOR_CHILD_ROUNDS_JS,
-            GEMINI_CHILD_ROUNDS_JS,
             OPENCODE_CHILD_ROUNDS_JS,
         )
     ),

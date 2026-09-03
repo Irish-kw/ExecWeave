@@ -28,7 +28,6 @@ _INTERNAL_HOOK_TOKENS = (
     "execweave-claude-hook",
     "execweave-codex-hook",
     "execweave-antigravity-hook",
-    "execweave-gemini-hook",
     "execweave-cursor-hook",
     "execweave-opencode-hook",
     "execweave-opencode-plugin",

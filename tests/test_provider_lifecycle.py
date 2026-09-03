@@ -63,12 +63,6 @@ def test_provider_lifecycle_preserves_provider_specific_evidence_semantics() -> 
         source=_entity("tool_call", "tool-call:codex:s:c", tool_name="Bash"),
         target=_entity("tool", "tool:codex:Bash"),
     )
-    gemini = _semantic_event(
-        "gemini",
-        "TOOL_RESULT_REPORTED_ERROR",
-        source=_entity("tool", "tool:gemini:read_file"),
-        target=_entity("tool_result", "tool-result:gemini:s:r"),
-    )
     cursor = _semantic_event(
         "cursor",
         "DECLARED_TARGET",
@@ -84,7 +78,6 @@ def test_provider_lifecycle_preserves_provider_specific_evidence_semantics() -> 
 
     assert _annotation(claude)["stage"] == "succeeded"
     assert _annotation(codex)["stage"] == "returned"
-    assert _annotation(gemini)["stage"] == "provider_reported_error"
     assert _annotation(cursor) == {
         "schema_version": "0.1",
         "provider": "cursor",
@@ -188,13 +181,6 @@ def test_live_and_final_graph_materialize_same_provider_lifecycle(tmp_path: Path
             target=_entity("tool", "tool:codex:Bash"),
         ),
         _semantic_event(
-            "gemini",
-            "TOOL_RESULT_REPORTED_ERROR",
-            timestamp=timestamp,
-            source=_entity("tool", "tool:gemini:read_file"),
-            target=_entity("tool_result", "tool-result:gemini:s:r"),
-        ),
-        _semantic_event(
             "cursor",
             "DECLARED_TARGET",
             timestamp=timestamp,
@@ -231,9 +217,9 @@ def test_live_and_final_graph_materialize_same_provider_lifecycle(tmp_path: Path
 
     expected = lifecycle_by_edge(final_graph)
     assert lifecycle_by_edge(live_graph) == expected
-    assert len(expected) == 5
+    assert len(expected) == 4
     assert {
         lifecycle[0]["provider"]
         for lifecycle in expected.values()
         if isinstance(lifecycle, list) and lifecycle
-    } == {"claude", "codex", "gemini", "cursor", "opencode"}
+    } == {"claude", "codex", "cursor", "opencode"}

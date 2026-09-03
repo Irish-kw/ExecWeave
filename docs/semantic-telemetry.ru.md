@@ -60,4 +60,4 @@ Full-fidelity content намеренно чувствителен. Не след
 
 ExecWeave фильтрует известные transport credentials из некоторых provider-metadata projections, когда это определено контрактом adapter, но это не общий secret scanner и не удаляет чувствительные значения, встроенные в content payload. Content blobs по умолчанию остаются локальными и не вставляются напрямую в graph events, однако всё равно являются частью evidence run и должны быть проверены перед публикацией.
 
-Документация конкретных провайдеров точно определяет наблюдаемые поля. См. документы Claude Code, Codex, Gemini, Cursor, OpenCode, Inference Gateway и Model Runtime.
+Документация конкретных провайдеров точно определяет наблюдаемые поля. См. документы Claude Code, Codex, Antigravity, Cursor, OpenCode, Inference Gateway и Model Runtime.

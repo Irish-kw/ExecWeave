@@ -36,7 +36,7 @@ strace backend 以 `strace -ff` 追蹤被啟動 command 的 lineage 與選定 sy
 
 ## Specialized hooks 與 direct API integrations
 
-Claude、Codex、Gemini、Cursor、OpenCode、model-runtime、gateway、proxy 與 direct-API integration 可以在明確 integration point 提供更強的 semantic content evidence，但不會揭露 provider-hidden state。
+Claude、Codex、Antigravity、Cursor、OpenCode、model-runtime、gateway、proxy 與 direct-API integration 可以在明確 integration point 提供更強的 semantic content evidence，但不會揭露 provider-hidden state。
 
 - response-only integration 只能證明提供給 ExecWeave 的 response fields。
 - caller-supplied request+response exchange 只能證明該份被提供的 exchange；不能宣稱為 transparent wire interception。

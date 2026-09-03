@@ -60,4 +60,4 @@ Full-Fidelity-Inhalt ist absichtlich sensibel. Gehen Sie **nicht** davon aus, da
 
 ExecWeave filtert bekannte Transport-Credentials aus ausgewählten Provider-Metadatenprojektionen, wenn der Adaptervertrag dies vorsieht. Das ist jedoch weder ein allgemeiner Secret-Scanner noch entfernt es sensible Werte, die im Content selbst enthalten sind. Content-Blobs bleiben standardmäßig lokal und werden nicht inline in Graph-Ereignisse geschrieben, gehören aber weiterhin zur Evidenz des Runs und sollten vor dem Teilen geprüft werden.
 
-Provider-spezifische Dokumente definieren genau, welche Felder jede Integration beobachten kann. Siehe die Dokumentation zu Claude Code, Codex, Gemini, Cursor, OpenCode, Inference Gateway und Model Runtime.
+Provider-spezifische Dokumente definieren genau, welche Felder jede Integration beobachten kann. Siehe die Dokumentation zu Claude Code, Codex, Antigravity, Cursor, OpenCode, Inference Gateway und Model Runtime.

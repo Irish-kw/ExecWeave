@@ -13,14 +13,6 @@ def harden_dashboard_html(html: str) -> str:
     """Apply the reviewed v0.8.3 hardening set and its live-delta fixups."""
     html = _harden_v1(html)
 
-    # Fix the ownership-card timestamp filter before the generated JS reaches a browser.
-    html = _replace_once(
-        html,
-        "const stamps=ordered.map(call=>String(call?.first_seen||'').filter(Boolean));",
-        "const stamps=ordered.map(call=>String(call?.first_seen||'')).filter(Boolean);",
-        label="tool timestamp filter",
-    )
-
     # Only a real browser measurement is authoritative enough to cache. Detached/export
     # contexts can fall back to the character estimate, but caching that estimate would
     # prevent a later attached render from upgrading the same string to measured width.

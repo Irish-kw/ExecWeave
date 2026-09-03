@@ -31,7 +31,7 @@ EXECWEAVE_SEMANTIC_SIDECAR
 
 Specialized evidence 可以通过多种 attribution-safe 路径自动进入：
 
-- 已配置的 Claude Code、OpenAI Codex、Gemini CLI、Cursor hooks；
+- 已配置的 Claude Code、OpenAI Codex、Antigravity、Cursor hooks；
 - 已安装的 OpenCode plugin；
 - 当 ExecWeave 启动受支持的本机 Ollama、llama.cpp、vLLM server 时，使用 loopback model-catalog probe；
 - 对 `lms server start --port <port>` 使用 success-gated LM Studio post-launch probe，并且 launch 前该兼容 endpoint 必须不存在；
@@ -88,7 +88,7 @@ Browser 与 detached `execweave top` dashboard 会消费带 sequence number 的 
 | --- | --- |
 | Claude Code | **是**，需先配置 ExecWeave hooks |
 | OpenAI Codex | **是**，需先配置 ExecWeave hooks |
-| Gemini CLI | **是**，需先配置 ExecWeave hooks |
+| Antigravity | **是**，需先配置 ExecWeave hooks |
 | Cursor | **是**，需先配置 ExecWeave hooks |
 | OpenCode | **是**，需先安装 ExecWeave plugin |
 | Ollama | **是**，限已识别的本机 `ollama serve` launch |
@@ -215,7 +215,7 @@ Repository CI 当前覆盖：
 - semantic sidecar 在 runtime identity ready 前到达；
 - semantic sidecar truncation 与 replay；
 - canonical final runtime + specialized rebuild；
-- Claude、Codex、Gemini、Cursor、OpenCode 的 automatic shared-sidecar delivery；
+- Claude、Codex、Antigravity、Cursor、OpenCode 的 automatic shared-sidecar delivery；
 - Ollama、llama.cpp、vLLM automatic local model-runtime probe，以及 attribution-safe LM Studio launch handling；
 - LiteLLM callback privacy、fail-open behavior 与 final live-graph materialization；
 - detached Top 不会启动第二个 Agent；

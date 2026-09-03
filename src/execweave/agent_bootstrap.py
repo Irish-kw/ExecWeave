@@ -17,8 +17,6 @@ _SUPPORTED_AGENTS = {
     "antigravity": "antigravity",
     "cursor": "cursor",
     "opencode": "opencode",
-    # Legacy compatibility only. Gemini CLI is no longer advertised as current.
-    "gemini": "gemini",
 }
 
 
@@ -244,8 +242,6 @@ def _provider_target(
         return root / "hooks.json"
     if provider == "antigravity":
         return home / ".gemini" / "config" / "hooks.json"
-    if provider == "gemini":
-        return home / ".gemini" / "settings.json"
     if provider == "cursor":
         return home / ".cursor" / "hooks.json"
     if provider == "opencode":
@@ -267,10 +263,6 @@ def _provider_fragment(provider: str) -> tuple[dict[str, Any], str]:
         from .antigravity_hook_cli import antigravity_hook_config
 
         return antigravity_hook_config(), "execweave-antigravity-hook"
-    if provider == "gemini":
-        from .gemini_hook_cli import gemini_hook_config
-
-        return gemini_hook_config(f"execweave-gemini-hook {_AUTO_FLAG}"), "execweave-gemini-hook"
     if provider == "cursor":
         from .cursor_hook_cli import cursor_hook_config
 

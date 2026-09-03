@@ -276,7 +276,7 @@ def _child_transcript_tool_events(
                     attributes=evidence,
                 )
             )
-            command = _semantic._command_entity(canonical_args)
+            command = _semantic._command_entity(canonical_args) if name != "apply_patch" else None
             if command is not None:
                 events.append(
                     _semantic._event(
@@ -290,7 +290,32 @@ def _child_transcript_tool_events(
                     )
                 )
             file_entity = _semantic._file_entity(child_payload, canonical_args)
-            if file_entity is not None:
+            patch_targets = (
+                _semantic._apply_patch_targets(
+                    canonical_args.get("patch") or canonical_args.get("command")
+                )
+                if name == "apply_patch"
+                else []
+            )
+            file_targets: list[tuple[dict[str, Any], str | None]]
+            if patch_targets:
+                file_targets = [
+                    (
+                        _semantic._file_entity(
+                            child_payload,
+                            {"TargetFile": raw_path},
+                        ),
+                        operation,
+                    )
+                    for operation, raw_path in patch_targets
+                ]
+            elif file_entity is not None:
+                file_targets = [(file_entity, None)]
+            else:
+                file_targets = []
+            for file_entity, patch_operation in file_targets:
+                if file_entity is None:
+                    continue
                 file_attributes = dict(file_entity.get("attributes") or {})
                 file_attributes.update(
                     {
@@ -298,6 +323,8 @@ def _child_transcript_tool_events(
                         "transcript_path": str(transcript),
                     }
                 )
+                if patch_operation is not None:
+                    file_attributes["patch_operation"] = patch_operation
                 file_entity["attributes"] = file_attributes
                 events.append(
                     _semantic._event(
@@ -311,6 +338,44 @@ def _child_transcript_tool_events(
                     )
                 )
     return events
+
+
+def _child_transcript_archive_events(
+    *,
+    link: dict[str, Any],
+    parent_payload: dict[str, Any],
+    store: FullFidelityContentStore,
+    timestamp: str,
+) -> list[dict[str, Any]]:
+    """Archive a validated child transcript discovered in the parent result.
+
+    Antigravity does not reliably emit lifecycle hooks for every subagent.  The
+    parent result nevertheless contains an exact child conversation id and
+    ``logAbsoluteUri``.  Once the linkage validator has accepted that pair, it
+    is sufficient evidence to materialize the child's conversation record; the
+    child tool projection and the conversation archive should not depend on a
+    separate child Stop hook arriving later.
+    """
+    child_id = link.get("conversation_id")
+    transcript = link.get("transcript_path")
+    if (
+        not isinstance(child_id, str)
+        or not child_id
+        or not isinstance(transcript, Path)
+    ):
+        return []
+    child_payload = dict(parent_payload)
+    child_payload.update(
+        {
+            "conversationId": child_id,
+            "transcriptPath": str(transcript),
+        }
+    )
+    return antigravity_conversation_archive_events(
+        child_payload,
+        store=store,
+        timestamp=timestamp,
+    )
 
 
 def _subagent_assignment_events(
@@ -358,6 +423,14 @@ def _subagent_assignment_events(
         )
         events.append(assignment)
         events.append(_child_session_event(assignment=assignment, parent_id=conversation_id))
+        events.extend(
+            _child_transcript_archive_events(
+                link=link,
+                parent_payload=payload,
+                store=store,
+                timestamp=timestamp,
+            )
+        )
         events.extend(
             _child_transcript_tool_events(
                 link=link,
@@ -416,6 +489,14 @@ def _transcript_assignment_events(
         )
         events.append(assignment)
         events.append(_child_session_event(assignment=assignment, parent_id=conversation_id))
+        events.extend(
+            _child_transcript_archive_events(
+                link=link,
+                parent_payload=payload,
+                store=store,
+                timestamp=timestamp,
+            )
+        )
         events.extend(
             _child_transcript_tool_events(
                 link=link,
@@ -477,7 +558,7 @@ def antigravity_hook_to_content_events(
     # the same validated brain path on PreInvocation / PostInvocation; waiting
     # for Stop leaves live and finished dashboards with conversation identity
     # and no prompt/response text when Stop never arrives.
-    if hook_event in {"PreInvocation", "PostInvocation", "Stop"}:
+    if hook_event in {"PostToolUse", "PreInvocation", "PostInvocation", "Stop"}:
         events.extend(
             antigravity_conversation_archive_events(
                 payload,
@@ -485,11 +566,12 @@ def antigravity_hook_to_content_events(
                 timestamp=timestamp,
             )
         )
-        events.extend(
-            _transcript_assignment_events(
-                payload,
-                timestamp=timestamp,
-                store=store,
+        if hook_event != "PostToolUse":
+            events.extend(
+                _transcript_assignment_events(
+                    payload,
+                    timestamp=timestamp,
+                    store=store,
+                )
             )
-        )
     return events

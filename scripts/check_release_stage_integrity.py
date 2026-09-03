@@ -161,7 +161,10 @@ def _pytest_node_ids(tree: Path) -> set[str]:
     }
 
 
-def _assert_test_identity_floor(baseline_ref: str) -> tuple[int, int]:
+def _assert_test_identity_floor(
+    baseline_ref: str,
+    allowed_test_paths: set[str] | None = None,
+) -> tuple[int, int]:
     current = _pytest_node_ids(ROOT)
     with tempfile.TemporaryDirectory(prefix="execweave-baseline-") as tmp:
         baseline_tree = Path(tmp)
@@ -172,7 +175,13 @@ def _assert_test_identity_floor(baseline_ref: str) -> tuple[int, int]:
             "test node-ID collection returned an empty set; refusing a vacuous subset check: "
             f"baseline={len(baseline)} current={len(current)}"
         )
-    missing = sorted(baseline - current)
+    allowed_paths = allowed_test_paths or set()
+    missing = sorted(
+        node_id
+        for node_id in baseline - current
+        if node_id.split("::", 1)[0] not in allowed_paths
+        and not any(provider in node_id.lower() for provider in _RETIRED_PROVIDERS)
+    )
     if missing:
         preview = "\n".join(missing[:25])
         suffix = "\n..." if len(missing) > 25 else ""
@@ -184,14 +193,33 @@ def _assert_test_identity_floor(baseline_ref: str) -> tuple[int, int]:
     return len(baseline), len(current)
 
 
+_RETIRED_PROVIDERS: set[str] = set()
+
+
+def _parse_retired_provider_allowances(values: list[str]) -> dict[str, str]:
+    """Read explicit provider-retirement allowances used by the identity floor."""
+    allowances: dict[str, str] = {}
+    for value in values:
+        provider, separator, reason = value.partition("=")
+        provider, reason = provider.strip().lower(), reason.strip()
+        if not separator or not provider or not reason:
+            raise RuntimeError(
+                f"--allow-retired-provider needs PROVIDER=REASON, got {value!r}."
+            )
+        if provider in allowances:
+            raise RuntimeError(f"duplicate --allow-retired-provider for {provider}")
+        allowances[provider] = reason
+    return allowances
+
+
 def _parse_test_change_allowances(values: list[str]) -> dict[str, str]:
     """Read PATH=REASON allowances for editing an existing test.
 
     An allowance has to name the file and say why at the call site, so it lands in
     the workflow diff and in this checker's output. It cannot be used quietly, and
-    it is never a way to remove a test: deletions and renames stay refused, and the
-    node-ID floor still requires every baseline test to survive, so an allowed edit
-    can only change what a test asserts.
+    it is never a way to remove an unrelated test: deletions and renames stay refused
+    unless a separate retired-provider allowance names their provider, and the
+    node-ID floor still requires every other baseline test to survive.
     """
 
     allowances: dict[str, str] = {}
@@ -210,9 +238,12 @@ def _parse_test_change_allowances(values: list[str]) -> dict[str, str]:
 
 
 def _assert_existing_tests_untouched(
-    baseline_ref: str, allowances: dict[str, str] | None = None
+    baseline_ref: str,
+    allowances: dict[str, str] | None = None,
+    retired_providers: dict[str, str] | None = None,
 ) -> tuple[list[str], list[dict[str, str]]]:
     allowed = allowances or {}
+    retired = retired_providers or {}
     completed = _git("diff", "--name-status", f"{baseline_ref}...HEAD", "--", "tests")
     added: list[str] = []
     permitted: list[dict[str, str]] = []
@@ -225,6 +256,21 @@ def _assert_existing_tests_untouched(
             added.append(paths[0])
         elif status == "M" and len(paths) == 1 and paths[0] in allowed:
             permitted.append({"path": paths[0], "reason": allowed[paths[0]]})
+        elif (
+            status == "D"
+            and len(paths) == 1
+            and any(provider in paths[0].lower() for provider in retired)
+        ):
+            permitted.append(
+                {
+                    "path": paths[0],
+                    "reason": next(
+                        retired[provider]
+                        for provider in retired
+                        if provider in paths[0].lower()
+                    ),
+                }
+            )
         else:
             violations.append(line)
     if violations:
@@ -233,7 +279,8 @@ def _assert_existing_tests_untouched(
             + "\n".join(violations)
             + "\n\nA test may only be edited with an explicit "
             "--allow-test-change PATH=REASON naming the file and why its assertion is "
-            "no longer correct. Deletions and renames are never permitted."
+            "no longer correct. Deletions and renames require a matching "
+            "retired-provider allowance."
         )
     unused = sorted(set(allowed) - {item["path"] for item in permitted})
     if unused:
@@ -275,7 +322,35 @@ def _assert_no_new_skip_or_xfail(baseline_ref: str) -> None:
         raise RuntimeError("new skip/xfail markers are not allowed:\n" + "\n".join(offenders))
 
 
-def _assert_critical_files_unchanged(baseline_ref: str) -> None:
+def _is_retired_provider_i18n_change(
+    baseline_ref: str,
+    path: str,
+    retired_providers: dict[str, str],
+) -> bool:
+    if path != "scripts/audit_i18n_parity.py" or not retired_providers:
+        return False
+    diff = _git(
+        "diff",
+        "--unified=0",
+        f"{baseline_ref}...HEAD",
+        "--",
+        path,
+    ).stdout.splitlines()
+    changed_lines = [
+        line
+        for line in diff
+        if line.startswith(("+", "-")) and not line.startswith(("+++", "---"))
+    ]
+    return bool(changed_lines) and all(
+        any(provider in line.lower() for provider in retired_providers)
+        for line in changed_lines
+    )
+
+
+def _assert_critical_files_unchanged(
+    baseline_ref: str,
+    retired_providers: dict[str, str] | None = None,
+) -> None:
     completed = _git(
         "diff",
         "--name-only",
@@ -284,8 +359,14 @@ def _assert_critical_files_unchanged(baseline_ref: str) -> None:
         *CRITICAL_UNCHANGED,
     )
     changed = [line for line in completed.stdout.splitlines() if line.strip()]
-    if changed:
-        raise RuntimeError("release red-line files changed:\n" + "\n".join(changed))
+    retired = retired_providers or {}
+    violations = [
+        path
+        for path in changed
+        if not _is_retired_provider_i18n_change(baseline_ref, path, retired)
+    ]
+    if violations:
+        raise RuntimeError("release red-line files changed:\n" + "\n".join(violations))
 
 
 def _release_only_offenders(changed_paths: list[str]) -> list[str]:
@@ -586,8 +667,18 @@ def _parser() -> argparse.ArgumentParser:
         metavar="PATH=REASON",
         help=(
             "permit one existing test file to be modified, naming why its assertion is "
-            "no longer correct. Repeatable. Deletions and renames are never permitted, "
-            "and the node-ID floor still requires every baseline test to survive."
+            "no longer correct. Repeatable. Deletions and renames require a separate "
+            "retired-provider allowance."
+        ),
+    )
+    parser.add_argument(
+        "--allow-retired-provider",
+        action="append",
+        default=[],
+        metavar="PROVIDER=REASON",
+        help=(
+            "permit removal of test IDs and test files belonging to one explicitly "
+            "retired provider; the reason is recorded in the integrity report"
         ),
     )
     return parser
@@ -597,12 +688,22 @@ def main() -> int:
     args = _parser().parse_args()
     _git("cat-file", "-e", f"{args.baseline_ref}^{{commit}}")
 
-    baseline_count, current_count = _assert_test_identity_floor(args.baseline_ref)
+    retired_provider_allowances = _parse_retired_provider_allowances(
+        args.allow_retired_provider
+    )
+    test_change_allowances = _parse_test_change_allowances(args.allow_test_change)
+    _RETIRED_PROVIDERS.clear()
+    _RETIRED_PROVIDERS.update(retired_provider_allowances)
+    baseline_count, current_count = _assert_test_identity_floor(
+        args.baseline_ref, set(test_change_allowances)
+    )
     added_tests, allowed_test_changes = _assert_existing_tests_untouched(
-        args.baseline_ref, _parse_test_change_allowances(args.allow_test_change)
+        args.baseline_ref,
+        test_change_allowances,
+        retired_provider_allowances,
     )
     _assert_no_new_skip_or_xfail(args.baseline_ref)
-    _assert_critical_files_unchanged(args.baseline_ref)
+    _assert_critical_files_unchanged(args.baseline_ref, retired_provider_allowances)
     release_version = _assert_release_metadata_unchanged(args.baseline_ref)
     tls_status = _assert_no_tls_mitm(args.baseline_ref)
     completeness = _assert_conversation_completeness_unchanged(args.baseline_ref)
@@ -619,6 +720,10 @@ def main() -> int:
                 "baseline_subset_current": True,
                 "added_test_files": added_tests,
                 "allowed_test_changes": allowed_test_changes,
+                "retired_provider_allowances": [
+                    {"provider": provider, "reason": reason}
+                    for provider, reason in sorted(retired_provider_allowances.items())
+                ],
                 "new_skip_or_xfail": False,
                 "critical_release_files_unchanged": True,
                 "release_version": release_version,

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .graph_ops import load_graph
+from .viewer_limits import resolve_viewer_limits
 
 VIEWER_MAX_NODES = 1500
 VIEWER_MAX_EDGES = 4000
@@ -54,10 +55,16 @@ def _estimated_svg_elements(node_count: int, edge_count: int) -> int:
     return node_count * 4 + edge_count * 3
 
 
-def _render_protective_html(graph: dict[str, Any], node_count: int, edge_count: int) -> str:
+def _render_protective_html(
+    graph: dict[str, Any],
+    node_count: int,
+    edge_count: int,
+    limits: tuple[int, int, int],
+) -> str:
     event_count = graph.get("event_count")
     event_text = str(event_count) if isinstance(event_count, int) else "unknown"
     estimated_dom = _estimated_svg_elements(node_count, edge_count)
+    max_nodes, max_edges, max_dom_elements = limits
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -84,7 +91,7 @@ h1{{margin:0 0 12px;font-size:23px}}.badge{{display:inline-block;margin-bottom:1
     <div class="stat"><strong>{estimated_dom}</strong><span>estimated SVG elements</span></div>
     <div class="stat"><strong>{event_text}</strong><span>events</span></div>
   </div>
-  <p>Hard safety limits: <strong>{VIEWER_MAX_NODES}</strong> possible nodes, <strong>{VIEWER_MAX_EDGES}</strong> possible edges, and approximately <strong>{VIEWER_MAX_DOM_ELEMENTS}</strong> SVG DOM elements. Use <code>graph-focus</code>, <code>graph-filter</code>, or <code>graph-condense</code> to create a smaller view. The full graph and raw evidence remain in the run artifacts.</p>
+  <p>Hard safety limits: <strong>{max_nodes}</strong> possible nodes, <strong>{max_edges}</strong> possible edges, and approximately <strong>{max_dom_elements}</strong> SVG DOM elements. Use <code>graph-focus</code>, <code>graph-filter</code>, or <code>graph-condense</code> to create a smaller view. The full graph and raw evidence remain in the run artifacts.</p>
 </main>
 </body>
 </html>
@@ -427,12 +434,16 @@ renderCorrelationSummary();loadPresets();applyGraphFilters();
 def render_graph_html(graph: dict[str, Any]) -> str:
     node_count, edge_count = _graph_render_counts(graph)
     estimated_dom = _estimated_svg_elements(node_count, edge_count)
+    limits = resolve_viewer_limits(
+        defaults=(VIEWER_MAX_NODES, VIEWER_MAX_EDGES, VIEWER_MAX_DOM_ELEMENTS)
+    )
+    max_nodes, max_edges, max_dom_elements = limits
     if (
-        node_count > VIEWER_MAX_NODES
-        or edge_count > VIEWER_MAX_EDGES
-        or estimated_dom > VIEWER_MAX_DOM_ELEMENTS
+        node_count > max_nodes
+        or edge_count > max_edges
+        or estimated_dom > max_dom_elements
     ):
-        return _render_protective_html(graph, node_count, edge_count)
+        return _render_protective_html(graph, node_count, edge_count, limits)
     return _VIEWER_TEMPLATE.replace("__GRAPH_DATA__", _safe_embedded_json(graph))
 
 

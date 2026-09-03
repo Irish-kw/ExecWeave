@@ -128,7 +128,7 @@ These are presentation-layer changes. Raw graph evidence is unchanged, and Live,
 
 Stable provider identifiers such as Cursor `tool_use_id`, Codex rollout thread identity, or OpenCode `sessionID + callID` prove logical provider identity; they are not OS PIDs. Cross-agent content is shown only when the provider exposes an explicit route, delegation, or result. Gateways or local runtimes that expose only root request/response traffic remain root-only; ExecWeave does not fabricate subagents or hidden routing.
 
-OpenRouter `exchange` is caller-supplied request+response evidence, not transparent wire interception. LiteLLM Proxy remains a narrower metadata-oriented integration in the current baseline. Legacy Gemini CLI entry points remain packaged for compatibility, but new Google CLI usage should use Antigravity (`agy`).
+OpenRouter `exchange` is caller-supplied request+response evidence, not transparent wire interception. LiteLLM Proxy remains a narrower metadata-oriented integration in the current baseline. Google CLI usage should use Antigravity (`agy`).
 
 ## Evidence model
 
@@ -243,6 +243,10 @@ A provider-integrated run may contain:
 Derived correlation never rewrites raw runtime or provider sidecar evidence.
 
 ## Limits and privacy
+
+The default dashboard safety budget is 1,500 nodes, 4,000 edges, and approximately 5,000 SVG elements. Override it for a rendered run with `--viewer-max-nodes N`, `--viewer-max-edges N`, and `--viewer-max-dom-elements N` on `view`, `record`, or `live`. The equivalent environment variables are `EXECWEAVE_VIEWER_MAX_NODES`, `EXECWEAVE_VIEWER_MAX_EDGES`, and `EXECWEAVE_VIEWER_MAX_DOM_ELEMENTS`.
+
+Every pull request also runs the Provider Dashboard Contract matrix. It checks provider-neutral root history, provider-reported subagent history where available, dashboard graph projection, External endpoint aggregation, file/tool edges such as `.md` targets, and raw process/filesystem/network events. The matrix covers Claude, Codex, AGY (Antigravity), Cursor, OpenCode, Ollama, llama.cpp, vLLM, LM Studio, and the supported gateway providers. Root-only model runtimes and gateways are tested as root-only by design.
 
 - The portable collector runs on Linux, macOS, and Windows. Portable filesystem observation is session-correlated rather than process-causal, and polling can miss sufficiently short-lived activity.
 - Linux also has a syscall-backed `strace` reference backend with stronger process-attributed syscall evidence for supported executions.

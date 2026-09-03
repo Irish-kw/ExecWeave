@@ -178,7 +178,6 @@ def test_agent_labels_are_provider_neutral_without_mutating_raw_graph() -> None:
         "agent:Codex",
         "agent:Cursor",
         "agent:OpenCode",
-        "agent:Gemini CLI",
         "agent:Antigravity",
     ):
         assert root_id in html

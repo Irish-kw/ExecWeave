@@ -46,7 +46,6 @@ def test_visibility_contract_is_explicit_for_all_integrated_agent_providers() ->
         "codex": "provider_exposed_plaintext_summary_or_encoded",
         "cursor": "provider_exposed_thinking_text",
         "opencode": "provider_exposed_reasoning_part",
-        "gemini": "not_exposed_by_source",
         "antigravity": "not_exposed_by_source",
     }
     for provider, reasoning in expected.items():
@@ -156,6 +155,49 @@ def test_opencode_reasoning_part_is_preserved_and_projected_to_session_agent(
     reference = viewer_content_reference(reasoning["target"])
     assert reference is not None
     assert reference["category"] == "Reasoning Text"
+
+
+def test_opencode_tool_event_projects_explicit_file_target_and_keeps_call_identity(
+    tmp_path: Path,
+) -> None:
+    store = FullFidelityContentStore(tmp_path)
+    plugin_events = opencode_agent_trace_events(
+        {
+            "hook_event_name": "tool.execute.before",
+            "sessionID": "child",
+            "tool": "write",
+            "callID": "call-file-1",
+            "args": {"filePath": str(tmp_path / "notes.md"), "content": "private"},
+            "cwd": "/repo",
+        },
+        store=store,
+        timestamp="2026-08-28T00:00:00Z",
+    )
+    bus_events = opencode_agent_trace_events(
+        _opencode_bus(
+            "message.part.updated",
+            {
+                "part": {
+                    "id": "part-tool-1",
+                    "sessionID": "child",
+                    "messageID": "message-1",
+                    "type": "tool",
+                    "callID": "call-file-1",
+                    "tool": "write",
+                    "state": {"input": {"filePath": str(tmp_path / "notes.md"), "content": "private"}},
+                }
+            },
+        ),
+        store=store,
+        timestamp="2026-08-28T00:00:01Z",
+    )
+    plugin_call = next(event["target"] for event in plugin_events if event["relation"] == "OWNED_TOOL_CALL")
+    bus_call = next(event["target"] for event in bus_events if event["relation"] == "OBSERVED_TOOL_CALL")
+    declared = next(event for event in bus_events if event["relation"] == "DECLARED_TARGET")
+    assert plugin_call["id"] == bus_call["id"] == "tool-call:opencode:child:call-file-1"
+    assert declared["target"]["id"] == f"file:{tmp_path / 'notes.md'}"
+    assert declared["attributes"]["provider_event_projection"] is True
+    assert '"content": "private"' not in json.dumps(bus_events)
 
 
 def test_opencode_subtask_keeps_prompt_and_profile_without_inventing_child_session(

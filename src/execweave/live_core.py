@@ -24,6 +24,7 @@ from .semantic import LiveSemanticNormalizer, merge_semantic_sidecar
 from .sink import JsonlSink
 from .validate import validate_event_stream
 from .viewer_dashboard_clean import fold_budget_bootstrap, resolve_fold_budget
+from .viewer_limits import resolve_viewer_limits, viewer_limits_bootstrap
 from .viewer import (
     VIEWER_MAX_DOM_ELEMENTS,
     VIEWER_MAX_EDGES,
@@ -86,7 +87,13 @@ def _live_page(html: str, budget: int) -> str:
     the command line has not been read yet. It is spliced in per budget instead, and
     cached, because a run resolves exactly one.
     """
-    bootstrap = f"<script>{fold_budget_bootstrap(budget)}</script>\n"
+    limits = resolve_viewer_limits(
+        defaults=(VIEWER_MAX_NODES, VIEWER_MAX_EDGES, VIEWER_MAX_DOM_ELEMENTS)
+    )
+    bootstrap = (
+        f"<script>{fold_budget_bootstrap(budget)}"
+        f"{viewer_limits_bootstrap(limits)}</script>\n"
+    )
     if "<script>" not in html:
         return bootstrap + html
     return html.replace("<script>", bootstrap + "<script>", 1)
@@ -120,10 +127,13 @@ class LiveResult:
 
 def _within_live_payload_budget(node_count: int, edge_count: int) -> bool:
     estimated_dom = node_count * 4 + edge_count * 3
+    max_nodes, max_edges, max_dom_elements = resolve_viewer_limits(
+        defaults=(VIEWER_MAX_NODES, VIEWER_MAX_EDGES, VIEWER_MAX_DOM_ELEMENTS)
+    )
     return (
-        node_count <= VIEWER_MAX_NODES
-        and edge_count <= VIEWER_MAX_EDGES
-        and estimated_dom <= VIEWER_MAX_DOM_ELEMENTS
+        node_count <= max_nodes
+        and edge_count <= max_edges
+        and estimated_dom <= max_dom_elements
     )
 
 

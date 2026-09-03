@@ -303,12 +303,6 @@ def _root_only_sources() -> list[tuple[str, dict[str, Any], str]]:
             "antigravity.assistant_response",
         ),
         (
-            "gemini",
-            {"id": "agent:Gemini CLI", "type": "agent", "name": "Gemini CLI",
-             "attributes": {"provider": "gemini", "session_id": "g-1"}},
-            "gemini.assistant_final_response",
-        ),
-        (
             "openrouter",
             {"id": "agent:openrouter", "type": "agent", "name": "OpenRouter",
              "attributes": {"provider": "openrouter", "session_id": "or-1"}},
@@ -424,7 +418,7 @@ CI_WORKFLOW = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "c
 
 def test_ci_verifies_materialized_conversations_for_every_provider_smoke() -> None:
     workflow = CI_WORKFLOW.read_text(encoding="utf-8")
-    for provider in ("claude", "cursor", "gemini", "opencode", "codex"):
+    for provider in ("claude", "cursor", "opencode", "codex"):
         assert f"execweave-{provider}-record" in workflow, f"{provider} has no record smoke"
         assert f"check_conversation_records.py {provider}-record-smoke" in workflow, (
             f"{provider} records a run but never checks its conversations.json"

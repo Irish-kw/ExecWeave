@@ -109,7 +109,7 @@ def _payload(
         "workspacePaths": [str(workspace)],
         "transcriptPath": str(transcript),
         "artifactDirectoryPath": str(transcript.parents[3]),
-        "modelName": "gemini-test",
+        "modelName": "agy-test",
         "stepIdx": 7,
         "error": "",
         "toolCall": {

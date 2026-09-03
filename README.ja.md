@@ -128,7 +128,7 @@ v0.8.3 は raw evidence を変えずに、dense / multi-round run の読みや�
 
 Cursor `tool_use_id`、Codex rollout thread identity、OpenCode `sessionID + callID` のような stable provider identifier は logical provider identity を示しますが、OS PID ではありません。Cross-agent content は provider が明示的な route、delegation、result を公開した場合にのみ表示されます。Gateway / local runtime が root request/response しか公開しない場合は root-only のままで、ExecWeave が subagent や hidden routing を作ることはありません。
 
-OpenRouter `exchange` は caller-supplied request+response evidence であり、transparent wire interception ではありません。LiteLLM Proxy は現在の baseline ではより限定的な metadata-oriented integration です。Legacy Gemini CLI entry points は互換性のため残っていますが、新しい Google CLI 利用では Antigravity (`agy`) を使用してください。
+OpenRouter `exchange` は caller-supplied request+response evidence であり、transparent wire interception ではありません。LiteLLM Proxy は現在の baseline ではより限定的な metadata-oriented integration です。新しい Google CLI 利用では Antigravity (`agy`) を使用してください。
 
 ## Evidence model
 

@@ -31,7 +31,7 @@ EXECWEAVE_SEMANTIC_SIDECAR
 
 Spezialisierte Belege können über mehrere attribution-sichere Wege automatisch eintreffen:
 
-- konfigurierte Hooks für Claude Code, OpenAI Codex, Gemini CLI und Cursor;
+- konfigurierte Hooks für Claude Code, OpenAI Codex, Antigravity und Cursor;
 - das installierte OpenCode-Plugin;
 - Loopback-Model-Catalog-Probes, wenn ExecWeave erkannte lokale Ollama-, llama.cpp- oder vLLM-Server startet;
 - ein success-gated LM-Studio-Post-Launch-Probe für `lms server start --port <port>`, sofern vor dem Start kein kompatibler Endpoint existierte;
@@ -88,7 +88,7 @@ Wenn keine spezialisierten Ereignisse eintreffen, bleibt die finale Materialisie
 | --- | --- |
 | Claude Code | **Ja**, nachdem die ExecWeave-Hooks konfiguriert wurden |
 | OpenAI Codex | **Ja**, nachdem die ExecWeave-Hooks konfiguriert wurden |
-| Gemini CLI | **Ja**, nachdem die ExecWeave-Hooks konfiguriert wurden |
+| Antigravity | **Ja**, nachdem die ExecWeave-Hooks konfiguriert wurden |
 | Cursor | **Ja**, nachdem die ExecWeave-Hooks konfiguriert wurden |
 | OpenCode | **Ja**, nachdem das ExecWeave-Plugin installiert wurde |
 | Ollama | **Ja**, für erkannte lokale `ollama serve`-Starts |
@@ -215,7 +215,7 @@ Die CI-Konfiguration des Repositorys deckt Folgendes ab:
 - Sidecar-Ankunft, bevor Runtime-Identität verfügbar ist;
 - Sidecar-Trunkierung und Replay;
 - kanonischen finalen Runtime+Specialized-Neuaufbau;
-- automatische Shared-Sidecar-Lieferung für Claude, Codex, Gemini, Cursor und OpenCode;
+- automatische Shared-Sidecar-Lieferung für Claude, Codex, Antigravity, Cursor und OpenCode;
 - automatische lokale Model-Runtime-Probes für Ollama, llama.cpp und vLLM sowie attribution-sichere LM-Studio-Startbehandlung;
 - Datenschutz, fail-open Verhalten und finale Live-Graph-Materialisierung des LiteLLM-Callbacks;
 - abgekoppeltes Top-Verhalten ohne Start eines zweiten Agent;

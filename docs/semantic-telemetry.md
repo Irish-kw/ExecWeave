@@ -60,4 +60,4 @@ Full-fidelity content is intentionally sensitive. Do **not** assume prompt text,
 
 ExecWeave filters known transport credentials from provider-metadata projections where the adapter contract defines that filtering, but that is not a general secret scanner and does not remove secrets embedded inside content payloads. Content blobs remain local by default and are not inlined into graph events, but they are still part of the run evidence and must be reviewed before sharing.
 
-Provider-specific documents define exactly which fields each integration can observe. See the Claude Code, Codex, Gemini, Cursor, OpenCode, Inference Gateway, and Model Runtime documentation for those boundaries.
+Provider-specific documents define exactly which fields each integration can observe. See the Claude Code, Codex, Antigravity, Cursor, OpenCode, Inference Gateway, and Model Runtime documentation for those boundaries.

@@ -194,7 +194,7 @@ def test_antigravity_send_message_preserves_exact_route_without_claiming_deliver
             "workspacePaths": [str(tmp_path)],
             "transcriptPath": str(tmp_path / "transcript.jsonl"),
             "artifactDirectoryPath": str(tmp_path / "artifacts"),
-            "modelName": "gemini-test",
+        "modelName": "agy-test",
             "stepIdx": 7,
             "error": "",
             "toolCall": {
@@ -277,7 +277,7 @@ def test_antigravity_validated_subagent_prompt_routes_to_exact_child_thread(tmp_
             "workspacePaths": [str(workspace)],
             "transcriptPath": str(parent_transcript),
             "artifactDirectoryPath": str(tmp_path / "artifacts"),
-            "modelName": "gemini-test",
+        "modelName": "agy-test",
             "stepIdx": 7,
             "error": "",
             "toolCall": {"name": "invoke_subagent", "args": {"Subagents": [spec]}},

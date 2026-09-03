@@ -31,7 +31,7 @@ EXECWEAVE_SEMANTIC_SIDECAR
 
 Les preuves spécialisées peuvent arriver automatiquement par plusieurs chemins sûrs pour l’attribution :
 
-- hooks Claude Code, OpenAI Codex, Gemini CLI et Cursor déjà configurés ;
+- hooks Claude Code, OpenAI Codex, Antigravity et Cursor déjà configurés ;
 - plugin OpenCode installé ;
 - probes loopback de catalogue de modèles lorsque ExecWeave lance des serveurs locaux Ollama, llama.cpp ou vLLM reconnus ;
 - probe LM Studio post-lancement conditionné au succès pour `lms server start --port <port>`, uniquement si aucun endpoint compatible n’existait avant le lancement ;
@@ -88,7 +88,7 @@ Si aucun événement spécialisé n’arrive, la matérialisation finale reste r
 | --- | --- |
 | Claude Code | **Oui**, après configuration des hooks ExecWeave |
 | OpenAI Codex | **Oui**, après configuration des hooks ExecWeave |
-| Gemini CLI | **Oui**, après configuration des hooks ExecWeave |
+| Antigravity | **Oui**, après configuration des hooks ExecWeave |
 | Cursor | **Oui**, après configuration des hooks ExecWeave |
 | OpenCode | **Oui**, après installation du plugin ExecWeave |
 | Ollama | **Oui**, pour les lancements locaux `ollama serve` reconnus |
@@ -215,7 +215,7 @@ La configuration CI du dépôt couvre :
 - l’arrivée du sidecar avant que l’identité runtime soit prête ;
 - la troncature et le rejeu du sidecar ;
 - la reconstruction canonique finale runtime + specialized ;
-- la livraison automatique via sidecar partagé pour Claude, Codex, Gemini, Cursor et OpenCode ;
+- la livraison automatique via sidecar partagé pour Claude, Codex, Antigravity, Cursor et OpenCode ;
 - les probes model-runtime locaux automatiques pour Ollama, llama.cpp, vLLM et la gestion LM Studio sûre pour l’attribution ;
 - la confidentialité du callback LiteLLM, son comportement fail-open et la matérialisation finale dans le graphe live ;
 - le comportement Top détaché sans lancement d’un second Agent ;

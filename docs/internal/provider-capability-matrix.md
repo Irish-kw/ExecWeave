@@ -33,7 +33,7 @@ Tier A is release-blocking and contains these clients:
 
 - Codex CLI
 - Claude Code
-- Gemini CLI
+- Antigravity
 - Cursor Agent
 - OpenCode
 - Ollama

@@ -93,7 +93,6 @@ def test_multi_agent_providers_never_merge_different_agent_paths() -> None:
 
 def test_single_root_request_response_providers_still_merge_incrementally() -> None:
     for provider in (
-        "gemini",
         "anthropic",
         "openrouter",
         "litellm",

@@ -23,7 +23,6 @@ DOC_BASE_NAMES = [
     "semantic-telemetry.md",
     "claude-code-hooks.md",
     "codex-hooks.md",
-    "gemini-hooks.md",
     "cursor-hooks.md",
     "opencode-plugin.md",
     "inference-gateway.md",

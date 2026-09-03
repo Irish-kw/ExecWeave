@@ -85,11 +85,10 @@ def test_documented_unavailable_requires_strong_evidence() -> None:
     assert evidence.decryptability == PROVIDER_DOCUMENTED_UNAVAILABLE
 
 
-def test_required_inventory_has_the_six_release_blocking_clients() -> None:
+def test_required_inventory_has_the_five_release_blocking_clients() -> None:
     assert {entry.client for entry in REQUIRED_CAPABILITY_INVENTORY} == {
         "codex-cli",
         "claude-code",
-        "gemini-cli",
         "cursor-agent",
         "opencode",
         "ollama",
@@ -171,20 +170,6 @@ def test_evidence_source_does_not_expose_supplied_absolute_path(tmp_path: Path) 
     assert prompt.availability == AVAILABLE
     assert "artifact.json" in prompt.evidence_source
     assert str(tmp_path) not in prompt.evidence_source
-
-
-def test_missing_artifact_is_no_data_not_an_empty_matrix(tmp_path: Path) -> None:
-    rows = probe_artifact(
-        inventory_entry("gemini-cli"),
-        tmp_path / "missing.jsonl",
-        auth_mode="api_key",
-        surface="agent",
-    )
-    assert len(rows) == len(REQUIRED_FIELDS)
-    assert {row.field for row in rows} == set(REQUIRED_FIELDS)
-    assert all(row.availability == NOT_OBSERVED for row in rows)
-    assert all("artifact not found" in (row.notes or "") for row in rows)
-    assert all(str(tmp_path) not in (row.notes or "") for row in rows)
 
 
 def test_probe_cli_emits_full_matrix_and_codex_observation() -> None:
