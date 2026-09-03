@@ -17,7 +17,7 @@ def _post_tool(tmp_path: Path, *, tool_call: object = None, error: str = "") -> 
         "workspacePaths": [str(tmp_path)],
         "transcriptPath": str(tmp_path / "transcript.jsonl"),
         "artifactDirectoryPath": str(tmp_path / "artifacts"),
-        "modelName": "gemini-test",
+        "modelName": "agy-test",
         "stepIdx": 7,
         "error": error,
     }

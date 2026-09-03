@@ -21,7 +21,6 @@ DOCS = [
     (Path("docs/semantic-telemetry.md"), "docs/semantic-telemetry"),
     (Path("docs/claude-code-hooks.md"), "docs/claude-code-hooks"),
     (Path("docs/codex-hooks.md"), "docs/codex-hooks"),
-    (Path("docs/gemini-hooks.md"), "docs/gemini-hooks"),
     (Path("docs/cursor-hooks.md"), "docs/cursor-hooks"),
     (Path("docs/opencode-plugin.md"), "docs/opencode-plugin"),
     (Path("docs/inference-gateway.md"), "docs/inference-gateway"),

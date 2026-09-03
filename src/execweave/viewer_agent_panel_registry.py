@@ -7,7 +7,6 @@ PANEL_PROVIDERS = (
     "claude",
     "antigravity",
     "cursor",
-    "gemini",
     "opencode",
     "ollama",
 )

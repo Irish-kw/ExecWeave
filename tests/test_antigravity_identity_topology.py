@@ -33,7 +33,7 @@ def _payload(tmp_path: Path, conversation_id: str = "conversation-r4") -> dict[s
         "workspacePaths": [str(workspace)],
         "transcriptPath": str(transcript),
         "artifactDirectoryPath": str(transcript.parents[3]),
-        "modelName": "gemini-test",
+        "modelName": "agy-test",
         "stepIdx": 4,
         "toolCall": {"name": "run_command", "args": {"command": "pwd"}},
         "error": "",

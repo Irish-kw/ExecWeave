@@ -60,4 +60,4 @@ Full-fidelity content는 본질적으로 sensitive합니다. Prompt text, tool a
 
 ExecWeave는 adapter contract가 정의한 경우에만 provider-metadata projection에서 알려진 transport credentials를 필터링합니다. 이는 범용 secret scanner가 아니며 content payload 안의 secret을 제거하지 않습니다. Content blob은 기본적으로 로컬에 남고 graph event에 inline되지 않지만 여전히 run evidence의 일부이므로 공유 전 검토가 필요합니다.
 
-각 provider-specific 문서가 관측 가능한 field를 정의합니다. Claude Code, Codex, Gemini, Cursor, OpenCode, Inference Gateway, Model Runtime 문서를 참고하세요.
+각 provider-specific 문서가 관측 가능한 field를 정의합니다. Claude Code, Codex, Antigravity, Cursor, OpenCode, Inference Gateway, Model Runtime 문서를 참고하세요.

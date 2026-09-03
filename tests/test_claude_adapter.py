@@ -61,6 +61,20 @@ def test_write_declares_file_target_without_storing_content() -> None:
     assert "content" in events[0]["target"]["attributes"]["input_keys"]
 
 
+def test_notebook_edit_declares_explicit_notebook_path() -> None:
+    payload = {
+        **_base("PreToolUse"),
+        "tool_name": "NotebookEdit",
+        "tool_use_id": "toolu_notebook",
+        "tool_input": {"notebook_path": "/repo/analysis.ipynb", "new_source": "x = 1"},
+    }
+
+    events = claude_hook_to_semantic_events(payload, timestamp="2026-08-25T03:00:00Z")
+
+    declared = next(event for event in events if event["relation"] == "DECLARED_TARGET")
+    assert declared["target"]["name"] == "analysis.ipynb"
+
+
 def test_mcp_tool_creates_server_and_tool_relationships() -> None:
     payload = {
         **_base("PreToolUse"),

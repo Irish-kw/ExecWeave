@@ -5,7 +5,7 @@ from typing import Any
 
 LIFECYCLE_SCHEMA_VERSION = "0.1"
 SUPPORTED_PROVIDER_LIFECYCLES = frozenset(
-    {"claude", "codex", "gemini", "antigravity", "cursor", "opencode"}
+    {"claude", "codex", "antigravity", "cursor", "opencode"}
 )
 
 

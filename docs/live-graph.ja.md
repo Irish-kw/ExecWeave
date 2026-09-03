@@ -31,7 +31,7 @@ EXECWEAVE_SEMANTIC_SIDECAR
 
 Specialized evidence は複数の attribution-safe path から自動で到着できます。
 
-- 設定済みの Claude Code、OpenAI Codex、Gemini CLI、Cursor hooks；
+- 設定済みの Claude Code、OpenAI Codex、Antigravity、Cursor hooks；
 - インストール済みの OpenCode plugin；
 - ExecWeave が対応する local Ollama、llama.cpp、vLLM server を起動した場合の loopback model-catalog probe；
 - `lms server start --port <port>` に対する success-gated LM Studio post-launch probe。ただし launch 前に同じ compatible endpoint が存在していないこと；
@@ -88,7 +88,7 @@ Specialized event が一件も到着しなければ、final materialization は 
 | --- | --- |
 | Claude Code | **Yes**、ExecWeave hooks 設定後 |
 | OpenAI Codex | **Yes**、ExecWeave hooks 設定後 |
-| Gemini CLI | **Yes**、ExecWeave hooks 設定後 |
+| Antigravity | **Yes**、ExecWeave hooks 設定後 |
 | Cursor | **Yes**、ExecWeave hooks 設定後 |
 | OpenCode | **Yes**、ExecWeave plugin インストール後 |
 | Ollama | **Yes**、認識済み local `ollama serve` launch の場合 |
@@ -215,7 +215,7 @@ Repository CI は次をカバーします。
 - runtime identity ready 前の semantic sidecar arrival；
 - semantic sidecar truncation と replay；
 - canonical final runtime + specialized rebuild；
-- Claude、Codex、Gemini、Cursor、OpenCode の automatic shared-sidecar delivery；
+- Claude、Codex、Antigravity、Cursor、OpenCode の automatic shared-sidecar delivery；
 - Ollama、llama.cpp、vLLM の automatic local model-runtime probe と attribution-safe LM Studio launch handling；
 - LiteLLM callback の privacy、fail-open behavior、final live-graph materialization；
 - 2 つ目の Agent を起動しない detached Top behavior；

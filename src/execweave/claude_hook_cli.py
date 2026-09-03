@@ -11,6 +11,7 @@ from typing import Any
 from .agent_trace import provider_agent_trace_visibility_event
 from .claude_adapter import append_semantic_records, claude_hook_to_semantic_events, read_hook_payload
 from .claude_delegation import claude_delegation_events
+from .claude_child_transcript import claude_child_transcript_semantic_events
 from .claude_hook_contract import (
     PASSIVE_CLAUDE_HOOK_EVENTS,
     claude_official_full_fidelity_events,
@@ -178,6 +179,13 @@ def main(argv: list[str] | None = None) -> int:
                 payload,
                 content_events=content_records,
                 timestamp=observed_at,
+            )
+        )
+        records.extend(
+            claude_child_transcript_semantic_events(
+                payload,
+                timestamp=observed_at,
+                sidecar=sidecar,
             )
         )
         append_semantic_records(sidecar, records)

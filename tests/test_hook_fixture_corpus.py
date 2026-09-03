@@ -11,7 +11,6 @@ from execweave.claude_adapter import claude_hook_to_semantic_events
 from execweave.claude_hook_cli import main as claude_hook_main
 from execweave.codex_adapter import codex_hook_to_semantic_events
 from execweave.cursor_adapter import cursor_hook_to_semantic_events
-from execweave.gemini_adapter import gemini_hook_to_semantic_events
 from execweave.opencode_adapter import opencode_plugin_to_semantic_events
 
 FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures" / "hooks"
@@ -70,10 +69,6 @@ def _codex(payload: dict) -> list[dict]:
     return codex_hook_to_semantic_events(payload, timestamp=FIXED_TIMESTAMP)
 
 
-def _gemini(payload: dict) -> list[dict]:
-    return gemini_hook_to_semantic_events(payload)
-
-
 def _cursor(payload: dict) -> list[dict]:
     return cursor_hook_to_semantic_events(payload)
 
@@ -85,7 +80,6 @@ def _opencode(payload: dict) -> list[dict]:
 ADAPTERS: dict[str, Callable[[dict], list[dict]]] = {
     "claude": _claude,
     "codex": _codex,
-    "gemini": _gemini,
     "cursor": _cursor,
     "opencode": _opencode,
 }

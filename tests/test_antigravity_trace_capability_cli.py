@@ -21,7 +21,7 @@ def test_antigravity_preinvocation_cli_emits_transcript_aware_visibility(
         "workspacePaths": [str(tmp_path)],
         "transcriptPath": str(tmp_path / "transcript.jsonl"),
         "artifactDirectoryPath": str(tmp_path / "artifacts"),
-        "modelName": "gemini-test",
+        "modelName": "agy-test",
     }
     monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
 

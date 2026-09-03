@@ -16,7 +16,6 @@ from execweave.claude_hook_cli import main as claude_hook_main
 from execweave.codex_hook_cli import main as codex_hook_main
 from execweave.cursor_hook_cli import main as cursor_hook_main
 from execweave.entry import _live_command
-from execweave.gemini_hook_cli import main as gemini_hook_main
 from execweave.opencode_hook_cli import main as opencode_hook_main
 from execweave.opencode_plugin_cli import plugin_text
 
@@ -26,7 +25,6 @@ from execweave.opencode_plugin_cli import plugin_text
     [
         (["claude"], "claude"),
         (["C:\\Tools\\codex.exe"], "codex"),
-        (["gemini.cmd"], "gemini"),
         (["/opt/cursor"], "cursor"),
         (["opencode.bat"], "opencode"),
         (["python", "agent.py"], None),
@@ -44,7 +42,6 @@ def test_supported_agent_normalizes_platform_launchers(
     [
         ("claude", Path(".claude/settings.json"), "execweave-claude-hook --auto"),
         ("codex", Path(".codex/hooks.json"), "execweave-codex-hook --auto"),
-        ("gemini", Path(".gemini/settings.json"), "execweave-gemini-hook --auto"),
         ("cursor", Path(".cursor/hooks.json"), "execweave-cursor-hook --auto"),
     ],
 )
@@ -156,7 +153,6 @@ def test_opencode_bootstrap_uses_global_plugin_and_is_idempotent(tmp_path: Path)
     [
         (claude_hook_main, ""),
         (codex_hook_main, ""),
-        (gemini_hook_main, "{}\n"),
         (cursor_hook_main, "{}\n"),
         (opencode_hook_main, "{}\n"),
     ],
@@ -211,16 +207,6 @@ def test_auto_hooks_still_emit_when_live_sidecar_is_present(monkeypatch, tmp_pat
     )
     _invoke_auto_hook(
         monkeypatch,
-        gemini_hook_main,
-        {
-            "session_id": "gemini-session",
-            "cwd": str(tmp_path),
-            "hook_event_name": "SessionStart",
-            "source": "startup",
-        },
-    )
-    _invoke_auto_hook(
-        monkeypatch,
         cursor_hook_main,
         {
             "conversation_id": "cursor-conversation",
@@ -254,7 +240,7 @@ def test_auto_hooks_still_emit_when_live_sidecar_is_present(monkeypatch, tmp_pat
         for record in records
         if isinstance(record.get("attributes"), dict)
     }
-    assert {"claude", "codex", "gemini", "cursor", "opencode"}.issubset(providers)
+    assert {"claude", "codex", "cursor", "opencode"}.issubset(providers)
 
 
 @pytest.mark.parametrize(
@@ -262,7 +248,6 @@ def test_auto_hooks_still_emit_when_live_sidecar_is_present(monkeypatch, tmp_pat
     [
         (["live", "--open", "--", "claude"], ["claude"]),
         (["live", "--port", "0", "codex"], ["codex"]),
-        (["live", "--linger=0", "gemini", "--flag"], ["gemini", "--flag"]),
         (["record", "--", "claude"], []),
         (["live", "--unknown", "claude"], []),
     ],

@@ -17,7 +17,6 @@ def _read_events(path: Path) -> list[dict]:
 def test_infer_agent_name() -> None:
     assert infer_agent_name(["claude"]) == "Claude Code"
     assert infer_agent_name(["codex"]) == "OpenAI Codex"
-    assert infer_agent_name(["gemini"]) == "Gemini CLI"
     assert infer_agent_name(["custom-agent"]) == "custom-agent"
 
 

@@ -20,7 +20,6 @@ def _prepend_path(monkeypatch, directory: Path) -> None:
 def test_infer_agent_name_normalizes_windows_launcher_suffixes() -> None:
     assert infer_agent_name(["codex.cmd"]) == "OpenAI Codex"
     assert infer_agent_name(["claude.exe"]) == "Claude Code"
-    assert infer_agent_name(["gemini.bat"]) == "Gemini CLI"
     assert infer_agent_name(["cursor.ps1"]) == "Cursor"
     assert infer_agent_name(["opencode.cmd"]) == "OpenCode"
 
@@ -45,7 +44,7 @@ def test_posix_path_script_is_resolved_and_launchable(tmp_path: Path, monkeypatc
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows launcher test")
-@pytest.mark.parametrize("agent", ["codex", "cursor", "claude", "gemini", "opencode"])
+@pytest.mark.parametrize("agent", ["codex", "cursor", "claude", "opencode"])
 def test_windows_cmd_shim_is_resolved_and_launchable(
     agent: str, tmp_path: Path, monkeypatch
 ) -> None:

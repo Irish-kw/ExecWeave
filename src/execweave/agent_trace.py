@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from pathlib import Path
 from typing import Any
 
 from .content_evidence import content_observation_event
@@ -29,11 +30,6 @@ _VISIBILITY: dict[str, dict[str, str]] = {
         "agent_identity_visibility": "provider_exposed_session_identity",
         "subagent_visibility": "provider_exposed_session_parent_id",
         "reasoning_visibility": "provider_exposed_reasoning_part",
-    },
-    "gemini": {
-        "agent_identity_visibility": "provider_root_only",
-        "subagent_visibility": "not_exposed_by_source",
-        "reasoning_visibility": "not_exposed_by_source",
     },
     "antigravity": {
         "agent_identity_visibility": "provider_root_only",
@@ -63,7 +59,6 @@ _PROVIDER_ROOT_AGENTS: dict[str, tuple[str, str]] = {
     "codex": ("agent:Codex", "Codex"),
     "cursor": ("agent:Cursor", "Cursor"),
     "opencode": ("agent:OpenCode", "OpenCode"),
-    "gemini": ("agent:Gemini CLI", "Gemini CLI"),
     "antigravity": ("agent:Antigravity", "Antigravity"),
 }
 
@@ -195,6 +190,44 @@ def _opencode_event_body(event: dict[str, Any]) -> dict[str, Any]:
 
 def _string(value: Any) -> str | None:
     return value if isinstance(value, str) and value else None
+
+
+def _declared_opencode_file(
+    *,
+    payload: dict[str, Any],
+    args: Any,
+) -> dict[str, Any] | None:
+    """Project only an explicitly supplied OpenCode file argument.
+
+    Event-bus tool parts and plugin tool hooks use the same provider file
+    argument contract.  Keep path projection metadata-only; file contents stay
+    in the full-fidelity content store.
+    """
+    if not isinstance(args, dict):
+        return None
+    raw = None
+    for key in ("filePath", "file_path", "path"):
+        value = args.get(key)
+        if isinstance(value, str) and value:
+            raw = value
+            break
+    if raw is None:
+        return None
+    candidate = Path(raw).expanduser()
+    cwd = _string(payload.get("cwd"))
+    if not candidate.is_absolute() and cwd is not None:
+        candidate = Path(cwd) / candidate
+    try:
+        normalized = candidate.resolve(strict=False)
+    except OSError:
+        normalized = candidate.absolute()
+    return _entity(
+        "file",
+        f"file:{normalized}",
+        normalized.name or str(normalized),
+        provider="opencode",
+        declared_by_provider_event_bus=True,
+    )
 
 
 def _session_id_from(
@@ -559,6 +592,7 @@ def _agent_part_events(
 def _tool_part_events(
     *,
     part: dict[str, Any],
+    payload: dict[str, Any],
     session_id: str,
     timestamp: str,
     store: FullFidelityContentStore,
@@ -609,6 +643,24 @@ def _tool_part_events(
     ]
     state = part.get("state")
     if isinstance(state, dict):
+        target = _declared_opencode_file(
+            payload=payload,
+            args=state.get("input"),
+        )
+        if target is not None:
+            events.append(
+                _event(
+                    timestamp=timestamp,
+                    event_type="semantic.opencode.file.declared",
+                    relation="DECLARED_TARGET",
+                    source=call,
+                    target=target,
+                    provider="opencode",
+                    attribution="opencode_event_bus",
+                    evidence_source="provider_plugin",
+                    attributes={"provider_event_projection": True},
+                )
+            )
         for field, kind, relation in (
             ("input", "opencode.tool_state_input", "OBSERVED_TOOL_INPUT_FROM_PROVIDER_EVENT"),
             ("output", "opencode.tool_state_output", "RECEIVED_TOOL_OUTPUT_FROM_PROVIDER_EVENT"),
@@ -732,6 +784,7 @@ def _part_events(
     if kind == "tool":
         return _tool_part_events(
             part=part,
+            payload=payload,
             session_id=session_id,
             timestamp=timestamp,
             store=store,

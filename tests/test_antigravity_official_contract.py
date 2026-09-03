@@ -27,7 +27,7 @@ def _stop_payload(tmp_path, *, error: str = "") -> dict[str, object]:
         "workspacePaths": [str(tmp_path)],
         "transcriptPath": str(tmp_path / "transcript.jsonl"),
         "artifactDirectoryPath": str(tmp_path / "artifacts"),
-        "modelName": "gemini-test",
+        "modelName": "agy-test",
     }
 
 
@@ -77,7 +77,7 @@ def test_antigravity_preinvocation_observes_session_without_claiming_session_sta
         "workspacePaths": [str(tmp_path)],
         "transcriptPath": str(tmp_path / "transcript.jsonl"),
         "artifactDirectoryPath": str(tmp_path / "artifacts"),
-        "modelName": "gemini-test",
+        "modelName": "agy-test",
     }
 
     events = antigravity_hook_to_semantic_events(

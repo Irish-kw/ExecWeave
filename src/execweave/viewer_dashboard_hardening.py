@@ -246,7 +246,7 @@ function toolCallsFor(agentId){
   const calls=relatedToAny(agentId,TOOL_CALL_OWNERSHIP_RELATIONS);
   if(!calls.length)return '';
   const ordered=[...calls].sort((a,b)=>String(b?.first_seen||'').localeCompare(String(a?.first_seen||''))||String(a?.id||'').localeCompare(String(b?.id||'')));
-  const stamps=ordered.map(call=>String(call?.first_seen||'').filter(Boolean));
+  const stamps=ordered.map(call=>String(call?.first_seen||'')).filter(Boolean);
   const sameDay=stamps.length<2||stamps.every(value=>value.slice(0,10)===stamps[0].slice(0,10));
   return ordered.map(call=>toolCallLine(call,sameDay)).join('\\n');
 }

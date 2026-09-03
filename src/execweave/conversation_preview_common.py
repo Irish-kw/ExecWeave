@@ -38,7 +38,6 @@ _PROVIDER_LABELS = {
     "codex": "OpenAI Codex",
     "cursor": "Cursor",
     "opencode": "OpenCode",
-    "gemini": "Gemini CLI",
     "antigravity": "Antigravity",
     "anthropic": "Anthropic",
     "openrouter": "OpenRouter",

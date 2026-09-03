@@ -31,7 +31,7 @@ EXECWEAVE_SEMANTIC_SIDECAR
 
 Specialized evidence can arrive automatically through several attribution-safe paths:
 
-- configured Claude Code, OpenAI Codex, Gemini CLI, and Cursor hooks;
+- configured Claude Code, OpenAI Codex, Antigravity, and Cursor hooks;
 - the installed OpenCode plugin;
 - loopback model-catalog probes when ExecWeave launches supported local Ollama, llama.cpp, or vLLM servers;
 - a success-gated post-launch LM Studio probe for `lms server start --port <port>` when that compatible endpoint did not already exist before launch;
@@ -88,7 +88,7 @@ If no specialized events arrive, final materialization remains runtime-only.
 | --- | --- |
 | Claude Code | **Yes**, after ExecWeave hooks are configured |
 | OpenAI Codex | **Yes**, after ExecWeave hooks are configured |
-| Gemini CLI | **Yes**, after ExecWeave hooks are configured |
+| Antigravity | **Yes**, after ExecWeave hooks are configured |
 | Cursor | **Yes**, after ExecWeave hooks are configured |
 | OpenCode | **Yes**, after the ExecWeave plugin is installed |
 | Ollama | **Yes**, for recognized local `ollama serve` launches |
@@ -215,7 +215,7 @@ The repository CI configuration covers:
 - semantic sidecar arrival before runtime identity is ready;
 - semantic sidecar truncation and replay;
 - canonical final runtime + specialized rebuild;
-- automatic shared-sidecar delivery for Claude, Codex, Gemini, Cursor, and OpenCode;
+- automatic shared-sidecar delivery for Claude, Codex, Antigravity, Cursor, and OpenCode;
 - automatic local model-runtime probes for Ollama, llama.cpp, vLLM, and attribution-safe LM Studio launch handling;
 - LiteLLM callback privacy, fail-open behavior, and final live-graph materialization;
 - detached Top behavior without launching a second Agent;

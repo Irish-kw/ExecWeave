@@ -60,4 +60,4 @@ Le contenu full-fidelity est volontairement sensible. Ne supposez pas que les pr
 
 ExecWeave filtre les identifiants de transport connus dans certaines projections de métadonnées lorsque le contrat de l'adaptateur le prévoit, mais ce n'est ni un scanner général de secrets ni un mécanisme qui supprime les valeurs sensibles incorporées dans le contenu. Les blobs restent locaux par défaut et ne sont pas intégrés directement aux événements de graphe, mais font toujours partie des preuves du run et doivent être examinés avant partage.
 
-Les documents propres à chaque fournisseur définissent exactement quels champs sont observables. Voir la documentation Claude Code, Codex, Gemini, Cursor, OpenCode, Inference Gateway et Model Runtime.
+Les documents propres à chaque fournisseur définissent exactement quels champs sont observables. Voir la documentation Claude Code, Codex, Antigravity, Cursor, OpenCode, Inference Gateway et Model Runtime.

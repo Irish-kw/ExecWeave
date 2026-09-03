@@ -6,7 +6,7 @@ execweaveDashboardGraph=function(data){
   const projected=execweaveDashboardGraphBase(data);
   const hiddenTypes=new Set(['agent_trace_capability','session','command','inference_call','code_cell','agent_message']);
   const mergeTypes=new Set(['model','directory','network_endpoint']);
-  const providerRootIds=new Set(['agent:Claude Code','agent:OpenAI Codex','agent:Codex','agent:Cursor','agent:OpenCode','agent:Gemini CLI','agent:Antigravity','agent:Ollama','agent:ollama']);
+  const providerRootIds=new Set(['agent:Claude Code','agent:OpenAI Codex','agent:Codex','agent:Cursor','agent:OpenCode','agent:Antigravity','agent:Ollama','agent:ollama']);
   const before=Array.isArray(projected.nodes)?projected.nodes:[];
   let prepared=before.filter(node=>node&&!hiddenTypes.has(String(node.type||''))).map(node=>{
     const attrs=node.attributes||{};

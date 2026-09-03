@@ -69,14 +69,6 @@ REQUIRED_CAPABILITY_INVENTORY = (
         tier=TIER_REQUIRED,
     ),
     CapabilityInventoryEntry(
-        client="gemini-cli",
-        provider="google",
-        auth_modes=("api_key",),
-        surfaces=("agent",),
-        transport_mode="direct",
-        tier=TIER_REQUIRED,
-    ),
-    CapabilityInventoryEntry(
         client="cursor-agent",
         provider="cursor_or_upstream",
         auth_modes=("subscription",),

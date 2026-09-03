@@ -31,7 +31,7 @@ EXECWEAVE_SEMANTIC_SIDECAR
 
 Специализированные доказательства могут автоматически поступать через несколько attribution-safe путей:
 
-- заранее настроенные hooks Claude Code, OpenAI Codex, Gemini CLI и Cursor;
+- заранее настроенные hooks Claude Code, OpenAI Codex, Antigravity и Cursor;
 - установленный плагин OpenCode;
 - loopback model-catalog probes, когда ExecWeave запускает распознанные локальные серверы Ollama, llama.cpp или vLLM;
 - success-gated post-launch probe LM Studio для `lms server start --port <port>`, только если до запуска совместимого endpoint ещё не существовало;
@@ -88,7 +88,7 @@ OS runtime-доказательства остаются независимым 
 | --- | --- |
 | Claude Code | **Да**, после настройки hooks ExecWeave |
 | OpenAI Codex | **Да**, после настройки hooks ExecWeave |
-| Gemini CLI | **Да**, после настройки hooks ExecWeave |
+| Antigravity | **Да**, после настройки hooks ExecWeave |
 | Cursor | **Да**, после настройки hooks ExecWeave |
 | OpenCode | **Да**, после установки плагина ExecWeave |
 | Ollama | **Да**, для распознанных локальных запусков `ollama serve` |
@@ -215,7 +215,7 @@ Live-обновления используют ограниченную исто
 - поступление sidecar до готовности runtime identity;
 - усечение и replay sidecar;
 - каноническую финальную перестройку runtime + specialized;
-- автоматическую доставку через общий sidecar для Claude, Codex, Gemini, Cursor и OpenCode;
+- автоматическую доставку через общий sidecar для Claude, Codex, Antigravity, Cursor и OpenCode;
 - автоматические локальные model-runtime probes для Ollama, llama.cpp, vLLM и attribution-safe обработку запуска LM Studio;
 - privacy, fail-open behavior и финальную live-graph materialization callback LiteLLM;
 - отделённое поведение Top без запуска второго Agent;

@@ -183,9 +183,12 @@ def _command_entity(tool_input: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def _declared_file_entity(payload: dict[str, Any], tool_input: dict[str, Any]) -> dict[str, Any] | None:
-    raw = tool_input.get("file_path")
-    if not isinstance(raw, str) or not raw:
-        raw = tool_input.get("path")
+    raw = None
+    for key in ("file_path", "filePath", "path", "notebook_path", "notebookPath"):
+        candidate = tool_input.get(key)
+        if isinstance(candidate, str) and candidate:
+            raw = candidate
+            break
     if not isinstance(raw, str) or not raw:
         return None
     candidate = Path(raw).expanduser()
@@ -281,7 +284,7 @@ def _tool_pre_events(payload: dict[str, Any], *, timestamp: str) -> list[dict[st
                         attributes=common,
                     )
                 )
-        if tool_name in {"Read", "Edit", "Write", "NotebookEdit"}:
+        if tool_name.strip().lower() in {"read", "edit", "write", "notebookedit"}:
             target_file = _declared_file_entity(payload, tool_input)
             if target_file is not None:
                 events.append(

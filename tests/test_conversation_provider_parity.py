@@ -135,18 +135,6 @@ def test_provider_neutral_conversation_preview_parity(tmp_path: Path) -> None:
             "assistant_kind": "opencode.completed_text",
             "assistant": "opencode answer",
         },
-        "gemini": {
-            "source": {
-                "id": "agent:Gemini CLI",
-                "type": "agent",
-                "name": "Gemini CLI",
-                "attributes": {"provider": "gemini"},
-            },
-            "user_kind": "gemini.user_prompt",
-            "user": "gemini user",
-            "assistant_kind": "gemini.agent_response_candidate",
-            "assistant": "gemini answer candidate",
-        },
         "anthropic": {
             "source": {
                 "id": "inference-request:anthropic:1",
@@ -305,7 +293,6 @@ def test_provider_neutral_conversation_preview_parity(tmp_path: Path) -> None:
         assert all(required_message_fields <= set(message) for message in preview["messages"])
         assert preview["messages"][0]["sender"] == "user", provider
 
-    assert previews["gemini"]["messages"][1]["phase"] == "candidate"
     assert previews["cursor"]["messages"][0]["kind"] == "user_prompt_candidate"
     assert previews["anthropic"]["provider_label"] == "Anthropic"
     assert previews["openrouter"]["provider_label"] == "OpenRouter"
@@ -432,7 +419,6 @@ def test_dashboard_copy_and_root_detection_are_provider_neutral(tmp_path: Path) 
         "agent:Codex",
         "agent:Cursor",
         "agent:OpenCode",
-        "agent:Gemini CLI",
         "agent:Antigravity",
     ):
         assert root_id in html

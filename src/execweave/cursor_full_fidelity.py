@@ -106,11 +106,12 @@ def _tool_call(payload: dict[str, Any], hook: str) -> dict[str, Any]:
 
 
 def _file(payload: dict[str, Any]) -> dict[str, Any]:
-    raw = (
-        payload.get("file_path")
-        if isinstance(payload.get("file_path"), str)
-        else "unknown"
-    )
+    raw = "unknown"
+    for key in ("file_path", "filePath", "path"):
+        candidate = payload.get(key)
+        if isinstance(candidate, str) and candidate:
+            raw = candidate
+            break
     candidate = Path(raw).expanduser() if raw != "unknown" else Path(raw)
     try:
         normalized = str(candidate.resolve(strict=False)) if raw != "unknown" else raw

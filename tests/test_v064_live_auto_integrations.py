@@ -8,7 +8,6 @@ from pathlib import Path
 from execweave.claude_hook_cli import main as claude_hook_main
 from execweave.codex_hook_cli import main as codex_hook_main
 from execweave.cursor_hook_cli import main as cursor_hook_main
-from execweave.gemini_hook_cli import main as gemini_hook_main
 from execweave.live import _LiveState
 from execweave.opencode_hook_cli import main as opencode_hook_main
 
@@ -73,16 +72,6 @@ def test_configured_agent_integrations_inherit_live_sidecar_and_stream_into_view
     )
     _invoke_hook(
         monkeypatch,
-        gemini_hook_main,
-        {
-            "session_id": "gemini-session",
-            "cwd": str(tmp_path),
-            "hook_event_name": "SessionStart",
-            "source": "startup",
-        },
-    )
-    _invoke_hook(
-        monkeypatch,
         cursor_hook_main,
         {
             "conversation_id": "cursor-conversation",
@@ -117,7 +106,7 @@ def test_configured_agent_integrations_inherit_live_sidecar_and_stream_into_view
         for record in raw_records
         if isinstance(record.get("attributes"), dict)
     }
-    assert {"claude", "codex", "gemini", "cursor", "opencode"}.issubset(providers)
+    assert {"claude", "codex", "cursor", "opencode"}.issubset(providers)
 
     runtime = tmp_path / "events.jsonl"
     _write_runtime(runtime)
@@ -132,4 +121,4 @@ def test_configured_agent_integrations_inherit_live_sidecar_and_stream_into_view
         for node in graph["nodes"]
         if isinstance(node.get("attributes"), dict)
     }
-    assert {"claude", "codex", "gemini", "cursor", "opencode"}.issubset(graph_providers)
+    assert {"claude", "codex", "cursor", "opencode"}.issubset(graph_providers)

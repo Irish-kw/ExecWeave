@@ -72,7 +72,3 @@ That edge is exact identity evidence (`identity_exact: true`) with identity meth
 The assignment edge does not copy `transcriptPath` or child `logAbsoluteUri` into its graph attributes. Hook-supplied metadata may still be preserved separately by the full-fidelity content layer according to the normal provider-metadata rules.
 
 This integration does **not** claim access to hidden model state, private chain-of-thought, an unseen provider-side request, or any content not delivered to an observed local surface. OS-runtime evidence remains a separate layer.
-
-## Legacy Gemini CLI
-
-The older `execweave-gemini-*` entry points remain available for compatibility with existing installations and archived workflows. They are not the current Google CLI path documented by ExecWeave; new usage should target Antigravity with `agy`.

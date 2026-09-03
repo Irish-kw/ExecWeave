@@ -443,9 +443,6 @@ def test_two_antigravity_root_conversations_are_isolated(tmp_path: Path) -> None
                     "attributes": {"provider": "cursor", "conversation_id": "c"}},
          "cursor.assistant_final_response"),
         ("opencode", opencode_session_agent("ses_solo"), "opencode.assistant_response"),
-        ("gemini", {"id": "agent:Gemini CLI", "type": "agent", "name": "Gemini CLI",
-                    "attributes": {"provider": "gemini", "session_id": "g"}},
-         "gemini.assistant_final_response"),
         ("antigravity", {"id": "agent:antigravity:conversation:c7", "type": "agent",
                          "name": "Antigravity conversation",
                          "attributes": {"provider": "antigravity", "conversation_id": "c7"}},
@@ -454,7 +451,7 @@ def test_two_antigravity_root_conversations_are_isolated(tmp_path: Path) -> None
                         "attributes": {"provider": "openrouter", "session_id": "o"}},
          "inference_gateway.openrouter.response"),
     ],
-    ids=["claude", "cursor", "opencode", "gemini", "antigravity", "gateway"],
+    ids=["claude", "cursor", "opencode", "antigravity", "gateway"],
 )
 def test_root_thread_identity_contract_is_unchanged(
     tmp_path: Path, provider: str, source: dict[str, Any], content_kind: str

@@ -119,7 +119,7 @@ def test_antigravity_post_tool_hook_emits_provider_evidence(
         "workspacePaths": [str(tmp_path)],
         "transcriptPath": str(tmp_path / "transcript.jsonl"),
         "artifactDirectoryPath": str(tmp_path / "artifacts"),
-        "modelName": "gemini-test",
+        "modelName": "agy-test",
         "stepIdx": 5,
         "toolCall": {
             "name": "run_command",

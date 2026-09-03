@@ -128,7 +128,7 @@ v0.8.3 的重點是讓 dense、multi-round run 更容易讀，同時不改 raw e
 
 Cursor `tool_use_id`、Codex rollout thread identity、OpenCode `sessionID + callID` 這類 stable provider identifier 能證明 logical provider identity，但它們不是 OS PID。只有 provider 明確曝露 route、delegation 或 result 時，cross-agent content 才會被顯示。若 gateway / local runtime 只提供 root request/response，ExecWeave 就維持 root-only，不會虛構 subagent 或 hidden routing。
 
-OpenRouter `exchange` 是 caller-supplied request+response evidence，不是 transparent wire interception。LiteLLM Proxy 在目前 baseline 仍屬較窄的 metadata-oriented integration。Legacy Gemini CLI entry points 仍為相容性保留，但新的 Google CLI 使用情境應改用 Antigravity (`agy`)。
+OpenRouter `exchange` 是 caller-supplied request+response evidence，不是 transparent wire interception。LiteLLM Proxy 在目前 baseline 仍屬較窄的 metadata-oriented integration。Google CLI 使用情境應改用 Antigravity (`agy`)。
 
 ## Evidence model
 

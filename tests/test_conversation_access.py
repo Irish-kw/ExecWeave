@@ -169,7 +169,7 @@ def test_antigravity_archives_only_validated_brain_transcript(tmp_path: Path) ->
         "workspacePaths": [str(workspace)],
         "transcriptPath": str(transcript),
         "artifactDirectoryPath": str(transcript.parents[3]),
-        "modelName": "gemini-test",
+        "modelName": "agy-test",
     }
     store = FullFidelityContentStore(tmp_path / "run")
 

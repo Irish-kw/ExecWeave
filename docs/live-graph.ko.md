@@ -31,7 +31,7 @@ EXECWEAVE_SEMANTIC_SIDECAR
 
 Specialized evidence는 여러 attribution-safe 경로를 통해 자동으로 들어올 수 있습니다.
 
-- 설정된 Claude Code, OpenAI Codex, Gemini CLI, Cursor hooks;
+- 설정된 Claude Code, OpenAI Codex, Antigravity, Cursor hooks;
 - 설치된 OpenCode plugin;
 - ExecWeave가 지원되는 local Ollama, llama.cpp, vLLM server를 시작할 때의 loopback model-catalog probe;
 - `lms server start --port <port>`에 대한 success-gated LM Studio post-launch probe. 단, launch 전에 동일한 compatible endpoint가 존재하지 않아야 함;
@@ -88,7 +88,7 @@ Specialized event가 하나도 없으면 final materialization은 runtime-only�
 | --- | --- |
 | Claude Code | **Yes**, ExecWeave hooks 설정 후 |
 | OpenAI Codex | **Yes**, ExecWeave hooks 설정 후 |
-| Gemini CLI | **Yes**, ExecWeave hooks 설정 후 |
+| Antigravity | **Yes**, ExecWeave hooks 설정 후 |
 | Cursor | **Yes**, ExecWeave hooks 설정 후 |
 | OpenCode | **Yes**, ExecWeave plugin 설치 후 |
 | Ollama | **Yes**, 인식된 local `ollama serve` launch인 경우 |
@@ -215,7 +215,7 @@ Repository CI는 다음을 포함합니다.
 - runtime identity가 ready되기 전 semantic sidecar arrival;
 - semantic sidecar truncation 및 replay;
 - canonical final runtime + specialized rebuild;
-- Claude, Codex, Gemini, Cursor, OpenCode의 automatic shared-sidecar delivery;
+- Claude, Codex, Antigravity, Cursor, OpenCode의 automatic shared-sidecar delivery;
 - Ollama, llama.cpp, vLLM automatic local model-runtime probe와 attribution-safe LM Studio launch handling;
 - LiteLLM callback privacy, fail-open behavior, final live-graph materialization;
 - 두 번째 Agent를 시작하지 않는 detached Top behavior;

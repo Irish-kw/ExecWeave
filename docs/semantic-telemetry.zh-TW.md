@@ -60,4 +60,4 @@ Full-fidelity content 本來就屬於敏感資料。**不要假設** prompt text
 
 ExecWeave 只會在 adapter contract 明確定義時，從 provider-metadata projection 過濾已知 transport credentials；這不是通用 secret scanner，也不會移除 content payload 內嵌的 secret。Content blobs 預設留在本機，且不 inline 到 graph events，但仍是 run evidence 的一部分，分享前必須檢查。
 
-每個 provider-specific 文件會定義該 integration 能觀察哪些欄位。Claude Code、Codex、Gemini、Cursor、OpenCode、Inference Gateway 與 Model Runtime 的精確邊界請參考各自文件。
+每個 provider-specific 文件會定義該 integration 能觀察哪些欄位。Claude Code、Codex、Antigravity、Cursor、OpenCode、Inference Gateway 與 Model Runtime 的精確邊界請參考各自文件。

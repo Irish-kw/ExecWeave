@@ -59,7 +59,7 @@ def test_antigravity_postinvocation_archives_transcript_like_codex_lifecycle(tmp
         "workspacePaths": [str(tmp_path / "workspace")],
         "transcriptPath": str(transcript),
         "artifactDirectoryPath": str(transcript.parents[3]),
-        "modelName": "gemini-test",
+        "modelName": "agy-test",
         "initialNumSteps": 2,
         "invocationNum": 0,
     }
@@ -110,7 +110,7 @@ def test_antigravity_preinvocation_archives_existing_transcript(tmp_path: Path) 
         "workspacePaths": [str(tmp_path)],
         "transcriptPath": str(transcript),
         "artifactDirectoryPath": str(transcript.parents[3]),
-        "modelName": "gemini-test",
+        "modelName": "agy-test",
         "initialNumSteps": 1,
         "invocationNum": 0,
     }

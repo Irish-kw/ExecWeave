@@ -50,7 +50,7 @@ Puis :
 ```bash
 execweave run -- claude
 execweave run -- codex
-execweave run -- gemini
+execweave run -- agy
 execweave run -- opencode
 execweave run -- python my_agent.py
 ```
