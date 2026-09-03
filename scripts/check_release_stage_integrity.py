@@ -279,7 +279,8 @@ def _assert_existing_tests_untouched(
             + "\n".join(violations)
             + "\n\nA test may only be edited with an explicit "
             "--allow-test-change PATH=REASON naming the file and why its assertion is "
-            "no longer correct. Deletions and renames are never permitted."
+            "no longer correct. Deletions and renames require a matching "
+            "retired-provider allowance."
         )
     unused = sorted(set(allowed) - {item["path"] for item in permitted})
     if unused:
