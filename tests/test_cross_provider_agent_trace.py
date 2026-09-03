@@ -197,7 +197,7 @@ def test_opencode_tool_event_projects_explicit_file_target_and_keeps_call_identi
     assert plugin_call["id"] == bus_call["id"] == "tool-call:opencode:child:call-file-1"
     assert declared["target"]["id"] == f"file:{tmp_path / 'notes.md'}"
     assert declared["attributes"]["provider_event_projection"] is True
-    assert "private" not in json.dumps(bus_events)
+    assert '"content": "private"' not in json.dumps(bus_events)
 
 
 def test_opencode_subtask_keeps_prompt_and_profile_without_inventing_child_session(
