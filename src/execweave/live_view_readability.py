@@ -36,7 +36,7 @@ const EXECWEAVE_LANE_GAP={runtime:110,root:110,agent:120,model:120,tool:120,file
 // A component with no path to the execution spine is packed below it rather than
 // interleaved with it, so its rows never sit between two nodes that talk to each other.
 const EXECWEAVE_BAND_GAP=170;
-let execweaveTopology={spec:new Map(),bundleByEdge:new Map(),sourcePort:new Map(),targetPort:new Map(),width:new Map(),height:new Map(),laneX:{},crowded:false};
+let execweaveTopology={spec:new Map(),bundleByEdge:new Map(),sourcePort:new Map(),targetPort:new Map(),routePoints:new Map(),width:new Map(),height:new Map(),laneX:{},crowded:false};
 let execweaveRuler=null;
 // Measure with a hidden text node carrying the label's own class, so the width comes
 // from the font actually in use rather than a guess. Contexts without layout (a
@@ -261,7 +261,7 @@ function execweaveBuildTopology(){
     list.sort((a,b)=>{const as=spec.get(a.source),bs=spec.get(b.source);return (as?.y??0)-(bs?.y??0)||(as?.rank??0)-(bs?.rank??0)||edgeId(a).localeCompare(edgeId(b))});
     list.forEach((edge,index)=>targetPort.set(edgeId(edge),{index,total:list.length}));
   }
-  return{spec,bundleByEdge,sourcePort,targetPort,width,height,laneX,crowded:edges.length>=16||nodes.length>=12};
+  return{spec,bundleByEdge,sourcePort,targetPort,routePoints:new Map(),width,height,laneX,crowded:edges.length>=16||nodes.length>=12};
 }
 function execweaveComponents(nodes,edges){
   const adjacent=new Map();

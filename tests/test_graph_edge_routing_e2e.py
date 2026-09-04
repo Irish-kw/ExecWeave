@@ -111,7 +111,12 @@ def test_the_crossing_count_does_not_rise_above_the_recorded_baseline(tmp_path: 
 
 
 def test_every_ordinary_edge_shares_one_geometry(tmp_path: Path) -> None:
-    """A spawn and a tool call leaving the same agent must be shaped the same way."""
+    """Ordinary flow uses one family; bundles and lifecycle returns stay deliberate exceptions.
+
+    After dagre routing points are wired, ordinary edges are polylines (M/L) snapped to
+    ports. Spawns and tool calls must still share that family so they leave the same
+    node on the same geometry.
+    """
 
     def read(page: Any) -> dict[str, Any]:
         return json.loads(
@@ -130,9 +135,11 @@ def test_every_ordinary_edge_shares_one_geometry(tmp_path: Path) -> None:
 
     shapes = _on_page(tmp_path, read)
     assert set(shapes) >= {"spawn", "forward", "bundle", "lifecycle-return"}, shapes
-    ordinary = {command for kind in ("spawn", "forward") for command in shapes[kind]}
-    assert len(ordinary) == 1, f"ordinary edges still use more than one shape: {ordinary}"
-    assert ordinary == {"MC,,"}, f"ordinary edges are not a single cubic: {ordinary}"
+    ordinary = [command for kind in ("spawn", "forward") for command in shapes[kind]]
+    assert ordinary, "ordinary edges produced no paths"
+    assert all(command.startswith("M") and set(command) <= {"M", "L"} for command in ordinary), (
+        f"ordinary edges are not dagre polylines: {set(ordinary)}"
+    )
     # The two deliberate exceptions keep their own shapes.
     assert set(shapes["bundle"]) == {"MHVH"}, shapes["bundle"]
     assert set(shapes["lifecycle-return"]) == {"MC,,"}, shapes["lifecycle-return"]
