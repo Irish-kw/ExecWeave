@@ -32,7 +32,7 @@ ExecWeave est un projet d’observabilité source-available et local-first qui t
   <img src="docs/assets/codex.gif" alt="ExecWeave animated live demo" width="100%">
 </p>
 
-Ce README décrit **v0.8.9**.
+Ce README décrit **v0.8.10**.
 
 ## Pourquoi ExecWeave
 
