@@ -1,0 +1,551 @@
+name: Apply Ollama serve runtime hotfix
+
+on:
+  push:
+    branches:
+      - fix/ollama-serve-windows-finalization
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/ollama-serve-windows-finalization
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Apply guarded source changes
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: Path, old: str, new: str) -> None:
+              text = path.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one guarded match, found {count}")
+              path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          collector = Path("src/execweave/collector.py")
+          replace_once(
+              collector,
+              "import psutil\n\nfrom .auto_specialized import (",
+              "import psutil\n\nfrom . import __version__\nfrom .auto_specialized import (",
+          )
+          replace_once(
+              collector,
+              '''            attributes={
+                  "command": command,
+                  "cwd": str(self.watch_root),
+                  "backend": self.backend_name,
+              },''',
+              '''            attributes={
+                  "command": command,
+                  "cwd": str(self.watch_root),
+                  "backend": self.backend_name,
+                  "execweave_version": __version__,
+              },''',
+          )
+          replace_once(
+              collector,
+              '                attributes={"collector_pid": os.getpid(), "backend": self.backend_name},',
+              '''                attributes={
+                      "collector_pid": os.getpid(),
+                      "backend": self.backend_name,
+                      "execweave_version": __version__,
+                  },''',
+          )
+          old_run = '''        process: subprocess.Popen[bytes] | None = None
+          return_code = 1
+          post_command_probe = prepare_post_command_specialized_probe(command)
+          try:
+              with auto_specialized_launch(command, server_relay=True) as launch_environment:
+                  process = subprocess.Popen(
+                      launch_command,
+                      cwd=str(self.watch_root),
+                      env=launch_environment,
+                  )
+                  root = psutil.Process(process.pid)
+                  snapshot = _safe_process_snapshot(root)
+                  if snapshot is not None:
+                      self._record_process_start(snapshot, parent=session, relation="LAUNCHED")
+
+                  with auto_specialized_probe(command):
+                      while process.poll() is None:
+                          self._sample_process_tree(root)
+                          time.sleep(self.poll_interval)
+
+                      self._sample_process_tree(root)
+                      self._mark_disappeared_processes(set())
+                  return_code = int(process.returncode or 0)
+              run_post_command_specialized_probe(
+                  post_command_probe,
+                  return_code=return_code,
+              )
+              return return_code
+          finally:'''
+          new_run = '''        process: subprocess.Popen[bytes] | None = None
+          return_code = 1
+          interrupted = False
+          post_command_probe = prepare_post_command_specialized_probe(command)
+          try:
+              try:
+                  with auto_specialized_launch(
+                      command,
+                      server_relay=True,
+                  ) as launch_environment:
+                      process = subprocess.Popen(
+                          launch_command,
+                          cwd=str(self.watch_root),
+                          env=launch_environment,
+                      )
+                      root = psutil.Process(process.pid)
+                      snapshot = _safe_process_snapshot(root)
+                      if snapshot is not None:
+                          self._record_process_start(snapshot, parent=session, relation="LAUNCHED")
+
+                      with auto_specialized_probe(command):
+                          while process.poll() is None:
+                              self._sample_process_tree(root)
+                              time.sleep(self.poll_interval)
+
+                          self._sample_process_tree(root)
+                          self._mark_disappeared_processes(set())
+                      return_code = int(process.returncode or 0)
+              except KeyboardInterrupt:
+                  interrupted = True
+                  return_code = 130
+                  if process is not None:
+                      self._terminate_process_tree(process)
+              if not interrupted:
+                  run_post_command_specialized_probe(
+                      post_command_probe,
+                      return_code=return_code,
+                  )
+              return return_code
+          finally:'''
+          replace_once(collector, old_run, new_run)
+          replace_once(
+              collector,
+              '''                    attributes={
+                          "return_code": return_code,
+                          "root_pid": process.pid if process is not None else None,
+                          "backend": self.backend_name,
+                      },''',
+              '''                    attributes={
+                          "return_code": return_code,
+                          "root_pid": process.pid if process is not None else None,
+                          "backend": self.backend_name,
+                          "interrupted": interrupted,
+                          "execweave_version": __version__,
+                      },''',
+          )
+          marker = '''    def _sample_process_tree(self, root: psutil.Process) -> None:
+          '''
+          helper = '''    @staticmethod
+          def _terminate_process_tree(process: subprocess.Popen[bytes]) -> None:
+              descendants: list[psutil.Process] = []
+              try:
+                  root = psutil.Process(process.pid)
+                  descendants = root.children(recursive=True)
+              except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                  pass
+
+              for child in reversed(descendants):
+                  try:
+                      child.terminate()
+                  except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                      pass
+
+              if process.poll() is None:
+                  try:
+                      process.terminate()
+                  except OSError:
+                      pass
+
+              if descendants:
+                  _, alive = psutil.wait_procs(descendants, timeout=2.0)
+                  for child in alive:
+                      try:
+                          child.kill()
+                      except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                          pass
+
+              try:
+                  process.wait(timeout=2.0)
+              except subprocess.TimeoutExpired:
+                  try:
+                      process.kill()
+                  except OSError:
+                      return
+                  try:
+                      process.wait(timeout=2.0)
+                  except subprocess.TimeoutExpired:
+                      pass
+
+          def _sample_process_tree(self, root: psutil.Process) -> None:
+          '''
+          replace_once(collector, marker, helper)
+
+          specialized = Path("src/execweave/auto_specialized.py")
+          replace_once(
+              specialized,
+              "import socket\nimport threading",
+              "import socket\nimport sys\nimport threading",
+          )
+          old_bind = '''    try:
+              server = ExecWeaveHTTPProxyServer(
+                  (listen_host, listen_port),
+                  ProxyConfig(upstream=upstream, sidecar=sidecar, mode="ollama"),
+                  recorder=_record_ollama_inference_exchange,
+              )
+          except OSError:
+              # Fail open: preserve the child command's normal bind/error behavior.
+              yield environment
+              return
+          thread = threading.Thread(
+              target=server.serve_forever,
+              kwargs={"poll_interval": 0.05},
+              name="execweave-ollama-serve-relay",
+              daemon=True,
+          )
+          thread.start()
+          environment["OLLAMA_HOST"] = upstream
+          '''
+          new_bind = '''    server: ExecWeaveHTTPProxyServer | None = None
+          last_bind_error: OSError | None = None
+          for attempt in range(5):
+              try:
+                  server = ExecWeaveHTTPProxyServer(
+                      (listen_host, listen_port),
+                      ProxyConfig(upstream=upstream, sidecar=sidecar, mode="ollama"),
+                      recorder=_record_ollama_inference_exchange,
+                  )
+                  break
+              except OSError as exc:
+                  last_bind_error = exc
+                  if attempt < 4:
+                      time.sleep(0.05)
+          if server is None:
+              public_endpoint = f"http://{listen_host}:{listen_port}"
+              raise RuntimeError(
+                  "ExecWeave could not reserve the Ollama endpoint "
+                  f"{public_endpoint} for transparent conversation capture. "
+                  "Stop any existing Ollama server using that endpoint or set "
+                  "OLLAMA_HOST to a free loopback port before starting "
+                  "`execweave live -- ollama serve`."
+              ) from last_bind_error
+          thread = threading.Thread(
+              target=server.serve_forever,
+              kwargs={"poll_interval": 0.05},
+              name="execweave-ollama-serve-relay",
+              daemon=True,
+          )
+          thread.start()
+          environment["OLLAMA_HOST"] = upstream
+          print(
+              "ExecWeave Ollama relay: "
+              f"http://{listen_host}:{listen_port} -> {upstream}",
+              file=sys.stderr,
+          )
+          '''
+          replace_once(specialized, old_bind, new_bind)
+
+          strace = Path("src/execweave/strace_backend.py")
+          replace_once(
+              strace,
+              "from .auto_specialized import auto_specialized_launch\nfrom .collector import infer_agent_name",
+              "from . import __version__\nfrom .auto_specialized import auto_specialized_launch\nfrom .collector import infer_agent_name",
+          )
+          replace_once(
+              strace,
+              '''            attributes={
+                  "command": command,
+                  "cwd": str(self.watch_root),
+                  "backend": self.backend_name,
+              },''',
+              '''            attributes={
+                  "command": command,
+                  "cwd": str(self.watch_root),
+                  "backend": self.backend_name,
+                  "execweave_version": __version__,
+              },''',
+          )
+          replace_once(
+              strace,
+              '                attributes={"collector_pid": os.getpid(), "backend": self.backend_name},',
+              '''                attributes={
+                      "collector_pid": os.getpid(),
+                      "backend": self.backend_name,
+                      "execweave_version": __version__,
+                  },''',
+          )
+          replace_once(
+              strace,
+              "            with auto_specialized_launch(command) as launch_environment:",
+              '''            with auto_specialized_launch(
+                  command,
+                  server_relay=True,
+              ) as launch_environment:''',
+          )
+
+          test_path = Path("tests/test_ollama_serve_runtime_integration.py")
+          if test_path.exists():
+              raise SystemExit(f"{test_path} already exists")
+          test_path.write_text(r'''from __future__ import annotations
+
+import json
+import socket
+import sys
+import threading
+import time
+from pathlib import Path
+from urllib.error import URLError
+from urllib.request import Request, urlopen
+
+import psutil
+import pytest
+
+import execweave
+import execweave.collector as collector_module
+from execweave.auto_specialized import auto_specialized_launch
+from execweave.collector import RuntimeCollector
+from execweave.live_core import run_live_session
+from execweave.sink import JsonlSink
+
+
+def _free_loopback_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+def _wait_for_json(url: str, timeout: float = 8.0) -> dict[str, object]:
+    deadline = time.monotonic() + timeout
+    last_error: Exception | None = None
+    while time.monotonic() < deadline:
+        try:
+            with urlopen(url, timeout=0.5) as response:
+                value = json.loads(response.read().decode("utf-8"))
+            if isinstance(value, dict):
+                return value
+        except (URLError, OSError, TimeoutError, json.JSONDecodeError) as exc:
+            last_error = exc
+        time.sleep(0.05)
+    raise AssertionError(f"endpoint did not become ready: {url}: {last_error}")
+
+
+def _write_fake_ollama_server(path: Path) -> None:
+    path.write_text(
+        r'''from http.server import BaseHTTPRequestHandler, HTTPServer
+import json
+import os
+from urllib.parse import urlsplit
+
+endpoint = urlsplit(os.environ["OLLAMA_HOST"])
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, format, *args):
+        return
+
+    def send_json(self, payload, status=200):
+        body = json.dumps(payload).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):
+        if self.path == "/api/ps":
+            self.send_json({"models": []})
+            return
+        self.send_json({"error": "not found"}, 404)
+
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length", "0"))
+        request = json.loads(self.rfile.read(length).decode("utf-8"))
+        if self.path != "/api/chat":
+            self.send_json({"error": "not found"}, 404)
+            return
+        self.send_json({
+            "model": request.get("model", "tiny"),
+            "message": {"role": "assistant", "content": "collector relay answer"},
+            "done": True,
+        })
+        self.server.done = True
+
+server = HTTPServer((endpoint.hostname, endpoint.port), Handler)
+server.timeout = 0.2
+server.done = False
+while not server.done:
+    server.handle_request()
+server.server_close()
+''',
+        encoding="utf-8",
+    )
+
+
+def test_runtime_collector_ollama_serve_captures_independent_client(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    public_port = _free_loopback_port()
+    public_endpoint = f"http://127.0.0.1:{public_port}"
+    sidecar = tmp_path / "semantic.jsonl"
+    event_path = tmp_path / "events.jsonl"
+    fake_server = tmp_path / "fake_ollama_server.py"
+    _write_fake_ollama_server(fake_server)
+
+    monkeypatch.setenv("EXECWEAVE_SEMANTIC_SIDECAR", str(sidecar))
+    monkeypatch.setenv("OLLAMA_HOST", public_endpoint)
+    monkeypatch.setattr(
+        collector_module,
+        "resolve_launch_command",
+        lambda command: [sys.executable, str(fake_server)],
+    )
+
+    collector = RuntimeCollector(
+        session_id="serve-integration",
+        sink=JsonlSink(event_path),
+        watch_root=tmp_path,
+        poll_interval=0.02,
+        collect_filesystem=False,
+        collect_network=False,
+    )
+    result: dict[str, object] = {}
+    errors: list[BaseException] = []
+
+    def run_collector() -> None:
+        try:
+            result["return_code"] = collector.run(["ollama", "serve"])
+        except BaseException as exc:
+            errors.append(exc)
+
+    thread = threading.Thread(target=run_collector, daemon=True)
+    thread.start()
+    assert _wait_for_json(public_endpoint + "/api/ps") == {"models": []}
+
+    request = Request(
+        public_endpoint + "/api/chat",
+        data=json.dumps(
+            {
+                "model": "tiny",
+                "messages": [{"role": "user", "content": "outside process tree"}],
+            }
+        ).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urlopen(request, timeout=5) as response:
+        response_payload = json.loads(response.read().decode("utf-8"))
+    assert response_payload["message"]["content"] == "collector relay answer"
+
+    thread.join(timeout=10)
+    assert not thread.is_alive()
+    assert errors == []
+    assert result["return_code"] == 0
+
+    semantic_rows = [
+        json.loads(line)
+        for line in sidecar.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    kinds = {
+        (row.get("target", {}).get("attributes") or {}).get("content_kind")
+        for row in semantic_rows
+        if isinstance(row, dict)
+    }
+    assert "model_runtime.ollama.request_messages" in kinds
+    assert "model_runtime.ollama.assistant_messages" in kinds
+    assert any(
+        row.get("attributes", {}).get("transport_relay_observed") is True
+        for row in semantic_rows
+        if isinstance(row, dict)
+    )
+
+    runtime_rows = [
+        json.loads(line)
+        for line in event_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    started = next(row for row in runtime_rows if row["event_type"] == "session.started")
+    assert started["attributes"]["execweave_version"] == execweave.__version__
+
+
+def test_ollama_serve_relay_bind_failure_is_not_silent(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    holder = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    holder.bind(("127.0.0.1", 0))
+    holder.listen()
+    port = int(holder.getsockname()[1])
+    monkeypatch.setenv("EXECWEAVE_SEMANTIC_SIDECAR", str(tmp_path / "semantic.jsonl"))
+    monkeypatch.setenv("OLLAMA_HOST", f"http://127.0.0.1:{port}")
+    try:
+        with pytest.raises(RuntimeError, match="could not reserve the Ollama endpoint"):
+            with auto_specialized_launch(
+                ["ollama", "serve"],
+                server_relay=True,
+            ):
+                raise AssertionError("relay must not silently fall back")
+    finally:
+        holder.close()
+
+
+def test_ctrl_c_still_materializes_live_artifacts(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def interrupt_poll(self: RuntimeCollector, root: psutil.Process) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(RuntimeCollector, "_sample_process_tree", interrupt_poll)
+    result = run_live_session(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        watch_root=tmp_path,
+        output_dir=tmp_path / "run",
+        collect_filesystem=False,
+        collect_network=False,
+        open_browser=False,
+        linger_seconds=0,
+    )
+
+    assert result.return_code == 130
+    assert result.graph.exists()
+    assert result.viewer.exists()
+    assert result.materialized_event_stream.exists()
+
+    rows = [
+        json.loads(line)
+        for line in result.event_stream.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    finished = next(row for row in rows if row["event_type"] == "session.finished")
+    assert finished["attributes"]["return_code"] == 130
+    assert finished["attributes"]["interrupted"] is True
+    assert finished["attributes"]["execweave_version"] == execweave.__version__
+
+    launched = next(row for row in rows if row["event_type"] == "process.started")
+    pid = int(launched["target"]["attributes"]["pid"])
+    assert not psutil.pid_exists(pid)
+''', encoding="utf-8")
+          PY
+      - name: Check patch formatting
+        run: git diff --check
+      - name: Commit guarded hotfix
+        shell: bash
+        run: |
+          rm .github/workflows/apply-ollama-serve-hotfix.yml
+          git config user.name "GWW"
+          git config user.email "49675917+Irish-kw@users.noreply.github.com"
+          git add -A
+          git commit -m "Fix Ollama serve capture and Ctrl+C finalization"
+          git push origin HEAD:fix/ollama-serve-windows-finalization
