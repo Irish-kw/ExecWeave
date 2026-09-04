@@ -20,17 +20,30 @@ def _free_loopback_port() -> int:
         return int(sock.getsockname()[1])
 
 
+@pytest.mark.parametrize(
+    "install_parts",
+    [
+        ("custom-cursor",),
+        ("Apps With Spaces", "Cursor Portable"),
+        ("任意位置", "Cursor"),
+    ],
+)
 def test_windows_cursor_policy_prefers_desktop_from_same_install(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    install_parts: tuple[str, ...],
 ) -> None:
-    install = tmp_path / "custom-cursor"
+    # The install root is deliberately arbitrary. The resolver must derive the
+    # desktop binary from the PATH shim's relative package layout, never from a
+    # drive letter, username, or fixed install directory.
+    install = tmp_path.joinpath(*install_parts)
     bin_dir = install / "resources" / "app" / "bin"
     bin_dir.mkdir(parents=True)
     shim = bin_dir / "cursor.cmd"
     shim.write_text("@echo off\r\n", encoding="utf-8")
     desktop = install / "Cursor.exe"
     desktop.write_bytes(b"MZ")
+    desktop.chmod(0o755)
 
     monkeypatch.setattr(
         command_module.shutil,
