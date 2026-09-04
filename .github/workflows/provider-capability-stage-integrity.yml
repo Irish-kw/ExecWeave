@@ -135,6 +135,18 @@ jobs:
               esac
             done < <(git diff --name-only "$BASELINE_REF...HEAD" -- tests)
           fi
+          if [[ "$HEAD_REF" == "fix/dagre-routing-and-ports" ]]; then
+            while IFS= read -r path; do
+              case "$path" in
+                tests/test_process_tree_layout.py)
+                  args+=(--allow-test-change "$path=dagre now exposes route points and ports are recomputed after layout; historical test names remain stable")
+                  ;;
+                tests/test_graph_edge_routing_e2e.py)
+                  args+=(--allow-test-change "$path=ordinary edges now use dagre polylines instead of cubics while bundle and lifecycle-return families stay deliberate exceptions")
+                  ;;
+              esac
+            done < <(git diff --name-only "$BASELINE_REF...HEAD" -- tests)
+          fi
           if [[ "$HEAD_REF" == "audit/remaining-providers-v0.8.7" ]]; then
             args+=(--allow-retired-provider "gemini=Gemini integration was retired and replaced by the AGY/Antigravity provider; only Gemini-owned test IDs and files may disappear")
             while IFS= read -r path; do

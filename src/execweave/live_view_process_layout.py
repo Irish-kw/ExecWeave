@@ -183,8 +183,39 @@ function execweaveLayoutRelated(topo){
   return topo;
 }
 const EXECWEAVE_DAG_GAP=24;
-function execweaveSeparateOverlappingNodes(topo){
+function execweaveEdgeKey(source,target){return`${source}\0${target}`}
+function execweaveRecomputePorts(topo){
   if(!topo||!topo.spec)return topo;
+  const sourceEdges=new Map(),targetEdges=new Map();
+  for(const edge of edgeById.values()){
+    if(!topo.spec.has(edge.source)||!topo.spec.has(edge.target))continue;
+    if(!sourceEdges.has(edge.source))sourceEdges.set(edge.source,[]);
+    sourceEdges.get(edge.source).push(edge);
+    if(!targetEdges.has(edge.target))targetEdges.set(edge.target,[]);
+    targetEdges.get(edge.target).push(edge);
+  }
+  const sourcePort=new Map(),targetPort=new Map();
+  for(const list of sourceEdges.values()){
+    list.sort((a,b)=>{
+      const at=topo.spec.get(a.target),bt=topo.spec.get(b.target);
+      return(at?.y??0)-(bt?.y??0)||(at?.x??0)-(bt?.x??0)||edgeId(a).localeCompare(edgeId(b));
+    });
+    list.forEach((edge,index)=>sourcePort.set(edgeId(edge),{index,total:list.length}));
+  }
+  for(const list of targetEdges.values()){
+    list.sort((a,b)=>{
+      const as=topo.spec.get(a.source),bs=topo.spec.get(b.source);
+      return(as?.y??0)-(bs?.y??0)||(as?.x??0)-(bs?.x??0)||edgeId(a).localeCompare(edgeId(b));
+    });
+    list.forEach((edge,index)=>targetPort.set(edgeId(edge),{index,total:list.length}));
+  }
+  topo.sourcePort=sourcePort;
+  topo.targetPort=targetPort;
+  return topo;
+}
+function execweaveSeparateOverlappingNodes(topo){
+  if(!topo||!topo.spec)return false;
+  let shifted=false;
   for(let pass=0;pass<32;pass++){
     const boxes=[...topo.spec.keys()].filter(id=>nodeById.has(id)).map(id=>({
       id,
@@ -205,14 +236,16 @@ function execweaveSeparateOverlappingNodes(topo){
         B.spec.y=A.y+A.h+EXECWEAVE_DAG_GAP;
         B.y=B.spec.y;
         moved=true;
+        shifted=true;
       }
     }
-    if(!moved)return topo;
+    if(!moved)break;
   }
-  return topo;
+  return shifted;
 }
 function execweaveLayoutDirectedGraph(topo){
   if(!topo||!topo.spec)return topo;
+  topo.routePoints=new Map();
   const engine=(typeof dagre!=='undefined'&&dagre&&dagre.graphlib&&typeof dagre.layout==='function')?dagre:null;
   if(!engine){
     console.warn('execweaveLayoutDirectedGraph: dagre unavailable, using process-tree layout');
@@ -232,18 +265,25 @@ function execweaveLayoutDirectedGraph(topo){
     const seen=new Set();
     for(const edge of edgeById.values()){
       if(!topo.spec.has(edge.source)||!topo.spec.has(edge.target)||edge.source===edge.target)continue;
-      const key=`${edge.source}\0${edge.target}`;
+      const key=execweaveEdgeKey(edge.source,edge.target);
       if(seen.has(key))continue;
       seen.add(key);
       graph.setEdge(edge.source,edge.target);
     }
-    // dagre.layout runs Sugiyama: rank (layer assignment), order (crossing minimization / barycenter decross), then position.
+    // dagre.layout runs Sugiyama: rank → order (crossing minimization) → position → edge points.
     engine.layout(graph);
     for(const id of ids){
       const placed=graph.node(id),spec=topo.spec.get(id);
       if(!placed||!spec)continue;
       spec.x=placed.x-placed.width/2;
       spec.y=placed.y-placed.height/2;
+    }
+    // Keep Sugiyama step 4 (routing points). First/last are node-box hits; midpoints bend around ranks.
+    for(const edge of graph.edges()){
+      const label=graph.edge(edge);
+      const points=label&&Array.isArray(label.points)?label.points:[];
+      if(points.length<2)continue;
+      topo.routePoints.set(execweaveEdgeKey(edge.v,edge.w),points.map(point=>({x:point.x,y:point.y})));
     }
   }catch(error){
     console.warn('execweaveLayoutDirectedGraph: dagre failed, using process-tree layout',error);
@@ -254,19 +294,37 @@ function execweaveLayoutDirectedGraph(topo){
 function execweaveApplyDirectedGraph(topo){
   execweaveLayoutDirectedGraph(topo);
   execweaveSeparateOverlappingNodes(topo);
+  // Ports were assigned before dagre moved nodes; rebuild against final Y so order matches crossing minimization.
+  execweaveRecomputePorts(topo);
   return topo;
+}
+function execweaveRouteFromPoints(edge,points){
+  const sp=positions.get(edge.source)||{x:0,y:0},tp=positions.get(edge.target)||{x:0,y:0};
+  const sourcePort=execweaveTopology.sourcePort.get(edgeId(edge)),targetPort=execweaveTopology.targetPort.get(edgeId(edge));
+  const sourceSpec=execweaveTopology.spec.get(edge.source)||{},targetSpec=execweaveTopology.spec.get(edge.target)||{};
+  const forward=(targetSpec.x??0)>=(sourceSpec.x??0);
+  const sx=forward?sp.x+execweaveWidthOf(edge.source):sp.x;
+  const tx=forward?tp.x:tp.x+execweaveWidthOf(edge.target);
+  const sy=execweavePortY(sp,sourcePort,edge.source),ty=execweavePortY(tp,targetPort,edge.target);
+  const mid=points.length>2?points.slice(1,-1):[];
+  let d=`M ${sx} ${sy}`;
+  for(const point of mid)d+=` L ${point.x} ${point.y}`;
+  d+=` L ${tx} ${ty}`;
+  const labelPoint=mid.length?mid[Math.floor(mid.length/2)]:{x:(sx+tx)/2,y:(sy+ty)/2};
+  return{d,labelX:labelPoint.x,labelY:labelPoint.y-8,kind:execweaveIsSpawn(edge)?'spawn':(forward?'forward':'reverse'),bundle:null};
 }
 const execweaveBuildTopologyBase=execweaveBuildTopology;
 execweaveBuildTopology=function(){return execweaveApplyDirectedGraph(execweaveLayoutRelated(execweaveLayoutProcessTree(execweaveBuildTopologyBase())))};
 window.execweaveLayoutDirectedGraph=execweaveLayoutDirectedGraph;
 window.execweaveSeparateOverlappingNodes=execweaveSeparateOverlappingNodes;
+window.execweaveRecomputePorts=execweaveRecomputePorts;
 const execweaveRouteBase=execweaveRoute;
 execweaveRoute=function(edge){
-  const sourceSpec=execweaveTopology.spec.get(edge.source)||{};
-  const targetSpec=execweaveTopology.spec.get(edge.target)||{};
   const bundle=execweaveTopology.bundleByEdge.get(edgeId(edge));
   if(bundle&&bundle.size>1)return execweaveRouteBase(edge);
   if(execweaveIsStopped(edge))return execweaveRouteBase(edge);
+  const points=execweaveTopology.routePoints&&execweaveTopology.routePoints.get(execweaveEdgeKey(edge.source,edge.target));
+  if(points&&points.length>=2)return execweaveRouteFromPoints(edge,points);
   const sp=positions.get(edge.source)||{x:0,y:0},tp=positions.get(edge.target)||{x:0,y:0};
   const sameColumn=Math.abs(sp.x-tp.x)<8;
   if(!sameColumn)return execweaveRouteBase(edge);
@@ -287,6 +345,7 @@ function execweaveArrangePositions(){
   for(const id of ordered)next.set(id,execweavePlaceStable(id,execweaveDesiredPosition(id),next,id));
   execweaveLayoutDirectedGraph(execweaveTopology);
   execweaveSeparateOverlappingNodes(execweaveTopology);
+  execweaveRecomputePorts(execweaveTopology);
   for(const id of ordered){
     const spec=execweaveTopology.spec.get(id);
     if(spec)next.set(id,{x:spec.x,y:spec.y});
