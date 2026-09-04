@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import threading
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator
+from typing import Any, Iterator
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit, urlunsplit
 from urllib.request import Request, urlopen
@@ -22,6 +23,18 @@ from .model_runtime import (
 
 _SEMANTIC_ENV = "EXECWEAVE_SEMANTIC_SIDECAR"
 _OLLAMA_DEFAULT_ENDPOINT = "http://127.0.0.1:11434"
+_OLLAMA_INFERENCE_PATHS = frozenset(
+    {
+        "/api/chat",
+        "/api/generate",
+        "/api/embed",
+        "/api/embeddings",
+        "/v1/chat/completions",
+        "/v1/completions",
+        "/v1/embeddings",
+        "/v1/responses",
+    }
+)
 _PROBE_INTERVAL_SECONDS = 0.50
 _PROBE_TIMEOUT_SECONDS = 0.35
 _PROBE_STARTUP_GRACE_SECONDS = 0.10
@@ -130,6 +143,45 @@ def _ollama_endpoint_from_environment() -> str | None:
     if parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
         return None
     return _local_endpoint(hostname, port)
+
+
+def _ollama_serve_relay_address() -> tuple[str, int] | None:
+    """Return a loopback endpoint ExecWeave can safely own for ``ollama serve``."""
+    raw = os.environ.get("OLLAMA_HOST", "").strip()
+    if not raw:
+        return ("127.0.0.1", 11434)
+    candidate = raw if "://" in raw else f"http://{raw}"
+    try:
+        parsed = urlsplit(candidate)
+        port = parsed.port or 11434
+    except ValueError:
+        return None
+    if parsed.scheme != "http" or parsed.username is not None or parsed.password is not None:
+        return None
+    if parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
+        return None
+    hostname = parsed.hostname
+    # Do not silently narrow wildcard/external/IPv6 exposure to IPv4 loopback.
+    if hostname not in {"127.0.0.1", "localhost"} or not (1 <= port <= 65535):
+        return None
+    return ("127.0.0.1", port)
+
+
+def _allocate_loopback_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+def _record_ollama_inference_exchange(config: Any, **kwargs: Any) -> None:
+    """Record inference exchanges while still relaying every Ollama API route."""
+    method = str(kwargs.get("method", "")).upper()
+    request_path = str(kwargs.get("request_path", ""))
+    if method != "POST" or urlsplit(request_path).path not in _OLLAMA_INFERENCE_PATHS:
+        return
+    from .http_proxy import record_exchange_fail_open
+
+    record_exchange_fail_open(config, **kwargs)
 
 
 def _lmstudio_post_probe_spec(command: list[str]) -> _ProbeSpec | None:
@@ -248,12 +300,7 @@ def _run_ollama_probe(
 
 
 def prepare_post_command_specialized_probe(command: list[str]) -> _ProbeSpec | None:
-    """Prepare an attribution-safe post-command probe for short-lived launch CLIs.
-
-    LM Studio's `lms server start` exits after starting a persistent server. ExecWeave
-    only prepares this probe when the user supplied an explicit local port and no
-    compatible API is already observable at that endpoint before launch.
-    """
+    """Prepare an attribution-safe post-command probe for short-lived launch CLIs."""
     spec = _lmstudio_post_probe_spec(command)
     if spec is None:
         return None
@@ -292,40 +339,85 @@ def run_post_command_specialized_probe(
                 time.sleep(_POST_PROBE_RETRY_SECONDS)
 
 
-
 @contextmanager
-def auto_specialized_launch(command: list[str]) -> Iterator[dict[str, str]]:
-    """Prepare child-only launch wiring for supported transparent local integrations."""
+def auto_specialized_launch(
+    command: list[str],
+    *,
+    server_relay: bool = False,
+) -> Iterator[dict[str, str]]:
+    """Prepare child launch wiring for supported transparent local integrations.
+
+    ``server_relay`` is deliberately opt-in so direct library callers preserve the
+    existing contract. RuntimeCollector enables it for a real managed server run.
+    """
     environment = dict(os.environ)
     configured_sidecar = os.environ.get(_SEMANTIC_ENV)
-    if not configured_sidecar or not _is_ollama_run(command):
-        yield environment
-        return
-    upstream = _ollama_endpoint_from_environment()
-    if upstream is None:
+    wants_run_relay = _is_ollama_run(command)
+    wants_serve_relay = server_relay and _is_ollama_serve(command)
+    if not configured_sidecar or not (wants_run_relay or wants_serve_relay):
         yield environment
         return
 
     from .http_proxy import ExecWeaveHTTPProxyServer, ProxyConfig
 
     sidecar = Path(configured_sidecar).expanduser().resolve()
+
+    if wants_run_relay:
+        upstream = _ollama_endpoint_from_environment()
+        if upstream is None:
+            yield environment
+            return
+        try:
+            server = ExecWeaveHTTPProxyServer(
+                ("127.0.0.1", 0),
+                ProxyConfig(upstream=upstream, sidecar=sidecar, mode="ollama"),
+                recorder=_record_ollama_inference_exchange,
+            )
+        except OSError:
+            yield environment
+            return
+        thread = threading.Thread(
+            target=server.serve_forever,
+            kwargs={"poll_interval": 0.05},
+            name="execweave-ollama-run-relay",
+            daemon=True,
+        )
+        thread.start()
+        host, port = server.server_address[:2]
+        environment["OLLAMA_HOST"] = f"http://{host}:{port}"
+        try:
+            yield environment
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2.0)
+        return
+
+    listen_address = _ollama_serve_relay_address()
+    if listen_address is None:
+        yield environment
+        return
+    listen_host, listen_port = listen_address
+    internal_port = _allocate_loopback_port()
+    upstream = f"http://127.0.0.1:{internal_port}"
     try:
         server = ExecWeaveHTTPProxyServer(
-            ("127.0.0.1", 0),
+            (listen_host, listen_port),
             ProxyConfig(upstream=upstream, sidecar=sidecar, mode="ollama"),
+            recorder=_record_ollama_inference_exchange,
         )
     except OSError:
+        # Fail open: preserve the child command's normal bind/error behavior.
         yield environment
         return
     thread = threading.Thread(
         target=server.serve_forever,
         kwargs={"poll_interval": 0.05},
-        name="execweave-ollama-run-relay",
+        name="execweave-ollama-serve-relay",
         daemon=True,
     )
     thread.start()
-    host, port = server.server_address[:2]
-    environment["OLLAMA_HOST"] = f"http://{host}:{port}"
+    environment["OLLAMA_HOST"] = upstream
     try:
         yield environment
     finally:
@@ -336,12 +428,7 @@ def auto_specialized_launch(command: list[str]) -> Iterator[dict[str, str]]:
 
 @contextmanager
 def auto_specialized_probe(command: list[str]) -> Iterator[None]:
-    """Run supported local specialized probes without affecting command execution.
-
-    The probe activates only when a caller supplies ExecWeave's per-run semantic
-    sidecar environment variable. Auto-probing is limited to known local server
-    launch commands and loopback endpoints. All failures are fail-open.
-    """
+    """Run supported local specialized probes without affecting command execution."""
     configured_sidecar = os.environ.get(_SEMANTIC_ENV)
     spec = _probe_spec(command)
     if not configured_sidecar or spec is None:

@@ -37,7 +37,31 @@ def _cursor_desktop_candidates() -> list[Path]:
     return []
 
 
-def _resolve_cursor_desktop() -> str | None:
+def _cursor_desktop_from_launcher(launcher: str | None) -> str | None:
+    """Resolve Cursor.exe beside a Windows VS Code-style PATH shim."""
+    if not launcher or os.name != "nt":
+        return None
+    path = Path(launcher).expanduser()
+    bin_dir = path.parent
+    app_dir = bin_dir.parent
+    resources_dir = app_dir.parent
+    install_root = resources_dir.parent
+    if (
+        bin_dir.name.lower() != "bin"
+        or app_dir.name.lower() != "app"
+        or resources_dir.name.lower() != "resources"
+    ):
+        return None
+    candidate = install_root / "Cursor.exe"
+    if candidate.is_file():
+        return str(candidate.resolve())
+    return None
+
+
+def _resolve_cursor_desktop(*, path_launcher: str | None = None) -> str | None:
+    derived = _cursor_desktop_from_launcher(path_launcher)
+    if derived is not None:
+        return derived
     for candidate in _cursor_desktop_candidates():
         if candidate.is_file():
             return str(candidate.resolve())
@@ -54,16 +78,21 @@ def _resolve_executable(executable: str, *, path: str | None = None) -> str:
             raise FileNotFoundError(f"command executable not found: {executable!r}")
         resolved = str(candidate.resolve())
     else:
-        resolved = shutil.which(executable, path=path)
-        if resolved is None and executable.lower() == "cursor":
-            resolved = _resolve_cursor_desktop()
+        path_launcher = shutil.which(executable, path=path)
+        if executable.lower() == "cursor" and os.name == "nt":
+            resolved = _resolve_cursor_desktop(path_launcher=path_launcher) or path_launcher
+        else:
+            resolved = path_launcher
+            if resolved is None and executable.lower() == "cursor":
+                resolved = _resolve_cursor_desktop()
         if resolved is None and executable.lower() == "antigravity":
             resolved = shutil.which("agy", path=path)
         if resolved is None:
             detail = ""
             if executable.lower() == "cursor":
                 detail = (
-                    "; ExecWeave also checked the standard Cursor desktop-app install paths"
+                    "; ExecWeave also checked the Cursor desktop binary beside the PATH "
+                    "launcher and the standard desktop-app install paths"
                 )
             elif executable.lower() == "antigravity":
                 detail = "; the current Antigravity CLI executable is 'agy'"
@@ -83,9 +112,15 @@ def resolve_launch_command(command: list[str], *, path: str | None = None) -> li
     ExecWeave launches commands without ``shell=True``. Normal executables use PATH
     lookup. On Windows, PATHEXT keeps npm-style ``.cmd``/``.bat`` launchers working.
 
-    ``cursor`` additionally falls back to the standard macOS/Windows desktop app
-    binaries when no CLI launcher exists on PATH. ``antigravity`` is accepted as a
-    friendly alias for Google's current Antigravity CLI executable, ``agy``.
+    Bare ``cursor`` on Windows prefers the desktop application binary. ExecWeave
+    first derives ``Cursor.exe`` from a VS Code-style PATH shim such as
+    ``<install>/resources/app/bin/cursor.cmd`` and then checks standard desktop
+    install paths. This keeps the GUI process and provider hooks in the ExecWeave
+    launch environment instead of treating a short-lived CLI shim as the observed
+    application lifetime. Explicit launcher paths are never rewritten.
+
+    ``antigravity`` is accepted as a friendly alias for Google's current
+    Antigravity CLI executable, ``agy``.
 
     An explicitly supplied PowerShell ``.ps1`` file is launched through pwsh or
     Windows PowerShell because CreateProcess cannot execute a PowerShell script by
