@@ -16,7 +16,7 @@ import execweave
 import execweave.collector as collector_module
 from execweave.auto_specialized import auto_specialized_launch
 from execweave.collector import RuntimeCollector
-from execweave.live_core import run_live_session
+from execweave.live_core import run_live
 from execweave.sink import JsonlSink
 
 
@@ -208,7 +208,7 @@ def test_ctrl_c_still_materializes_live_artifacts(
         raise KeyboardInterrupt
 
     monkeypatch.setattr(RuntimeCollector, "_sample_process_tree", interrupt_poll)
-    result = run_live_session(
+    result = run_live(
         [sys.executable, "-c", "import time; time.sleep(30)"],
         watch_root=tmp_path,
         output_dir=tmp_path / "run",
