@@ -56,7 +56,7 @@ def test_live_state_streams_original_runtime_events_for_raw_log(tmp_path: Path) 
     snapshot = state.live_update(-1)
     assert snapshot["raw_events"][0]["event"]["event_id"] == "event-1"
     assert state.snapshot()["raw_events"][0]["line"] == 1
-    assert LIVE_RAW_EVENT_HISTORY == 320
+    assert LIVE_RAW_EVENT_HISTORY == 640
 
 
 def test_live_dashboard_has_structured_and_raw_log_modes() -> None:
@@ -65,7 +65,9 @@ def test_live_dashboard_has_structured_and_raw_log_modes() -> None:
     assert 'id="raw-log"' in LIVE_HTML
     assert 'id="raw-rows"' in LIVE_HTML
     assert "raw_events_added" in LIVE_HTML
-    assert "events.jsonl line" in LIVE_HTML
+    assert "raw-target-actions" in LIVE_HTML
+    assert "Inspect ${node.type||'node'}" in LIVE_HTML
+    assert "${entry.stream||'events.jsonl'} line" in LIVE_HTML
 
 
 def test_finished_dashboard_supports_replay_and_gif_export() -> None:

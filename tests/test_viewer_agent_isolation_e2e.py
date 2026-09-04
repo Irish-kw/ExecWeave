@@ -295,6 +295,248 @@ def test_the_live_dashboard_isolates_agents_before_the_run_finishes(tmp_path: Pa
         thread.join(timeout=5)
 
 
+def test_live_raw_event_opens_its_md_file_target(tmp_path: Path) -> None:
+    """A raw file event must expose the same file node through the live inspector."""
+    from execweave import live as live_module
+    from execweave.viewer_projection import project_viewer_graph
+
+    process = {
+        "id": "process:raw-e2e",
+        "type": "process",
+        "name": "provider process",
+        "attributes": {"provider": "antigravity"},
+    }
+    file_node = {
+        "id": "file:/workspace/notes.md",
+        "type": "file",
+        "name": "notes.md",
+        "attributes": {"path": "/workspace/notes.md", "provider": "antigravity"},
+    }
+    edge = {
+        "id": "process:raw-e2e--CREATED-->file:/workspace/notes.md",
+        "source": process["id"],
+        "target": file_node["id"],
+        "relation": "CREATED",
+        "count": 1,
+        "first_sequence": 1,
+        "last_sequence": 1,
+    }
+    graph = {
+        "graph_schema_version": "0.2",
+        "session_id": "raw-e2e",
+        "event_count": 1,
+        "node_count": 2,
+        "edge_count": 1,
+        "nodes": [process, file_node],
+        "edges": [edge],
+    }
+    projected_graph = project_viewer_graph(graph)
+    event_path = tmp_path / "events.jsonl"
+    event_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "0.2",
+                "event_id": "raw-session-start",
+                "session_id": "raw-e2e",
+                "timestamp": "2026-09-04T00:00:00Z",
+                "sequence": 1,
+                "event_type": "session.started",
+                "relation": "STARTED_SESSION",
+                "source": process,
+                "target": {"id": "session:raw-e2e", "type": "session", "name": "raw-e2e"},
+                "attributes": {"backend": "portable", "causal": True},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    semantic_path = tmp_path / "semantic.jsonl"
+    semantic_path.write_text(
+        json.dumps(
+            {
+                "timestamp": "2026-09-04T00:00:01Z",
+                "event_type": "semantic.antigravity.file.declared",
+                "relation": "DECLARED_TARGET",
+                "source": {
+                    "id": "tool-call:antigravity:write-1",
+                    "type": "tool_call",
+                    "name": "write_to_file",
+                    "attributes": {"provider": "antigravity", "tool_call_id": "write-1"},
+                },
+                "target": file_node,
+                "attributes": {"backend": "semantic", "provider": "antigravity"},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    state = live_module._LiveState("raw-e2e", event_path, semantic_path)
+    state._projected_graph_locked = lambda: dict(projected_graph)  # type: ignore[method-assign]
+    state._viewer_projection_ever_active = True
+    state.live_update(-1)
+
+    token = "raw-e2e-token"
+    server = live_module._LocalThreadingHTTPServer(
+        ("127.0.0.1", 0), live_module._handler_factory(state, token)
+    )
+    server.daemon_threads = True
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    host, port = server.server_address[:2]
+
+    manager, executable = _browser()
+    try:
+        with manager as playwright:
+            browser = _launch(playwright, executable)
+            try:
+                page = browser.new_page(viewport={"width": 1440, "height": 1000})
+                page.goto(f"http://{host}:{port}/?t={token}")
+                page.wait_for_selector(".node", timeout=15000)
+                page.locator('[data-log-mode="raw"]').click()
+                page.locator(".raw-row").filter(
+                    has_text="semantic.antigravity.file.declared"
+                ).click()
+                file_button = page.locator("#details .raw-target-actions button").filter(
+                    has_text="notes.md"
+                )
+                assert file_button.count() == 1
+                file_button.click()
+                _wait_for_text(page, "notes.md")
+                assert "file" in page.locator("#details").inner_text().casefold()
+            finally:
+                browser.close()
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_agy_followup_conversation_stays_on_one_role_node(tmp_path: Path) -> None:
+    from execweave.dashboard_shell import render_static_dashboard_html
+    from execweave.viewer_projection import project_viewer_graph
+
+    root_id = "agent:antigravity:conversation:root"
+    child_ids = [
+        "agent:antigravity:conversation:child-a",
+        "agent:antigravity:conversation:child-b",
+    ]
+    nodes = [
+        {
+            "id": root_id,
+            "type": "agent",
+            "name": "Antigravity",
+            "attributes": {
+                "provider": "antigravity",
+                "agent_role": "root",
+                "root_agent_path": "/root",
+            },
+        }
+    ]
+    for index, child_id in enumerate(child_ids, start=1):
+        nodes.append(
+            {
+                "id": child_id,
+                "type": "agent",
+                "name": "geologist",
+                "first_seen": f"2026-09-04T00:0{index}:00Z",
+                "last_seen": f"2026-09-04T00:0{index}:30Z",
+                "attributes": {
+                    "provider": "antigravity",
+                    "conversation_id": child_id.rsplit(":", 1)[-1],
+                    "agent_role": "subagent",
+                    "parent_scope_id": "root",
+                    "parent_agent_path": "/root",
+                    "child_agent_path": "/root/geologist",
+                    "parent_relation_source": "provider_validated_child_transcript",
+                    "provider_role_slot": 0,
+                    "provider_role_type": "research",
+                    "provider_role_workspace": "inherit",
+                },
+            }
+        )
+    graph = {
+        "graph_schema_version": "0.2",
+        "session_id": "agy-role-followup",
+        "event_count": 2,
+        "node_count": 3,
+        "edge_count": 2,
+        "nodes": nodes,
+        "edges": [
+            {
+                "id": f"root-child-{index}",
+                "source": root_id,
+                "target": child_id,
+                "relation": "HAS_CHILD_AGENT_SESSION",
+                "count": 1,
+            }
+            for index, child_id in enumerate(child_ids, start=1)
+        ],
+    }
+    entries = []
+    for index, child_id in enumerate(child_ids, start=1):
+        entries.append(
+            {
+                "provider": "antigravity",
+                "source_id": child_id,
+                "conversation_preview": {
+                    "is_root": False,
+                    "topology_state": "provider_reported",
+                    "agent_path": "/root/geologist",
+                    "parent_agent_path": "/root",
+                    "messages": [
+                        {
+                            "timestamp": f"2026-09-04T00:0{index}:00Z",
+                            "ordinal": index * 2,
+                            "kind": "task",
+                            "phase": "assignment",
+                            "sender": "/root",
+                            "recipient": "/root/geologist",
+                            "content_role": "antigravity_addressed_task",
+                            "text": f"FOLLOWUP TASK {index}",
+                        },
+                        {
+                            "timestamp": f"2026-09-04T00:0{index}:30Z",
+                            "ordinal": index * 2 + 1,
+                            "kind": "subagent_final_response",
+                            "phase": "final_answer",
+                            "sender": "/root/geologist",
+                            "recipient": "/root",
+                            "text": f"FOLLOWUP ANSWER {index}",
+                        },
+                    ],
+                },
+            }
+        )
+
+    projected = project_viewer_graph(graph)
+    child_nodes = [
+        node
+        for node in projected["nodes"]
+        if (node.get("attributes") or {}).get("child_agent_path") == "/root/geologist"
+    ]
+    assert len(child_nodes) == 1
+    viewer = tmp_path / "agy-followup.html"
+    viewer.write_text(
+        render_static_dashboard_html(projected, conversation_entries=entries),
+        encoding="utf-8",
+    )
+
+    manager, executable = _browser()
+    with manager as playwright:
+        browser = _launch(playwright, executable)
+        try:
+            page = browser.new_page(viewport={"width": 1440, "height": 1000})
+            page.goto(viewer.as_uri())
+            page.wait_for_selector(".node")
+            _click_id(page, child_nodes[0]["id"])
+            _wait_for_text(page, "FOLLOWUP ANSWER 2")
+            assert page.locator("#details .execweave-agent-older").count() == 1
+            page.locator("#details .execweave-agent-older summary").click()
+            _wait_for_text(page, "FOLLOWUP ANSWER 1")
+        finally:
+            browser.close()
+
+
 def test_the_live_server_serves_the_same_index_the_file_would_carry(tmp_path: Path) -> None:
     from urllib.request import urlopen
 

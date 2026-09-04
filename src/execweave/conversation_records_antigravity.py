@@ -190,14 +190,13 @@ def apply_antigravity_role_path_fallback(
             child_entry = by_id.get(child_id)
             if child_entry is None:
                 continue
-            if child_id in declared_children:
-                continue
             child_preview = child_entry.get("conversation_preview")
             if not isinstance(child_preview, dict):
                 continue
-            if child_preview.get("is_root") is False and str(
-                child_preview.get("agent_path") or ""
-            ).startswith("/root/"):
+            if (
+                child_id in declared_children
+                and child_preview.get("agent_path") == link["agent_path"]
+            ):
                 continue
             spec = link["spec"]
             nickname = spec.get("Role") if isinstance(spec.get("Role"), str) else spec.get("TypeName")
