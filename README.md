@@ -32,7 +32,7 @@ ExecWeave is a source-available, local-first observability project that turns AI
   <img src="docs/assets/codex.gif" alt="ExecWeave animated live demo" width="100%">
 </p>
 
-This README documents **v0.8.8**.
+This README documents **v0.8.9**. It includes dagre route-point rendering and post-layout port recomputation, with provider graph/history/raw contracts verified across Ubuntu, macOS, and Windows.
 
 ## Why ExecWeave
 
