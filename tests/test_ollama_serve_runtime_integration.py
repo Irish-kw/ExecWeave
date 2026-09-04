@@ -41,13 +41,34 @@ def _wait_for_json(url: str, timeout: float = 8.0) -> dict[str, object]:
     raise AssertionError(f"endpoint did not become ready: {url}: {last_error}")
 
 
-def _wait_for_path(path: Path, timeout: float = 8.0) -> None:
+def _wait_for_child_ready(
+    ready_path: Path,
+    *,
+    started_path: Path,
+    thread: threading.Thread,
+    errors: list[BaseException],
+    result: dict[str, object],
+    event_path: Path,
+    timeout: float = 8.0,
+) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if path.exists():
+        if ready_path.exists():
             return
+        if errors or not thread.is_alive():
+            events = event_path.read_text(encoding="utf-8") if event_path.exists() else ""
+            raise AssertionError(
+                "collector stopped before fake Ollama became ready: "
+                f"started={started_path.exists()} errors={errors!r} "
+                f"result={result!r} events={events}"
+            )
         time.sleep(0.02)
-    raise AssertionError(f"path did not become ready: {path}")
+    events = event_path.read_text(encoding="utf-8") if event_path.exists() else ""
+    raise AssertionError(
+        "fake Ollama did not become ready: "
+        f"started={started_path.exists()} thread_alive={thread.is_alive()} "
+        f"errors={errors!r} result={result!r} events={events}"
+    )
 
 
 def _write_fake_ollama_server(path: Path) -> None:
@@ -58,6 +79,7 @@ import os
 from pathlib import Path
 from urllib.parse import urlsplit
 
+Path(os.environ["FAKE_OLLAMA_STARTED"]).write_text("started", encoding="utf-8")
 endpoint = urlsplit(os.environ["OLLAMA_HOST"])
 
 class Handler(BaseHTTPRequestHandler):
@@ -111,12 +133,14 @@ def test_runtime_collector_ollama_serve_captures_independent_client(
     public_endpoint = f"http://127.0.0.1:{public_port}"
     sidecar = tmp_path / "semantic.jsonl"
     event_path = tmp_path / "events.jsonl"
+    started_path = tmp_path / "fake-ollama.started"
     ready_path = tmp_path / "fake-ollama.ready"
     fake_server = tmp_path / "fake_ollama_server.py"
     _write_fake_ollama_server(fake_server)
 
     monkeypatch.setenv("EXECWEAVE_SEMANTIC_SIDECAR", str(sidecar))
     monkeypatch.setenv("OLLAMA_HOST", public_endpoint)
+    monkeypatch.setenv("FAKE_OLLAMA_STARTED", str(started_path))
     monkeypatch.setenv("FAKE_OLLAMA_READY", str(ready_path))
     monkeypatch.setattr(
         collector_module,
@@ -144,9 +168,14 @@ def test_runtime_collector_ollama_serve_captures_independent_client(
     thread = threading.Thread(target=run_collector, daemon=True)
     thread.start()
 
-    # Wait for the child Ollama server to finish binding its private endpoint.
-    # The independent client still talks only to the original/public endpoint.
-    _wait_for_path(ready_path)
+    _wait_for_child_ready(
+        ready_path,
+        started_path=started_path,
+        thread=thread,
+        errors=errors,
+        result=result,
+        event_path=event_path,
+    )
     assert _wait_for_json(public_endpoint + "/api/ps") == {"models": []}
 
     request = Request(
