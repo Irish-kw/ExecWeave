@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import socket
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -21,8 +20,7 @@ def _free_loopback_port() -> int:
         return int(sock.getsockname()[1])
 
 
-@pytest.mark.skipif(os.name != "nt", reason="Windows Cursor shim regression")
-def test_windows_cursor_path_shim_prefers_desktop_from_same_install(
+def test_windows_cursor_policy_prefers_desktop_from_same_install(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -40,17 +38,18 @@ def test_windows_cursor_path_shim_prefers_desktop_from_same_install(
         lambda executable, path=None: str(shim) if executable == "cursor" else None,
     )
     monkeypatch.setattr(command_module, "_cursor_desktop_candidates", lambda: [])
+    monkeypatch.setattr(command_module, "_prefer_cursor_desktop_launcher", lambda: True)
 
     assert resolve_launch_command(["cursor"]) == [str(desktop.resolve())]
 
 
-@pytest.mark.skipif(os.name != "nt", reason="Windows Cursor shim regression")
 def test_explicit_cursor_launcher_path_is_not_rewritten(tmp_path: Path) -> None:
     install = tmp_path / "custom-cursor"
     bin_dir = install / "resources" / "app" / "bin"
     bin_dir.mkdir(parents=True)
     shim = bin_dir / "cursor.cmd"
-    shim.write_text("@echo off\r\n", encoding="utf-8")
+    shim.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    shim.chmod(0o755)
     desktop = install / "Cursor.exe"
     desktop.write_bytes(b"MZ")
 
