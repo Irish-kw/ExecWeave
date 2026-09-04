@@ -32,7 +32,7 @@ ExecWeave は source-available / local-first の observability プロジェク�
   <img src="docs/assets/codex.gif" alt="ExecWeave animated live demo" width="100%">
 </p>
 
-この README は **v0.8.8** を説明します。
+この README は **v0.8.9** を説明します。
 
 ## ExecWeave を使う理由
 
