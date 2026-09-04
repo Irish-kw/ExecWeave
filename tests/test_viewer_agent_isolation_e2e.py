@@ -402,7 +402,7 @@ def test_live_raw_event_opens_its_md_file_target(tmp_path: Path) -> None:
                 assert file_button.count() == 1
                 file_button.click()
                 _wait_for_text(page, "notes.md")
-                assert "file" in page.locator("#details").inner_text().casefold()
+                assert "path" in page.locator("#details").inner_text().casefold()
             finally:
                 browser.close()
     finally:
