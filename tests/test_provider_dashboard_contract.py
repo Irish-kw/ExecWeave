@@ -167,6 +167,80 @@ def test_every_provider_keeps_dashboard_graph_raw_events_and_file_targets(
     assert f"{provider}-notes.md" in html
 
 
+@pytest.mark.parametrize("provider", _selected_providers())
+def test_every_provider_collapses_repeated_result_and_operation_nodes(
+    provider: str,
+) -> None:
+    graph = _dashboard_graph(provider)
+    agent_id = f"agent:{provider}:root"
+    tool_id = f"tool:{provider}:apply_patch"
+    for index in (1, 2):
+        graph["nodes"].extend(
+            [
+                {
+                    "id": f"tool-result:{provider}:{index}",
+                    "type": "tool_result",
+                    "name": "apply_patch result",
+                    "first_seen": f"2026-09-03T00:00:0{index}Z",
+                    "last_seen": f"2026-09-03T00:00:0{index}Z",
+                    "event_count": 1,
+                    "attributes": {"provider": provider},
+                },
+                {
+                    "id": f"agent-operation:{provider}:{index}",
+                    "type": "agent_operation",
+                    "name": "manage_subagents list",
+                    "first_seen": f"2026-09-03T00:00:0{index}Z",
+                    "last_seen": f"2026-09-03T00:00:0{index}Z",
+                    "event_count": 1,
+                    "attributes": {"provider": provider},
+                },
+            ]
+        )
+        graph["edges"].extend(
+            [
+                {
+                    "id": f"result-{index}",
+                    "source": tool_id,
+                    "target": f"tool-result:{provider}:{index}",
+                    "relation": "TOOL_RESULT_RETURNED",
+                    "count": 1,
+                },
+                {
+                    "id": f"operation-{index}",
+                    "source": agent_id,
+                    "target": f"agent-operation:{provider}:{index}",
+                    "relation": "OBSERVED_AGENT_OPERATION",
+                    "count": 1,
+                },
+            ]
+        )
+
+    projected = project_viewer_graph(graph)
+    result_nodes = [
+        node for node in projected["nodes"] if node.get("type") == "tool_result"
+    ]
+    operation_nodes = [
+        node for node in projected["nodes"] if node.get("type") == "agent_operation"
+    ]
+    assert len(result_nodes) == 1
+    assert len(operation_nodes) == 1
+    assert result_nodes[0]["attributes"]["viewer_occurrence_count"] == 2
+    assert operation_nodes[0]["attributes"]["viewer_occurrence_count"] == 2
+    result_edge = next(
+        edge
+        for edge in projected["edges"]
+        if edge.get("relation") == "TOOL_RESULT_RETURNED"
+    )
+    operation_edge = next(
+        edge
+        for edge in projected["edges"]
+        if edge.get("relation") == "OBSERVED_AGENT_OPERATION"
+    )
+    assert result_edge["count"] == 2
+    assert operation_edge["count"] == 2
+
+
 def _runtime_event(
     provider: str,
     event_id: str,
@@ -252,6 +326,63 @@ def test_every_provider_raw_log_retains_process_file_and_network_events(
     assert any(
         node.get("type") == "file" and node.get("name") == f"{provider}-notes.md"
         for node in graph["nodes"]
+    )
+
+
+@pytest.mark.parametrize("provider", _selected_providers())
+def test_every_provider_raw_log_includes_semantic_only_file_targets(
+    provider: str,
+    tmp_path: Path,
+) -> None:
+    event_path = tmp_path / "events.jsonl"
+    semantic_path = tmp_path / "semantic.jsonl"
+    started = _runtime_event(
+        provider,
+        f"{provider}-session-start",
+        1,
+        "session.started",
+        "STARTED_SESSION",
+        {"id": f"session:raw-{provider}", "type": "session", "name": provider},
+    )
+    event_path.write_text(json.dumps(started) + "\n", encoding="utf-8")
+    semantic_event = {
+        "timestamp": "2026-09-03T00:00:02Z",
+        "event_type": f"semantic.{provider}.file.declared",
+        "relation": "DECLARED_TARGET",
+        "source": {
+            "id": f"tool-call:{provider}:write-1",
+            "type": "tool_call",
+            "name": "write",
+            "attributes": {"provider": provider, "tool_call_id": "write-1"},
+        },
+        "target": {
+            "id": f"file:/workspace/{provider}-semantic-only.md",
+            "type": "file",
+            "name": f"{provider}-semantic-only.md",
+            "attributes": {"path": f"/workspace/{provider}-semantic-only.md"},
+        },
+        "attributes": {"backend": "semantic", "provider": provider},
+    }
+    semantic_path.write_text(
+        json.dumps(semantic_event) + "\n" + json.dumps(semantic_event) + "\n",
+        encoding="utf-8",
+    )
+
+    payload = _LiveState(
+        f"raw-{provider}",
+        event_path,
+        semantic_path,
+    ).live_update(-1)
+    semantic_rows = [
+        entry for entry in payload["raw_events"] if entry.get("stream") == "semantic.jsonl"
+    ]
+    assert len(semantic_rows) == 1
+    assert semantic_rows[0]["evidence_event_count"] == 2
+    assert semantic_rows[0]["event"]["relation"] == "DECLARED_TARGET"
+    assert f"{provider}-semantic-only.md" in json.dumps(semantic_rows, ensure_ascii=False)
+    assert any(
+        node.get("name") == f"{provider}-semantic-only.md"
+        for node in payload["graph"]["nodes"]
     )
 
 

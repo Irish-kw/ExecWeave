@@ -195,7 +195,11 @@ def test_live_logs_are_vertically_resizable_without_expanding_log_retention() ->
     assert "Resize live logs" in html
     assert "pointerdown" in html
     assert "execweave.live.activity-height" in html
-    assert live_module.LIVE_RAW_EVENT_HISTORY == 320
+    # Runtime and semantic evidence each retain the previous 320-row allowance;
+    # the combined panel can therefore expose 640 rows without either stream
+    # evicting the other.
+    assert live_module.LIVE_RAW_EVENT_HISTORY == 640
+    assert live_module.LIVE_RAW_EVENT_STREAM_HISTORY == 320
 
 
 def test_live_conversation_panel_is_provider_neutral_rooted_agent_tree() -> None:

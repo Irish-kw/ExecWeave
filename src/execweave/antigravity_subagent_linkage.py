@@ -305,36 +305,46 @@ def transcript_subagent_links(
             step if isinstance(step, int) and not isinstance(step, bool) and step >= 0 else index
         )
         candidates.append((specs, results, step_index))
-    if len(candidates) != 1:
+    if not candidates:
         return []
-    specs, results, step_index = candidates[0]
-    if len(results) != len(specs):
+    # A cumulative transcript contains every completed spawn pair.  Replaying
+    # the exact same pair is ambiguous/corrupt evidence, but multiple distinct
+    # pairs are valid and must all remain attached to the parent conversation.
+    signatures = {
+        json.dumps((specs, results), ensure_ascii=False, sort_keys=True)
+        for specs, results, _ in candidates
+    }
+    if len(signatures) != len(candidates):
         return []
-    seen: set[str] = set()
+
     links: list[dict[str, Any]] = []
-    for subagent_index, (spec, result) in enumerate(zip(specs, results, strict=True)):
-        child_id = result.get("conversationId")
-        if not isinstance(child_id, str) or not child_id:
+    seen: set[str] = set()
+    for specs, results, step_index in candidates:
+        if len(results) != len(specs):
             return []
-        if child_id == parent_id or child_id in seen:
-            return []
-        seen.add(child_id)
-        child_transcript = None
-        log_uri = result.get("logAbsoluteUri")
-        if isinstance(log_uri, str):
-            candidate = _canonical_file_uri_path(log_uri)
-            if candidate is not None and _transcript_root(candidate, child_id) is not None:
-                child_transcript = candidate
-        links.append(
-            {
-                "subagent_index": subagent_index,
-                "conversation_id": child_id,
-                "step_index": step_index,
-                "spec": spec,
-                "agent_path": derived_child_agent_path(spec, child_id),
-                "transcript_path": child_transcript,
-            }
-        )
+        for subagent_index, (spec, result) in enumerate(zip(specs, results, strict=True)):
+            child_id = result.get("conversationId")
+            if not isinstance(child_id, str) or not child_id:
+                return []
+            if child_id == parent_id or child_id in seen:
+                return []
+            seen.add(child_id)
+            child_transcript = None
+            log_uri = result.get("logAbsoluteUri")
+            if isinstance(log_uri, str):
+                candidate = _canonical_file_uri_path(log_uri)
+                if candidate is not None and _transcript_root(candidate, child_id) is not None:
+                    child_transcript = candidate
+            links.append(
+                {
+                    "subagent_index": subagent_index,
+                    "conversation_id": child_id,
+                    "step_index": step_index,
+                    "spec": spec,
+                    "agent_path": derived_child_agent_path(spec, child_id),
+                    "transcript_path": child_transcript,
+                }
+            )
     return links
 
 
@@ -378,16 +388,32 @@ def validated_subagent_links(
     if records is None:
         return []
 
-    candidates: list[list[dict[str, Any]]] = []
+    candidates: list[tuple[list[dict[str, Any]], int]] = []
     for index, record in enumerate(records[:-1]):
         if not _matching_request(record, specs):
             continue
         results = _matching_result(records[index + 1])
         if results is not None:
-            candidates.append(results)
-    if len(candidates) != 1:
+            step = record.get("step_index")
+            step_index = (
+                step if isinstance(step, int) and not isinstance(step, bool) and step >= 0 else index
+            )
+            candidates.append((results, step_index))
+    if not candidates:
         return []
-    results = candidates[0]
+    payload_step = payload.get("stepIdx")
+    eligible = [
+        candidate
+        for candidate in candidates
+        if not isinstance(payload_step, int) or candidate[1] <= payload_step
+    ]
+    if not eligible:
+        return []
+    latest_step = max(candidate[1] for candidate in eligible)
+    latest = [candidate for candidate in eligible if candidate[1] == latest_step]
+    if len(latest) != 1:
+        return []
+    results = latest[0][0]
     if len(results) != len(specs):
         return []
 

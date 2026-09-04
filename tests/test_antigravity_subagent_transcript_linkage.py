@@ -5,6 +5,8 @@ from pathlib import Path
 
 from execweave.antigravity_full_fidelity import antigravity_hook_to_content_events
 from execweave.content_store import FullFidelityContentStore
+from execweave.graph import GraphAccumulator
+from execweave.viewer_projection import project_viewer_graph
 
 
 def _subagent(prompt: str, workspace: str = "inherit") -> dict:
@@ -169,6 +171,73 @@ def test_antigravity_transcript_multi_child_uses_provider_order(tmp_path: Path) 
         "child-a",
         "child-b",
     ]
+
+
+def test_antigravity_followup_spawn_uses_latest_distinct_pair_and_keeps_root_request(
+    tmp_path: Path,
+) -> None:
+    workspace, transcript = _layout(tmp_path)
+    first_subagents = [_subagent("inspect auth")]
+    second_subagents = [_subagent("inspect storage")]
+    first = _pair(
+        first_subagents,
+        [_child_result(tmp_path, "child-a", workspace=workspace)],
+    )
+    second = _pair(
+        second_subagents,
+        [_child_result(tmp_path, "child-b", workspace=workspace)],
+    )
+    second[0]["step_index"] = 41
+    second[1]["step_index"] = 42
+    _write_transcript(transcript, first + second)
+
+    first_payload = _payload(workspace, transcript, first_subagents)
+    first_payload["stepIdx"] = 7
+    first_events = _events(first_payload, tmp_path)
+    payload = _payload(workspace, transcript, second_subagents)
+    payload["stepIdx"] = 41
+    events = _events(payload, tmp_path)
+    assigned = _assignments(events)
+
+    assert len(assigned) == 1
+    assert assigned[0]["target"]["attributes"]["conversation_id"] == "child-b"
+    requested = [event for event in events if event["relation"] == "REQUESTED_SUBTASK"]
+    assert len(requested) == 1
+    assert requested[0]["source"]["id"] == "agent:antigravity:conversation:parent-conversation"
+    assert requested[0]["target"]["id"] == assigned[0]["source"]["id"]
+
+    accumulator = GraphAccumulator(
+        session_id="agy-followup",
+        source_path=tmp_path / "events.semantic.jsonl",
+    )
+    for index, event in enumerate(first_events + events, start=1):
+        accumulator.apply(
+            {
+                **event,
+                "schema_version": "0.2",
+                "session_id": "agy-followup",
+                "event_id": f"agy-followup-{index}",
+                "sequence": index,
+            }
+        )
+    projected = project_viewer_graph(accumulator.to_dict())
+    continued = [
+        node
+        for node in projected["nodes"]
+        if node.get("type") == "agent"
+        and (node.get("attributes") or {}).get("provider_role_path")
+        == "/root/security reviewer"
+    ]
+    assert len(continued) == 1
+    assert set(continued[0]["attributes"]["viewer_agent_member_ids"]) == {
+        "agent:antigravity:conversation:child-a",
+        "agent:antigravity:conversation:child-b",
+    }
+    assert {
+        edge["relation"]
+        for edge in projected["edges"]
+        if edge.get("target") == continued[0]["id"]
+    } >= {"ASSIGNED_AGENT_TASK", "HAS_CHILD_AGENT_SESSION"}
 
 
 def test_antigravity_transcript_count_mismatch_abstains(tmp_path: Path) -> None:

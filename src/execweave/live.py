@@ -8,6 +8,7 @@ from collections import deque
 from . import live_core as _core
 from .conversation_records import conversation_index_payload
 from .dashboard_shell import DASHBOARD_HTML
+from .graph import logical_event_key
 from .viewer_limits import resolve_viewer_limits
 from .viewer_projection import (
     internal_hook_process_ids_in_event,
@@ -36,7 +37,8 @@ _LIVE_HTML = DASHBOARD_HTML
 render_graph_html = _projected_render_graph_html
 write_graph_html = _projected_write_graph_html
 
-LIVE_RAW_EVENT_HISTORY = 320
+LIVE_RAW_EVENT_HISTORY = 640
+LIVE_RAW_EVENT_STREAM_HISTORY = LIVE_RAW_EVENT_HISTORY // 2
 _BaseLiveState = _core._LiveState
 _base_inject_live_auth = _core._inject_live_auth
 _base_inject_final_theme = _core._inject_final_theme
@@ -169,16 +171,64 @@ class _LiveState(_BaseLiveState):
         semantic_path: Path | None = None,
     ) -> None:
         super().__init__(session_id, event_path, semantic_path)
-        self._raw_events: deque[dict[str, object]] = deque(maxlen=LIVE_RAW_EVENT_HISTORY)
+        self._raw_events: deque[dict[str, object]] = deque(
+            maxlen=LIVE_RAW_EVENT_STREAM_HISTORY
+        )
+        self._raw_semantic_events: deque[dict[str, object]] = deque(
+            maxlen=LIVE_RAW_EVENT_STREAM_HISTORY
+        )
         self._pending_raw_events: list[dict[str, object]] = []
+        self._raw_semantic_entries: dict[str, dict[str, object]] = {}
+        self._raw_semantic_entry_keys: dict[int, str] = {}
         self._internal_hook_process_ids: set[str] = set()
         self._viewer_projection_ever_active = False
 
     def _reset_incremental_state_locked(self) -> None:
         super()._reset_incremental_state_locked()
         self._raw_events.clear()
+        self._raw_semantic_events.clear()
         self._pending_raw_events.clear()
+        self._raw_semantic_entries.clear()
+        self._raw_semantic_entry_keys.clear()
         self._internal_hook_process_ids.clear()
+
+    def _append_raw_entry_locked(
+        self,
+        *,
+        line_number: int,
+        event: dict[str, object],
+        stream: str,
+        semantic_key: str | None = None,
+    ) -> None:
+        if semantic_key is not None:
+            existing = self._raw_semantic_entries.get(semantic_key)
+            if existing is not None and id(existing) in self._raw_semantic_entry_keys:
+                existing["last_line"] = line_number
+                existing["evidence_event_count"] = int(
+                    existing.get("evidence_event_count", 1) or 1
+                ) + 1
+                timestamp = event.get("timestamp")
+                if isinstance(timestamp, str) and timestamp:
+                    existing["last_observed"] = timestamp
+                return
+
+        bucket = self._raw_semantic_events if stream == "semantic.jsonl" else self._raw_events
+        if len(bucket) == bucket.maxlen and bucket:
+            evicted = bucket[0]
+            evicted_key = self._raw_semantic_entry_keys.pop(id(evicted), None)
+            if evicted_key is not None:
+                self._raw_semantic_entries.pop(evicted_key, None)
+        entry: dict[str, object] = {
+            "line": line_number,
+            "stream": stream,
+            "event": event,
+            "evidence_event_count": 1,
+        }
+        bucket.append(entry)
+        self._pending_raw_events.append(entry)
+        if semantic_key is not None:
+            self._raw_semantic_entries[semantic_key] = entry
+            self._raw_semantic_entry_keys[id(entry)] = semantic_key
 
     @staticmethod
     def _event_entity_id(event: dict[str, object], key: str) -> str | None:
@@ -187,6 +237,19 @@ class _LiveState(_BaseLiveState):
             return None
         value = entity.get("id")
         return value if isinstance(value, str) and value else None
+
+    def _raw_event_snapshot_locked(self) -> list[dict[str, object]]:
+        rows = [*self._raw_events, *self._raw_semantic_events]
+        rows.sort(
+            key=lambda entry: (
+                str((entry.get("event") or {}).get("timestamp") or "")
+                if isinstance(entry.get("event"), dict)
+                else "",
+                str(entry.get("stream") or ""),
+                int(entry.get("line", 0) or 0),
+            )
+        )
+        return rows[-LIVE_RAW_EVENT_HISTORY:]
 
     def _event_uses_internal_hook_process_locked(self, event: dict[str, object]) -> bool:
         direct_ids = internal_hook_process_ids_in_event(event)
@@ -219,9 +282,19 @@ class _LiveState(_BaseLiveState):
             for line_number, event in records:
                 if self._event_uses_internal_hook_process_locked(event):
                     continue
-                entry: dict[str, object] = {"line": line_number, "event": event}
-                self._raw_events.append(entry)
-                self._pending_raw_events.append(entry)
+                self._append_raw_entry_locked(
+                    line_number=line_number,
+                    event=event,
+                    stream="events.jsonl",
+                )
+        elif tail is self._semantic_tail:
+            for line_number, event in records:
+                self._append_raw_entry_locked(
+                    line_number=line_number,
+                    event=event,
+                    stream="semantic.jsonl",
+                    semantic_key=logical_event_key(event),
+                )
         return records
 
     def _apply_live_event_locked(
@@ -311,7 +384,7 @@ class _LiveState(_BaseLiveState):
     def snapshot(self) -> dict[str, object]:
         payload = super().snapshot()
         with self._lock:
-            payload["raw_events"] = list(self._raw_events)
+            payload["raw_events"] = self._raw_event_snapshot_locked()
         return payload
 
     def live_update(self, after: int | None) -> dict[str, object]:
@@ -331,7 +404,7 @@ class _LiveState(_BaseLiveState):
                 elif payload.get("kind") == "noop":
                     payload.update(counts)
             if payload.get("kind") == "snapshot":
-                payload["raw_events"] = list(self._raw_events)
+                payload["raw_events"] = self._raw_event_snapshot_locked()
         return payload
 
 

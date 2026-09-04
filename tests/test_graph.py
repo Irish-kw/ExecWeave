@@ -89,6 +89,76 @@ def test_graph_deduplicates_nodes_and_aggregates_edges(tmp_path: Path) -> None:
     assert read_edge["backends"] == ["strace"]
 
 
+def test_graph_folds_replayed_semantic_evidence_but_keeps_raw_evidence_count() -> None:
+    accumulator = GraphAccumulator(session_id="semantic-replay", source_path=Path("events.jsonl"))
+    first = {
+        "schema_version": "0.2",
+        "event_id": "semantic-a",
+        "session_id": "semantic-replay",
+        "timestamp": "2026-09-03T00:00:00Z",
+        "sequence": 1,
+        "event_type": "semantic.provider.tool.returned",
+        "relation": "TOOL_RESULT_RETURNED",
+        "source": {"id": "tool:provider:write", "type": "tool", "name": "write"},
+        "target": {"id": "tool-result:provider:1", "type": "tool_result", "name": "write result"},
+        "attributes": {"backend": "semantic", "provider": "provider"},
+    }
+    replay = dict(first)
+    replay.update(
+        {
+            "event_id": "semantic-b",
+            "timestamp": "2026-09-03T00:00:05Z",
+            "sequence": 2,
+        }
+    )
+
+    accumulator.apply(first)
+    accumulator.apply(replay)
+    payload = accumulator.to_dict()
+    edge = payload["edges"][0]
+
+    assert payload["event_count"] == 2
+    assert edge["count"] == 1
+    assert edge["evidence_event_count"] == 2
+    assert edge["event_ids"] == ["semantic-a", "semantic-b"]
+    assert all(node["event_count"] == 1 for node in payload["nodes"])
+    assert all(node["evidence_event_count"] == 2 for node in payload["nodes"])
+
+
+def test_graph_never_folds_distinct_model_invocations_with_equal_endpoints() -> None:
+    accumulator = GraphAccumulator(session_id="model-calls", source_path=Path("events.jsonl"))
+    base = {
+        "schema_version": "0.2",
+        "session_id": "model-calls",
+        "event_type": "semantic.antigravity.model.invocation.requested",
+        "relation": "INVOKES_MODEL",
+        "source": {
+            "id": "provider-session:antigravity:root",
+            "type": "provider_session",
+        },
+        "target": {"id": "model:antigravity:test", "type": "model"},
+    }
+    for index, initial_steps in enumerate((1, 4), start=1):
+        accumulator.apply(
+            {
+                **base,
+                "event_id": f"model-call-{index}",
+                "timestamp": f"2026-09-03T00:00:0{index}Z",
+                "sequence": index,
+                "attributes": {
+                    "backend": "semantic",
+                    "provider": "antigravity",
+                    "antigravity_initial_num_steps": initial_steps,
+                    "antigravity_invocation_number": 0,
+                },
+            }
+        )
+
+    edge = accumulator.to_dict()["edges"][0]
+    assert edge["count"] == 2
+    assert edge["evidence_event_count"] == 2
+
+
 def test_incremental_graph_accumulator_matches_canonical_builder(tmp_path: Path) -> None:
     stream = tmp_path / "run.jsonl"
     _emit_complete_stream(stream)

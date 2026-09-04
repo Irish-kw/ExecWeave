@@ -8,6 +8,7 @@ from . import antigravity_full_fidelity_collaboration_base as _base
 from . import antigravity_adapter_base as _semantic
 from .agent_topology import EVIDENCE_VALIDATED_CHILD_TRANSCRIPT, subagent_topology
 from .antigravity_subagent_linkage import (
+    derived_child_agent_path,
     read_transcript_records,
     transcript_subagent_links,
     validated_subagent_links,
@@ -70,6 +71,10 @@ def _assignment_event(
             "conversation_id": child_id,
             "agent_type": child_label,
             "agent_nickname": role or type_name,
+            "provider_role_slot": subagent_index,
+            "provider_role_type": type_name,
+            "provider_role_workspace": workspace,
+            "provider_role_path": derived_child_agent_path(spec, child_id),
             "identity_semantics": "provider_transcript_result_conversation_id",
             "execution_observed": False,
             "lifecycle_authority": "child_provider_hooks",
@@ -130,6 +135,67 @@ def _child_session_event(*, assignment: dict[str, Any], parent_id: str) -> dict[
         "target": child,
         "attributes": dict(attributes) if isinstance(attributes, dict) else {},
     }
+
+
+def _subtask_request_event(*, assignment: dict[str, Any], parent_id: str) -> dict[str, Any]:
+    """Connect the requesting agent to the subtask before its child is known."""
+    subtask = assignment.get("source")
+    subtask = subtask if isinstance(subtask, dict) else {}
+    attributes = assignment.get("attributes")
+    request_attributes = dict(attributes) if isinstance(attributes, dict) else {}
+    request_attributes.update(
+        {
+            "provider": "antigravity",
+            "attribution": "antigravity_hook",
+            "evidence_source": "provider_hook_plus_validated_transcript",
+            "causal": False,
+            "inferred": False,
+            "identity_exact": True,
+            "provider_collaboration_tool_exact": True,
+            "provider_post_tool_success": True,
+        }
+    )
+    return {
+        "timestamp": assignment.get("timestamp"),
+        "event_type": "semantic.antigravity.subtask.requested",
+        "relation": "REQUESTED_SUBTASK",
+        "source": _entity(
+            "agent",
+            f"agent:antigravity:conversation:{parent_id}",
+            name="Antigravity conversation",
+            attributes={
+                "provider": "antigravity",
+                "conversation_id": parent_id,
+                "identity_semantics": "provider_conversation_id",
+            },
+        ),
+        "target": subtask,
+        "attributes": request_attributes,
+    }
+
+
+def _append_missing_subtask_requests(
+    events: list[dict[str, Any]],
+    assignments: list[dict[str, Any]],
+    *,
+    parent_id: str,
+) -> None:
+    """Add root-to-subtask edges without duplicating request-only evidence."""
+    requested_ids = {
+        target.get("id")
+        for event in events
+        if event.get("relation") == "REQUESTED_SUBTASK"
+        and isinstance((target := event.get("target")), dict)
+        and isinstance(target.get("id"), str)
+    }
+    for assignment in assignments:
+        source = assignment.get("source")
+        if not isinstance(source, dict) or not isinstance(source.get("id"), str):
+            continue
+        if source["id"] in requested_ids:
+            continue
+        events.append(_subtask_request_event(assignment=assignment, parent_id=parent_id))
+        requested_ids.add(source["id"])
 
 
 def _child_task_content_event(
@@ -474,6 +540,7 @@ def _transcript_assignment_events(
         parent_id=conversation_id,
     )
     events: list[dict[str, Any]] = []
+    assignments: list[dict[str, Any]] = []
     for link in links:
         spec = link["spec"]
         child_id = link["conversation_id"]
@@ -487,6 +554,7 @@ def _transcript_assignment_events(
             child_id=child_id,
             spec=spec,
         )
+        assignments.append(assignment)
         events.append(assignment)
         events.append(_child_session_event(assignment=assignment, parent_id=conversation_id))
         events.extend(
@@ -513,6 +581,7 @@ def _transcript_assignment_events(
         )
         if task_content is not None:
             events.append(task_content)
+    _append_missing_subtask_requests(events, assignments, parent_id=conversation_id)
     return events
 
 
@@ -538,6 +607,16 @@ def antigravity_hook_to_content_events(
             payload,
             timestamp=timestamp,
             store=store,
+        )
+        assignments = [
+            event
+            for event in assigned
+            if event.get("relation") == "ASSIGNED_AGENT_TASK"
+        ]
+        _append_missing_subtask_requests(
+            events,
+            assignments,
+            parent_id=str(payload.get("conversationId") or ""),
         )
         events.extend(assigned)
         tool_call = payload.get("toolCall")

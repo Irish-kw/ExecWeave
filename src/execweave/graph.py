@@ -1,16 +1,141 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .fidelity import FidelityAccumulator, derive_fidelity
+from .fidelity import FidelityAccumulator
 from .provider_lifecycle import ProviderLifecycleAnnotation, provider_lifecycle_annotation
 from .validate import validate_event_stream
 
 GRAPH_SCHEMA_VERSION = "0.2"
+
+
+def logical_event_key(event: dict[str, Any]) -> str | None:
+    """Return a replay key only when the event exposes occurrence identity.
+
+    A semantic sidecar can replay one transcript occurrence many times, but equal
+    endpoints do *not* prove equal occurrences.  Model invocations are the important
+    counterexample: one provider session legitimately invokes the same model more than
+    once.  We therefore fold only events that carry a provider occurrence discriminator
+    or point at an occurrence-shaped entity whose stable ID supplies that discriminator.
+    """
+    if not isinstance(event, dict):
+        return None
+    event_type = event.get("event_type")
+    attributes = event.get("attributes")
+    semantic = (
+        isinstance(event_type, str)
+        and event_type.startswith("semantic.")
+    ) or (
+        isinstance(attributes, dict)
+        and attributes.get("backend") == "semantic"
+    )
+    event_id = event.get("event_id")
+    if not semantic and isinstance(event_id, str) and event_id:
+        return f"event_id:{event_id}"
+    if not semantic:
+        return None
+    def endpoint_identity(value: object) -> dict[str, str] | None:
+        if not isinstance(value, dict):
+            return None
+        identity = {
+            key: value[key]
+            for key in ("id", "type")
+            if isinstance(value.get(key), str) and value[key]
+        }
+        return identity or None
+
+    source = endpoint_identity(event.get("source"))
+    target = endpoint_identity(event.get("target"))
+    occurrence_entity_types = {
+        "agent_operation",
+        "agent_turn",
+        "command",
+        "context_compaction",
+        "conversation_item",
+        "observed_content",
+        "permission_request",
+        "subtask",
+        "terminal_operation",
+        "tool_call",
+        "tool_call_observation",
+        "tool_result",
+    }
+    endpoint_occurrence = any(
+        endpoint is not None and endpoint.get("type") in occurrence_entity_types
+        for endpoint in (source, target)
+    )
+
+    occurrence_keys = (
+        "tool_use_id",
+        "tool_call_id",
+        "call_id",
+        "provider_call_id",
+        "invocation_id",
+        "request_id",
+        "response_id",
+        "message_id",
+        "item_id",
+        "turn_id",
+        "step_index",
+        "stepIdx",
+        "antigravity_step_index",
+        "invocation_number",
+        "antigravity_invocation_number",
+        "initial_num_steps",
+        "antigravity_initial_num_steps",
+        "transcript_record_ordinal",
+        "transcript_tool_call_index",
+    )
+
+    occurrence: dict[str, Any] = {}
+    if not endpoint_occurrence:
+        for scope, value in (
+            ("event", event.get("attributes")),
+            (
+                "source",
+                (event.get("source") or {}).get("attributes")
+                if isinstance(event.get("source"), dict)
+                else None,
+            ),
+            (
+                "target",
+                (event.get("target") or {}).get("attributes")
+                if isinstance(event.get("target"), dict)
+                else None,
+            ),
+        ):
+            if not isinstance(value, dict):
+                continue
+            selected = {
+                key: value[key]
+                for key in occurrence_keys
+                if value.get(key) is not None
+            }
+            if selected:
+                occurrence[scope] = selected
+
+    if not endpoint_occurrence and not occurrence:
+        return None
+
+    stable = {
+        "event_type": event.get("event_type"),
+        "relation": event.get("relation"),
+        "source": source,
+        "target": target,
+        "occurrence": occurrence,
+    }
+    encoded = json.dumps(
+        stable,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return "semantic:" + hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 @dataclass
@@ -22,9 +147,16 @@ class GraphNode:
     first_seen: str | None = None
     last_seen: str | None = None
     event_count: int = 0
+    evidence_event_count: int = 0
     event_types: set[str] = field(default_factory=set)
 
-    def observe(self, entity: dict[str, Any], event: dict[str, Any]) -> None:
+    def observe(
+        self,
+        entity: dict[str, Any],
+        event: dict[str, Any],
+        *,
+        logical: bool = True,
+    ) -> None:
         self.name = self.name or entity.get("name")
         incoming = entity.get("attributes") or {}
         if isinstance(incoming, dict):
@@ -40,7 +172,9 @@ class GraphNode:
         if isinstance(timestamp, str):
             self.first_seen = min(self.first_seen, timestamp) if self.first_seen else timestamp
             self.last_seen = max(self.last_seen, timestamp) if self.last_seen else timestamp
-        self.event_count += 1
+        self.evidence_event_count += 1
+        if logical:
+            self.event_count += 1
         event_type = event.get("event_type")
         if isinstance(event_type, str):
             self.event_types.add(event_type)
@@ -58,6 +192,7 @@ class GraphEdge:
     target: str
     relation: str
     count: int = 0
+    evidence_event_count: int = 0
     first_seen: str | None = None
     last_seen: str | None = None
     first_sequence: int | None = None
@@ -77,8 +212,16 @@ class GraphEdge:
     supporting_event_ids: set[str] = field(default_factory=set)
     provider_lifecycle: set[ProviderLifecycleAnnotation] = field(default_factory=set)
 
-    def observe(self, event: dict[str, Any], *, retain_event_id: bool = True) -> None:
-        self.count += 1
+    def observe(
+        self,
+        event: dict[str, Any],
+        *,
+        retain_event_id: bool = True,
+        logical: bool = True,
+    ) -> None:
+        self.evidence_event_count += 1
+        if logical:
+            self.count += 1
         timestamp = event.get("timestamp")
         if isinstance(timestamp, str):
             self.first_seen = min(self.first_seen, timestamp) if self.first_seen else timestamp
@@ -163,6 +306,7 @@ class GraphEdge:
             "target": self.target,
             "relation": self.relation,
             "count": self.count,
+            "evidence_event_count": self.evidence_event_count,
             "first_seen": self.first_seen,
             "last_seen": self.last_seen,
             "first_sequence": self.first_sequence,
@@ -247,6 +391,7 @@ class GraphAccumulator:
         self.nodes: dict[str, GraphNode] = {}
         self.edges: dict[tuple[str, str, str], GraphEdge] = {}
         self._fidelity = FidelityAccumulator()
+        self._seen_logical_events: set[str] = set()
 
     @property
     def node_count(self) -> int:
@@ -270,6 +415,10 @@ class GraphAccumulator:
             self.source_schema_versions.add(schema_version)
         self.event_count += 1
         self._fidelity.observe(event)
+        logical_key = logical_event_key(event)
+        logical = logical_key not in self._seen_logical_events
+        if logical_key is not None:
+            self._seen_logical_events.add(logical_key)
 
         source = event.get("source")
         target = event.get("target")
@@ -288,7 +437,7 @@ class GraphAccumulator:
                     name=entity.get("name") if isinstance(entity.get("name"), str) else None,
                 )
                 self.nodes[entity_id] = node
-            node.observe(entity, event)
+            node.observe(entity, event, logical=logical)
 
         if not isinstance(source, dict) or not isinstance(target, dict):
             return
@@ -307,7 +456,11 @@ class GraphAccumulator:
                 relation=relation,
             )
             self.edges[key] = edge
-        edge.observe(event, retain_event_id=self.retain_event_ids)
+        edge.observe(
+            event,
+            retain_event_id=self.retain_event_ids,
+            logical=logical,
+        )
 
     def to_execution_graph(self) -> ExecutionGraph:
         return ExecutionGraph(
@@ -349,59 +502,13 @@ def build_execution_graph(
         raise ValueError(f"invalid ExecWeave event stream: {details}")
 
     events = _load_events(source_path)
-    nodes: dict[str, GraphNode] = {}
-    edges: dict[tuple[str, str, str], GraphEdge] = {}
-
-    for event in events:
-        source = event.get("source")
-        target = event.get("target")
-
-        for entity in (source, target):
-            if not isinstance(entity, dict):
-                continue
-            entity_id = entity.get("id")
-            entity_type = entity.get("type")
-            if not isinstance(entity_id, str) or not isinstance(entity_type, str):
-                continue
-            node = nodes.get(entity_id)
-            if node is None:
-                node = GraphNode(
-                    id=entity_id,
-                    type=entity_type,
-                    name=entity.get("name") if isinstance(entity.get("name"), str) else None,
-                )
-                nodes[entity_id] = node
-            node.observe(entity, event)
-
-        if not isinstance(source, dict) or not isinstance(target, dict):
-            continue
-        source_id = source.get("id")
-        target_id = target.get("id")
-        relation = event.get("relation")
-        if not all(isinstance(value, str) and value for value in (source_id, target_id, relation)):
-            continue
-        key = (source_id, relation, target_id)
-        edge = edges.get(key)
-        if edge is None:
-            edge = GraphEdge(
-                id=_edge_id(source_id, relation, target_id),
-                source=source_id,
-                target=target_id,
-                relation=relation,
-            )
-            edges[key] = edge
-        edge.observe(event)
-
     session_id = validation.session_ids[0] if validation.session_ids else "unknown"
-    return ExecutionGraph(
-        session_id=session_id,
-        source_path=str(source_path),
-        source_schema_versions=validation.schema_versions,
-        event_count=len(events),
-        nodes=sorted(nodes.values(), key=lambda node: (node.type, node.id)),
-        edges=sorted(edges.values(), key=lambda edge: (edge.source, edge.relation, edge.target)),
-        fidelity=derive_fidelity(events),
-    )
+    accumulator = GraphAccumulator(session_id=session_id, source_path=source_path)
+    for event in events:
+        accumulator.apply(event)
+    graph = accumulator.to_execution_graph()
+    graph.source_schema_versions = validation.schema_versions
+    return graph
 
 
 def write_execution_graph(

@@ -111,6 +111,30 @@ jobs:
               esac
             done < <(git diff --name-only "$BASELINE_REF...HEAD" -- tests)
           fi
+          if [[ "$HEAD_REF" == "fix/provider-history-aggregation" ]]; then
+            while IFS= read -r path; do
+              case "$path" in
+                tests/test_antigravity_subagent_transcript_linkage.py)
+                  args+=(--allow-test-change "$path=follow-up Antigravity spawn pairs now select the validated latest transcript pair while preserving the historical duplicate-pair abstention contract")
+                  ;;
+                tests/test_graph.py)
+                  args+=(--allow-test-change "$path=semantic transcript replay is folded into one graph transition while raw evidence counts remain visible")
+                  ;;
+                tests/test_live_logs_export.py)
+                  args+=(--allow-test-change "$path=raw event details now expose safe inspection actions for the event source and file target nodes")
+                  ;;
+                tests/test_provider_dashboard_contract.py)
+                  args+=(--allow-test-change "$path=all providers now assert repeated result aggregation and semantic-only raw file evidence")
+                  ;;
+                tests/test_dashboard_information_architecture.py)
+                  args+=(--allow-test-change "$path=runtime and semantic raw evidence now retain independent 320-row budgets, so the combined raw panel limit is 640")
+                  ;;
+                tests/test_viewer_agent_isolation_e2e.py)
+                  args+=(--allow-test-change "$path=browser regressions now verify semantic-only md inspection and AGY follow-up conversation continuity")
+                  ;;
+              esac
+            done < <(git diff --name-only "$BASELINE_REF...HEAD" -- tests)
+          fi
           if [[ "$HEAD_REF" == "audit/remaining-providers-v0.8.7" ]]; then
             args+=(--allow-retired-provider "gemini=Gemini integration was retired and replaced by the AGY/Antigravity provider; only Gemini-owned test IDs and files may disappear")
             while IFS= read -r path; do
