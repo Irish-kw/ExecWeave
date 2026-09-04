@@ -41,11 +41,21 @@ def _wait_for_json(url: str, timeout: float = 8.0) -> dict[str, object]:
     raise AssertionError(f"endpoint did not become ready: {url}: {last_error}")
 
 
+def _wait_for_path(path: Path, timeout: float = 8.0) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if path.exists():
+            return
+        time.sleep(0.02)
+    raise AssertionError(f"path did not become ready: {path}")
+
+
 def _write_fake_ollama_server(path: Path) -> None:
     path.write_text(
         r'''from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 import os
+from pathlib import Path
 from urllib.parse import urlsplit
 
 endpoint = urlsplit(os.environ["OLLAMA_HOST"])
@@ -84,6 +94,7 @@ class Handler(BaseHTTPRequestHandler):
 server = HTTPServer((endpoint.hostname, endpoint.port), Handler)
 server.timeout = 0.2
 server.done = False
+Path(os.environ["FAKE_OLLAMA_READY"]).write_text("ready", encoding="utf-8")
 while not server.done:
     server.handle_request()
 server.server_close()
@@ -100,11 +111,13 @@ def test_runtime_collector_ollama_serve_captures_independent_client(
     public_endpoint = f"http://127.0.0.1:{public_port}"
     sidecar = tmp_path / "semantic.jsonl"
     event_path = tmp_path / "events.jsonl"
+    ready_path = tmp_path / "fake-ollama.ready"
     fake_server = tmp_path / "fake_ollama_server.py"
     _write_fake_ollama_server(fake_server)
 
     monkeypatch.setenv("EXECWEAVE_SEMANTIC_SIDECAR", str(sidecar))
     monkeypatch.setenv("OLLAMA_HOST", public_endpoint)
+    monkeypatch.setenv("FAKE_OLLAMA_READY", str(ready_path))
     monkeypatch.setattr(
         collector_module,
         "resolve_launch_command",
@@ -130,6 +143,10 @@ def test_runtime_collector_ollama_serve_captures_independent_client(
 
     thread = threading.Thread(target=run_collector, daemon=True)
     thread.start()
+
+    # Wait for the child Ollama server to finish binding its private endpoint.
+    # The independent client still talks only to the original/public endpoint.
+    _wait_for_path(ready_path)
     assert _wait_for_json(public_endpoint + "/api/ps") == {"models": []}
 
     request = Request(
