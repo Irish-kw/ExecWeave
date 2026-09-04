@@ -168,7 +168,7 @@ class RuntimeCollector:
         return_code = 1
         post_command_probe = prepare_post_command_specialized_probe(command)
         try:
-            with auto_specialized_launch(command) as launch_environment:
+            with auto_specialized_launch(command, server_relay=True) as launch_environment:
                 process = subprocess.Popen(
                     launch_command,
                     cwd=str(self.watch_root),
