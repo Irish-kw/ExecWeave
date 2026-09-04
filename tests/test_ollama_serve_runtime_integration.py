@@ -183,6 +183,8 @@ def test_ollama_serve_relay_bind_failure_is_not_silent(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    # A raw TCP listener is intentionally not an Ollama server: the /api/ps
+    # preflight must not classify arbitrary port occupancy as a server to preserve.
     holder = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     holder.bind(("127.0.0.1", 0))
     holder.listen()
