@@ -225,7 +225,7 @@ def test_antigravity_followup_spawn_uses_latest_distinct_pair_and_keeps_root_req
         node
         for node in projected["nodes"]
         if node.get("type") == "agent"
-        and (node.get("attributes") or {}).get("child_agent_path")
+        and (node.get("attributes") or {}).get("provider_role_path")
         == "/root/security reviewer"
     ]
     assert len(continued) == 1

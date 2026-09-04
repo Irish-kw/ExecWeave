@@ -126,6 +126,9 @@ jobs:
                 tests/test_provider_dashboard_contract.py)
                   args+=(--allow-test-change "$path=all providers now assert repeated result aggregation and semantic-only raw file evidence")
                   ;;
+                tests/test_dashboard_information_architecture.py)
+                  args+=(--allow-test-change "$path=runtime and semantic raw evidence now retain independent 320-row budgets, so the combined raw panel limit is 640")
+                  ;;
                 tests/test_viewer_agent_isolation_e2e.py)
                   args+=(--allow-test-change "$path=browser regressions now verify semantic-only md inspection and AGY follow-up conversation continuity")
                   ;;

@@ -447,6 +447,7 @@ def test_agy_followup_conversation_stays_on_one_role_node(tmp_path: Path) -> Non
                     "parent_scope_id": "root",
                     "parent_agent_path": "/root",
                     "child_agent_path": "/root/geologist",
+                    "provider_role_path": "/root/geologist",
                     "parent_relation_source": "provider_validated_child_transcript",
                     "provider_role_slot": 0,
                     "provider_role_type": "research",

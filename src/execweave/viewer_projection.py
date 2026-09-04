@@ -69,7 +69,7 @@ def _antigravity_role_key(node: dict[str, Any]) -> tuple[str, str, str] | None:
     if attributes.get("agent_role") != "subagent":
         return None
     parent = attributes.get("parent_scope_id")
-    path = attributes.get("child_agent_path")
+    path = attributes.get("provider_role_path")
     evidence = attributes.get("parent_relation_source")
     slot = attributes.get("provider_role_slot")
     if not all(isinstance(value, str) and value for value in (parent, path, evidence)):

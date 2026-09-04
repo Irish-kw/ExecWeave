@@ -74,13 +74,13 @@ def _assignment_event(
             "provider_role_slot": subagent_index,
             "provider_role_type": type_name,
             "provider_role_workspace": workspace,
+            "provider_role_path": derived_child_agent_path(spec, child_id),
             "identity_semantics": "provider_transcript_result_conversation_id",
             "execution_observed": False,
             "lifecycle_authority": "child_provider_hooks",
             **subagent_topology(
                 evidence=EVIDENCE_VALIDATED_CHILD_TRANSCRIPT,
                 parent_scope_id=conversation_id,
-                agent_path=derived_child_agent_path(spec, child_id),
             ),
         },
     )

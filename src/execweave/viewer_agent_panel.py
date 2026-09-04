@@ -68,8 +68,9 @@ function aggregate(matches){
 }
 function recordFor(node){
   const nodeId=String(node?.id||'');
-  const aliases=new Set([nodeId,...(Array.isArray(attrs(node).viewer_agent_member_ids)?attrs(node).viewer_agent_member_ids:[])].map(String).filter(Boolean));
-  const exact=aliases.size?entries.filter(entry=>aliases.has(String(entry?.source_id||''))):[];
+  const exact=nodeId?entries.filter(entry=>String(entry?.source_id||'')===nodeId):[];
+  const aliases=new Set((Array.isArray(attrs(node).viewer_agent_member_ids)?attrs(node).viewer_agent_member_ids:[]).map(String).filter(alias=>alias&&alias!==nodeId));
+  if(aliases.size)exact.push(...entries.filter(entry=>aliases.has(String(entry?.source_id||''))));
   if(exact.length)return aggregate(exact);
   const path=nodePath(node);if(!path)return null;
   return aggregate(entries.filter(entry=>{

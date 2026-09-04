@@ -193,10 +193,12 @@ def apply_antigravity_role_path_fallback(
             child_preview = child_entry.get("conversation_preview")
             if not isinstance(child_preview, dict):
                 continue
-            if (
-                child_id in declared_children
-                and child_preview.get("agent_path") == link["agent_path"]
-            ):
+            # A validated graph child already has authoritative topology. Its
+            # canonical path is derived from the provider conversation id when AGY
+            # publishes no path; the Role label is presentation identity only and
+            # must not overwrite that native conversation scope. Role continuity in
+            # the viewer is handled separately by ``provider_role_path``.
+            if child_id in declared_children:
                 continue
             spec = link["spec"]
             nickname = spec.get("Role") if isinstance(spec.get("Role"), str) else spec.get("TypeName")
