@@ -37,9 +37,13 @@ def _cursor_desktop_candidates() -> list[Path]:
     return []
 
 
+def _prefer_cursor_desktop_launcher() -> bool:
+    return os.name == "nt"
+
+
 def _cursor_desktop_from_launcher(launcher: str | None) -> str | None:
-    """Resolve Cursor.exe beside a Windows VS Code-style PATH shim."""
-    if not launcher or os.name != "nt":
+    """Resolve Cursor.exe beside a VS Code-style PATH shim."""
+    if not launcher:
         return None
     path = Path(launcher).expanduser()
     bin_dir = path.parent
@@ -79,7 +83,7 @@ def _resolve_executable(executable: str, *, path: str | None = None) -> str:
         resolved = str(candidate.resolve())
     else:
         path_launcher = shutil.which(executable, path=path)
-        if executable.lower() == "cursor" and os.name == "nt":
+        if executable.lower() == "cursor" and _prefer_cursor_desktop_launcher():
             resolved = _resolve_cursor_desktop(path_launcher=path_launcher) or path_launcher
         else:
             resolved = path_launcher
