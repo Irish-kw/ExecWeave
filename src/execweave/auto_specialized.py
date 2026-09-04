@@ -399,6 +399,23 @@ def auto_specialized_launch(
         yield environment
         return
     listen_host, listen_port = listen_address
+    public_endpoint = f"http://{listen_host}:{listen_port}"
+    try:
+        existing = _get_json(
+            f"{public_endpoint}/api/ps",
+            timeout=_PROBE_TIMEOUT_SECONDS,
+        )
+    except _PROBE_ERRORS:
+        existing = None
+    if isinstance(existing, dict) and isinstance(existing.get("models"), list):
+        print(
+            "ExecWeave Ollama relay: existing Ollama server detected at "
+            f"{public_endpoint}; leaving that server unclaimed.",
+            file=sys.stderr,
+        )
+        yield environment
+        return
+
     internal_port = _allocate_loopback_port()
     upstream = f"http://127.0.0.1:{internal_port}"
     server: ExecWeaveHTTPProxyServer | None = None
@@ -416,7 +433,6 @@ def auto_specialized_launch(
             if attempt < 4:
                 time.sleep(0.05)
     if server is None:
-        public_endpoint = f"http://{listen_host}:{listen_port}"
         raise RuntimeError(
             "ExecWeave could not reserve the Ollama endpoint "
             f"{public_endpoint} for transparent conversation capture. "
