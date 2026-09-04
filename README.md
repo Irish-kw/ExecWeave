@@ -32,7 +32,7 @@ ExecWeave is a source-available, local-first observability project that turns AI
   <img src="docs/assets/codex.gif" alt="ExecWeave animated live demo" width="100%">
 </p>
 
-This README documents **v0.8.10**. This release fixes Windows Cursor launch resolution for arbitrary install roots and lets an ExecWeave-managed local `ollama serve` capture later loopback inference clients into the same semantic stream and dashboard.
+This README documents **v0.8.9**. It includes dagre route-point rendering and post-layout port recomputation, with provider graph/history/raw contracts verified across Ubuntu, macOS, and Windows.
 
 ## Why ExecWeave
 
@@ -73,11 +73,7 @@ execweave live --open -- python my_agent.py
 
 > **Approve the hook when prompted.** On the first provider-integrated run, the Agent/IDE may ask whether ExecWeave may enable its local hook integration. Choose **Allow / Yes**. Without approval, OS-runtime telemetry can still work, but provider-level tool, model, conversation, and supplied-content visibility may be reduced or unavailable.
 
-Google Antigravity currently uses the `agy` CLI command; ExecWeave also accepts `antigravity` as a friendly alias and resolves it to `agy`.
-
-For Cursor on Windows, bare `cursor` follows the PATH entry the user actually has and, when it is the normal `.../resources/app/bin/cursor.cmd` shim, derives the matching `Cursor.exe` from that same installation root. This works for custom drives and arbitrary install directories; explicit launcher paths are left untouched. macOS/Windows standard desktop paths remain a fallback when the PATH shim cannot identify the desktop binary.
-
-For a managed local Ollama server, `execweave live --open -- ollama serve` owns the public loopback endpoint and relays the real server through an internal loopback port. A later `ollama run`, Ollama SDK request, OpenAI-compatible client, or `curl` started from another terminal can therefore appear in the same ExecWeave semantic stream even though that client is not a child of the `ollama serve` process. Relay mode is deliberately limited to local `localhost` / `127.0.0.1` binds; external, wildcard, and IPv6 exposure is not rewritten.
+Google Antigravity currently uses the `agy` CLI command; ExecWeave also accepts `antigravity` as a friendly alias and resolves it to `agy`. For Cursor, `execweave live --open -- cursor` first tries a normal PATH launcher, then falls back to the standard desktop application binary on macOS and Windows.
 
 Build finalized run artifacts with:
 
@@ -121,9 +117,9 @@ These are presentation-layer changes. Raw graph evidence is unchanged, and Live,
 | Claude Code | Yes | native hooks + full-fidelity supplied hook content + exact subagent results when exposed |
 | OpenAI Codex | Yes | lifecycle hooks + validated rollout transcripts + agent-local task/message/final-response routing |
 | Google Antigravity / Antigravity CLI | Yes | passive native hooks + validated conversation/subagent routing where exposed |
-| Cursor | Yes | native hooks + exact subagent task/summary routing when exposed; Windows bare-launch resolution follows the actual PATH installation |
+| Cursor | Yes | native hooks + exact subagent task/summary routing when exposed |
 | OpenCode | Yes | project plugin + session/task routing + full-fidelity supplied plugin content |
-| Ollama | Yes | managed local `ollama serve` loopback relay + `execweave-model-runtime event/exchange/probe --runtime ollama` |
+| Ollama | Yes | `execweave-model-runtime event/exchange/probe --runtime ollama` |
 | llama.cpp | Yes | `execweave-model-runtime event/exchange/probe --runtime llamacpp` |
 | vLLM | Yes | `execweave-model-runtime event/exchange/probe --runtime vllm` |
 | LM Studio | Only when the local process is launched under ExecWeave | `execweave-model-runtime event/exchange/probe --runtime lmstudio` |
