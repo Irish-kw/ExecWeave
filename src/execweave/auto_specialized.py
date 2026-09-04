@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import socket
+import sys
 import threading
 import time
 from contextlib import contextmanager
@@ -400,16 +401,29 @@ def auto_specialized_launch(
     listen_host, listen_port = listen_address
     internal_port = _allocate_loopback_port()
     upstream = f"http://127.0.0.1:{internal_port}"
-    try:
-        server = ExecWeaveHTTPProxyServer(
-            (listen_host, listen_port),
-            ProxyConfig(upstream=upstream, sidecar=sidecar, mode="ollama"),
-            recorder=_record_ollama_inference_exchange,
-        )
-    except OSError:
-        # Fail open: preserve the child command's normal bind/error behavior.
-        yield environment
-        return
+    server: ExecWeaveHTTPProxyServer | None = None
+    last_bind_error: OSError | None = None
+    for attempt in range(5):
+        try:
+            server = ExecWeaveHTTPProxyServer(
+                (listen_host, listen_port),
+                ProxyConfig(upstream=upstream, sidecar=sidecar, mode="ollama"),
+                recorder=_record_ollama_inference_exchange,
+            )
+            break
+        except OSError as exc:
+            last_bind_error = exc
+            if attempt < 4:
+                time.sleep(0.05)
+    if server is None:
+        public_endpoint = f"http://{listen_host}:{listen_port}"
+        raise RuntimeError(
+            "ExecWeave could not reserve the Ollama endpoint "
+            f"{public_endpoint} for transparent conversation capture. "
+            "Stop any existing Ollama server using that endpoint or set "
+            "OLLAMA_HOST to a free loopback port before starting "
+            "`execweave live -- ollama serve`."
+        ) from last_bind_error
     thread = threading.Thread(
         target=server.serve_forever,
         kwargs={"poll_interval": 0.05},
@@ -418,6 +432,11 @@ def auto_specialized_launch(
     )
     thread.start()
     environment["OLLAMA_HOST"] = upstream
+    print(
+        "ExecWeave Ollama relay: "
+        f"http://{listen_host}:{listen_port} -> {upstream}",
+        file=sys.stderr,
+    )
     try:
         yield environment
     finally:

@@ -653,7 +653,10 @@ class StraceRuntimeCollector:
         ]
         return_code = 1
         try:
-            with auto_specialized_launch(command) as launch_environment:
+            with auto_specialized_launch(
+                command,
+                server_relay=True,
+            ) as launch_environment:
                 completed = subprocess.run(
                     strace_command,
                     cwd=str(self.watch_root),

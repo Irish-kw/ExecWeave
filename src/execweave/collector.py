@@ -9,6 +9,7 @@ from typing import Iterable
 
 import psutil
 
+from . import __version__
 from .auto_specialized import (
     auto_specialized_launch,
     auto_specialized_probe,
@@ -139,6 +140,7 @@ class RuntimeCollector:
                 "command": command,
                 "cwd": str(self.watch_root),
                 "backend": self.backend_name,
+                "execweave_version": __version__,
             },
         )
         self.sink.emit(
@@ -148,7 +150,11 @@ class RuntimeCollector:
                 relation="STARTED_SESSION",
                 source=agent,
                 target=session,
-                attributes={"collector_pid": os.getpid(), "backend": self.backend_name},
+                attributes={
+                    "collector_pid": os.getpid(),
+                    "backend": self.backend_name,
+                    "execweave_version": __version__,
+                },
             )
         )
 
@@ -166,31 +172,42 @@ class RuntimeCollector:
 
         process: subprocess.Popen[bytes] | None = None
         return_code = 1
+        interrupted = False
         post_command_probe = prepare_post_command_specialized_probe(command)
         try:
-            with auto_specialized_launch(command, server_relay=True) as launch_environment:
-                process = subprocess.Popen(
-                    launch_command,
-                    cwd=str(self.watch_root),
-                    env=launch_environment,
-                )
-                root = psutil.Process(process.pid)
-                snapshot = _safe_process_snapshot(root)
-                if snapshot is not None:
-                    self._record_process_start(snapshot, parent=session, relation="LAUNCHED")
+            try:
+                with auto_specialized_launch(
+                    command,
+                    server_relay=True,
+                ) as launch_environment:
+                    process = subprocess.Popen(
+                        launch_command,
+                        cwd=str(self.watch_root),
+                        env=launch_environment,
+                    )
+                    root = psutil.Process(process.pid)
+                    snapshot = _safe_process_snapshot(root)
+                    if snapshot is not None:
+                        self._record_process_start(snapshot, parent=session, relation="LAUNCHED")
 
-                with auto_specialized_probe(command):
-                    while process.poll() is None:
+                    with auto_specialized_probe(command):
+                        while process.poll() is None:
+                            self._sample_process_tree(root)
+                            time.sleep(self.poll_interval)
+
                         self._sample_process_tree(root)
-                        time.sleep(self.poll_interval)
-
-                    self._sample_process_tree(root)
-                    self._mark_disappeared_processes(set())
-                return_code = int(process.returncode or 0)
-            run_post_command_specialized_probe(
-                post_command_probe,
-                return_code=return_code,
-            )
+                        self._mark_disappeared_processes(set())
+                    return_code = int(process.returncode or 0)
+            except KeyboardInterrupt:
+                interrupted = True
+                return_code = 130
+                if process is not None:
+                    self._terminate_process_tree(process)
+            if not interrupted:
+                run_post_command_specialized_probe(
+                    post_command_probe,
+                    return_code=return_code,
+                )
             return return_code
         finally:
             if watcher is not None:
@@ -205,9 +222,52 @@ class RuntimeCollector:
                         "return_code": return_code,
                         "root_pid": process.pid if process is not None else None,
                         "backend": self.backend_name,
+                        "interrupted": interrupted,
+                        "execweave_version": __version__,
                     },
                 )
             )
+
+    @staticmethod
+    def _terminate_process_tree(process: subprocess.Popen[bytes]) -> None:
+        descendants: list[psutil.Process] = []
+        try:
+            root = psutil.Process(process.pid)
+            descendants = root.children(recursive=True)
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            pass
+
+        for child in reversed(descendants):
+            try:
+                child.terminate()
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                pass
+
+        if process.poll() is None:
+            try:
+                process.terminate()
+            except OSError:
+                pass
+
+        if descendants:
+            _, alive = psutil.wait_procs(descendants, timeout=2.0)
+            for child in alive:
+                try:
+                    child.kill()
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    pass
+
+        try:
+            process.wait(timeout=2.0)
+        except subprocess.TimeoutExpired:
+            try:
+                process.kill()
+            except OSError:
+                return
+            try:
+                process.wait(timeout=2.0)
+            except subprocess.TimeoutExpired:
+                pass
 
     def _sample_process_tree(self, root: psutil.Process) -> None:
         processes: list[psutil.Process] = []
