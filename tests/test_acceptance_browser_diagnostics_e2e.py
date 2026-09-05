@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -69,4 +70,44 @@ def test_formal_offline_runner_propagates_console_error_to_gate(
     assert "runner-private" not in transcript
     assert "[REDACTED]" in transcript
     assert "EW-RUNNER-CONSOLE" in transcript
+    assert (root / "FAILURE.png").stat().st_size > 0
+
+
+def test_formal_g6_runner_propagates_console_error_to_gate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    try:
+        import playwright.sync_api  # noqa: F401
+    except ImportError:
+        if os.environ.get("EXECWEAVE_E2E_REQUIRED"):
+            pytest.fail("Playwright is required for the formal G6 browser diagnostics journey")
+        pytest.skip("Playwright is not installed")
+
+    import python_native_acceptance as python_runner
+
+    execweave_bin = shutil.which("execweave")
+    if not execweave_bin:
+        if os.environ.get("EXECWEAVE_E2E_REQUIRED"):
+            pytest.fail("execweave is required for the formal G6 browser diagnostics journey")
+        pytest.skip("execweave executable is not installed")
+
+    class InjectingDiagnostics(BrowserDiagnostics):
+        def __init__(self, page) -> None:
+            super().__init__(page)
+            page.evaluate("console.error('api_key=g6-private EW-G6-CONSOLE')")
+
+    monkeypatch.setattr(python_runner, "BrowserDiagnostics", InjectingDiagnostics)
+    result = python_runner._run_native(
+        output_root=tmp_path / "g6-runner",
+        execweave_bin=execweave_bin,
+        timeout=45.0,
+    )
+    assert result.checks["JS console"].status == Status.FAIL
+    assert result.checks["Cleanup"].status == Status.PASS
+
+    root = Path(result.artifacts)
+    transcript = (root / "browser-console.log").read_text(encoding="utf-8")
+    assert "g6-private" not in transcript
+    assert "[REDACTED]" in transcript
+    assert "EW-G6-CONSOLE" in transcript
     assert (root / "FAILURE.png").stat().st_size > 0

@@ -24,6 +24,7 @@ from typing import Any
 from uuid import uuid4
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from acceptance.browser_diagnostics import BrowserDiagnostics  # noqa: E402
 from acceptance.processes import CleanupReport, OwnedProcessTracker  # noqa: E402
 from acceptance.reporting import FEATURES, Result, Status, write_report  # noqa: E402
 
@@ -260,8 +261,9 @@ def _run_native(
     capture: _LineCapture | None = None
     browser = None
     playwright = None
+    page = None
+    diagnostics: BrowserDiagnostics | None = None
     unavailable_reason: str | None = None
-    page_errors: list[str] = []
     started_at = time.monotonic()
 
     try:
@@ -320,7 +322,7 @@ def _run_native(
             return result
 
         page = browser.new_page(viewport={"width": 1366, "height": 768})
-        page.on("pageerror", lambda error: page_errors.append(str(error)))
+        diagnostics = BrowserDiagnostics(page)
         page.goto(live_url)
         page.wait_for_selector(".node", timeout=int(timeout * 1000))
         page.evaluate("window.__execweaveG6Document=document")
@@ -436,9 +438,22 @@ def _run_native(
             True,
             "Finished viewer rendered and actual Process/File/Network inspectors were clickable",
         )
-        _check(result, "JS console", not page_errors, "No browser page errors", *page_errors)
+        assert diagnostics is not None
+        console_ok = diagnostics.finish(page, run_root)
+        _check(
+            result,
+            "JS console",
+            console_ok,
+            "No browser console errors or uncaught JavaScript failures were observed"
+            if console_ok
+            else "; ".join(diagnostics.errors),
+            "browser-console.log",
+            *("FAILURE.png",) if not console_ok else (),
+        )
         page.screenshot(path=str(run_root / "02-native-finished.png"), full_page=True)
     except Exception as exc:  # noqa: BLE001 - formal report preserves exact failure
+        if diagnostics is not None and page is not None:
+            diagnostics.failure(page, run_root)
         _check(result, "Launch", False, f"{type(exc).__name__}: {exc}")
     finally:
         if browser is not None:
