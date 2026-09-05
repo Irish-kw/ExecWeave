@@ -27,6 +27,83 @@ def test_local_model_present_requires_exact_model_identity() -> None:
     assert not visible._local_model_present(tags, "qwen")
 
 
+def test_network_evidence_uses_native_network_endpoint_type() -> None:
+    assert visible._has_network_evidence({"nodes": [{"type": "network_endpoint"}]})
+    assert not visible._has_network_evidence({"nodes": [{"type": "endpoint"}]})
+    assert not visible._has_network_evidence({"nodes": []})
+
+
+def test_final_must_be_grounded_in_independent_client_output() -> None:
+    assert visible._final_matches_client_output("The answer is 4.", "Thinking...\nThe answer is 4.\n")
+    assert not visible._final_matches_client_output("placeholder", "The answer is 4.")
+    assert not visible._final_matches_client_output("", "The answer is 4.")
+
+
+def test_windows_finalize_stops_only_owned_ollama_serve_descendant(monkeypatch) -> None:
+    class FakeChild:
+        def __init__(self, command: list[str]) -> None:
+            self.command = command
+            self.terminated = False
+
+        def cmdline(self) -> list[str]:
+            return self.command
+
+        def terminate(self) -> None:
+            self.terminated = True
+
+    owned_server = FakeChild([r"C:\\Program Files\\Ollama\\ollama.exe", "serve"])
+    unrelated_child = FakeChild([r"C:\\Windows\\System32\\python.exe", "worker.py"])
+
+    class FakeParent:
+        def children(self, recursive: bool = False):
+            assert recursive is True
+            return [unrelated_child, owned_server]
+
+    class FakePopen:
+        pid = 4242
+
+        def poll(self):
+            return None
+
+    monkeypatch.setattr(visible.os, "name", "nt")
+    monkeypatch.setattr(visible.psutil, "Process", lambda _pid: FakeParent())
+
+    assert visible._interrupt(FakePopen())
+    assert owned_server.terminated
+    assert not unrelated_child.terminated
+
+
+def test_windows_finalize_fails_closed_when_owned_server_is_ambiguous(monkeypatch) -> None:
+    class FakeChild:
+        def __init__(self) -> None:
+            self.terminated = False
+
+        def cmdline(self) -> list[str]:
+            return ["ollama.exe", "serve"]
+
+        def terminate(self) -> None:
+            self.terminated = True
+
+    children = [FakeChild(), FakeChild()]
+
+    class FakeParent:
+        def children(self, recursive: bool = False):
+            assert recursive is True
+            return children
+
+    class FakePopen:
+        pid = 4343
+
+        def poll(self):
+            return None
+
+    monkeypatch.setattr(visible.os, "name", "nt")
+    monkeypatch.setattr(visible.psutil, "Process", lambda _pid: FakeParent())
+
+    assert not visible._interrupt(FakePopen())
+    assert not any(child.terminated for child in children)
+
+
 def test_unavailable_result_stays_skip_after_successful_cleanup(tmp_path: Path) -> None:
     reason = "Local Ollama model is unavailable: fixture"
     result = visible._skip_result(tmp_path, reason)
