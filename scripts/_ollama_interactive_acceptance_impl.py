@@ -31,6 +31,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ollama_visible_acceptance as visible  # noqa: E402
 from acceptance.processes import CleanupReport, OwnedProcessTracker  # noqa: E402
 from acceptance.reporting import FEATURES, Result, Status, write_report  # noqa: E402
+from acceptance.terminal_output import TerminalTranscript  # noqa: E402
 from execweave.conversation_records import conversation_index_payload  # noqa: E402
 
 _PROVIDER = "ollama"
@@ -176,6 +177,7 @@ class _PosixTerminal(_TerminalBase):
     def _capture(self) -> None:
         self._artifact.parent.mkdir(parents=True, exist_ok=True)
         with self._artifact.open("w", encoding="utf-8") as output:
+            transcript = TerminalTranscript(output)
             while not self._stop.is_set():
                 try:
                     readable, _, _ = select.select([self._master_fd], [], [], 0.20)
@@ -191,8 +193,8 @@ class _PosixTerminal(_TerminalBase):
                     break
                 if not chunk:
                     break
-                output.write(visible.redact(chunk.decode("utf-8", errors="replace")))
-                output.flush()
+                transcript.feed(chunk)
+            transcript.close()
 
     def write(self, text: str) -> None:
         os.write(self._master_fd, text.encode("utf-8"))
@@ -255,6 +257,7 @@ class _WinPtyTerminal(_TerminalBase):
     def _capture(self) -> None:
         self._artifact.parent.mkdir(parents=True, exist_ok=True)
         with self._artifact.open("w", encoding="utf-8") as output:
+            transcript = TerminalTranscript(output)
             while not self._stop.is_set():
                 try:
                     chunk = self._process.read(4096)
@@ -266,10 +269,10 @@ class _WinPtyTerminal(_TerminalBase):
                     time.sleep(0.05)
                     continue
                 if chunk:
-                    output.write(visible.redact(str(chunk)))
-                    output.flush()
+                    transcript.feed(str(chunk))
                 elif not self._process.isalive():
                     break
+            transcript.close()
 
     def write(self, text: str) -> None:
         self._process.write(text)

@@ -237,7 +237,7 @@ def test_terminal_backend_is_real_or_explicitly_unavailable(tmp_path: Path) -> N
 
 
 @pytest.mark.viewer_e2e
-def test_required_e2e_terminal_backend_round_trip(tmp_path: Path) -> None:
+def test_required_e2e_terminal_backend_round_trip(tmp_path: Path, capsys) -> None:
     assert interactive._terminal_backend_reason() is None
     code = (
         "import sys\n"
@@ -262,3 +262,6 @@ def test_required_e2e_terminal_backend_round_trip(tmp_path: Path) -> None:
     text = artifact.read_text(encoding="utf-8")
     assert "READY" in text
     assert "ECHO=HELLO" in text
+    displayed = capsys.readouterr().out
+    assert "[OLLAMA]" in displayed
+    assert "ECHO=HELLO" in displayed
