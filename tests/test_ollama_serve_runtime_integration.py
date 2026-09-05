@@ -77,10 +77,17 @@ def _write_fake_ollama_server(path: Path) -> None:
 import json
 import os
 from pathlib import Path
+import socket
 from urllib.parse import urlsplit
 
 Path(os.environ["FAKE_OLLAMA_STARTED"]).write_text("started", encoding="utf-8")
 endpoint = urlsplit(os.environ["OLLAMA_HOST"])
+
+# HTTPServer.server_bind() calls socket.getfqdn(). On GitHub's macOS runner
+# that lookup can block for many seconds even for a loopback address, which
+# makes this local fixture race the test timeout. Avoid external hostname
+# resolution: this fixture only needs an HTTP listener on a known loopback IP.
+socket.getfqdn = lambda name="": name or "127.0.0.1"
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
