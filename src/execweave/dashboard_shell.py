@@ -82,6 +82,37 @@ def _avoid_camera_fit_starvation(html: str) -> str:
     return html.replace(needle, replacement, 1)
 
 
+def _defer_camera_takeover_until_node_drag(html: str) -> str:
+    """Do not freeze Fit mode merely because a node was clicked.
+
+    The drag affordance historically called ``userTookCamera`` on pointer-down, before
+    it knew whether the reader intended to drag. A normal click could therefore switch
+    Fit to Manual and stop an in-flight fit animation. Fast native Windows telemetry
+    exposed the race: Process/File inspection could freeze the graph before a Network
+    endpoint had moved clear of the inspector. Keep pointer capture on press, but only
+    take the camera and move the node after the existing 3 px drag threshold is crossed.
+    """
+    pointer_down = """    event.stopPropagation();userTookCamera();stopAnimation();const point=execweaveGraphPoint(event);
+    execweaveNodeDrag={id:node.id,pointerId:event.pointerId,dx:point.x-current.x,dy:point.y-current.y,startX:event.clientX,startY:event.clientY,moved:false};
+    group.classList.add('dragging');try{group.setPointerCapture(event.pointerId)}catch(_){}"""
+    pointer_down_replacement = """    event.stopPropagation();
+    execweaveNodeDrag={id:node.id,pointerId:event.pointerId,originX:current.x,originY:current.y,startX:event.clientX,startY:event.clientY,moved:false};
+    try{group.setPointerCapture(event.pointerId)}catch(_){}"""
+    pointer_move = """    if(Math.abs(event.clientX-drag.startX)>3||Math.abs(event.clientY-drag.startY)>3)drag.moved=true;
+    const point=execweaveGraphPoint(event),next={x:point.x-drag.dx,y:point.y-drag.dy};positions.set(node.id,next);group.setAttribute('transform',`translate(${next.x} ${next.y})`);execweaveRefreshIncidentEdges(node.id);updateJumpLatest();"""
+    pointer_move_replacement = """    if(!drag.moved){
+      if(Math.abs(event.clientX-drag.startX)<=3&&Math.abs(event.clientY-drag.startY)<=3)return;
+      drag.moved=true;userTookCamera();stopAnimation();group.classList.add('dragging');
+    }
+    const scale=Math.max(.0001,Number(transform.scale)||1),next={x:drag.originX+(event.clientX-drag.startX)/scale,y:drag.originY+(event.clientY-drag.startY)/scale};positions.set(node.id,next);group.setAttribute('transform',`translate(${next.x} ${next.y})`);execweaveRefreshIncidentEdges(node.id);updateJumpLatest();"""
+    if html.count(pointer_down) != 1:
+        raise RuntimeError("node drag pointer-down seam changed")
+    if html.count(pointer_move) != 1:
+        raise RuntimeError("node drag pointer-move seam changed")
+    html = html.replace(pointer_down, pointer_down_replacement, 1)
+    return html.replace(pointer_move, pointer_move_replacement, 1)
+
+
 def _preserve_readable_initial_camera(html: str) -> str:
     """Keep first paint readable without changing the explicit whole-graph Fit action.
 
@@ -121,10 +152,12 @@ def _preserve_readable_initial_camera(html: str) -> str:
 # Patch the shared shell after all existing semantic-layout injections have run. The
 # base renderer function reads its module-global DASHBOARD_HTML at call time, so static
 # viewer.html and live mode both consume the same patched document.
-_base.DASHBOARD_HTML = _preserve_readable_initial_camera(
-    _avoid_camera_fit_starvation(
-        _start_in_fit_camera_mode(
-            _route_bundle_edges_on_ordered_rails(_base.DASHBOARD_HTML)
+_base.DASHBOARD_HTML = _defer_camera_takeover_until_node_drag(
+    _preserve_readable_initial_camera(
+        _avoid_camera_fit_starvation(
+            _start_in_fit_camera_mode(
+                _route_bundle_edges_on_ordered_rails(_base.DASHBOARD_HTML)
+            )
         )
     )
 )
