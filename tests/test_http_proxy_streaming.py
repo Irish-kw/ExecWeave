@@ -16,6 +16,39 @@ def _start(server):
     return thread
 
 
+def test_unicode_upstream_error_returns_502_instead_of_eof(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Localized Windows socket errors must not crash the HTTP status writer."""
+
+    def fail_request(*args, **kwargs):
+        raise OSError("無法連線，因為目標電腦拒絕連線")
+
+    monkeypatch.setattr(http.client.HTTPConnection, "request", fail_request)
+    proxy = create_proxy_server(
+        listen_host="127.0.0.1",
+        listen_port=0,
+        config=ProxyConfig(
+            upstream="http://127.0.0.1:9",
+            sidecar=tmp_path / "semantic.jsonl",
+            mode="ollama",
+        ),
+    )
+    thread = _start(proxy)
+    client = http.client.HTTPConnection("127.0.0.1", proxy.server_port, timeout=3)
+    try:
+        client.request("HEAD", "/")
+        response = client.getresponse()
+        assert response.status == 502
+        assert response.reason.startswith("upstream HTTP relay failed:")
+        response.reason.encode("latin-1")
+    finally:
+        client.close()
+        proxy.shutdown()
+        proxy.server_close()
+        thread.join(3)
+
+
 @pytest.mark.parametrize("chunked", [False, True])
 def test_relay_delivers_first_bytes_before_upstream_finishes(tmp_path: Path, chunked: bool):
     """NEW-005: native socket ordering, not post-completion content equality."""

@@ -4,8 +4,29 @@ from . import _http_proxy_base as _base
 from ._http_proxy_stage import *  # noqa: F403
 
 
+def _safe_http_reason(message: str | None) -> str | None:
+    """Return a single-line HTTP reason phrase that BaseHTTPRequestHandler can encode."""
+    if message is None:
+        return None
+    single_line = " ".join(str(message).splitlines())
+    return single_line.encode("latin-1", errors="replace").decode("latin-1")
+
+
 class ExecWeaveHTTPProxyHandler(_base.ExecWeaveHTTPProxyHandler):
     """Security-equivalent handler used by the staged acceptance relay."""
+
+    def send_error(
+        self,
+        code: int,
+        message: str | None = None,
+        explain: str | None = None,
+    ) -> None:
+        # BaseHTTPRequestHandler writes the status line as latin-1. Windows socket
+        # errors can be localized (for example WinError 10061 in Chinese), so a raw
+        # exception string here can turn a recoverable 502 into UnicodeEncodeError
+        # and an EOF at the client. Preserve the diagnostic shape but fail closed to
+        # an encodable, single-line reason phrase.
+        super().send_error(code, _safe_http_reason(message), explain)
 
     def do_CONNECT(self) -> None:
         self.send_error(405, "CONNECT is disabled; ExecWeave does not perform TLS MITM")
