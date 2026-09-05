@@ -57,6 +57,31 @@ def _start_in_fit_camera_mode(html: str) -> str:
     return html
 
 
+def _avoid_camera_fit_starvation(html: str) -> str:
+    """Guarantee a Fit pass during a dense live-delta burst.
+
+    The base scheduler debounces every delta by clearing the pending camera timer.
+    Native Windows telemetry can arrive faster than the 180 ms delay for long enough
+    that the fit never executes, leaving newly added endpoint nodes underneath the
+    inspector. Ordinary deltas now keep the first pending timer. Explicit force
+    scheduling can still replace it, preserving resize/resync behavior.
+    """
+    needle = (
+        "function scheduleCamera(force=false){clearTimeout(cameraTimer);"
+        "cameraTimer=setTimeout(()=>{if(cameraMode==='fit')fit(true);"
+        "else if(cameraMode==='follow')followLatest(force);updateJumpLatest()},180)}"
+    )
+    replacement = (
+        "function scheduleCamera(force=false){if(cameraTimer!==null){"
+        "if(!force)return;clearTimeout(cameraTimer)}cameraTimer=setTimeout(()=>{"
+        "cameraTimer=null;if(cameraMode==='fit')fit(true);"
+        "else if(cameraMode==='follow')followLatest(force);updateJumpLatest()},180)}"
+    )
+    if html.count(needle) != 1:
+        raise RuntimeError("camera scheduler seam changed")
+    return html.replace(needle, replacement, 1)
+
+
 def _preserve_readable_initial_camera(html: str) -> str:
     """Keep first paint readable without changing the explicit whole-graph Fit action.
 
@@ -97,8 +122,10 @@ def _preserve_readable_initial_camera(html: str) -> str:
 # base renderer function reads its module-global DASHBOARD_HTML at call time, so static
 # viewer.html and live mode both consume the same patched document.
 _base.DASHBOARD_HTML = _preserve_readable_initial_camera(
-    _start_in_fit_camera_mode(
-        _route_bundle_edges_on_ordered_rails(_base.DASHBOARD_HTML)
+    _avoid_camera_fit_starvation(
+        _start_in_fit_camera_mode(
+            _route_bundle_edges_on_ordered_rails(_base.DASHBOARD_HTML)
+        )
     )
 )
 DASHBOARD_HTML = _base.DASHBOARD_HTML
