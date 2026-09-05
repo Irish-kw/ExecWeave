@@ -62,3 +62,15 @@ def test_exit_aware_terminal_preserves_identity_backend_and_cleanup() -> None:
     assert terminal.backend == inner.backend
     terminal.close()
     assert inner.closed is True
+
+
+def test_posix_backend_interrupt_writes_control_byte_without_external_signal(monkeypatch) -> None:
+    # Backend contract only: no fake OS or claim of native POSIX execution.
+    from types import SimpleNamespace
+
+    terminal = object.__new__(interactive._PosixTerminal)
+    terminal._process = SimpleNamespace(poll=lambda: None)
+    writes = []
+    terminal.write = writes.append
+    terminal.interrupt()
+    assert writes == ["\x03"]

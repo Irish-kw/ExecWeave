@@ -200,7 +200,7 @@ class _PosixTerminal(_TerminalBase):
     def interrupt(self) -> None:
         if self._process.poll() is not None:
             return
-        os.killpg(self._process.pid, signal.SIGINT)
+        self.write("\x03")
 
     def is_alive(self) -> bool:
         return self._process.poll() is None
@@ -650,7 +650,7 @@ def _run_interactive(
         page.screenshot(path=str(run_root / "01-interactive-live.png"), full_page=True)
         terminal.interrupt()
         if not terminal.wait(min(timeout, 8.0)):
-            raise AssertionError("PTY/ConPTY interrupt did not stop interactive ollama client")
+            raise AssertionError("interactive ollama client did not exit after terminal Ctrl+C and /bye")
         _check(result, "Launch", True, f"Real interactive client used terminal backend {terminal.backend}")
 
         if not visible._interrupt(live_process):
