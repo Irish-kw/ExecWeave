@@ -32,7 +32,7 @@ ExecWeave is a source-available, local-first observability project that turns AI
   <img src="docs/assets/codex.gif" alt="ExecWeave animated live demo" width="100%">
 </p>
 
-This README documents **v0.8.10**. This release fixes Windows Cursor launch resolution for arbitrary install roots and lets an ExecWeave-managed local `ollama serve` capture later loopback inference clients into the same semantic stream and dashboard.
+This README documents **v0.8.11**. This release makes managed local `ollama serve` capture fail-safe for independent loopback clients, so a later `ollama run`, SDK, or `curl` request from another terminal is recorded in the same semantic stream instead of silently falling back without conversation evidence. It also finalizes merged events, `graph.json`, and `viewer.html` when a Live run is stopped with Ctrl+C.
 
 ## Why ExecWeave
 
@@ -77,7 +77,7 @@ Google Antigravity currently uses the `agy` CLI command; ExecWeave also accepts 
 
 For Cursor on Windows, bare `cursor` follows the PATH entry the user actually has and, when it is the normal `.../resources/app/bin/cursor.cmd` shim, derives the matching `Cursor.exe` from that same installation root. This works for custom drives and arbitrary install directories; explicit launcher paths are left untouched. macOS/Windows standard desktop paths remain a fallback when the PATH shim cannot identify the desktop binary.
 
-For a managed local Ollama server, `execweave live --open -- ollama serve` owns the public loopback endpoint and relays the real server through an internal loopback port. A later `ollama run`, Ollama SDK request, OpenAI-compatible client, or `curl` started from another terminal can therefore appear in the same ExecWeave semantic stream even though that client is not a child of the `ollama serve` process. Relay mode is deliberately limited to local `localhost` / `127.0.0.1` binds; external, wildcard, and IPv6 exposure is not rewritten.
+For a managed local Ollama server, `execweave live --open -- ollama serve` owns the public loopback endpoint and relays the real server through an internal loopback port. A later `ollama run`, Ollama SDK request, OpenAI-compatible client, or `curl` started from another terminal can therefore appear in the same ExecWeave semantic stream even though that client is not a child of the `ollama serve` process. ExecWeave prints the active public-to-internal relay mapping; if the public loopback endpoint cannot be safely reserved, the managed run now fails explicitly rather than silently losing conversation capture. Relay mode is deliberately limited to local `localhost` / `127.0.0.1` binds; external, wildcard, and IPv6 exposure is not rewritten. Stopping Live with Ctrl+C still finalizes the run artifacts before returning.
 
 Build finalized run artifacts with:
 

@@ -32,7 +32,7 @@ ExecWeave 是一个 source-available、local-first 的可观测性项目，把 A
   <img src="docs/assets/codex.gif" alt="ExecWeave animated live demo" width="100%">
 </p>
 
-本 README 对应 **v0.8.10**。
+本 README 对应 **v0.8.11**。
 
 ## 为什么是 ExecWeave
 
