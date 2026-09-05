@@ -1,88 +1,170 @@
 from __future__ import annotations
 
-import json
-from typing import Any
-
-from .live_view import LIVE_HTML as _BASE_LIVE_HTML
-from .viewer_agent_panel import inject_agent_panel
-from .viewer_dashboard_clean import fold_budget_bootstrap, inject_live_dashboard_clean
-from .viewer_limits import resolve_viewer_limits, viewer_limits_bootstrap
-from .viewer_dashboard_focus import inject_live_dashboard_focus
-from .viewer_live_layout import inject_live_dashboard_layout
+from . import _dashboard_shell_base as _base
 
 
-def _align_agent_panel_topology(html: str) -> str:
-    """Keep the agent panel's identity/topology authority intact.
+def _route_bundle_edges_on_ordered_rails(html: str) -> str:
+    """Spread bundle members onto deterministic rails instead of one shared trunk.
 
-    The panel owns the provider-neutral rule: exact conversation identity selects
-    content, while only explicit/root-provenance evidence selects the root renderer.
-    Rewriting that code here used to promote every derived ``/root`` preview back into
-    a canonical root and reintroduced cross-conversation aggregation. The shared shell
-    therefore no longer carries a second topology policy.
+    The aggregate bundle semantics stay unchanged: members retain the same bundle key,
+    representative label, styling, and M-H-V-H route family. Only the vertical rail X
+    coordinate differs by source row and target slot, which keeps dense multi-agent
+    traffic traceable and prevents stacked trunks from turning into a visual braid.
     """
+    needle = "trunkX=Math.max(sx+54,tx-82-(bundle.groupIndex%6)*24);"
+    replacement = (
+        "sourceRail=Math.max(0,Number(sourceSpec.order)||0),"
+        "targetRail=Math.max(0,(Number(targetSpec.rank)||0)-(Number(sourceSpec.rank)||0)-1)"
+        "+Math.max(0,Number(targetSpec.order)||0),"
+        "railDistance=20+sourceRail*25+targetRail*10,"
+        "trunkX=tx>=sx?Math.min(tx,sx+railDistance):Math.max(tx,sx-railDistance);"
+    )
+    if needle not in html:
+        raise RuntimeError("bundle routing seam changed")
+    return html.replace(needle, replacement, 1)
+
+
+def _start_in_fit_camera_mode(html: str) -> str:
+    """Follow live graph growth until the user explicitly takes the camera.
+
+    A live run can first render a tiny process-only snapshot and add file/network nodes
+    later. If that first automatic fit is followed by Manual mode, the tiny-snapshot
+    transform is frozen and later nodes can land under the inspector. Starting in Fit
+    keeps incremental growth in the graph viewport; existing pan/zoom handling still
+    switches to Manual on the user's first camera action.
+    """
+    seams = (
+        (
+            "protectedMode=false,cameraMode='manual',latestNodeId=null",
+            "protectedMode=false,cameraMode='fit',latestNodeId=null",
+            "camera mode state seam changed",
+        ),
+        (
+            '<button type="button" data-camera="manual" class="active">Manual</button><button type="button" data-camera="fit">Fit graph</button>',
+            '<button type="button" data-camera="manual">Manual</button><button type="button" data-camera="fit" class="active">Fit graph</button>',
+            "camera control markup seam changed",
+        ),
+        (
+            '<strong id="camera-label">Manual</strong>',
+            '<strong id="camera-label">Fit graph</strong>',
+            "camera label seam changed",
+        ),
+    )
+    for old, new, error in seams:
+        if html.count(old) != 1:
+            raise RuntimeError(error)
+        html = html.replace(old, new, 1)
     return html
 
 
-def _guard_compact_live_snapshot(html: str) -> str:
-    """Keep compact live payloads in protective mode instead of projecting nodes=[]."""
-    needle = "function setSnapshot(data){const signature="
-    guarded = (
-        "function setSnapshot(data){"
-        "if(data.live_payload_compact){updateStats(data);enterProtectiveMode(data);return}"
-        "const signature="
+def _avoid_camera_fit_starvation(html: str) -> str:
+    """Guarantee a Fit pass during a dense live-delta burst.
+
+    The base scheduler debounces every delta by clearing the pending camera timer.
+    Native Windows telemetry can arrive faster than the 180 ms delay for long enough
+    that the fit never executes, leaving newly added endpoint nodes underneath the
+    inspector. Ordinary deltas now keep the first pending timer. Explicit force
+    scheduling can still replace it, preserving resize/resync behavior.
+    """
+    needle = (
+        "function scheduleCamera(force=false){clearTimeout(cameraTimer);"
+        "cameraTimer=setTimeout(()=>{if(cameraMode==='fit')fit(true);"
+        "else if(cameraMode==='follow')followLatest(force);updateJumpLatest()},180)}"
     )
-    if needle not in html:
-        return html
-    return html.replace(needle, guarded, 1)
-
-
-def _build_dashboard_html() -> str:
-    html = inject_live_dashboard_layout(
-        inject_live_dashboard_focus(inject_live_dashboard_clean(_BASE_LIVE_HTML))
+    replacement = (
+        "function scheduleCamera(force=false){if(cameraTimer!==null){"
+        "if(!force)return;clearTimeout(cameraTimer)}cameraTimer=setTimeout(()=>{"
+        "cameraTimer=null;if(cameraMode==='fit')fit(true);"
+        "else if(cameraMode==='follow')followLatest(force);updateJumpLatest()},180)}"
     )
-    return _align_agent_panel_topology(inject_agent_panel(_guard_compact_live_snapshot(html)))
+    if html.count(needle) != 1:
+        raise RuntimeError("camera scheduler seam changed")
+    return html.replace(needle, replacement, 1)
 
 
-DASHBOARD_HTML = _build_dashboard_html()
+def _defer_camera_takeover_until_node_drag(html: str) -> str:
+    """Do not freeze Fit mode merely because a node was clicked.
+
+    The drag affordance historically called ``userTookCamera`` on pointer-down, before
+    it knew whether the reader intended to drag. A normal click could therefore switch
+    Fit to Manual and stop an in-flight fit animation. Fast native Windows telemetry
+    exposed the race: Process/File inspection could freeze the graph before a Network
+    endpoint had moved clear of the inspector. Keep pointer capture on press, but only
+    take the camera and move the node after the existing 3 px drag threshold is crossed.
+    """
+    pointer_down = """    event.stopPropagation();userTookCamera();stopAnimation();const point=execweaveGraphPoint(event);
+    execweaveNodeDrag={id:node.id,pointerId:event.pointerId,dx:point.x-current.x,dy:point.y-current.y,startX:event.clientX,startY:event.clientY,moved:false};
+    group.classList.add('dragging');try{group.setPointerCapture(event.pointerId)}catch(_){}"""
+    pointer_down_replacement = """    event.stopPropagation();
+    execweaveNodeDrag={id:node.id,pointerId:event.pointerId,originX:current.x,originY:current.y,startX:event.clientX,startY:event.clientY,moved:false};
+    try{group.setPointerCapture(event.pointerId)}catch(_){}"""
+    pointer_move = """    if(Math.abs(event.clientX-drag.startX)>3||Math.abs(event.clientY-drag.startY)>3)drag.moved=true;
+    const point=execweaveGraphPoint(event),next={x:point.x-drag.dx,y:point.y-drag.dy};positions.set(node.id,next);group.setAttribute('transform',`translate(${next.x} ${next.y})`);execweaveRefreshIncidentEdges(node.id);updateJumpLatest();"""
+    pointer_move_replacement = """    if(!drag.moved){
+      if(Math.abs(event.clientX-drag.startX)<=3&&Math.abs(event.clientY-drag.startY)<=3)return;
+      drag.moved=true;userTookCamera();stopAnimation();group.classList.add('dragging');
+    }
+    const scale=Math.max(.0001,Number(transform.scale)||1),next={x:drag.originX+(event.clientX-drag.startX)/scale,y:drag.originY+(event.clientY-drag.startY)/scale};positions.set(node.id,next);group.setAttribute('transform',`translate(${next.x} ${next.y})`);execweaveRefreshIncidentEdges(node.id);updateJumpLatest();"""
+    if html.count(pointer_down) != 1:
+        raise RuntimeError("node drag pointer-down seam changed")
+    if html.count(pointer_move) != 1:
+        raise RuntimeError("node drag pointer-move seam changed")
+    html = html.replace(pointer_down, pointer_down_replacement, 1)
+    return html.replace(pointer_move, pointer_move_replacement, 1)
 
 
-def _safe_json(value: object) -> str:
-    return (
-        json.dumps(value, ensure_ascii=False, separators=(",", ":"))
-        .replace("<", "\\u003c")
-        .replace(">", "\\u003e")
-        .replace("&", "\\u0026")
+def _preserve_readable_initial_camera(html: str) -> str:
+    """Keep first paint readable without changing the explicit whole-graph Fit action.
+
+    The initial snapshot historically called the same whole-graph ``fit`` routine as
+    the user-facing Fit button. Dense graphs can therefore arrive below readable
+    screen-space size even though the camera is otherwise in manual mode. Give only
+    the automatic first fit a 0.5 scale floor; an explicit Fit still defaults to the
+    established 0.07 floor so the full graph remains available as an overview.
+    """
+    signature = "function fit(animate=true){"
+    if html.count(signature) != 1:
+        raise RuntimeError("camera fit signature seam changed")
+    html = html.replace(signature, "function fit(animate=true,minScale=.07){", 1)
+
+    scale = (
+        "scale=Math.min(1.2,Math.max(.07,Math.min((box.width-72)/w,"
+        "(box.height-72)/h))),next="
     )
-
-
-def render_static_dashboard_html(
-    graph: dict[str, Any],
-    *,
-    conversation_entries: list[dict[str, Any]] | None = None,
-) -> str:
-    """Render the exact dashboard shell used by live, backed by embedded snapshots."""
-    bootstrap = (
-        "<script>window.__execweaveStaticMode=true;"
-        f"{fold_budget_bootstrap()}"
-        f"{viewer_limits_bootstrap(resolve_viewer_limits())}"
-        f"window.__execweaveStaticGraph={_safe_json(graph)};"
-        f"window.__execweaveStaticConversations={_safe_json(conversation_entries or [])};"
-        "</script>\n"
+    scale_with_floor = (
+        "fitFloor=Math.min(1.2,Math.max(.07,Number(minScale)||.07)),"
+        "scale=Math.min(1.2,Math.max(fitFloor,Math.min((box.width-72)/w,"
+        "(box.height-72)/h))),next="
     )
-    html = DASHBOARD_HTML.replace("<script>", bootstrap + "<script>", 1)
-    live_start = "applyTheme(initialTheme());applyTransform();poll();"
-    static_start = (
-        "applyTheme(initialTheme());applyTransform();"
-        "setSnapshot(window.__execweaveStaticGraph||{});"
-        "setStatus('FINISHED','finished');"
-        "window.__execweaveDashboard?.onFinished?.();"
-    )
-    if live_start not in html:
-        raise RuntimeError("shared dashboard startup seam changed")
-    html = html.replace(live_start, static_start, 1)
-    html = html.replace("<title>ExecWeave Live</title>", "<title>ExecWeave</title>", 1)
+    if html.count(scale) != 1:
+        raise RuntimeError("camera fit scale seam changed")
+    html = html.replace(scale, scale_with_floor, 1)
+
+    initial_fit = "if(!hasFitted&&positions.size){fit(false);hasFitted=true}"
+    if html.count(initial_fit) != 2:
+        raise RuntimeError("initial camera fit seams changed")
     return html.replace(
-        "<body>",
-        '<body>\n<!-- unified dashboard: theme is owned by the visible #theme-toggle control -->',
-        1,
+        initial_fit,
+        "if(!hasFitted&&positions.size){fit(false,.5);hasFitted=true}",
     )
+
+
+# Patch the shared shell after all existing semantic-layout injections have run. The
+# base renderer function reads its module-global DASHBOARD_HTML at call time, so static
+# viewer.html and live mode both consume the same patched document.
+_base.DASHBOARD_HTML = _defer_camera_takeover_until_node_drag(
+    _preserve_readable_initial_camera(
+        _avoid_camera_fit_starvation(
+            _start_in_fit_camera_mode(
+                _route_bundle_edges_on_ordered_rails(_base.DASHBOARD_HTML)
+            )
+        )
+    )
+)
+DASHBOARD_HTML = _base.DASHBOARD_HTML
+render_static_dashboard_html = _base.render_static_dashboard_html
+
+
+def __getattr__(name: str):
+    """Preserve access to internal helpers while this acceptance shim is isolated."""
+    return getattr(_base, name)

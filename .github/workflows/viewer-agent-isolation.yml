@@ -6,7 +6,7 @@ name: Viewer Agent Isolation
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, test/live-dashboard-acceptance]
   workflow_dispatch:
 
 permissions:
@@ -14,7 +14,11 @@ permissions:
 
 jobs:
   viewers:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
@@ -35,11 +39,39 @@ jobs:
           EXECWEAVE_VISUAL_ARTIFACT_DIR: visual-artifacts
         run: python -m pytest -m viewer_e2e -v
 
+      - name: Run formal offline dashboard acceptance
+        run: >-
+          python scripts/dashboard_acceptance.py
+          --mode offline
+          --output-dir "${{ github.workspace }}/artifacts/dashboard-acceptance"
+          --require offline-ollama-fixture
+
+      - name: Run formal owned-process cleanup acceptance
+        run: >-
+          python scripts/owned_cleanup_acceptance.py
+          --output-dir "${{ github.workspace }}/artifacts/dashboard-acceptance/owned-cleanup"
+
+      - name: Run formal native Python OS acceptance (Linux)
+        if: runner.os == 'Linux'
+        run: >-
+          xvfb-run -a python scripts/python_native_acceptance.py
+          --output-dir "${{ github.workspace }}/artifacts/dashboard-acceptance/python-native"
+          --require python
+
+      - name: Run formal native Python OS acceptance (macOS/Windows)
+        if: runner.os != 'Linux'
+        run: >-
+          python scripts/python_native_acceptance.py
+          --output-dir "${{ github.workspace }}/artifacts/dashboard-acceptance/python-native"
+          --require python
+
       - name: Upload visual release evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: unified-dashboard-visuals
-          path: visual-artifacts
+          name: unified-dashboard-visuals-${{ matrix.os }}
+          path: |
+            visual-artifacts
+            artifacts/dashboard-acceptance
           if-no-files-found: error
           retention-days: 7
