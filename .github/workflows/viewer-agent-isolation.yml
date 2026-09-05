@@ -33,7 +33,15 @@ jobs:
       - name: Install Chromium
         run: python -m playwright install --with-deps chromium
 
-      - name: Read live and viewer.html in a browser
+      - name: Read live and viewer.html in a browser (Linux)
+        if: runner.os == 'Linux'
+        env:
+          EXECWEAVE_E2E_REQUIRED: "1"
+          EXECWEAVE_VISUAL_ARTIFACT_DIR: visual-artifacts
+        run: xvfb-run -a python -m pytest -m viewer_e2e -v
+
+      - name: Read live and viewer.html in a browser (macOS/Windows)
+        if: runner.os != 'Linux'
         env:
           EXECWEAVE_E2E_REQUIRED: "1"
           EXECWEAVE_VISUAL_ARTIFACT_DIR: visual-artifacts

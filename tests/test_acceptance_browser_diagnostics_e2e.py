@@ -83,6 +83,11 @@ def test_formal_g6_runner_propagates_console_error_to_gate(
             pytest.fail("Playwright is required for the formal G6 browser diagnostics journey")
         pytest.skip("Playwright is not installed")
 
+    if sys.platform.startswith("linux") and not os.environ.get("DISPLAY"):
+        if os.environ.get("EXECWEAVE_E2E_REQUIRED"):
+            pytest.fail("formal headed G6 regression must run under Xvfb on Linux")
+        pytest.skip("headed G6 regression requires DISPLAY/Xvfb on Linux")
+
     import python_native_acceptance as python_runner
 
     execweave_bin = shutil.which("execweave")
