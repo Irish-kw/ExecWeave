@@ -147,6 +147,27 @@ jobs:
               esac
             done < <(git diff --name-only "$BASELINE_REF...HEAD" -- tests)
           fi
+          if [[ "$HEAD_REF" == "test/live-dashboard-acceptance" ]]; then
+            while IFS= read -r path; do
+              case "$path" in
+                tests/test_command.py)
+                  args+=(--allow-test-change "$path=acceptance branch isolates the historical Windows shim fallback from installed Cursor desktop candidates; native desktop preference and custom-install contracts remain separate and existing test node IDs are unchanged")
+                  ;;
+                tests/test_graph_clear_focus_e2e.py|tests/test_graph_edge_routing_e2e.py|tests/test_graph_node_sizing_e2e.py|tests/test_tool_traffic_e2e.py)
+                  args+=(--allow-test-change "$path=existing browser assertions are unchanged; the module-level viewer_e2e marker makes the dedicated three-OS browser workflow collect tests that were previously omitted")
+                  ;;
+                tests/test_graph_lane_separation_e2e.py)
+                  args+=(--allow-test-change "$path=layout acceptance separates endpoint projection from lane geometry using loopback fixtures and replaces obsolete fixed canvas coordinates with semantic lane/band invariants; historical test node IDs remain unchanged")
+                  ;;
+                tests/test_http_proxy.py)
+                  args+=(--allow-test-change "$path=NEW-005 adds native streaming-order regressions for content-length and chunked responses; existing test assertions and node IDs are unchanged")
+                  ;;
+                tests/test_semantic.py)
+                  args+=(--allow-test-change "$path=NEW-006 adds contradictory and future PID identity regressions through merge and graph materialization; existing test assertions and node IDs are unchanged")
+                  ;;
+              esac
+            done < <(git diff --name-only "$BASELINE_REF...HEAD" -- tests)
+          fi
           if [[ "$HEAD_REF" == "audit/remaining-providers-v0.8.7" ]]; then
             args+=(--allow-retired-provider "gemini=Gemini integration was retired and replaced by the AGY/Antigravity provider; only Gemini-owned test IDs and files may disappear")
             while IFS= read -r path; do
