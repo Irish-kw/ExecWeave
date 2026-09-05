@@ -1,6 +1,7 @@
 # Handoff: implementation-only agent, then return for native review
 
-Latest checkpoint: read `acceptance_hardening_20260906.md` FIRST. This file below
+Latest stop/checkpoint: read `handoff_checkpoint_20260906.md` FIRST, then
+`acceptance_hardening_20260906.md`. This file below
 preserves the earlier handoff and contains historical statements superseded there.
 Fetch remote before acting. G4/G5/G6 remain unaccepted; no cloud-provider tests or
 model downloads are authorized. Source/offline fixes must return to the original
