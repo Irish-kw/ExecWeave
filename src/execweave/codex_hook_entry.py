@@ -141,7 +141,13 @@ def _append_interrupt_fast(sidecar: Path, payload: dict[str, Any]) -> None:
 
 
 def _active_auto_payload() -> tuple[str, dict[str, Any] | None]:
-    raw = sys.stdin.read()
+    try:
+        raw = sys.stdin.read()
+    except (OSError, ValueError):
+        # The passive entry boundary must remain fail-open even when stdin itself is
+        # unavailable. The normal capture path will receive an empty stream and its
+        # own non-strict setup handling will still normalize the telemetry failure.
+        return "", None
     if not isinstance(raw, str):
         return "", None
     try:

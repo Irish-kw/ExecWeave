@@ -153,6 +153,9 @@ jobs:
                 tests/test_command.py)
                   args+=(--allow-test-change "$path=acceptance branch isolates the historical Windows shim fallback from installed Cursor desktop candidates; native desktop preference and custom-install contracts remain separate and existing test node IDs are unchanged")
                   ;;
+                tests/test_codex_adapter.py)
+                  args+=(--allow-test-change "$path=Codex now documents Interrupt as a first-class hook with a bounded handler contract; the existing config test node ID is retained and now asserts the current official event and timeout semantics")
+                  ;;
                 tests/test_codex_hook_lifecycle.py)
                   args+=(--allow-test-change "$path=Codex now documents Interrupt as a first-class lifecycle event; the historical test node ID is retained while its assertion is corrected to the current official contract")
                   ;;
