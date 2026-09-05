@@ -240,6 +240,7 @@ class _WinPtyTerminal(_TerminalBase):
     def __init__(self, argv: list[str], *, cwd: Path, env: dict[str, str], artifact: Path) -> None:
         try:
             from winpty import PtyProcess
+            from winpty.enums import Backend
         except ImportError as exc:
             raise RuntimeError("pywinpty/ConPTY is unavailable") from exc
         self._process = PtyProcess.spawn(
@@ -247,6 +248,9 @@ class _WinPtyTerminal(_TerminalBase):
             cwd=str(cwd),
             env=env,
             dimensions=(30, 120),
+            # pywinpty treats integer 0 as falsy and consults PYWINPTY_BACKEND.
+            # A nonempty "0" pins ConPTY without changing the user's environment.
+            backend=str(Backend.ConPTY),
         )
         self.pid = int(self._process.pid)
         self._artifact = artifact

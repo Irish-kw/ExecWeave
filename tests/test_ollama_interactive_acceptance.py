@@ -240,7 +240,8 @@ def test_terminal_backend_is_real_or_explicitly_unavailable(tmp_path: Path) -> N
 def test_required_e2e_terminal_backend_round_trip(tmp_path: Path, capsys) -> None:
     assert interactive._terminal_backend_reason() is None
     code = (
-        "import sys\n"
+        "import os,sys\n"
+        "print('TTY='+str(os.isatty(sys.stdin.fileno())), flush=True)\n"
         "print('READY', flush=True)\n"
         "line=input()\n"
         "print('ECHO='+line, flush=True)\n"
@@ -262,6 +263,7 @@ def test_required_e2e_terminal_backend_round_trip(tmp_path: Path, capsys) -> Non
     text = artifact.read_text(encoding="utf-8")
     assert "READY" in text
     assert "ECHO=HELLO" in text
+    assert "TTY=True" in text
     displayed = capsys.readouterr().out
     assert "[OLLAMA]" in displayed
     assert "ECHO=HELLO" in displayed

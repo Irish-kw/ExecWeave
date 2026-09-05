@@ -55,6 +55,7 @@ release = [
 # development install stays small; CI installs it and requires the checks to run.
 e2e = [
   "playwright>=1.44",
+  "pywinpty>=3.0.5,<4; platform_system == 'Windows'",
 ]
 
 [project.urls]

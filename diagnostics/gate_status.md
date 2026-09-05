@@ -3,6 +3,12 @@
 Baseline: a098eeb81f641b6e3fb1d65cc1905f46aa8eae30 (v0.8.11).
 Only completed checks are PASS. A checkpoint commit does not close a gate.
 
+Latest source/offline re-audit: `acceptance_hardening_20260906.md`. This supersedes
+stale present-tense G4/G5 statements below without promoting native gates. Two-round
+identity binding and required terminal round-trip are already implemented. Original
+Windows clean-2f93d629 evidence includes a revised G4 server-exit PASS and a G5
+Ctrl+C/exit-contract FAIL; neither establishes a current-head full native PASS.
+
 Current-state re-audit: see `current_state_reaudit.md`. REAUDIT-001 cleanup identity
 safety has been re-exercised by the formal owned-process cleanup on all three hosted
 OSes at exact head `1a53b87`; the large-response memory gate remains green from its
@@ -16,8 +22,8 @@ current full-product PASS is claimed.
 | G1 baseline audit report | PASS | Architecture/history, native/browser findings, priorities and design recorded; unexecuted release journeys explicitly remain open |
 | G2 minimal defect fixes | PASS | NEW-001/002/003/004/005/006 are verified; the final large-response memory gate is green on Ubuntu, macOS and Windows at exact head `f9edc66`, and identity-aware owned cleanup is current-head green at `1a53b87` |
 | G3 offline acceptance | PASS | Formal `scripts/dashboard_acceptance.py` loopback relay/live/finished journey is current-head green on Ubuntu, macOS and Windows at `1a53b87`; native/provider-only capabilities remain explicitly outside this gate |
-| G4 visible live acceptance | IN_PROGRESS | Formal real-Ollama headed harness exists at `scripts/ollama_visible_acceptance.py`; Windows finalization, required `network_endpoint` evidence and client-output comparison are corrected in source, but the corrected real local-model journey has not yet been executed formally |
-| G5 interactive visible and cleanup | IN_PROGRESS | Formal PTY/ConPTY two-round Ollama harness is prepared; request/response round matching still needs to be hardened from global counts to marker-bound inference-request identity, and real-provider execution remains required before PASS |
+| G4 visible live acceptance | IN_PROGRESS | Prior clean-2f93d629 revised server-exit journey passed, but collector Ctrl+C is not proved; substring Final comparison and visible output remain source gaps. Current-head real journey NEEDS_NATIVE_VALIDATION |
+| G5 interactive visible and cleanup | IN_PROGRESS | Marker-bound distinct exchanges, actual terminal round-trip, Ctrl+C then /bye wrapper and redacted visible transcript implemented. Prior real run failed the old exit contract; corrected current-head two-round/fold/finished/cleanup journey NEEDS_NATIVE_VALIDATION |
 | G6 native cross-platform validation | IN_PROGRESS | Native OS-only Process/File/Network subgate is PASS on Ubuntu, macOS and Windows at exact head `1a53b87` with real pointer interaction; provider-native acceptance scope remains incomplete |
 | G7 final regression and human review | NOT_STARTED | Draft PR #51 is validation-only; no merge, tag or release permitted |
 
