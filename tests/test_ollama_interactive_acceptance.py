@@ -234,3 +234,31 @@ def test_terminal_backend_is_real_or_explicitly_unavailable(tmp_path: Path) -> N
     text = (tmp_path / "pty.txt").read_text(encoding="utf-8")
     assert "TTY=True" in text
     assert "ECHO=HELLO" in text
+
+
+@pytest.mark.viewer_e2e
+def test_required_e2e_terminal_backend_round_trip(tmp_path: Path) -> None:
+    assert interactive._terminal_backend_reason() is None
+    code = (
+        "import sys\n"
+        "print('READY', flush=True)\n"
+        "line=input()\n"
+        "print('ECHO='+line, flush=True)\n"
+    )
+    artifact = tmp_path / "terminal-e2e.txt"
+    terminal = interactive._spawn_terminal(
+        [sys.executable, "-c", code],
+        cwd=tmp_path,
+        env=dict(os.environ),
+        artifact=artifact,
+    )
+    try:
+        expected_backend = "windows-conpty" if os.name == "nt" else "posix-pty"
+        assert terminal.backend == expected_backend
+        terminal.write("HELLO\r")
+        assert terminal.wait(10)
+    finally:
+        terminal.close()
+    text = artifact.read_text(encoding="utf-8")
+    assert "READY" in text
+    assert "ECHO=HELLO" in text
