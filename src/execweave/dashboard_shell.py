@@ -35,8 +35,8 @@ def _start_in_fit_camera_mode(html: str) -> str:
     """
     seams = (
         (
-            "let cameraMode='manual',cameraTimer=null,hasFitted=false;",
-            "let cameraMode='fit',cameraTimer=null,hasFitted=false;",
+            "protectedMode=false,cameraMode='manual',latestNodeId=null",
+            "protectedMode=false,cameraMode='fit',latestNodeId=null",
             "camera mode state seam changed",
         ),
         (
