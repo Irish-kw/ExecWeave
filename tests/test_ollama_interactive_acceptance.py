@@ -13,14 +13,6 @@ from acceptance.processes import CleanupReport, ProcessIdentity  # noqa: E402
 from acceptance.reporting import Status, write_report  # noqa: E402
 
 
-def _e2e_required() -> bool:
-    return os.environ.get("EXECWEAVE_E2E_REQUIRED", "").strip().lower() not in {
-        "",
-        "0",
-        "false",
-    }
-
-
 def _content_ref(root: Path, name: str, value: object) -> str:
     path = root / "content" / name
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -246,8 +238,6 @@ def test_terminal_backend_is_real_or_explicitly_unavailable(tmp_path: Path) -> N
 
 @pytest.mark.viewer_e2e
 def test_required_e2e_terminal_backend_round_trip(tmp_path: Path) -> None:
-    if not _e2e_required():
-        pytest.skip("required terminal backend round-trip belongs to Viewer Agent Isolation")
     assert interactive._terminal_backend_reason() is None
     code = (
         "import sys\n"
