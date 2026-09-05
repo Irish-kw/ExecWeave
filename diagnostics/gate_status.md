@@ -3,21 +3,22 @@
 Baseline: a098eeb81f641b6e3fb1d65cc1905f46aa8eae30 (v0.8.11).
 Only completed checks are PASS. A checkpoint commit does not close a gate.
 
-Current-state re-audit: see `current_state_reaudit.md`. The G2/G3 PASS entries
-below are historical scoped checkpoints, not revalidation of the newest head.
-G2 is reopened for REAUDIT-001 (unsafe bare-PID cleanup fallback). Formal Windows
-G4 executed and FAILED interrupt finalization (REAUDIT-002); required Network
-also needs correction (REAUDIT-003). No current full-product PASS is claimed.
+Current-state re-audit: see `current_state_reaudit.md`. REAUDIT-001 cleanup identity
+safety has been re-exercised by the formal owned-process cleanup on all three hosted
+OSes at exact head `1a53b87`; the large-response memory gate remains green from its
+three-OS checkpoint at `f9edc66`. REAUDIT-002/003 have source-level G4 corrections,
+but the corrected real local-model G4 journey has not yet been formally rerun. No
+current full-product PASS is claimed.
 
 | Gate | State | Evidence / remaining work |
 |---|---|---|
 | G0 baseline and evidence checkpoint | PASS | Native Windows baseline, public PR inventory, audit findings saved; no implementation changes |
 | G1 baseline audit report | PASS | Architecture/history, native/browser findings, priorities and design recorded; unexecuted release journeys explicitly remain open |
-| G2 minimal defect fixes | PASS | NEW-001/002/003/004/005/006 are verified; the final large-response memory gate is green on Ubuntu, macOS and Windows at exact head `f9edc66` |
-| G3 offline acceptance | PASS | Formal `scripts/dashboard_acceptance.py` loopback relay/live/finished journey passes on Ubuntu, macOS and Windows at exact head `0f04fe6`; native/provider-only capabilities remain explicitly outside this gate |
-| G4 visible live acceptance | IN_PROGRESS | Formal real-Ollama headed harness exists at `scripts/ollama_visible_acceptance.py`; availability/skip contracts are three-OS CI green at `1c4821e`, but a real local model journey has not yet been executed formally |
-| G5 interactive visible and cleanup | IN_PROGRESS | Formal PTY/ConPTY two-round Ollama harness is prepared; real-provider execution is still required before PASS |
-| G6 native cross-platform validation | NOT_STARTED | CI/browser/owned-cleanup suites are green on three hosted OSes, but the formal native/provider acceptance matrix is not complete |
+| G2 minimal defect fixes | PASS | NEW-001/002/003/004/005/006 are verified; the final large-response memory gate is green on Ubuntu, macOS and Windows at exact head `f9edc66`, and identity-aware owned cleanup is current-head green at `1a53b87` |
+| G3 offline acceptance | PASS | Formal `scripts/dashboard_acceptance.py` loopback relay/live/finished journey is current-head green on Ubuntu, macOS and Windows at `1a53b87`; native/provider-only capabilities remain explicitly outside this gate |
+| G4 visible live acceptance | IN_PROGRESS | Formal real-Ollama headed harness exists at `scripts/ollama_visible_acceptance.py`; Windows finalization, required `network_endpoint` evidence and client-output comparison are corrected in source, but the corrected real local-model journey has not yet been executed formally |
+| G5 interactive visible and cleanup | IN_PROGRESS | Formal PTY/ConPTY two-round Ollama harness is prepared; request/response round matching still needs to be hardened from global counts to marker-bound inference-request identity, and real-provider execution remains required before PASS |
+| G6 native cross-platform validation | IN_PROGRESS | Native OS-only Process/File/Network subgate is PASS on Ubuntu, macOS and Windows at exact head `1a53b87` with real pointer interaction; provider-native acceptance scope remains incomplete |
 | G7 final regression and human review | NOT_STARTED | Draft PR #51 is validation-only; no merge, tag or release permitted |
 
 ## Resume protocol
@@ -27,6 +28,32 @@ also needs correction (REAUDIT-003). No current full-product PASS is claimed.
 3. Commit each completed gate and each independent bug fix separately. Commit messages identify scope, evidence, limitations and the next gate.
 4. Save long-running evidence immediately. Large local browser/runtime artifacts remain under `.execweave-acceptance`; do not stage credentials, provider homes, virtual environments or browser binaries.
 5. `test/live-dashboard-acceptance` is the implementation branch. `main` remains the v0.8.11 baseline until an explicit later merge decision.
+
+## Current three-OS dashboard/native checkpoint
+
+Exact implementation head: `1a53b87e8be339d34162d10106c549a56ecb89b0`.
+All five pull-request workflow families completed SUCCESS on this exact head:
+
+- CI #968 / run `33982695918`
+- Viewer Agent Isolation #410 / run `33982695924`
+- Provider Capability Stage Integrity #312 / run `33982695913`
+- Windows Launcher Compatibility #563 / run `33982695912`
+- Provider Dashboard Contract #84 / run `33982695909`
+
+Viewer runs on Ubuntu, macOS and Windows all completed the browser selection, formal
+offline acceptance and formal owned-process cleanup successfully. The current browser
+selection includes the camera scheduler regression and the node-click/drag camera
+ownership regression. Native plain-Python OS acceptance completed successfully on all
+three hosted OSes, proving actual Process/File/Network observation plus natural pointer
+selection in both live and finished dashboards while requiring provider Prompt/Final/
+Tool semantics to remain absent.
+
+The Windows defect fixed by `1a53b87` was a cross-platform interaction race: node
+`pointerdown` took camera ownership and stopped an in-flight Fit before a click had
+become a drag. On faster native-delta timing this could freeze a Network endpoint under
+the inspector. A plain node inspection click now leaves Fit active; only motion beyond
+the existing drag threshold switches to Manual and moves the node. This checkpoint
+closes the native OS-only interaction subgate, not the remaining real-provider matrix.
 
 ## G4/G5 formal real-provider harness checkpoint
 
