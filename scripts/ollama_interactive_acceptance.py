@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Formal G5 interactive acceptance with provider-correct terminal exit semantics.
 
-The stable harness implementation lives in ``_ollama_interactive_acceptance_impl``.
-This entry point keeps the public script name while wrapping its terminal backend so
-Ollama Ctrl+C is tested as an interrupt, not misinterpreted as an exit command. The
-client must survive Ctrl+C and is then closed through Ollama's documented ``/bye``.
+The stable terminal primitives and compatibility surface live in
+``_ollama_interactive_acceptance_impl``. The formal journey is supplied by
+``acceptance.g5_runner`` so browser diagnostics, owned network evidence, crash
+persistence, and bounded cleanup share the hardened acceptance contracts.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ import _ollama_interactive_acceptance_impl as _impl
 
 # Preserve the historical module surface because tests and handoff commands import
 # private harness helpers directly. Provider-aware overrides below replace only the
-# terminal spawn path used by the formal journey.
+# terminal spawn path and formal journey.
 for _name in dir(_impl):
     if not _name.startswith("__"):
         globals()[_name] = getattr(_impl, _name)
@@ -27,7 +27,12 @@ _ORIGINAL_SPAWN_TERMINAL = _impl._spawn_terminal
 class _OllamaExitAwareTerminal(_impl._TerminalBase):
     """Delegate a real PTY/ConPTY while enforcing Ollama's Ctrl+C/exit contract."""
 
-    def __init__(self, terminal: _impl._TerminalBase, *, interrupt_pause: float = 0.25) -> None:
+    def __init__(
+        self,
+        terminal: _impl._TerminalBase,
+        *,
+        interrupt_pause: float = 0.25,
+    ) -> None:
         self._terminal = terminal
         self.pid = terminal.pid
         self.backend = terminal.backend
@@ -65,8 +70,14 @@ def _spawn_terminal(*args: Any, **kwargs: Any) -> _impl._TerminalBase:
 
 
 # _run_interactive is defined in the implementation module and resolves this global
-# there, so patch that one seam before invoking its main/run helpers.
+# there, so patch the provider-aware terminal seam before importing the hardened
+# journey that uses it.
 _impl._spawn_terminal = _spawn_terminal
+
+from acceptance.g5_runner import run_interactive as _hardened_run_interactive  # noqa: E402
+
+_impl._run_interactive = _hardened_run_interactive
+_run_interactive = _hardened_run_interactive
 
 
 def main() -> int:
