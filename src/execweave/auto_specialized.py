@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import socket
+import sys
 import threading
 import time
 from contextlib import contextmanager
@@ -398,18 +399,47 @@ def auto_specialized_launch(
         yield environment
         return
     listen_host, listen_port = listen_address
-    internal_port = _allocate_loopback_port()
-    upstream = f"http://127.0.0.1:{internal_port}"
+    public_endpoint = f"http://{listen_host}:{listen_port}"
     try:
-        server = ExecWeaveHTTPProxyServer(
-            (listen_host, listen_port),
-            ProxyConfig(upstream=upstream, sidecar=sidecar, mode="ollama"),
-            recorder=_record_ollama_inference_exchange,
+        existing = _get_json(
+            f"{public_endpoint}/api/ps",
+            timeout=_PROBE_TIMEOUT_SECONDS,
         )
-    except OSError:
-        # Fail open: preserve the child command's normal bind/error behavior.
+    except _PROBE_ERRORS:
+        existing = None
+    if isinstance(existing, dict) and isinstance(existing.get("models"), list):
+        print(
+            "ExecWeave Ollama relay: existing Ollama server detected at "
+            f"{public_endpoint}; leaving that server unclaimed.",
+            file=sys.stderr,
+        )
         yield environment
         return
+
+    internal_port = _allocate_loopback_port()
+    upstream = f"http://127.0.0.1:{internal_port}"
+    server: ExecWeaveHTTPProxyServer | None = None
+    last_bind_error: OSError | None = None
+    for attempt in range(5):
+        try:
+            server = ExecWeaveHTTPProxyServer(
+                (listen_host, listen_port),
+                ProxyConfig(upstream=upstream, sidecar=sidecar, mode="ollama"),
+                recorder=_record_ollama_inference_exchange,
+            )
+            break
+        except OSError as exc:
+            last_bind_error = exc
+            if attempt < 4:
+                time.sleep(0.05)
+    if server is None:
+        raise RuntimeError(
+            "ExecWeave could not reserve the Ollama endpoint "
+            f"{public_endpoint} for transparent conversation capture. "
+            "Stop any existing Ollama server using that endpoint or set "
+            "OLLAMA_HOST to a free loopback port before starting "
+            "`execweave live -- ollama serve`."
+        ) from last_bind_error
     thread = threading.Thread(
         target=server.serve_forever,
         kwargs={"poll_interval": 0.05},
@@ -418,6 +448,11 @@ def auto_specialized_launch(
     )
     thread.start()
     environment["OLLAMA_HOST"] = upstream
+    print(
+        "ExecWeave Ollama relay: "
+        f"http://{listen_host}:{listen_port} -> {upstream}",
+        file=sys.stderr,
+    )
     try:
         yield environment
     finally:
