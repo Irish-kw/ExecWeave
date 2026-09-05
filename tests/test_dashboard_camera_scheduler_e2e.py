@@ -20,7 +20,8 @@ _CORE_TEST_SEAM = (
     "window.__execweaveCore={getActivities:()=>activities.slice(),getGraph:()=>graph,"
     "getDisplayGraph:()=>({...graph,nodes:[...nodeById.values()],edges:[...edgeById.values()],"
     "node_count:nodeById.size,edge_count:edgeById.size}),getPositions:()=>new Map(positions),"
-    "selectEdge,selectNode,focusNode,markLatest,setCameraMode,applyDelta,scheduleCamera};"
+    "selectEdge,selectNode,focusNode,markLatest,setCameraMode,applyDelta,scheduleCamera,"
+    "getCameraMode:()=>cameraMode};"
 )
 _FIT_SEAM = "function fit(animate=true,minScale=.07){"
 _FIT_TEST_SEAM = (
@@ -36,12 +37,7 @@ def _initial_graph() -> dict[str, object]:
         "edge_count": 2,
         "event_count": 2,
         "nodes": [
-            {
-                "id": "process:python",
-                "type": "process",
-                "name": "python",
-                "attributes": {},
-            },
+            {"id": "process:python", "type": "process", "name": "python", "attributes": {}},
             {
                 "id": "agent:/root",
                 "type": "agent",
@@ -87,9 +83,7 @@ def _instrumented_viewer(tmp_path: Path) -> Path:
     return viewer
 
 
-def test_fit_camera_executes_during_rapid_delta_burst_and_keeps_endpoint_clickable(
-    tmp_path: Path,
-) -> None:
+def test_fit_camera_executes_during_rapid_delta_burst(tmp_path: Path) -> None:
     viewer = _instrumented_viewer(tmp_path)
     manager, executable = _browser()
     with manager as playwright:
@@ -97,23 +91,25 @@ def test_fit_camera_executes_during_rapid_delta_burst_and_keeps_endpoint_clickab
         try:
             page = browser.new_page(viewport={"width": 1440, "height": 1000})
             page.goto(viewer.as_uri())
-            file_node = page.locator('.node[data-id="file:acceptance"]')
-            file_node.wait_for(state="visible", timeout=15000)
-            file_node.click()
+            page.locator('.node[data-id="file:acceptance"]').wait_for(
+                state="visible", timeout=15000
+            )
+            assert page.evaluate("() => window.__execweaveCore.getCameraMode()") == "fit"
             initial_fit_calls = page.evaluate("() => window.__execweaveFitCalls||0")
 
-            endpoint = {
-                "id": "endpoint:loopback",
-                "type": "network_endpoint",
-                "name": "127.0.0.1:64024",
-                "event_count": 1,
-                "attributes": {},
-            }
             update = {
                 "event_count": 3,
                 "node_count": 4,
                 "edge_count": 3,
-                "nodes_added": [endpoint],
+                "nodes_added": [
+                    {
+                        "id": "endpoint:loopback",
+                        "type": "network_endpoint",
+                        "name": "127.0.0.1:64024",
+                        "event_count": 1,
+                        "attributes": {},
+                    }
+                ],
                 "nodes_updated": [],
                 "edges_added": [
                     {
@@ -148,6 +144,7 @@ def test_fit_camera_executes_during_rapid_delta_burst_and_keeps_endpoint_clickab
             ticks = page.evaluate("() => window.__execweaveRapidScheduleTicks")
             fit_calls = page.evaluate("() => window.__execweaveFitCalls||0")
             assert ticks < 20, "the assertion must run while the rapid schedule burst is active"
+            assert page.evaluate("() => window.__execweaveCore.getCameraMode()") == "fit"
             assert fit_calls > initial_fit_calls, (
                 "Fit camera was starved by repeated live scheduling; no fit executed "
                 "during the active burst"
