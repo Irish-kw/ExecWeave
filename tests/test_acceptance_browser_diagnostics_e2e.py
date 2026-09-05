@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -8,7 +9,6 @@ import pytest
 from test_viewer_agent_isolation_e2e import _browser, _launch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-import dashboard_acceptance as dashboard_runner  # noqa: E402
 from acceptance.browser_diagnostics import BrowserDiagnostics  # noqa: E402
 from acceptance.reporting import Status  # noqa: E402
 
@@ -45,6 +45,15 @@ def test_browser_diagnostics_captures_console_and_rejected_promise(tmp_path: Pat
 def test_formal_offline_runner_propagates_console_error_to_gate(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    try:
+        import playwright.sync_api  # noqa: F401
+    except ImportError:
+        if os.environ.get("EXECWEAVE_E2E_REQUIRED"):
+            pytest.fail("Playwright is required for the formal browser diagnostics journey")
+        pytest.skip("Playwright is not installed")
+
+    import dashboard_acceptance as dashboard_runner
+
     class InjectingDiagnostics(BrowserDiagnostics):
         def __init__(self, page) -> None:
             super().__init__(page)
