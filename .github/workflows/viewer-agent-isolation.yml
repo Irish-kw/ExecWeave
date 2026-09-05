@@ -51,6 +51,20 @@ jobs:
           python scripts/owned_cleanup_acceptance.py
           --output-dir "${{ github.workspace }}/artifacts/dashboard-acceptance/owned-cleanup"
 
+      - name: Run formal native Python OS acceptance (Linux)
+        if: runner.os == 'Linux'
+        run: >-
+          xvfb-run -a python scripts/python_native_acceptance.py
+          --output-dir "${{ github.workspace }}/artifacts/dashboard-acceptance/python-native"
+          --require python
+
+      - name: Run formal native Python OS acceptance (macOS/Windows)
+        if: runner.os != 'Linux'
+        run: >-
+          python scripts/python_native_acceptance.py
+          --output-dir "${{ github.workspace }}/artifacts/dashboard-acceptance/python-native"
+          --require python
+
       - name: Upload visual release evidence
         if: always()
         uses: actions/upload-artifact@v4
