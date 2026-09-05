@@ -21,8 +21,9 @@ _LIMIT = 64 * 1024
 
 
 class TerminalTranscript:
-    def __init__(self, artifact: TextIO) -> None:
+    def __init__(self, artifact: TextIO, *, label: str = "OLLAMA") -> None:
         self._artifact = artifact
+        self._label = label
         self._decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
         self._pending = ""
         self._discard = False
@@ -53,7 +54,7 @@ class TerminalTranscript:
         self._artifact.write(text + "\n")
         self._artifact.flush()
         with _PRINT_LOCK:
-            sys.stdout.write("[OLLAMA] " + text + "\n")
+            sys.stdout.write("[" + self._label + "] " + text + "\n")
             sys.stdout.flush()
         self._pending = ""
         self._discard = False

@@ -122,7 +122,15 @@ Open defects requiring further source hardening/review:
    sets PYWINPTY_BACKEND=1 yet requires explicit ConPTY selection on Windows and
    unaffected real PTY selection on POSIX, both with actual TTY/echo.
    Both terminal subprocess tests passed locally; no provider was executed.
-3. G4 independent-client output remains file-only; interactive tee does not fix G4.
+3. G4 independent-client output was file-only. Follow-up replaces blocking
+   communicate-then-write with reader threads for stdout/stderr; both use the
+   redacted transcript tee while the child is still running. ExecWeave status
+   uses the same capture path, with its tokenized URL redacted only in public
+   output/artifacts (internal readiness still uses the actual URL). Reader failure
+   or a reader that does not stop cannot silently establish client success.
+   Actual Python subprocess test holds the child alive until READY is visible,
+   verifies redaction, then releases it and verifies DONE/artifact parity. Related
+   tests: 29 passed. This is a pipe contract, not an Ollama provider run.
 4. Browser `pageerror` does not capture all `console.error` messages.
 5. G4/G5 Ctrl+C/crash report persistence and reader-resource cleanup need review.
 6. Temporary interactive/public-module rebinding adds another shim; do not perform
@@ -152,8 +160,8 @@ Full repository Ruff and diff whitespace checks passed. These are local checked-
 results, not a claim that a not-yet-created final commit already passed Actions.
 
 This is a bounded source-hardening checkpoint, not REPO_SIDE_WORK_COMPLETE=YES:
-the remaining G4 comparison/display, complete console capture, crash persistence
-and terminal long-line fidelity gaps above are still source work. Do not relabel
+complete console capture, crash persistence and terminal long-line fidelity gaps
+above are still source work. Do not relabel
 all remaining work as native-only. G6 native matrix and deliberate PID reuse remain
 separately unaccepted. No model or real provider was launched in this turn.
 

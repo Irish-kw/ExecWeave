@@ -37,6 +37,7 @@ import psutil
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from acceptance.processes import CleanupReport, OwnedProcessTracker  # noqa: E402
 from acceptance.reporting import FEATURES, Result, Status, redact, write_report  # noqa: E402
+from acceptance.terminal_output import TerminalTranscript  # noqa: E402
 from execweave.conversation_records import conversation_index_payload  # noqa: E402
 
 _PROVIDER = "ollama"
@@ -241,20 +242,30 @@ def _conversation_text(preview: dict[str, Any]) -> tuple[str, str]:
 
 
 class _PipeCapture:
-    def __init__(self, handle: Any, artifact: Path) -> None:
+    def __init__(self, handle: Any, artifact: Path, *, label: str = "EXECWEAVE") -> None:
         self._handle = handle
         self._artifact = artifact
+        self._label = label
+        self.error: str | None = None
         self.lines: queue.Queue[str] = queue.Queue()
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
     def _run(self) -> None:
-        self._artifact.parent.mkdir(parents=True, exist_ok=True)
-        with self._artifact.open("w", encoding="utf-8") as output:
-            for line in iter(self._handle.readline, ""):
-                self.lines.put(line)
-                output.write(redact(line))
-                output.flush()
+        try:
+            self._artifact.parent.mkdir(parents=True, exist_ok=True)
+            with self._artifact.open("w", encoding="utf-8") as output:
+                transcript = TerminalTranscript(output, label=self._label)
+                try:
+                    for line in iter(self._handle.readline, ""):
+                        self.lines.put(line)
+                        transcript.feed(line)
+                finally:
+                    transcript.close()
+        except Exception as exc:
+            self.error = redact(f"{type(exc).__name__}: {exc}")
+        finally:
+            self._handle.close()
 
     def wait_for_live_url(self, timeout: float) -> str | None:
         deadline = time.monotonic() + timeout
@@ -268,8 +279,17 @@ class _PipeCapture:
                 return match.group(1)
         return None
 
-    def join(self, timeout: float = 2.0) -> None:
+    def join(self, timeout: float = 2.0) -> bool:
         self._thread.join(timeout)
+        return not self._thread.is_alive() and self.error is None
+
+    def drain_text(self) -> str:
+        chunks: list[str] = []
+        while True:
+            try:
+                chunks.append(self.lines.get_nowait())
+            except queue.Empty:
+                return "".join(chunks)
 
 
 def _check(
@@ -384,6 +404,7 @@ def _run_visible(
     client_process: subprocess.Popen[str] | None = None
     live_stdout: _PipeCapture | None = None
     live_stderr: _PipeCapture | None = None
+    client_captures: list[_PipeCapture] = []
     page_errors: list[str] = []
     browser = None
     playwright = None
@@ -473,14 +494,21 @@ def _run_visible(
             errors="replace",
         )
         tracker.track_pid(client_process.pid)
+        assert client_process.stdout is not None
+        assert client_process.stderr is not None
+        client_captures = [
+            _PipeCapture(client_process.stdout, run_root / "ollama-client.stdout.txt", label="OLLAMA"),
+            _PipeCapture(client_process.stderr, run_root / "ollama-client.stderr.txt", label="OLLAMA STDERR"),
+        ]
         try:
-            raw_stdout, raw_stderr = client_process.communicate(timeout=timeout)
+            client_process.wait(timeout=timeout)
         except subprocess.TimeoutExpired as exc:
             raise AssertionError("independent ollama run client timed out") from exc
+        if not all(capture.join() for capture in client_captures):
+            raise AssertionError("independent client transcript reader failed or did not stop")
+        raw_stdout, raw_stderr = (capture.drain_text() for capture in client_captures)
         client_stdout = _clean_output(raw_stdout)
         client_stderr = _clean_output(raw_stderr)
-        (run_root / "ollama-client.stdout.txt").write_text(redact(client_stdout), encoding="utf-8")
-        (run_root / "ollama-client.stderr.txt").write_text(redact(client_stderr), encoding="utf-8")
         if client_process.returncode != 0:
             raise AssertionError(
                 f"independent ollama run failed rc={client_process.returncode}: {client_stderr[-400:]}"
@@ -631,6 +659,9 @@ def _run_visible(
             live_stdout.join()
         if live_stderr is not None:
             live_stderr.join()
+        for capture in client_captures:
+            if not capture.join():
+                _check(result, "Cleanup", False, "Client transcript reader did not stop cleanly")
         result.runtime_seconds = time.monotonic() - started_at
     return result
 
