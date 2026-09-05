@@ -23,6 +23,10 @@ def test_browser_diagnostics_captures_console_and_rejected_promise(tmp_path: Pat
         try:
             page = browser.new_page()
             diagnostics = BrowserDiagnostics(page)
+            page.route(
+                "https://execweave.invalid/diagnostic-401",
+                lambda route: route.fulfill(status=401, body="Unauthorized"),
+            )
             page.set_content("<p>offline diagnostic fixture</p>")
             assert diagnostics.errors == []
             with page.expect_event("pageerror"):
@@ -30,14 +34,23 @@ def test_browser_diagnostics_captures_console_and_rejected_promise(tmp_path: Pat
                     console.error('api_key=private-value');
                     setTimeout(() => { Promise.reject(new Error('EW-REJECTED')); }, 0);
                 }""")
+            response = page.evaluate(
+                "async()=>{const r=await fetch('https://execweave.invalid/diagnostic-401');return r.status}"
+            )
+            assert response == 401
             assert any("console.error:" in text for text in diagnostics.errors)
             assert any("pageerror:" in text and "EW-REJECTED" in text for text in diagnostics.errors)
+            assert any(
+                text == "http.401: https://execweave.invalid/diagnostic-401"
+                for text in diagnostics.messages
+            )
             failure_root = tmp_path / "missing" / "diagnostics"
             assert not diagnostics.finish(page, failure_root)
             transcript = (failure_root / "browser-console.log").read_text(encoding="utf-8")
             assert "private-value" not in transcript
             assert "[REDACTED]" in transcript
             assert "EW-REJECTED" in transcript
+            assert "http.401: https://execweave.invalid/diagnostic-401" in transcript
             assert (failure_root / "FAILURE.png").stat().st_size > 0
         finally:
             browser.close()

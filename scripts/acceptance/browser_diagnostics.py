@@ -1,4 +1,4 @@
-"""Capture both browser console errors and uncaught JavaScript failures."""
+"""Capture browser console errors, uncaught JavaScript failures, and HTTP diagnostics."""
 
 from __future__ import annotations
 
@@ -14,6 +14,29 @@ class BrowserDiagnostics:
         self.messages: list[str] = []
         page.on("pageerror", self._page_error)
         page.on("console", self._console)
+        page.on("response", self._response)
+
+    @staticmethod
+    def _console_location(message: Any) -> str:
+        try:
+            location = getattr(message, "location", None)
+            if callable(location):
+                location = location()
+        except Exception:  # noqa: BLE001 - diagnostics must not break the acceptance journey
+            return ""
+        if not isinstance(location, dict):
+            return ""
+        url = str(location.get("url") or "").strip()
+        if not url:
+            return ""
+        line = location.get("lineNumber")
+        column = location.get("columnNumber")
+        suffix = url
+        if isinstance(line, int):
+            suffix += f":{line + 1}"
+            if isinstance(column, int):
+                suffix += f":{column + 1}"
+        return redact(f" @ {suffix}")
 
     def _page_error(self, error: Any) -> None:
         message = redact(f"pageerror: {error}")
@@ -21,10 +44,21 @@ class BrowserDiagnostics:
         self.messages.append(message)
 
     def _console(self, message: Any) -> None:
-        text = redact(f"console.{message.type}: {message.text}")
+        text = redact(
+            f"console.{message.type}: {message.text}{self._console_location(message)}"
+        )
         self.messages.append(text)
         if message.type == "error":
             self.errors.append(text)
+
+    def _response(self, response: Any) -> None:
+        try:
+            status = int(response.status)
+            url = str(response.url)
+        except Exception:  # noqa: BLE001 - response metadata is supplemental diagnostics
+            return
+        if status >= 400:
+            self.messages.append(redact(f"http.{status}: {url}"))
 
     def write(self, root: Path) -> None:
         root.mkdir(parents=True, exist_ok=True)
