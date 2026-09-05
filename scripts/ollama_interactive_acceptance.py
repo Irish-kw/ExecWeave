@@ -36,24 +36,88 @@ from execweave.conversation_records import conversation_index_payload  # noqa: E
 _PROVIDER = "ollama"
 _MODE = "interactive-visible"
 _RESPONSE_RELATION = "OBSERVED_INFERENCE_RESPONSE"
-_REQUEST_RELATION = "OBSERVED_INFERENCE_REQUEST_MESSAGES"
+_REQUEST_RELATIONS = frozenset(
+    {
+        "OBSERVED_INFERENCE_REQUEST_MESSAGES",
+        "OBSERVED_INFERENCE_REQUEST_PROMPT",
+        "OBSERVED_INFERENCE_REQUEST_INPUT",
+    }
+)
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     return visible._read_jsonl(path)
 
 
-def _relation_count(path: Path, relation: str) -> int:
-    return sum(record.get("relation") == relation for record in _read_jsonl(path))
+def _content_contains_marker(run_root: Path, record: dict[str, Any], marker: str) -> bool:
+    attributes = record.get("attributes")
+    if not isinstance(attributes, dict):
+        return False
+    content_path = attributes.get("content_path")
+    if not isinstance(content_path, str) or not content_path:
+        return False
+    root = run_root.resolve()
+    candidate = (root / content_path).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        return False
+    try:
+        return marker in candidate.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
 
 
-def _wait_relation_count(path: Path, relation: str, count: int, *, timeout: float) -> bool:
+def _source_id(record: dict[str, Any]) -> str | None:
+    source = record.get("source")
+    if not isinstance(source, dict):
+        return None
+    source_id = source.get("id")
+    return source_id if isinstance(source_id, str) and source_id else None
+
+
+def _marker_exchange_state(
+    sidecar: Path,
+    run_root: Path,
+    marker: str,
+) -> tuple[str | None, bool]:
+    records = _read_jsonl(sidecar)
+    request_sources = {
+        source_id
+        for record in records
+        if record.get("relation") in _REQUEST_RELATIONS
+        and _content_contains_marker(run_root, record, marker)
+        and (source_id := _source_id(record)) is not None
+    }
+    if len(request_sources) > 1:
+        raise AssertionError(
+            "interactive marker appeared in multiple inference-request identities: "
+            f"{sorted(request_sources)}"
+        )
+    if not request_sources:
+        return None, False
+    source_id = next(iter(request_sources))
+    response_seen = any(
+        record.get("relation") == _RESPONSE_RELATION and _source_id(record) == source_id
+        for record in records
+    )
+    return source_id, response_seen
+
+
+def _wait_marker_exchange(
+    sidecar: Path,
+    run_root: Path,
+    marker: str,
+    *,
+    timeout: float,
+) -> tuple[str | None, bool]:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if _relation_count(path, relation) >= count:
-            return True
+        state = _marker_exchange_state(sidecar, run_root, marker)
+        if state[0] is not None and state[1]:
+            return state
         time.sleep(0.10)
-    return _relation_count(path, relation) >= count
+    return _marker_exchange_state(sidecar, run_root, marker)
 
 
 class _TerminalBase:
@@ -488,10 +552,18 @@ def _run_interactive(
 
         terminal.write(prompt_one + "\r")
         print("G5 prompt 1:", prompt_one, flush=True)
-        if not _wait_relation_count(sidecar, _RESPONSE_RELATION, 1, timeout=timeout):
-            raise AssertionError("first interactive prompt never produced a captured response")
-        if _relation_count(sidecar, _REQUEST_RELATION) < 1:
+        source_one, response_one = _wait_marker_exchange(
+            sidecar,
+            session_root,
+            prompt_one,
+            timeout=timeout,
+        )
+        if source_one is None:
             raise AssertionError("first interactive prompt request was not captured")
+        if not response_one:
+            raise AssertionError(
+                "first interactive prompt never produced a response on its request identity"
+            )
 
         _click_root(page, timeout)
         page.wait_for_function(
@@ -505,10 +577,20 @@ def _run_interactive(
 
         terminal.write(prompt_two + "\r")
         print("G5 prompt 2:", prompt_two, flush=True)
-        if not _wait_relation_count(sidecar, _RESPONSE_RELATION, 2, timeout=timeout):
-            raise AssertionError("second interactive prompt never produced a captured response")
-        if _relation_count(sidecar, _REQUEST_RELATION) < 2:
+        source_two, response_two = _wait_marker_exchange(
+            sidecar,
+            session_root,
+            prompt_two,
+            timeout=timeout,
+        )
+        if source_two is None:
             raise AssertionError("second interactive prompt request was not captured")
+        if source_two == source_one:
+            raise AssertionError("two interactive rounds reused one inference-request identity")
+        if not response_two:
+            raise AssertionError(
+                "second interactive prompt never produced a response on its request identity"
+            )
 
         page.wait_for_function(
             "value=>(document.getElementById('details')?.innerText||'').includes(value)",
