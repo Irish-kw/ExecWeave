@@ -27,10 +27,59 @@ def test_local_model_present_requires_exact_model_identity() -> None:
     assert not visible._local_model_present(tags, "qwen")
 
 
-def test_network_evidence_uses_native_network_endpoint_type() -> None:
-    assert visible._has_network_evidence({"nodes": [{"type": "network_endpoint"}]})
-    assert not visible._has_network_evidence({"nodes": [{"type": "endpoint"}]})
-    assert not visible._has_network_evidence({"nodes": []})
+def test_network_evidence_requires_owned_process_identity_edge() -> None:
+    create_time = 1770000000.123456
+    owned = ProcessIdentity(pid=4242, create_time=create_time)
+    graph = {
+        "nodes": [
+            {
+                "id": f"process:4242:{int(create_time * 1_000_000)}",
+                "type": "process",
+                "attributes": {"pid": 4242, "create_time": create_time},
+            },
+            {"id": "endpoint:127.0.0.1:11434", "type": "network_endpoint"},
+        ],
+        "edges": [
+            {
+                "source": f"process:4242:{int(create_time * 1_000_000)}",
+                "target": "endpoint:127.0.0.1:11434",
+                "relation": "CONNECTED_TO",
+            }
+        ],
+    }
+    assert visible._has_owned_network_evidence(graph, (owned,))
+    assert not visible._has_owned_network_evidence(
+        graph,
+        (ProcessIdentity(pid=4242, create_time=create_time + 1.0),),
+    )
+
+
+def test_network_endpoint_without_owned_edge_is_not_sufficient() -> None:
+    graph = {
+        "nodes": [
+            {
+                "id": "process:99:1000000",
+                "type": "process",
+                "attributes": {"pid": 99, "create_time": 1.0},
+            },
+            {"id": "endpoint:127.0.0.1:11434", "type": "network_endpoint"},
+        ],
+        "edges": [
+            {
+                "source": "process:99:1000000",
+                "target": "endpoint:127.0.0.1:11434",
+                "relation": "CONNECTED_TO",
+            }
+        ],
+    }
+    assert not visible._has_owned_network_evidence(
+        graph,
+        (ProcessIdentity(pid=4242, create_time=1.0),),
+    )
+    assert not visible._has_owned_network_evidence(
+        {"nodes": [{"id": "endpoint:x", "type": "network_endpoint"}], "edges": []},
+        (ProcessIdentity(pid=4242, create_time=1.0),),
+    )
 
 
 def test_final_must_be_grounded_in_independent_client_output() -> None:

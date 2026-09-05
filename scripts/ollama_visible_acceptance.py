@@ -35,7 +35,12 @@ from uuid import uuid4
 import psutil
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from acceptance.processes import CleanupReport, OwnedProcessTracker  # noqa: E402
+from acceptance.browser_diagnostics import BrowserDiagnostics  # noqa: E402
+from acceptance.processes import (  # noqa: E402
+    CleanupReport,
+    OwnedProcessTracker,
+    ProcessIdentity,
+)
 from acceptance.reporting import FEATURES, Result, Status, redact, write_report  # noqa: E402
 from acceptance.terminal_output import TerminalTranscript  # noqa: E402
 from execweave.conversation_records import conversation_index_payload  # noqa: E402
@@ -45,6 +50,7 @@ _MODE = "visible-live"
 _ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 _LIVE_URL_RE = re.compile(r"ExecWeave live:\s+(http://127\.0\.0\.1:\d+/\?t=[^\s]+)")
 _NETWORK_NODE_TYPE = "network_endpoint"
+_NETWORK_RELATIONS = frozenset({"CONNECTED_TO", "NETWORK_CONNECTED_TO"})
 
 
 def _free_loopback_port() -> int:
@@ -80,11 +86,56 @@ def _final_matches_client_output(final: str, client_output: str) -> bool:
     return expected == observed
 
 
-def _has_network_evidence(graph: dict[str, Any]) -> bool:
-    nodes = graph.get("nodes", [])
+def _owned_process_node_ids(
+    graph: dict[str, Any], identities: tuple[ProcessIdentity, ...]
+) -> set[str]:
+    """Return process nodes whose PID/create-time identity is harness-owned."""
+
+    owned = {
+        (identity.pid, int(identity.create_time * 1_000_000))
+        for identity in identities
+    }
+    matches: set[str] = set()
+    for node in graph.get("nodes", []):
+        if not isinstance(node, dict) or node.get("type") != "process":
+            continue
+        attributes = node.get("attributes")
+        node_id = node.get("id")
+        if not isinstance(attributes, dict) or not isinstance(node_id, str):
+            continue
+        try:
+            identity = (
+                int(attributes.get("pid")),
+                int(float(attributes.get("create_time")) * 1_000_000),
+            )
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if identity in owned:
+            matches.add(node_id)
+    return matches
+
+
+def _has_owned_network_evidence(
+    graph: dict[str, Any], identities: tuple[ProcessIdentity, ...]
+) -> bool:
+    """Require a native network edge from a harness-owned process identity."""
+
+    process_ids = _owned_process_node_ids(graph, identities)
+    if not process_ids:
+        return False
+    endpoint_ids = {
+        str(node.get("id"))
+        for node in graph.get("nodes", [])
+        if isinstance(node, dict)
+        and node.get("type") == _NETWORK_NODE_TYPE
+        and isinstance(node.get("id"), str)
+    }
     return any(
-        isinstance(node, dict) and node.get("type") == _NETWORK_NODE_TYPE
-        for node in nodes
+        isinstance(edge, dict)
+        and str(edge.get("relation") or "").upper() in _NETWORK_RELATIONS
+        and edge.get("source") in process_ids
+        and edge.get("target") in endpoint_ids
+        for edge in graph.get("edges", [])
     )
 
 
@@ -405,14 +456,16 @@ def _run_visible(
     live_stdout: _PipeCapture | None = None
     live_stderr: _PipeCapture | None = None
     client_captures: list[_PipeCapture] = []
-    page_errors: list[str] = []
     browser = None
     playwright = None
+    page = None
+    diagnostics: BrowserDiagnostics | None = None
     started_at = time.monotonic()
     live_details = ""
     client_stdout = ""
     client_stderr = ""
     unavailable_reason: str | None = None
+    cleanup_errors: list[str] = []
 
     try:
         live_command = [
@@ -478,7 +531,7 @@ def _run_visible(
             return result
 
         page = browser.new_page(viewport={"width": 1440, "height": 1000})
-        page.on("pageerror", lambda error: page_errors.append(str(error)))
+        diagnostics = BrowserDiagnostics(page)
         page.goto(live_url)
         page.evaluate("window.__execweaveG4Document=document")
         initial_nodes = page.locator(".node").count()
@@ -586,11 +639,13 @@ def _run_visible(
 
         nodes = [item for item in graph.get("nodes", []) if isinstance(item, dict)]
         _check(result, "Process", any(item.get("type") == "process" for item in nodes), "Real process node observed")
+        tracker.scan_once()
+        owned_identities = tracker.identities()
         _check(
             result,
             "Network",
-            _has_network_evidence(graph),
-            "Real network_endpoint node observed in the finished graph",
+            _has_owned_network_evidence(graph, owned_identities),
+            "A native network endpoint is connected from a harness-owned PID/create-time identity",
         )
 
         page.goto((session_root / "viewer.html").as_uri())
@@ -607,17 +662,25 @@ def _run_visible(
             "03-finished.png",
         )
         page.screenshot(path=str(run_root / "03-finished.png"))
+        assert diagnostics is not None
+        console_ok = diagnostics.finish(page, run_root)
         _check(
             result,
             "JS console",
-            not page_errors,
-            "No browser page errors observed" if not page_errors else "; ".join(page_errors),
+            console_ok,
+            "No browser console errors or uncaught JavaScript failures were observed"
+            if console_ok
+            else "; ".join(diagnostics.errors),
+            "browser-console.log",
+            *("FAILURE.png",) if not console_ok else (),
         )
         sidecar_events = _read_jsonl(session_root / "semantic.jsonl")
         result.observed_requests = sum(
             1 for event in sidecar_events if event.get("relation") == "OBSERVED_INFERENCE_RESPONSE"
         )
     except Exception as exc:  # noqa: BLE001 - formal report must preserve exact failure
+        if diagnostics is not None and page is not None:
+            diagnostics.failure(page, run_root)
         failure = f"{type(exc).__name__}: {exc}"
         for feature in (
             "Launch",
@@ -635,9 +698,15 @@ def _run_visible(
                 break
     finally:
         if browser is not None:
-            browser.close()
+            try:
+                browser.close()
+            except Exception as exc:  # noqa: BLE001 - cleanup remains bounded
+                cleanup_errors.append(redact(f"browser close failed: {exc}"))
         if playwright is not None:
-            playwright.stop()
+            try:
+                playwright.stop()
+            except Exception as exc:  # noqa: BLE001 - cleanup remains bounded
+                cleanup_errors.append(redact(f"Playwright stop failed: {exc}"))
         if client_process is not None and client_process.poll() is None:
             client_process.terminate()
         if live_process is not None and live_process.poll() is None:
@@ -655,13 +724,17 @@ def _run_visible(
         tracker.scan_once()
         cleanup = tracker.cleanup(grace_seconds=0.10, terminate_timeout=2.0, kill_timeout=2.0)
         _record_cleanup(result, cleanup, unavailable_reason=unavailable_reason)
-        if live_stdout is not None:
-            live_stdout.join()
-        if live_stderr is not None:
-            live_stderr.join()
+        for label, capture in (
+            ("ExecWeave stdout", live_stdout),
+            ("ExecWeave stderr", live_stderr),
+        ):
+            if capture is not None and not capture.join():
+                cleanup_errors.append(f"{label} transcript reader did not stop cleanly")
         for capture in client_captures:
             if not capture.join():
-                _check(result, "Cleanup", False, "Client transcript reader did not stop cleanly")
+                cleanup_errors.append("Client transcript reader did not stop cleanly")
+        if cleanup_errors:
+            _check(result, "Cleanup", False, "; ".join(cleanup_errors))
         result.runtime_seconds = time.monotonic() - started_at
     return result
 
