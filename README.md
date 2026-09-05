@@ -57,6 +57,21 @@ cd ExecWeave
 python -m pip install -e ".[dev]"
 ```
 
+To exercise the current checkout directly without relying on an already installed `execweave` console script, run the package module, not `execweave.entry`:
+
+```powershell
+# PowerShell
+$env:PYTHONPATH="$PWD\src"
+python -m execweave --help
+```
+
+```bash
+# POSIX shells
+PYTHONPATH="$PWD/src" python -m execweave --help
+```
+
+`python -m execweave.entry` only imports the CLI entry module and is not the package's `-m` launch path; use `python -m execweave` for source-checkout testing.
+
 ## 60-second quick start
 
 Live OS-runtime telemetry works with **any local command**. These Agent/runtime names are examples, not a whitelist.
@@ -78,6 +93,44 @@ Google Antigravity currently uses the `agy` CLI command; ExecWeave also accepts 
 For Cursor on Windows, bare `cursor` follows the PATH entry the user actually has and, when it is the normal `.../resources/app/bin/cursor.cmd` shim, derives the matching `Cursor.exe` from that same installation root. This works for custom drives and arbitrary install directories; explicit launcher paths are left untouched. macOS/Windows standard desktop paths remain a fallback when the PATH shim cannot identify the desktop binary.
 
 For a managed local Ollama server, `execweave live --open -- ollama serve` owns the public loopback endpoint and relays the real server through an internal loopback port. A later `ollama run`, Ollama SDK request, OpenAI-compatible client, or `curl` started from another terminal can therefore appear in the same ExecWeave semantic stream even though that client is not a child of the `ollama serve` process. ExecWeave prints the active public-to-internal relay mapping; if the public loopback endpoint cannot be safely reserved, the managed run now fails explicitly rather than silently losing conversation capture. Relay mode is deliberately limited to local `localhost` / `127.0.0.1` binds; external, wildcard, and IPv6 exposure is not rewritten. Stopping Live with Ctrl+C still finalizes the run artifacts before returning.
+
+### Ollama: server capture vs. direct client capture
+
+There are two different launch patterns. Do not mix up which command owns the Ollama server.
+
+**A. Observe a managed Ollama server and clients from other terminals.** ExecWeave starts and owns the server path:
+
+```bash
+# Terminal A
+execweave live --open -- ollama serve
+
+# Terminal B
+ollama run deepseek-r1:1.5b
+```
+
+Terminal B does **not** need another ExecWeave wrapper. Its requests go through the public loopback endpoint owned by the managed server relay and are recorded in Terminal A's run.
+
+**B. Observe one `ollama run` client directly.** An Ollama server must already be reachable before the command starts:
+
+```bash
+# Terminal A: existing server
+ollama serve
+
+# Terminal B
+execweave live --open -- ollama run deepseek-r1:1.5b
+```
+
+`execweave live -- ... ollama run ...` does **not** start an Ollama server. It places a temporary local relay in front of the Ollama endpoint that was configured before launch (`OLLAMA_HOST`, default `http://127.0.0.1:11434`). If that upstream server is not running, the relay returns HTTP 502 and the client run fails.
+
+Before using direct client capture, verify the upstream endpoint if needed:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:11434/api/tags
+```
+
+```bash
+curl http://127.0.0.1:11434/api/tags
+```
 
 Build finalized run artifacts with:
 
