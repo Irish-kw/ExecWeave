@@ -112,8 +112,9 @@ Open defects requiring further source hardening/review:
 2. Windows ConPTY label is not itself backend proof: pywinpty backend selection
    can depend on its environment. Corrected in this checkpoint by explicitly
    passing the nonempty string `"0"` (pywinpty treats integer zero as falsy), plus
-   required cross-platform isatty assertion. A Windows-only dev-CI test deliberately
-   sets PYWINPTY_BACKEND=1 yet requires explicit ConPTY selection and actual TTY/echo.
+   required cross-platform isatty assertion. A native dev-CI test deliberately
+   sets PYWINPTY_BACKEND=1 yet requires explicit ConPTY selection on Windows and
+   unaffected real PTY selection on POSIX, both with actual TTY/echo.
    Both terminal subprocess tests passed locally; no provider was executed.
 3. G4 independent-client output remains file-only; interactive tee does not fix G4.
 4. Browser `pageerror` does not capture all `console.error` messages.
@@ -174,3 +175,14 @@ PASS by either command above. Missing binary/model/browser is unavailable and
 
 G0/G1/G2/G3 retain their explicitly historical/scoped ledger status; G4/G5/G6 remain
 IN_PROGRESS, G7 NOT_STARTED. READY_FOR_HUMAN_MERGE_DECISION=NO.
+
+## Integrity correction after bba6bf7
+
+Exact bba6bf7 Integrity run 33992274452/job 101376498335 failed. Raw job log was
+retrieved and independently reproduced: `_assert_no_new_skip_or_xfail` rejected
+the new non-Windows skip in the ConPTY environment test. The guard is unchanged.
+The test now executes the actual host backend on both branches: ConPTY with explicit
+selection on Windows, real PTY on POSIX. It never changes os.name, returns early,
+or treats a platform skip as a transport PASS. Existing test identity and Windows
+assertions are preserved, with POSIX TTY/echo assertions added. Local Windows
+targeted result: 1 passed; Ruff PASS. Fresh CI is still required for the correction.
