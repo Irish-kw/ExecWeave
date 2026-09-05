@@ -20,11 +20,14 @@ def test_unicode_upstream_error_returns_502_instead_of_eof(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     """Localized Windows socket errors must not crash the HTTP status writer."""
+    original_request = http.client.HTTPConnection.request
 
-    def fail_request(*args, **kwargs):
-        raise OSError("無法連線，因為目標電腦拒絕連線")
+    def fail_upstream_request(connection, *args, **kwargs):
+        if connection.host == "127.0.0.1" and connection.port == 9:
+            raise OSError("無法連線，因為目標電腦拒絕連線")
+        return original_request(connection, *args, **kwargs)
 
-    monkeypatch.setattr(http.client.HTTPConnection, "request", fail_request)
+    monkeypatch.setattr(http.client.HTTPConnection, "request", fail_upstream_request)
     proxy = create_proxy_server(
         listen_host="127.0.0.1",
         listen_port=0,
