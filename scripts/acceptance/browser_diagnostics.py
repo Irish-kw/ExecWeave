@@ -31,8 +31,17 @@ class BrowserDiagnostics:
         (root / "browser-console.log").write_text("\n".join(self.messages), encoding="utf-8")
 
     def failure(self, page: Any, root: Path) -> None:
+        root.mkdir(parents=True, exist_ok=True)
         try:
             page.screenshot(path=str(root / "FAILURE.png"), full_page=True)
         except Exception as exc:
             self.messages.append(redact(f"failure screenshot unavailable: {exc}"))
         self.write(root)
+
+    def finish(self, page: Any, root: Path) -> bool:
+        """Persist diagnostics and capture a failure screenshot when JS errors exist."""
+        if self.errors:
+            self.failure(page, root)
+            return False
+        self.write(root)
+        return True

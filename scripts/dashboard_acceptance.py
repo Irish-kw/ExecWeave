@@ -20,6 +20,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from uuid import uuid4
 
+from acceptance.browser_diagnostics import BrowserDiagnostics
 from acceptance.contracts import ConversationSnapshot, same_conversation, verify_conversation
 from acceptance.reporting import Result, Status, write_report
 from execweave import live
@@ -266,10 +267,11 @@ def _run_offline(output_root: Path, headed: bool) -> Result:
     received = threading.Event()
     completed = threading.Event()
     client_errors: list[str] = []
-    console_errors: list[str] = []
     servers: list[ThreadingHTTPServer] = []
     threads: list[threading.Thread] = []
     client_thread: threading.Thread | None = None
+    page = None
+    diagnostics: BrowserDiagnostics | None = None
     started_at = time.monotonic()
 
     class SlowModel(BaseHTTPRequestHandler):
@@ -378,7 +380,7 @@ def _run_offline(output_root: Path, headed: bool) -> Result:
             browser = pw.chromium.launch(headless=not headed)
             try:
                 page = browser.new_page(viewport={"width": 1440, "height": 1000})
-                page.on("pageerror", lambda error: console_errors.append(str(error)))
+                diagnostics = BrowserDiagnostics(page)
                 page.goto(f"http://127.0.0.1:{live_server.server_port}/?t={token}")
                 node = page.locator('.node[data-id="agent:Ollama"]')
                 node.click(timeout=10000)
@@ -503,14 +505,22 @@ def _run_offline(output_root: Path, headed: bool) -> Result:
                     "03-finished.png",
                 )
                 page.screenshot(path=str(run_root / "03-finished.png"))
+                assert diagnostics is not None
+                console_ok = diagnostics.finish(page, run_root)
                 result.check(
                     "JS console",
-                    not console_errors,
-                    "No browser page errors were observed"
-                    if not console_errors
-                    else "; ".join(console_errors),
+                    console_ok,
+                    "No browser console errors or uncaught JavaScript failures were observed"
+                    if console_ok
+                    else "; ".join(diagnostics.errors),
+                    "browser-console.log",
+                    *("FAILURE.png",) if not console_ok else (),
                 )
                 result.observed_requests = 1
+            except Exception:
+                if diagnostics is not None and page is not None:
+                    diagnostics.failure(page, run_root)
+                raise
             finally:
                 browser.close()
     except Exception as exc:
