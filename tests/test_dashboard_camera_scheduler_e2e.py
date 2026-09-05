@@ -161,7 +161,8 @@ def test_fit_camera_executes_during_rapid_delta_burst(tmp_path: Path) -> None:
             page.wait_for_timeout(300)
             endpoint_node.click(timeout=5000)
             details = page.locator("#details").inner_text()
-            assert "network_endpoint" in details
+            assert "ADDRESS" in details
             assert "127.0.0.1:64024" in details
+            assert "REACHED BY" in details
         finally:
             browser.close()
