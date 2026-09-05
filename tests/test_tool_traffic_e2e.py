@@ -16,7 +16,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from test_graph_node_sizing_e2e import _browser, _launch, _render
+
+pytestmark = pytest.mark.viewer_e2e
 
 DIGEST = "cf4186dcf3dae08b9057e6263cefba644ffd5c4ce334505a3bcc8f82faf81608"
 
