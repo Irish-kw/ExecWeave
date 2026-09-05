@@ -232,6 +232,7 @@ def _start_server(server: ThreadingHTTPServer) -> threading.Thread:
 
 
 def _run_offline(output_root: Path, headed: bool) -> Result:
+    output_root = output_root.expanduser().resolve()
     marker = "EW-OFFLINE-" + uuid4().hex[:10].upper()
     done = marker + "-DONE"
     foreign = "EW-FOREIGN-" + uuid4().hex[:10].upper()
