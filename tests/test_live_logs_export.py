@@ -87,6 +87,8 @@ def test_replay_final_fetch_keeps_live_authentication() -> None:
     # the document at completion; authentication remains on the live data channel.
     assert "window.__execweaveToken=liveAuthToken" in _AUTHENTICATED_LIVE_HTML
     assert "X-ExecWeave-Token':liveAuthToken" in _AUTHENTICATED_LIVE_HTML
+    assert '<link rel="icon" href="data:,">' in LIVE_HTML
+    assert '<link rel="icon" href="data:,">' in _AUTHENTICATED_LIVE_HTML
     assert "fetch('/final'" not in _AUTHENTICATED_LIVE_HTML
     assert "location.href='/final'" not in _AUTHENTICATED_LIVE_HTML
     assert "document.write(" not in _AUTHENTICATED_LIVE_HTML
