@@ -4,8 +4,8 @@
 This scenario deliberately does not use the offline semantic fixture. It starts an
 ExecWeave-owned ``ollama serve`` on a fresh loopback endpoint, sends one independent
 real ``ollama run`` client request through the public relay, observes the live
-dashboard in headed Chromium, interrupts the owned live/server process, then checks
-the finished viewer and bounded cleanup.
+dashboard in headed Chromium, then stops only the harness-owned ``ollama serve``
+descendant so ExecWeave can finalize through the wrapped-command exit path.
 
 Unavailable binaries, a missing local model, or an unavailable headed browser are
 reported as SKIP_UNAVAILABLE unless ``--require ollama`` is supplied.
@@ -32,6 +32,8 @@ from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
 from uuid import uuid4
 
+import psutil
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from acceptance.processes import CleanupReport, OwnedProcessTracker  # noqa: E402
 from acceptance.reporting import FEATURES, Result, Status, redact, write_report  # noqa: E402
@@ -41,6 +43,7 @@ _PROVIDER = "ollama"
 _MODE = "visible-live"
 _ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 _LIVE_URL_RE = re.compile(r"ExecWeave live:\s+(http://127\.0\.0\.1:\d+/\?t=[^\s]+)")
+_NETWORK_NODE_TYPE = "network_endpoint"
 
 
 def _free_loopback_port() -> int:
@@ -54,20 +57,84 @@ def _clean_output(value: str) -> str:
     return "\n".join(line.rstrip() for line in value.splitlines()).strip()
 
 
+def _canonical_text(value: str) -> str:
+    return " ".join(_clean_output(value).split())
+
+
+def _final_matches_client_output(final: str, client_output: str) -> bool:
+    expected = _canonical_text(final)
+    observed = _canonical_text(client_output)
+    return bool(expected) and expected in observed
+
+
+def _has_network_evidence(graph: dict[str, Any]) -> bool:
+    nodes = graph.get("nodes", [])
+    return any(
+        isinstance(node, dict) and node.get("type") == _NETWORK_NODE_TYPE
+        for node in nodes
+    )
+
+
 def _process_group_kwargs() -> dict[str, Any]:
     if os.name == "nt":
         return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
     return {"start_new_session": True}
 
 
-def _interrupt(process: subprocess.Popen[str]) -> bool:
+def _is_ollama_serve_descendant(process: psutil.Process) -> bool:
+    try:
+        command = process.cmdline()
+    except psutil.Error:
+        return False
+    if len(command) < 2:
+        return False
+    executable = re.split(r"[\\/]", str(command[0]))[-1].lower()
+    return executable in {"ollama", "ollama.exe"} and any(
+        str(argument).strip().lower() == "serve" for argument in command[1:]
+    )
+
+
+def _stop_owned_ollama_serve(process: subprocess.Popen[str]) -> bool:
+    """Stop only an Ollama serve process currently descended from ``process``.
+
+    The parent Popen is harness-owned and still alive when this is called. Descendant
+    discovery is done at the moment of termination, so a pre-existing/shared Ollama
+    server can never be selected by executable name alone.
+    """
+
     if process.poll() is not None:
         return True
     try:
-        if os.name == "nt":
-            process.send_signal(signal.CTRL_BREAK_EVENT)
-        else:
-            os.killpg(process.pid, signal.SIGINT)
+        parent = psutil.Process(process.pid)
+        descendants = parent.children(recursive=True)
+    except (psutil.Error, OSError, ValueError):
+        return False
+
+    candidates = [child for child in descendants if _is_ollama_serve_descendant(child)]
+    if len(candidates) != 1:
+        return False
+    try:
+        candidates[0].terminate()
+    except psutil.Error:
+        return False
+    return True
+
+
+def _interrupt(process: subprocess.Popen[str]) -> bool:
+    """Request normal finalization of a harness-owned live run.
+
+    POSIX retains the normal terminal SIGINT path. On Windows the G4/G5 harnesses are
+    pipe-backed, so CTRL_BREAK can bypass ExecWeave's normal finalization path. Stop
+    the uniquely owned ``ollama serve`` descendant instead and let the wrapper exit
+    naturally. Interactive Ctrl+C itself is covered by G5's PTY/ConPTY client.
+    """
+
+    if process.poll() is not None:
+        return True
+    if os.name == "nt":
+        return _stop_owned_ollama_serve(process)
+    try:
+        os.killpg(process.pid, signal.SIGINT)
         return True
     except (AttributeError, OSError, ProcessLookupError):
         return False
@@ -162,7 +229,7 @@ def _conversation_text(preview: dict[str, Any]) -> tuple[str, str]:
 
 
 class _PipeCapture:
-    def __init__(self, handle, artifact: Path) -> None:
+    def __init__(self, handle: Any, artifact: Path) -> None:
         self._handle = handle
         self._artifact = artifact
         self.lines: queue.Queue[str] = queue.Queue()
@@ -227,12 +294,7 @@ def _record_cleanup(
     unavailable_reason: str | None,
 ) -> None:
     if cleanup.remaining:
-        _check(
-            result,
-            "Cleanup",
-            False,
-            f"Remaining owned identities: {cleanup.remaining}",
-        )
+        _check(result, "Cleanup", False, f"Remaining owned identities: {cleanup.remaining}")
         return
     if unavailable_reason is None:
         _check(result, "Cleanup", True, "No harness-owned process identity remains")
@@ -289,11 +351,7 @@ def _run_visible(
         "Multi-agent",
         "Single real Ollama root conversation; multi-agent belongs to provider-specific later gates",
     )
-    _skip(
-        result,
-        "Fold state",
-        "Single-round visible G4 scenario; interactive fold persistence belongs to G5",
-    )
+    _skip(result, "Fold state", "Single-round visible G4 scenario; fold persistence belongs to G5")
 
     public_port = _free_loopback_port()
     public_endpoint = f"http://127.0.0.1:{public_port}"
@@ -362,7 +420,6 @@ def _run_visible(
         live_url = live_stdout.wait_for_live_url(timeout=min(timeout, 15.0))
         if not live_url:
             raise AssertionError("ExecWeave live URL was not announced")
-        print("G4 collector: authenticated live dashboard announced", flush=True)
 
         tags = _wait_json(f"{public_endpoint}/api/tags", timeout=min(timeout, 20.0))
         if tags is None:
@@ -406,8 +463,8 @@ def _run_visible(
         tracker.track_pid(client_process.pid)
         try:
             raw_stdout, raw_stderr = client_process.communicate(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            raise AssertionError("independent ollama run client timed out")
+        except subprocess.TimeoutExpired as exc:
+            raise AssertionError("independent ollama run client timed out") from exc
         client_stdout = _clean_output(raw_stdout)
         client_stderr = _clean_output(raw_stderr)
         (run_root / "ollama-client.stdout.txt").write_text(redact(client_stdout), encoding="utf-8")
@@ -418,7 +475,6 @@ def _run_visible(
             )
         if not client_stdout:
             raise AssertionError("independent ollama run returned no visible response")
-        print(f"G4 provider output: {redact(client_stdout[-1200:])}", flush=True)
 
         node = page.locator('.node[data-id="agent:Ollama"]')
         node.wait_for(state="visible", timeout=int(timeout * 1000))
@@ -434,43 +490,34 @@ def _run_visible(
         )
         live_details = page.locator("#details").inner_text()
         live_final = live_details.partition("FINAL RESPONSE\n")[2].strip()
-        _check(
-            result,
-            "Launch",
-            True,
-            "Owned Ollama serve relay, independent client and headed Chromium started",
-        )
-        _check(
-            result,
-            "Prompt",
-            prompt in live_details,
-            "Unique real-client prompt is visible in the live root details",
-        )
+        _check(result, "Launch", True, "Owned relay, independent client and headed Chromium started")
+        _check(result, "Prompt", prompt in live_details, "Unique real-client prompt is visible live")
         _check(
             result,
             "Final",
-            bool(live_final) and live_final != prompt and foreign not in live_final,
-            "Live root has a non-prompt assistant final and no foreign marker",
+            bool(live_final)
+            and live_final != prompt
+            and foreign not in live_final
+            and _final_matches_client_output(live_final, client_stdout),
+            "Live final is non-placeholder evidence contained in independent Ollama client stdout",
             "02-live-final.png",
         )
         _check(result, "/root", True, "Clicked real Ollama agent root at agent_path=/root")
-        same_document = page.evaluate("window.__execweaveG4Document===document")
         final_nodes = page.locator(".node").count()
         _check(
             result,
             "Live update",
-            same_document and final_nodes > initial_nodes,
+            page.evaluate("window.__execweaveG4Document===document") and final_nodes > initial_nodes,
             f"Same document updated without reload; nodes {initial_nodes}->{final_nodes}",
         )
         page.screenshot(path=str(run_root / "02-live-final.png"))
 
         if not _interrupt(live_process):
-            raise AssertionError("could not send bounded interrupt to owned ExecWeave live process")
+            raise AssertionError("could not stop the harness-owned Ollama serve descendant")
         try:
             live_process.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            raise AssertionError("ExecWeave live did not finalize after interrupt")
-        print(f"G4 collector: finalized rc={live_process.returncode}", flush=True)
+        except subprocess.TimeoutExpired as exc:
+            raise AssertionError("ExecWeave live did not finalize after wrapped Ollama serve exit") from exc
 
         for required in (
             "events.jsonl",
@@ -488,34 +535,23 @@ def _run_visible(
             raise AssertionError("graph.json is not an object")
         preview = _root_preview(graph, session_root)
         finished_prompt, finished_final = _conversation_text(preview)
-        _check(
-            result,
-            "Prompt",
-            finished_prompt == prompt,
-            "Finished /root prompt exactly matches the independent Ollama client prompt",
-        )
+        _check(result, "Prompt", finished_prompt == prompt, "Finished prompt exactly matches client prompt")
         _check(
             result,
             "Final",
-            finished_final == live_final and bool(finished_final),
-            "Finished /root final exactly matches the completed live root final",
+            finished_final == live_final
+            and _final_matches_client_output(finished_final, client_stdout),
+            "Finished final equals live final and is grounded in independent client stdout",
         )
 
-        nodes = [node for node in graph.get("nodes", []) if isinstance(node, dict)]
+        nodes = [item for item in graph.get("nodes", []) if isinstance(item, dict)]
+        _check(result, "Process", any(item.get("type") == "process" for item in nodes), "Real process node observed")
         _check(
             result,
-            "Process",
-            any(node.get("type") == "process" for node in nodes),
-            "Real process node observed",
+            "Network",
+            _has_network_evidence(graph),
+            "Real network_endpoint node observed in the finished graph",
         )
-        if any(node.get("type") == "endpoint" for node in nodes):
-            _check(result, "Network", True, "Real endpoint node observed in the finished graph")
-        else:
-            _skip(
-                result,
-                "Network",
-                "Portable network sampling did not observe a stable endpoint in this short run",
-            )
 
         page.goto((session_root / "viewer.html").as_uri())
         finished_node = page.locator('.node[data-id="agent:Ollama"]')
@@ -527,7 +563,7 @@ def _run_visible(
             finished_details == live_details
             and prompt in finished_details
             and finished_final in finished_details,
-            "Finished viewer details equal the completed live details for the same real conversation",
+            "Finished viewer details equal completed live details for the same real conversation",
             "03-finished.png",
         )
         page.screenshot(path=str(run_root / "03-finished.png"))
@@ -541,7 +577,7 @@ def _run_visible(
         result.observed_requests = sum(
             1 for event in sidecar_events if event.get("relation") == "OBSERVED_INFERENCE_RESPONSE"
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - formal report must preserve exact failure
         failure = f"{type(exc).__name__}: {exc}"
         for feature in (
             "Launch",
@@ -550,6 +586,7 @@ def _run_visible(
             "/root",
             "Live update",
             "Process",
+            "Network",
             "Finished viewer",
             "JS console",
         ):
@@ -576,11 +613,7 @@ def _run_visible(
             except subprocess.TimeoutExpired:
                 pass
         tracker.scan_once()
-        cleanup = tracker.cleanup(
-            grace_seconds=0.10,
-            terminate_timeout=2.0,
-            kill_timeout=2.0,
-        )
+        cleanup = tracker.cleanup(grace_seconds=0.10, terminate_timeout=2.0, kill_timeout=2.0)
         _record_cleanup(result, cleanup, unavailable_reason=unavailable_reason)
         if live_stdout is not None:
             live_stdout.join()
