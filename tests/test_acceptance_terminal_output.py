@@ -46,11 +46,34 @@ def test_transcript_does_not_replay_terminal_controls(capsys) -> None:
     assert capsys.readouterr().out == "[OLLAMA] hello\n"
 
 
-def test_oversized_line_never_flushes_partial_secret(capsys) -> None:
+def test_oversized_line_streams_complete_redacted_content(capsys) -> None:
     artifact = io.StringIO()
     transcript = TerminalTranscript(artifact)
-    transcript.feed("Bearer " + "x" * 70000 + "\nnormal\n")
+    left = "x" * 70000
+    right = "y" * 70000
+    transcript.feed("start-" + left + "?to")
+    transcript.feed("ken=private-token&Bearer se")
+    transcript.feed("cret-value " + right + "-done\nnormal\n")
     transcript.close()
-    for text in (artifact.getvalue(), capsys.readouterr().out):
-        assert "omitted" in text and "normal" in text
-        assert "xxx" not in text
+
+    logged = artifact.getvalue()
+    visible = capsys.readouterr().out
+    for text in (logged, visible):
+        assert "omitted" not in text
+        assert "private-token" not in text
+        assert "secret-value" not in text
+        assert "?token=[REDACTED]&Bearer [REDACTED] " in text
+        assert left in text
+        assert right in text
+        assert "normal" in text
+
+
+def test_ansi_sequence_split_across_reads_is_removed(capsys) -> None:
+    artifact = io.StringIO()
+    transcript = TerminalTranscript(artifact)
+    transcript.feed("before\x1b[")
+    transcript.feed("31mred\x1b]0;ti")
+    transcript.feed("tle\x07after\n")
+    transcript.close()
+    assert artifact.getvalue() == "beforeredafter\n"
+    assert capsys.readouterr().out == "[OLLAMA] beforeredafter\n"
