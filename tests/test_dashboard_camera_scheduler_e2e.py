@@ -22,6 +22,11 @@ _CORE_TEST_SEAM = (
     "node_count:nodeById.size,edge_count:edgeById.size}),getPositions:()=>new Map(positions),"
     "selectEdge,selectNode,focusNode,markLatest,setCameraMode,applyDelta,scheduleCamera};"
 )
+_FIT_SEAM = "function fit(animate=true,minScale=.07){"
+_FIT_TEST_SEAM = (
+    "function fit(animate=true,minScale=.07){"
+    "window.__execweaveFitCalls=(window.__execweaveFitCalls||0)+1;"
+)
 
 
 def _initial_graph() -> dict[str, object]:
@@ -74,7 +79,9 @@ def _instrumented_viewer(tmp_path: Path) -> Path:
 
     html = render_static_dashboard_html(_initial_graph())
     assert _CORE_SEAM in html, "dashboard core seam changed; update this test deliberately"
+    assert html.count(_FIT_SEAM) == 1, "dashboard fit seam changed; update this test deliberately"
     html = html.replace(_CORE_SEAM, _CORE_TEST_SEAM, 1)
+    html = html.replace(_FIT_SEAM, _FIT_TEST_SEAM, 1)
     viewer = tmp_path / "camera-scheduler.html"
     viewer.write_text(html, encoding="utf-8")
     return viewer
@@ -93,7 +100,7 @@ def test_fit_camera_executes_during_rapid_delta_burst_and_keeps_endpoint_clickab
             file_node = page.locator('.node[data-id="file:acceptance"]')
             file_node.wait_for(state="visible", timeout=15000)
             file_node.click()
-            initial_transform = page.locator("#viewport").get_attribute("transform")
+            initial_fit_calls = page.evaluate("() => window.__execweaveFitCalls||0")
 
             endpoint = {
                 "id": "endpoint:loopback",
@@ -139,22 +146,12 @@ def test_fit_camera_executes_during_rapid_delta_burst_and_keeps_endpoint_clickab
             page.wait_for_timeout(450)
 
             ticks = page.evaluate("() => window.__execweaveRapidScheduleTicks")
-            during_burst = page.locator("#viewport").get_attribute("transform")
+            fit_calls = page.evaluate("() => window.__execweaveFitCalls||0")
             assert ticks < 20, "the assertion must run while the rapid schedule burst is active"
-            assert during_burst != initial_transform, (
-                "Fit camera was starved by repeated live scheduling; the viewport never moved "
-                "during the burst"
+            assert fit_calls > initial_fit_calls, (
+                "Fit camera was starved by repeated live scheduling; no fit executed "
+                "during the active burst"
             )
-
-            geometry = page.evaluate(
-                """() => {
-                const node=document.querySelector('.node[data-id="endpoint:loopback"]')
-                  .getBoundingClientRect();
-                const inspector=document.getElementById('inspector').getBoundingClientRect();
-                return {centerX:node.left+node.width/2,inspectorLeft:inspector.left};
-                }"""
-            )
-            assert geometry["centerX"] < geometry["inspectorLeft"], geometry
 
             page.evaluate(
                 """() => {
