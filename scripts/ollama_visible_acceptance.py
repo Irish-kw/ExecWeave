@@ -63,8 +63,20 @@ def _canonical_text(value: str) -> str:
 
 def _final_matches_client_output(final: str, client_output: str) -> bool:
     expected = _canonical_text(final)
-    observed = _canonical_text(client_output)
-    return bool(expected) and expected in observed
+    if not expected or expected.lower().rstrip(".") in {"not observed", "placeholder"}:
+        return False
+    lines = _clean_output(client_output).splitlines()
+    # Ollama CLI emits these complete delimiter lines around thinking. An open
+    # thinking block is NOT assistant-final evidence. Never search an arbitrary
+    # substring or take the last line (which would accept truncated multi-line finals).
+    if lines and lines[0] == "Thinking...":
+        try:
+            closing = lines.index("...done thinking.", 1)
+        except ValueError:
+            return False
+        lines = lines[closing + 1:]
+    observed = _canonical_text("\n".join(lines))
+    return expected == observed
 
 
 def _has_network_evidence(graph: dict[str, Any]) -> bool:
@@ -499,7 +511,7 @@ def _run_visible(
             and live_final != prompt
             and foreign not in live_final
             and _final_matches_client_output(live_final, client_stdout),
-            "Live final is non-placeholder evidence contained in independent Ollama client stdout",
+            "Live final equals independent client assistant output after terminal whitespace normalization",
             "02-live-final.png",
         )
         _check(result, "/root", True, "Clicked real Ollama agent root at agent_path=/root")

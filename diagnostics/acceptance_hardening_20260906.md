@@ -107,8 +107,14 @@ syscall reads; macOS sampling permissions/FSEvents limits remain explicit.
 
 Open defects requiring further source hardening/review:
 
-1. G4 final comparison is still substring-based. Prior negative probes accepted
-   `The answer` inside `The answer is 4.` and a placeholder inside thinking text.
+1. G4 final comparison previously accepted substrings. This follow-up now compares
+   the complete normalized assistant output and rejects placeholders and open
+   thinking blocks. The two original negative probes now fail correctly. Thinking
+   framing follows https://raw.githubusercontent.com/ollama/ollama/main/cmd/cmd.go
+   (`Thinking...` / `...done thinking.` complete lines); unknown CLI formats must
+   fail closed pending installed-version native validation. Red: 1 failed/12 passed;
+   green G4/G5 targeted selection: 28 passed. No exact model-answer requirement was
+   substituted for capture fidelity; whitespace normalization permits terminal wrapping.
 2. Windows ConPTY label is not itself backend proof: pywinpty backend selection
    can depend on its environment. Corrected in this checkpoint by explicitly
    passing the nonempty string `"0"` (pywinpty treats integer zero as falsy), plus

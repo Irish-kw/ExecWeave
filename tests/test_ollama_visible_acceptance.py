@@ -34,9 +34,27 @@ def test_network_evidence_uses_native_network_endpoint_type() -> None:
 
 
 def test_final_must_be_grounded_in_independent_client_output() -> None:
-    assert visible._final_matches_client_output("The answer is 4.", "Thinking...\nThe answer is 4.\n")
+    assert visible._final_matches_client_output(
+        "The answer is 4.", "Thinking...\nreasoning\n...done thinking.\n\nThe answer is 4.\n"
+    )
     assert not visible._final_matches_client_output("placeholder", "The answer is 4.")
     assert not visible._final_matches_client_output("", "The answer is 4.")
+
+
+def test_final_comparison_rejects_truncation_thinking_and_placeholders() -> None:
+    assert not visible._final_matches_client_output("The answer", "The answer is 4.")
+    assert not visible._final_matches_client_output("4.", "The answer is 4.")
+    assert not visible._final_matches_client_output(
+        "Not observed", "Thinking: Not observed. Actual final: 4"
+    )
+    assert not visible._final_matches_client_output("Not observed", "Not observed")
+    assert not visible._final_matches_client_output(
+        "The answer is 4.", "Thinking...\nThe answer is 4.\n"
+    )
+    assert not visible._final_matches_client_output(
+        "reasoning", "Thinking...\nreasoning\n...done thinking.\n\n4"
+    )
+    assert visible._final_matches_client_output("The answer is 4.", "The answer\nis 4.\n")
 
 
 def test_windows_finalize_stops_only_owned_ollama_serve_descendant(monkeypatch) -> None:
