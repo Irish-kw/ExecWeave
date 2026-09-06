@@ -18,6 +18,9 @@ from test_graph_node_sizing_e2e import _drawn
 
 pytestmark = pytest.mark.viewer_e2e
 
+_LOCAL_ENDPOINTS = "viewer-cluster:local-endpoints"
+_ORPHAN_FILES = "viewer-cluster:orphan-files"
+
 
 def _spine() -> dict[str, Any]:
     """A root, a subagent, a model and a tool: the execution flow, all connected."""
@@ -45,8 +48,6 @@ def _spine() -> dict[str, Any]:
 def test_files_and_endpoints_no_longer_share_a_column(tmp_path: Path) -> None:
     graph = _spine()
     graph["nodes"].append({"id": "file:1", "type": "file", "name": "notes.md", "attributes": {}})
-    # Loopback is deliberate: public endpoints are viewer-projected into the single
-    # External cluster, which is a separate projection contract from lane placement.
     graph["nodes"].append(
         {"id": "endpoint:1", "type": "network_endpoint", "name": "127.0.0.1:443", "attributes": {}}
     )
@@ -57,8 +58,8 @@ def test_files_and_endpoints_no_longer_share_a_column(tmp_path: Path) -> None:
 
     drawn = {node["id"]: node for node in _drawn(tmp_path, graph)}
     assert drawn["file:1"]["lane"] == "file", drawn["file:1"]
-    assert drawn["endpoint:1"]["lane"] == "endpoint", drawn["endpoint:1"]
-    assert drawn["file:1"]["x"] != drawn["endpoint:1"]["x"], (
+    assert drawn[_LOCAL_ENDPOINTS]["lane"] == "endpoint", drawn[_LOCAL_ENDPOINTS]
+    assert drawn["file:1"]["x"] != drawn[_LOCAL_ENDPOINTS]["x"], (
         f"files and endpoints are still in one column at x={drawn['file:1']['x']}"
     )
 
@@ -67,7 +68,8 @@ def test_each_evidence_lane_starts_at_its_own_first_row(tmp_path: Path) -> None:
     """The lanes shared one row counter, so whichever came second began part-way down.
 
     Checking only that files start at the top cannot see this: files were first in the
-    shared list. Both lanes have to start at the same first row.
+    shared list. Both lanes have to start at the same first row. Loopback endpoint
+    instances are presentation-collapsed, so this checks the Local endpoints lane node.
     """
     graph = _spine()
     for index in range(3):
@@ -91,7 +93,8 @@ def test_each_evidence_lane_starts_at_its_own_first_row(tmp_path: Path) -> None:
     drawn = _drawn(tmp_path, graph)
     files = [node for node in drawn if node["lane"] == "file"]
     endpoints = [node for node in drawn if node["lane"] == "endpoint"]
-    assert len(files) == 3 and len(endpoints) == 2, (files, endpoints)
+    assert len(files) == 3 and len(endpoints) == 1, (files, endpoints)
+    assert endpoints[0]["id"] == _LOCAL_ENDPOINTS, endpoints
     # Dagre may change vertical ordering; this contract is that the two evidence
     # lanes begin independently, not that either one owns a hard-coded canvas origin.
     file_top = min(node["y"] for node in files)
@@ -103,7 +106,7 @@ def test_each_evidence_lane_starts_at_its_own_first_row(tmp_path: Path) -> None:
 
 
 def test_disconnected_evidence_sits_below_the_spine(tmp_path: Path) -> None:
-    """No spine node may share a row band with evidence that cannot reach it."""
+    """No spine node may share a row band with disconnected evidence's viewer cluster."""
     graph = _spine()
     for index in range(6):
         graph["nodes"].append(
@@ -112,20 +115,19 @@ def test_disconnected_evidence_sits_below_the_spine(tmp_path: Path) -> None:
         )
 
     drawn = _drawn(tmp_path, graph)
-    spine = [node for node in drawn if not node["id"].startswith("orphan:")]
-    orphans = [node for node in drawn if node["id"].startswith("orphan:")]
-    assert len(orphans) == 6, orphans
+    by_id = {node["id"]: node for node in drawn}
+    orphan = by_id[_ORPHAN_FILES]
+    spine = [node for node in drawn if node["id"] != _ORPHAN_FILES]
 
     spine_floor = max(node["y"] + node["height"] for node in spine)
-    orphan_top = min(node["y"] for node in orphans)
-    assert orphan_top > spine_floor, (
-        f"disconnected evidence starts at {orphan_top}, inside the spine which ends "
+    assert orphan["y"] > spine_floor, (
+        f"disconnected evidence starts at {orphan['y']}, inside the spine which ends "
         f"at {spine_floor}"
     )
 
 
 def test_a_connected_file_stays_beside_the_spine(tmp_path: Path) -> None:
-    """Connected evidence must stay above the secondary band used for stray evidence."""
+    """Connected evidence must stay above the cluster used for stray evidence."""
     graph = _spine()
     graph["nodes"].append({"id": "file:1", "type": "file", "name": "report.md", "attributes": {}})
     graph["nodes"].append({"id": "orphan:1", "type": "file", "name": "stray.tmp", "attributes": {}})
@@ -133,9 +135,9 @@ def test_a_connected_file_stays_beside_the_spine(tmp_path: Path) -> None:
                            "relation": "WROTE_FILE", "attributes": {}})
 
     drawn = {node["id"]: node for node in _drawn(tmp_path, graph)}
-    assert drawn["file:1"]["y"] < drawn["orphan:1"]["y"], (
+    assert drawn["file:1"]["y"] < drawn[_ORPHAN_FILES]["y"], (
         f"connected evidence was demoted with stray evidence: "
-        f"connected={drawn['file:1']} orphan={drawn['orphan:1']}"
+        f"connected={drawn['file:1']} orphan={drawn[_ORPHAN_FILES]}"
     )
 
 
@@ -160,7 +162,7 @@ def test_a_subagent_is_never_demoted_even_with_no_edge_to_its_root(tmp_path: Pat
 
     drawn = {node["id"]: node for node in _drawn(tmp_path, graph)}
     root = drawn["agent:/root"]
-    orphan = drawn["orphan:1"]
+    orphan = drawn[_ORPHAN_FILES]
     for key, node in drawn.items():
         if not key.startswith("agent:"):
             continue
