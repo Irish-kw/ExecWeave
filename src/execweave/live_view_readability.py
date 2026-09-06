@@ -154,8 +154,35 @@ function execweaveBuildTopology(){
     if(!touching.length)return Number.MAX_SAFE_INTEGER;
     return touching.reduce((sum,edge)=>sum+(childOrder.get(edge.source)||0),0)/touching.length;
   };
+  const rootNodeOrder=new Map(roots.map((node,index)=>[node.id,index]));
+  const rootEdges=edges.filter(edge=>rootNodeOrder.has(edge.source)).sort((a,b)=>execweaveMoment(a).localeCompare(execweaveMoment(b))||edgeId(a).localeCompare(edgeId(b)));
+  const rootEdgeOrder=new Map(rootEdges.map((edge,index)=>[edgeId(edge),index]));
+  const rootFallbackBarycenter=node=>{
+    const rootTouching=edges.filter(edge=>edge.target===node.id&&rootNodeOrder.has(edge.source));
+    if(!rootTouching.length)return Number.MAX_SAFE_INTEGER;
+    if(roots.length>1){
+      const primary=rootTouching.reduce((sum,edge)=>sum+(rootNodeOrder.get(edge.source)||0),0)/rootTouching.length;
+      const secondary=rootTouching.reduce((sum,edge)=>sum+(rootEdgeOrder.get(edgeId(edge))??0),0)/rootTouching.length;
+      return primary*10000+secondary;
+    }
+    return rootTouching.reduce((sum,edge)=>sum+(rootEdgeOrder.get(edgeId(edge))??0),0)/rootTouching.length;
+  };
+  const effectiveBarycentre=node=>{
+    const childTouching=edges.filter(edge=>edge.target===node.id&&childOrder.has(edge.source));
+    if(childTouching.length)return sourceBarycentre(node);
+    const rbc=rootFallbackBarycenter(node);
+    if(rbc!==Number.MAX_SAFE_INTEGER)return rbc;
+    return sourceBarycentre(node);
+  };
+  const effectiveAgentBarycenter=node=>{
+    const childTouching=edges.filter(edge=>edge.target===node.id&&childOrder.has(edge.source));
+    if(childTouching.length)return agentBarycenter(node);
+    const rbc=rootFallbackBarycenter(node);
+    if(rbc!==Number.MAX_SAFE_INTEGER)return rbc;
+    return agentBarycenter(node);
+  };
   const byBarycentre=(a,b)=>{
-    const ab=sourceBarycentre(a),bb=sourceBarycentre(b);
+    const ab=effectiveBarycentre(a),bb=effectiveBarycentre(b);
     return ab!==bb?ab-bb:execweaveStableNodeSort(a,b);
   };
   byLane.get('runtime').sort(execweaveStableNodeSort);
@@ -163,7 +190,7 @@ function execweaveBuildTopology(){
   byLane.get('tool').sort((a,b)=>{
     const ac=/spawn|send|wait|agent/i.test(String(a?.name||execweaveAttrs(a).tool_name||'')),bc=/spawn|send|wait|agent/i.test(String(b?.name||execweaveAttrs(b).tool_name||''));
     if(ac!==bc)return ac?-1:1;
-    const ab=agentBarycenter(a),bb=agentBarycenter(b);if(ab!==bb)return ab-bb;
+    const ab=effectiveAgentBarycenter(a),bb=effectiveAgentBarycenter(b);if(ab!==bb)return ab-bb;
     return execweaveStableNodeSort(a,b);
   });
   const width=new Map(),height=new Map(),widthByLane=new Map(),occupied=new Set();
@@ -268,7 +295,7 @@ function execweaveBuildTopology(){
     list.sort((a,b)=>{const as=spec.get(a.source),bs=spec.get(b.source);return (as?.y??0)-(bs?.y??0)||(as?.rank??0)-(bs?.rank??0)||edgeId(a).localeCompare(edgeId(b))});
     list.forEach((edge,index)=>targetPort.set(edgeId(edge),{index,total:list.length}));
   }
-  return{spec,bundleByEdge,sourcePort,targetPort,routePoints:new Map(),width,height,laneX,crowded:edges.length>=16||nodes.length>=12};
+  return{spec,bundleByEdge,sourcePort,targetPort,routePoints:new Map(),width,height,laneX,crowded:edges.length>=16||nodes.length>=12,sourceBarycentre:effectiveBarycentre,agentBarycenter:effectiveAgentBarycenter,rootFallbackBarycenter};
 }
 function execweaveComponents(nodes,edges){
   const adjacent=new Map();
