@@ -217,17 +217,24 @@ function execweaveBuildTopology(){
     if(primary!==undefined)spineComponents.add(primary);
     const secondary=[...sizes.keys()].filter(value=>!spineComponents.has(value)).sort((a,b)=>a-b);
     if(secondary.length){
-      let floor=-Infinity;
-      for(const [id,value] of componentOf)if(spineComponents.has(value)){const s=spec.get(id);if(s)floor=Math.max(floor,s.y+(height.get(id)||EXECWEAVE_NODE_H))}
-      if(!Number.isFinite(floor))floor=0;
-      for(const value of secondary){
+      let spineFloor=-Infinity,spineLeft=Infinity,spineRight=-Infinity;
+      for(const [id,value] of componentOf)if(spineComponents.has(value)){const s=spec.get(id);if(s){spineFloor=Math.max(spineFloor,s.y+(height.get(id)||EXECWEAVE_NODE_H));spineLeft=Math.min(spineLeft,s.x);spineRight=Math.max(spineRight,s.x+(width.get(id)||EXECWEAVE_NODE_W))}}
+      if(!Number.isFinite(spineFloor))spineFloor=0;
+      if(!Number.isFinite(spineLeft)){spineLeft=0;spineRight=800}
+      const spineWidth=Math.max(600,spineRight-spineLeft);
+      const compBoxes=secondary.map(value=>{
         const members=[...componentOf.entries()].filter(entry=>entry[1]===value).map(entry=>entry[0]);
-        let top=Infinity,bottom=-Infinity;
-        for(const id of members){const s=spec.get(id);if(s){top=Math.min(top,s.y);bottom=Math.max(bottom,s.y+(height.get(id)||EXECWEAVE_NODE_H))}}
-        if(!Number.isFinite(top))continue;
-        const shift=floor+EXECWEAVE_BAND_GAP-top;
-        for(const id of members){const s=spec.get(id);if(s)s.y+=shift}
-        floor=bottom+shift;
+        let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
+        for(const id of members){const s=spec.get(id);if(s){minX=Math.min(minX,s.x);maxX=Math.max(maxX,s.x+(width.get(id)||EXECWEAVE_NODE_W));minY=Math.min(minY,s.y);maxY=Math.max(maxY,s.y+(height.get(id)||EXECWEAVE_NODE_H))}}
+        return{value,members,minX,maxX,minY,maxY,w:maxX-minX,h:maxY-minY};
+      }).filter(box=>Number.isFinite(box.minX));
+      let cursorX=spineLeft,cursorY=spineFloor+EXECWEAVE_BAND_GAP,rowHeight=0;
+      for(const box of compBoxes){
+        if(cursorX>spineLeft&&cursorX+box.w>spineLeft+spineWidth){cursorX=spineLeft;cursorY+=rowHeight+EXECWEAVE_BAND_GAP;rowHeight=0}
+        const shiftX=cursorX-box.minX,shiftY=cursorY-box.minY;
+        for(const id of box.members){const s=spec.get(id);if(s){s.x+=shiftX;s.y+=shiftY}}
+        cursorX+=box.w+EXECWEAVE_BAND_GAP;
+        rowHeight=Math.max(rowHeight,box.h);
       }
     }
   }
