@@ -214,15 +214,24 @@ def _live_graph(page: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _display_graph(page: Any) -> dict[str, Any]:
+    value = page.evaluate(
+        "()=>window.__execweaveCore?.getDisplayGraph?.()"
+        "||window.__execweaveCore?.getGraph?.()||{}"
+    )
+    return value if isinstance(value, dict) else {}
+
+
 def _locator_for_id(page: Any, node_id: str) -> Any:
     return page.locator(".node[data-id=" + json.dumps(node_id, ensure_ascii=False) + "]")
 
 
 def _click_type(page: Any, graph: dict[str, Any], node_type: str, *, timeout: float) -> str:
-    candidates = _nodes_of_type(graph, node_type)
-    if not candidates:
+    raw_candidates = _nodes_of_type(graph, node_type)
+    if not raw_candidates:
         raise AssertionError(f"missing {node_type} evidence")
-    for candidate in candidates:
+
+    for candidate in raw_candidates:
         node_id = str(candidate.get("id") or "")
         locator = _locator_for_id(page, node_id)
         if locator.count():
@@ -230,6 +239,20 @@ def _click_type(page: Any, graph: dict[str, Any], node_type: str, *, timeout: fl
             if not page.locator("#details").inner_text().strip():
                 raise AssertionError(f"{node_type} inspector is empty")
             return node_id
+
+    # Raw identity and dashboard identity are deliberately different after a
+    # presentation-only collapse (for example loopback endpoints -> Local endpoints).
+    # The raw graph above is still the evidence gate; the display graph is used only
+    # to prove that the corresponding projected inspector is actually rendered/clickable.
+    for candidate in _nodes_of_type(_display_graph(page), node_type):
+        node_id = str(candidate.get("id") or "")
+        locator = _locator_for_id(page, node_id)
+        if locator.count():
+            locator.click(timeout=int(timeout * 1000))
+            if not page.locator("#details").inner_text().strip():
+                raise AssertionError(f"projected {node_type} inspector is empty")
+            return node_id
+
     raise AssertionError(f"{node_type} evidence exists but none is rendered")
 
 
