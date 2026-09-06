@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import socket
 import struct
 import sys
@@ -81,7 +82,15 @@ def test_client_reset_during_live_response_is_a_clean_disconnect(tmp_path: Path)
             client.sendall(
                 f"GET /?t={token} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n".encode()
             )
-            client.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("hh", 1, 0))
+            # Winsock exposes ``linger`` as two unsigned shorts; POSIX uses two
+            # ints. Supplying the four-byte Winsock layout to Linux/macOS is an
+            # invalid socket option even though the reset behavior is portable.
+            linger_format = "HH" if os.name == "nt" else "ii"
+            client.setsockopt(
+                socket.SOL_SOCKET,
+                socket.SO_LINGER,
+                struct.pack(linger_format, 1, 0),
+            )
             client.close()
         time.sleep(0.25)
         assert server.unexpected == []
