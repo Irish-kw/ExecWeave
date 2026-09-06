@@ -319,13 +319,16 @@ class _LiveState(_BaseLiveState):
             updated_edges=updated_edges,
         )
 
-    def _projected_graph_locked(self) -> dict[str, object]:
-        raw_graph = (
+    def _raw_graph_locked(self) -> dict[str, object]:
+        graph = (
             dict(self._final_graph)
             if self._finished and self._final_graph is not None
             else self._accumulator.to_dict()
         )
-        projected = project_viewer_graph(raw_graph)
+        return strip_internal_hook_execution_graph(graph)
+
+    def _projected_graph_locked(self) -> dict[str, object]:
+        projected = project_viewer_graph(self._raw_graph_locked())
         if isinstance(projected.get("viewer_projection"), dict):
             self._viewer_projection_ever_active = True
         return projected
@@ -355,9 +358,9 @@ class _LiveState(_BaseLiveState):
         return self._projected_snapshot_locked()
 
     def conversation_index(self, run_root: Path) -> dict[str, object]:
-        """Project the conversation index from the graph observed so far."""
+        """Build conversation ownership from observed evidence, never viewer-only collapse."""
         with self._lock:
-            graph = self._projected_graph_locked()
+            graph = self._raw_graph_locked()
         return conversation_index_payload(graph, run_root)
 
     def _refresh_incremental_locked(self) -> None:
