@@ -159,6 +159,9 @@ jobs:
                 tests/test_codex_hook_lifecycle.py)
                   args+=(--allow-test-change "$path=Codex now documents Interrupt as a first-class lifecycle event; the historical test node ID is retained while its assertion is corrected to the current official contract")
                   ;;
+                tests/test_v069_dashboard_release.py)
+                  args+=(--allow-test-change "$path=README policy is now stable product documentation instead of release notes; the historical test node IDs are retained while assertions require no hard-coded release tags and preserve dashboard/conversation/license anchors")
+                  ;;
                 tests/test_graph_clear_focus_e2e.py|tests/test_graph_edge_routing_e2e.py|tests/test_graph_node_sizing_e2e.py|tests/test_tool_traffic_e2e.py)
                   args+=(--allow-test-change "$path=existing browser assertions are unchanged; the module-level viewer_e2e marker makes the dedicated three-OS browser workflow collect tests that were previously omitted")
                   ;;
