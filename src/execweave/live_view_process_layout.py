@@ -297,6 +297,7 @@ function execweaveRetargetRoutePoints(topo,dagrePlacement){
 function execweaveRestoreSemanticLayoutConstraints(topo,preferred,dagrePlacement){
   if(!topo||!topo.spec||!preferred||!dagrePlacement)return topo;
   if(typeof nodeById==='undefined'||typeof edgeById==='undefined'||typeof execweaveComponents!=='function')return topo;
+  topo.secondaryPackedIds=new Set();
   const nodes=[...nodeById.values()],edges=[...edgeById.values()];
   const componentOf=execweaveComponents(nodes,edges);
 
@@ -468,7 +469,7 @@ function execweaveRestoreSemanticLayoutConstraints(topo,preferred,dagrePlacement
     }
     const shiftX=cursorX-box.minX,shiftY=cursorY-box.minY;
     for(const id of box.members){
-      const s=topo.spec.get(id);if(s){s.x+=shiftX;s.y+=shiftY}
+      const s=topo.spec.get(id);if(s){s.x+=shiftX;s.y+=shiftY;topo.secondaryPackedIds.add(id)}
     }
     cursorX+=box.w+bandGap;
     rowHeight=Math.max(rowHeight,box.h);
@@ -652,7 +653,12 @@ function execweaveWriteDirectedPositions(topo){
   const next=new Map();
   for(const id of nodeById.keys()){
     const spec=topo.spec.get(id);
-    const initialX=(topo.laneX&&spec?.lane&&Number.isFinite(topo.laneX[spec.lane]))?topo.laneX[spec.lane]:spec?.x;
+    const packed=topo.secondaryPackedIds?.has(id);
+    const laneX=(topo.laneX&&spec?.lane&&Number.isFinite(topo.laneX[spec.lane]))?topo.laneX[spec.lane]:spec?.x;
+    // Connected semantic lanes retain their established X contract. Only
+    // disconnected components use the final 2D packing X; forcing those back
+    // to the lane origin would stack every orphan node on the same rectangle.
+    const initialX=packed?spec?.x:laneX;
     next.set(id,spec?{x:initialX,y:spec.y}:execweaveDesiredPosition(id));
   }
   positions=next;layerRows=new Map();

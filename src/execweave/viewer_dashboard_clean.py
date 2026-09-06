@@ -362,7 +362,7 @@ def inject_live_dashboard_clean(html: str) -> str:
         1,
     )
     render_marker = "renderSnapshot();seedActivities();const sortedEdges="
-    render_replacement = "renderSnapshot();for(const [id,y] of priorY){const p=positions.get(id),group=nodeElements.get(id);if(p&&Number.isFinite(y)){p.y=y;if(group)group.setAttribute('transform',`translate(${p.x} ${p.y})`)}}for(const e of edgeById.values())updateEdgeElement(e);seedActivities();const sortedEdges="
+    render_replacement = "renderSnapshot();for(const [id,y] of priorY){const p=positions.get(id);if(p&&Number.isFinite(y))p.y=y}if(typeof execweaveSeparateOverlappingNodes==='function')execweaveSeparateOverlappingNodes({spec:positions});for(const [id,p] of positions){const group=nodeElements.get(id);if(group)group.setAttribute('transform',`translate(${p.x} ${p.y})`)}for(const e of edgeById.values())updateEdgeElement(e);seedActivities();const sortedEdges="
     render_index = html.rfind(render_marker)
     if render_index >= 0:
         html = html[:render_index] + html[render_index:].replace(render_marker, render_replacement, 1)

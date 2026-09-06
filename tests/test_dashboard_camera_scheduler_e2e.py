@@ -238,3 +238,62 @@ def test_selection_owns_camera_and_focus_survives_full_live_snapshot(tmp_path: P
             )
         finally:
             browser.close()
+
+
+def test_delta_vertical_retention_never_reintroduces_node_overlap(tmp_path: Path) -> None:
+    viewer = _instrumented_viewer(tmp_path)
+    manager, executable = _browser()
+    with manager as playwright:
+        browser = _launch(playwright, executable)
+        try:
+            page = browser.new_page(viewport={"width": 1440, "height": 1000})
+            page.goto(viewer.as_uri())
+            page.locator('.node[data-id="file:acceptance"]').wait_for(
+                state="visible", timeout=15000
+            )
+
+            for index in range(2):
+                node_id = f"file:orphan-{index}"
+                page.evaluate(
+                    """update => window.__execweaveCore.applyDelta(update)""",
+                    {
+                        "event_count": 3 + index,
+                        "node_count": 4 + index,
+                        "edge_count": 2,
+                        "nodes_added": [
+                            {
+                                "id": node_id,
+                                "type": "file",
+                                "name": f"orphan-{index}.txt",
+                                "attributes": {},
+                            }
+                        ],
+                        "nodes_updated": [],
+                        "edges_added": [],
+                        "edges_updated": [],
+                    },
+                )
+                page.locator(f'.node[data-id="{node_id}"]').wait_for(
+                    state="visible", timeout=15000
+                )
+
+            boxes = page.locator(".node").evaluate_all(
+                """nodes => nodes.map(node => {
+                  const box = node.getBoundingClientRect();
+                  return {id: node.dataset.id, left: box.left, right: box.right,
+                    top: box.top, bottom: box.bottom};
+                })"""
+            )
+            overlaps = []
+            for index, first in enumerate(boxes):
+                for second in boxes[index + 1 :]:
+                    if (
+                        min(first["right"], second["right"])
+                        > max(first["left"], second["left"])
+                        and min(first["bottom"], second["bottom"])
+                        > max(first["top"], second["top"])
+                    ):
+                        overlaps.append((first["id"], second["id"]))
+            assert overlaps == []
+        finally:
+            browser.close()

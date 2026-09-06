@@ -103,7 +103,14 @@ def test_formal_g6_runner_propagates_console_error_to_gate(
 
     import python_native_acceptance as python_runner
 
-    execweave_bin = shutil.which("execweave")
+    environment_entrypoint = Path(sys.executable).with_name(
+        "execweave.exe" if os.name == "nt" else "execweave"
+    )
+    execweave_bin = (
+        str(environment_entrypoint)
+        if environment_entrypoint.is_file()
+        else shutil.which("execweave")
+    )
     if not execweave_bin:
         if os.environ.get("EXECWEAVE_E2E_REQUIRED"):
             pytest.fail("execweave is required for the formal G6 browser diagnostics journey")
