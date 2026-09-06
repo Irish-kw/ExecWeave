@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import _python_native_acceptance_impl as _impl
@@ -14,8 +15,22 @@ for _name in dir(_impl):
 from acceptance.g6_runner import run_native as _hardened_run_native  # noqa: E402
 from acceptance.interrupt_guard import run_guarded_main  # noqa: E402
 
-_impl._run_native = _hardened_run_native
-_run_native = _hardened_run_native
+
+def _run_native(*, output_root: Path, execweave_bin: str, timeout: float):
+    """Preserve the public diagnostics injection seam around the hardened journey."""
+    original_diagnostics = _impl.BrowserDiagnostics
+    _impl.BrowserDiagnostics = globals()["BrowserDiagnostics"]
+    try:
+        return _hardened_run_native(
+            output_root=output_root,
+            execweave_bin=execweave_bin,
+            timeout=timeout,
+        )
+    finally:
+        _impl.BrowserDiagnostics = original_diagnostics
+
+
+_impl._run_native = _run_native
 
 
 def _required(args: Any) -> set[str]:

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import _dashboard_acceptance_impl as _impl
@@ -12,6 +13,21 @@ for _name in dir(_impl):
         globals()[_name] = getattr(_impl, _name)
 
 from acceptance.interrupt_guard import run_guarded_main  # noqa: E402
+
+_ORIGINAL_RUN_OFFLINE = _impl._run_offline
+
+
+def _run_offline(output_root: Path, headed: bool):
+    """Preserve the public dependency-injection seam used by diagnostics tests."""
+    original_diagnostics = _impl.BrowserDiagnostics
+    _impl.BrowserDiagnostics = globals()["BrowserDiagnostics"]
+    try:
+        return _ORIGINAL_RUN_OFFLINE(output_root, headed)
+    finally:
+        _impl.BrowserDiagnostics = original_diagnostics
+
+
+_impl._run_offline = _run_offline
 
 
 def _required(args: Any) -> set[str]:
