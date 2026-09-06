@@ -11,6 +11,8 @@ from test_graph_node_sizing_e2e import LONG_LABEL, _browser, _launch, _nodes, _r
 
 pytestmark = pytest.mark.viewer_e2e
 
+_ORPHAN_FILES = "viewer-cluster:orphan-files"
+
 
 def _arrange_graph() -> dict[str, Any]:
     return {
@@ -78,7 +80,7 @@ def _assert_constraints(nodes: list[dict[str, Any]]) -> None:
     process = drawn["process:p"]
     root = drawn["agent:/root"]
     connected = drawn["file:connected"]
-    orphan = drawn["file:orphan"]
+    orphan = drawn[_ORPHAN_FILES]
 
     assert process["width"] > 160, "fixture must exercise adaptive lane width"
     assert process["x"] + process["width"] <= root["x"], (
