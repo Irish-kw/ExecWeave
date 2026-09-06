@@ -20,7 +20,7 @@ _CORE_TEST_SEAM = (
     "window.__execweaveCore={getActivities:()=>activities.slice(),getGraph:()=>graph,"
     "getDisplayGraph:()=>({...graph,nodes:[...nodeById.values()],edges:[...edgeById.values()],"
     "node_count:nodeById.size,edge_count:edgeById.size}),getPositions:()=>new Map(positions),"
-    "selectEdge,selectNode,focusNode,markLatest,setCameraMode,applyDelta,scheduleCamera,"
+    "selectEdge,selectNode,focusNode,markLatest,setCameraMode,applyDelta,setSnapshot,scheduleCamera,"
     "getCameraMode:()=>cameraMode};"
 )
 _FIT_SEAM = "function fit(animate=true,minScale=.07){"
@@ -164,5 +164,77 @@ def test_fit_camera_executes_during_rapid_delta_burst(tmp_path: Path) -> None:
             assert "ADDRESS" in details
             assert "127.0.0.1:64024" in details
             assert "REACHED BY" in details
+        finally:
+            browser.close()
+
+
+def test_selection_owns_camera_and_focus_survives_full_live_snapshot(tmp_path: Path) -> None:
+    viewer = _instrumented_viewer(tmp_path)
+    manager, executable = _browser()
+    with manager as playwright:
+        browser = _launch(playwright, executable)
+        try:
+            page = browser.new_page(viewport={"width": 1440, "height": 1000})
+            page.goto(viewer.as_uri())
+            process = page.locator('.node[data-id="process:python"]')
+            process.wait_for(state="visible", timeout=15000)
+
+            page.locator("#zoom-in").click()
+            page.wait_for_timeout(250)
+            process.click()
+            page.wait_for_timeout(250)
+            before = page.evaluate(
+                """() => ({
+                  transform:document.getElementById('viewport').getAttribute('transform'),
+                  selected:[...document.querySelectorAll('.node.selected')].map(n=>n.dataset.id),
+                  dimmed:[...document.querySelectorAll('.node.context-dim')].map(n=>n.dataset.id),
+                  camera:window.__execweaveCore.getCameraMode()
+                })"""
+            )
+            assert before["camera"] == "manual"
+            assert before["selected"] == ["process:python"]
+            assert "file:acceptance" in before["dimmed"]
+
+            updated = _initial_graph()
+            updated["event_count"] = 3
+            updated["node_count"] = 4
+            updated["edge_count"] = 3
+            updated["nodes"].append(
+                {
+                    "id": "endpoint:loopback",
+                    "type": "network_endpoint",
+                    "name": "127.0.0.1:11434",
+                    "attributes": {},
+                }
+            )
+            updated["edges"].append(
+                {
+                    "id": "e-process-endpoint",
+                    "source": "process:python",
+                    "target": "endpoint:loopback",
+                    "relation": "CONNECTED_TO",
+                    "attributes": {},
+                }
+            )
+            page.evaluate("graph => window.__execweaveCore.setSnapshot(graph)", updated)
+            page.wait_for_timeout(450)
+            after = page.evaluate(
+                """() => ({
+                  transform:document.getElementById('viewport').getAttribute('transform'),
+                  selected:[...document.querySelectorAll('.node.selected')].map(n=>n.dataset.id),
+                  dimmed:[...document.querySelectorAll('.node.context-dim')].map(n=>n.dataset.id),
+                  opacities:[...document.querySelectorAll('.node')].map(n=>({id:n.dataset.id,opacity:Number(getComputedStyle(n).opacity)})),
+                  camera:window.__execweaveCore.getCameraMode()
+                })"""
+            )
+
+            assert after["transform"] == before["transform"]
+            assert after["camera"] == "manual"
+            assert after["selected"] == ["process:python"]
+            assert "file:acceptance" in after["dimmed"]
+            assert any(
+                node["id"] == "file:acceptance" and node["opacity"] < 1
+                for node in after["opacities"]
+            )
         finally:
             browser.close()

@@ -405,9 +405,17 @@ function execweaveFocusOneEdge(id){
 const execweaveBaseClearSelection=clearSelection;
 clearSelection=function(){execweaveBaseClearSelection();execweaveClearContextFocus()};
 const execweaveBaseSelectNode=selectNode;
-selectNode=function(id,options={}){execweaveBaseSelectNode(id,options);if(nodeById.has(id))execweaveFocusNodeEdges(id)};
+selectNode=function(id,options={}){
+  if(nodeById.has(id)){userTookCamera();stopAnimation()}
+  execweaveBaseSelectNode(id,options);
+  if(nodeById.has(id))execweaveFocusNodeEdges(id);
+};
 const execweaveBaseSelectEdge=selectEdge;
-selectEdge=function(id,options={}){execweaveBaseSelectEdge(id,options);if(edgeById.has(id))execweaveFocusOneEdge(id)};
+selectEdge=function(id,options={}){
+  if(edgeById.has(id)){userTookCamera();stopAnimation()}
+  execweaveBaseSelectEdge(id,options);
+  if(edgeById.has(id))execweaveFocusOneEdge(id);
+};
 
 // Manual placement and automatic arrangement are complementary. Polling preserves a
 // reader's manual position, while Arrange deliberately throws manual positions away

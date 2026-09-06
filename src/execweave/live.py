@@ -102,14 +102,17 @@ def _handler_factory(state, token: str):
                 self._send(b"Not found", "text/plain; charset=utf-8", 404)
                 return
             with handle:
-                self.send_response(200)
-                self.send_header("Content-Type", content_type)
-                self.send_header("Content-Length", str(size))
-                self.send_header("Cache-Control", "no-store")
-                self.send_header("X-Content-Type-Options", "nosniff")
-                self.send_header("Referrer-Policy", "no-referrer")
-                self.end_headers()
-                shutil.copyfileobj(handle, self.wfile, length=1024 * 1024)
+                try:
+                    self.send_response(200)
+                    self.send_header("Content-Type", content_type)
+                    self.send_header("Content-Length", str(size))
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("X-Content-Type-Options", "nosniff")
+                    self.send_header("Referrer-Policy", "no-referrer")
+                    self.end_headers()
+                    shutil.copyfileobj(handle, self.wfile, length=1024 * 1024)
+                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                    self.close_connection = True
 
         def do_GET(self) -> None:
             parsed = _core.urlsplit(self.path)

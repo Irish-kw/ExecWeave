@@ -48,9 +48,10 @@ def _restore_live_safety_contracts(html: str) -> str:
         1,
     )
     html = html.replace(
-        "for(const n of nodeById.values())createNodeElement(n);applySearch()}",
         "for(const n of nodeById.values())createNodeElement(n);applySearch();"
-        "refreshEdgeLabels()}\n"
+        "restoreSelectionFocus()}",
+        "for(const n of nodeById.values())createNodeElement(n);applySearch();"
+        "refreshEdgeLabels();restoreSelectionFocus()}\n"
         "function refreshEdgeLabels(){for(const e of edgeById.values())updateEdgeElement(e)}",
         1,
     )
@@ -62,8 +63,8 @@ def _restore_live_safety_contracts(html: str) -> str:
     )
 
     html, lzw_count = re.subn(
-        r"function lzw\(indices,minCodeSize=8\)\{.*?\}\nfunction appendBlocks",
-        _SAFE_GIF_LZW + "\nfunction appendBlocks",
+        r"function lzw\(indices,minCodeSize=8\)\{.*?\}\nfunction gifBlocks",
+        _SAFE_GIF_LZW + "\nfunction gifBlocks",
         html,
         count=1,
         flags=re.DOTALL,
