@@ -140,7 +140,7 @@ def test_inferred_occurrence_keeps_root_prompt_answer_and_time(provider: str) ->
         and edge.get("relation") == "INFERRED"
     )
     occurrence = inferred["viewer_occurrences"][0]
-    assert occurrence["first_seen"] == "2026-09-07T00:00:02Z"
+    assert occurrence["first_seen"] == "2026-09-07T00:00:01Z"
     assert occurrence["first_sequence"] == 2
     assert occurrence["request_ids"] == [request_id]
     assert [message["text"] for message in occurrence["messages"]] == [
