@@ -353,6 +353,19 @@ def inject_live_dashboard_clean(html: str) -> str:
         "function applyTransform(){",
         _LIVE_APPLY_DELTA_CLEAN + "\n",
     )
+    # Static viewer deltas rerender the graph, but an incoming upstream node
+    # must not vertically re-pack unrelated existing nodes. Preserve their Y
+    # coordinates while allowing semantic lane X shifts.
+    html = html.replace(
+        "if(protectedMode)leaveProtectiveMode();nodeById=new Map((display.nodes||[]).map(n=>[n.id,n]));",
+        "if(protectedMode)leaveProtectiveMode();const priorY=new Map([...positions].map(([id,p])=>[id,p.y]));nodeById=new Map((display.nodes||[]).map(n=>[n.id,n]));",
+        1,
+    )
+    render_marker = "renderSnapshot();seedActivities();const sortedEdges="
+    render_replacement = "renderSnapshot();for(const [id,y] of priorY){const p=positions.get(id),group=nodeElements.get(id);if(p&&Number.isFinite(y)){p.y=y;if(group)group.setAttribute('transform',`translate(${p.x} ${p.y})`)}}for(const e of edgeById.values())updateEdgeElement(e);seedActivities();const sortedEdges="
+    render_index = html.rfind(render_marker)
+    if render_index >= 0:
+        html = html[:render_index] + html[render_index:].replace(render_marker, render_replacement, 1)
     html = html.replace(_LIVE_CORE_EXPORT, _LIVE_CORE_EXPORT_CLEAN, 1)
     html = html.replace(_LIVE_NOOP_STATS, _LIVE_NOOP_STATS_CLEAN, 1)
     html = html.replace(
