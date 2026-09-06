@@ -32,7 +32,7 @@ const EXECWEAVE_LANE_ORDER=['runtime','root','agent','model','tool','file','endp
 // The gap that follows each lane. These are the differences in the fixed table this
 // replaced, so a graph whose labels all fit the minimum width lands on exactly the
 // x positions it did before: 0, 270, 540, 820, 1100, 1380.
-const EXECWEAVE_LANE_GAP={runtime:110,root:110,agent:120,model:120,tool:120,file:120};
+const EXECWEAVE_LANE_GAP={runtime:110,root:110,agent:120,model:120,tool:120,file:120,endpoint:120,other:120};
 // A component with no path to the execution spine is packed below it rather than
 // interleaved with it, so its rows never sit between two nodes that talk to each other.
 const EXECWEAVE_BAND_GAP=170;
@@ -440,13 +440,11 @@ const execweaveBaseClearSelection=clearSelection;
 clearSelection=function(){execweaveBaseClearSelection();execweaveClearContextFocus()};
 const execweaveBaseSelectNode=selectNode;
 selectNode=function(id,options={}){
-  if(nodeById.has(id)){userTookCamera();stopAnimation()}
   execweaveBaseSelectNode(id,options);
   if(nodeById.has(id))execweaveFocusNodeEdges(id);
 };
 const execweaveBaseSelectEdge=selectEdge;
 selectEdge=function(id,options={}){
-  if(edgeById.has(id)){userTookCamera();stopAnimation()}
   execweaveBaseSelectEdge(id,options);
   if(edgeById.has(id))execweaveFocusOneEdge(id);
 };

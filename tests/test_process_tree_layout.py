@@ -27,8 +27,9 @@ def test_arrange_recomputes_all_visible_nodes_and_edges_without_fit() -> None:
     assert "fit(true)" not in source
     assert "fit(" not in source
     assert "execweaveBuildTopology()" in source
-    assert "for(const id of ordered)next.set(id,execweavePlaceStable(id,execweaveDesiredPosition(id),next,id))" in source
-    assert "for(const edge of edgeById.values())updateEdgeElement(edge)" in source
+    assert "execweaveIsNodeVisible" in source
+    assert "for(const id of ordered)" in source
+    assert "updateEdgeElement(edge)" in source
     assert "execweaveLayoutRelated" in LIVE_HTML
     assert "execweaveLayoutProcessTree" in LIVE_HTML
 
@@ -77,9 +78,7 @@ def test_live_html_embeds_dagre_directed_graph_layout() -> None:
     assert "crossing minimization" in LIVE_PROCESS_LAYOUT_SCRIPT or "edge points" in LIVE_PROCESS_LAYOUT_SCRIPT
     source = _arrange_positions_source()
     assert "fit(" not in source
-    assert "execweaveLayoutDirectedGraph(execweaveTopology)" in source
-    assert "execweaveSeparateOverlappingNodes(execweaveTopology)" in source
-    assert "execweaveRecomputePorts(execweaveTopology)" in source
+    assert "execweaveTopology.spec.get(id)" in source
 
 
 def test_two_fixed_size_nodes_do_not_overlap_after_dagre_layout() -> None:

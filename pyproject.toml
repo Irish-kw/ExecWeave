@@ -95,6 +95,7 @@ packages = ["src/execweave"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src"]
 markers = [
   "viewer_e2e: drives a shipped viewer in a real browser; needs playwright and chromium",
 ]
