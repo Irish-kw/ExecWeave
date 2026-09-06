@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from . import _dashboard_shell_base as _base
+from . import viewer_projection_base as _viewer_projection_base
+from .viewer_semantic_projection import project_provider_neutral_viewer_graph
 
 
 def _route_bundle_edges_on_ordered_rails(html: str) -> str:
@@ -149,14 +151,69 @@ def _preserve_readable_initial_camera(html: str) -> str:
     )
 
 
-# Patch the shared shell after all existing semantic-layout injections have run. The
-# base renderer function reads its module-global DASHBOARD_HTML at call time, so static
-# viewer.html and live mode both consume the same patched document.
-_base.DASHBOARD_HTML = _defer_camera_takeover_until_node_drag(
-    _preserve_readable_initial_camera(
-        _avoid_camera_fit_starvation(
-            _start_in_fit_camera_mode(
-                _route_bundle_edges_on_ordered_rails(_base.DASHBOARD_HTML)
+def _surface_provider_neutral_clusters(html: str) -> str:
+    """Expose collapsed files and model-call chronology in the shared inspector."""
+    helper_seam = "function nodeCards(node){"
+    if html.count(helper_seam) != 1:
+        raise RuntimeError("agent panel nodeCards seam changed")
+    helper = r"""
+function execweaveInferenceHistory(a){
+  const rows=Array.isArray(a.viewer_inference_occurrences)?a.viewer_inference_occurrences:[];
+  return rows.slice().sort((x,y)=>String(x?.first_seen||'').localeCompare(String(y?.first_seen||''))).map((item,index)=>{
+    const messages=Array.isArray(item?.messages)?item.messages:[];
+    const user=messages.find(message=>String(message?.sender||'')==='user'||/user|request|prompt/i.test(String(message?.kind||'')));
+    const answers=messages.filter(message=>String(message?.phase||'')==='final_answer'||String(message?.sender||'')==='assistant'||/assistant|response|final/i.test(String(message?.kind||'')));
+    const answer=answers.length?answers[answers.length-1]:null;
+    const refs=Array.isArray(item?.content_references)?item.content_references:[];
+    const when=moment(item?.first_seen||item?.last_seen);
+    const head=[when,`call ${index+1}`].filter(Boolean).join(' · ');
+    const lines=[head];
+    if(user?.text)lines.push(`Prompt: ${user.text}`);
+    if(answer?.text)lines.push(`Answer: ${answer.text}`);
+    if(!user?.text&&!answer?.text&&refs.length)lines.push(`Evidence: ${refs.map(ref=>ref?.content_kind||ref?.relation||ref?.id).filter(Boolean).join(', ')}`);
+    return lines.join('\n');
+  }).join('\n\n');
+}
+function execweaveFileClusterHistory(a){
+  const rows=Array.isArray(a.entries)?a.entries:[];
+  return rows.slice().sort((x,y)=>String(x?.path||'').localeCompare(String(y?.path||''))).map(item=>{
+    const when=moment(item?.last_seen||item?.first_seen),kind=String(item?.type||'file');
+    return [when,kind,item?.path||item?.name||item?.id].filter(Boolean).join(' · ');
+  }).join('\n');
+}
+""" + helper_seam
+    html = html.replace(helper_seam, helper, 1)
+
+    branch_seam = """  }else if(kind==='file'){
+    add('Path',node?.name);
+    add('Observed',fileHistory(String(node?.id||'')));
+  }else if(kind==='tool_call'){"""
+    branch_replacement = """  }else if(kind==='file'){
+    add('Path',node?.name);
+    add('Observed',fileHistory(String(node?.id||'')));
+  }else if(kind==='file_cluster'){
+    add('Files / directories',`${Number(a.member_count||0)} collapsed entries`);
+    add('Observed',execweaveFileClusterHistory(a));
+  }else if(kind==='model'){
+    add('Model',node?.name);
+    add('Provider',a.provider||a.provider_name);
+    add('Inference calls',a.viewer_inference_count);
+    add('Inference history',execweaveInferenceHistory(a));
+  }else if(kind==='tool_call'){"""
+    if html.count(branch_seam) != 1:
+        raise RuntimeError("agent panel file/model branch seam changed")
+    return html.replace(branch_seam, branch_replacement, 1)
+
+
+_viewer_projection_base.project_viewer_graph = project_provider_neutral_viewer_graph
+
+_base.DASHBOARD_HTML = _surface_provider_neutral_clusters(
+    _defer_camera_takeover_until_node_drag(
+        _preserve_readable_initial_camera(
+            _avoid_camera_fit_starvation(
+                _start_in_fit_camera_mode(
+                    _route_bundle_edges_on_ordered_rails(_base.DASHBOARD_HTML)
+                )
             )
         )
     )
