@@ -63,11 +63,13 @@ def _roots(nodes: list[dict[str, Any]], entries: list[dict[str, Any]]) -> tuple[
 
 def _components(ids: set[str], edges: list[dict[str, Any]]) -> list[list[str]]:
     parent = {value: value for value in ids}
+
     def find(value: str) -> str:
         while parent[value] != value:
             parent[value] = parent[parent[value]]
             value = parent[value]
         return value
+
     for edge in edges:
         if edge.get("relation") != "SAME_INFERENCE_REQUEST":
             continue
@@ -177,6 +179,7 @@ def collapse_inference_requests(nodes: list[dict[str, Any]], edges: list[dict[st
             "messages": _messages(matches), "content_references": refs,
         })
     hidden = set(request_ids)
+    # Content attached only to hidden request evidence is inspector evidence, not a main graph node.
     for content_id in list(hidden_content):
         incident = [edge for edge in edges if edge.get("source") == content_id or edge.get("target") == content_id]
         if all((edge.get("source") in request_ids or edge.get("target") in request_ids) for edge in incident):
@@ -211,9 +214,11 @@ def collapse_orphan_files(nodes: list[dict[str, Any]], edges: list[dict[str, Any
     degree: dict[str, int] = defaultdict(int)
     for edge in edges:
         for value in (edge.get("source"), edge.get("target")):
-            if isinstance(value, str): degree[value] += 1
+            if isinstance(value, str):
+                degree[value] += 1
     members = [node for node in nodes if node.get("type") in {"file", "directory"} and isinstance(node.get("id"), str) and degree.get(str(node["id"]), 0) == 0]
-    if not members: return nodes, edges, None
+    if not members:
+        return nodes, edges, None
     entries = [{"id": n.get("id"), "type": n.get("type"), "name": n.get("name"), "path": _file_path(n), "first_seen": n.get("first_seen"), "last_seen": n.get("last_seen"), "event_count": int(n.get("event_count") or 0), "event_types": list(n.get("event_types") or [])} for n in sorted(members, key=_file_path)]
     first = min((str(n.get("first_seen")) for n in members if n.get("first_seen")), default=None)
     last = max((str(n.get("last_seen")) for n in members if n.get("last_seen")), default=None)
@@ -232,7 +237,8 @@ def orphan_audit(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> di
     degree: dict[str, int] = defaultdict(int)
     for edge in edges:
         for value in (edge.get("source"), edge.get("target")):
-            if isinstance(value, str): degree[value] += 1
+            if isinstance(value, str):
+                degree[value] += 1
     grouped: dict[str, list[str]] = defaultdict(list)
     for node in nodes:
         node_id = node.get("id")
@@ -266,7 +272,8 @@ def project_provider_neutral_viewer_graph(graph: dict[str, Any]) -> dict[str, An
         for node in nodes:
             node_id = node.get("id")
             if not isinstance(node_id, str) or node_id not in per_model:
-                rewritten.append(node); continue
+                rewritten.append(node)
+                continue
             occurrences = sorted(per_model[node_id], key=lambda item: (str(item.get("first_seen") or ""), item.get("first_sequence") if isinstance(item.get("first_sequence"), int) else 2**63 - 1))
             rewritten.append({**node, "attributes": {**_attrs(node), "viewer_inference_occurrences": occurrences, "viewer_inference_count": len(occurrences)}})
         nodes = rewritten
@@ -284,10 +291,14 @@ def project_provider_neutral_viewer_graph(graph: dict[str, Any]) -> dict[str, An
     })
     payload = deepcopy(result.get("expansion")) if isinstance(result.get("expansion"), dict) else {}
     clusters = deepcopy(payload.get("clusters")) if isinstance(payload.get("clusters"), dict) else {}
-    if local: clusters[LOCAL_NODE_ID] = local
-    if files: clusters[ORPHAN_FILES_NODE_ID] = files
+    if local:
+        clusters[LOCAL_NODE_ID] = local
+    if files:
+        clusters[ORPHAN_FILES_NODE_ID] = files
     if clusters:
-        payload.setdefault("schema_version", "0.1"); payload["clusters"] = clusters; result["expansion"] = payload
+        payload.setdefault("schema_version", "0.1")
+        payload["clusters"] = clusters
+        result["expansion"] = payload
     meta["orphan_audit"] = orphan_audit(nodes, edges)
     result["viewer_projection"] = meta
     return result
