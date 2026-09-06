@@ -5,8 +5,6 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from acceptance.interrupt_guard import run_guarded_main  # noqa: E402
 
@@ -39,9 +37,9 @@ def test_keyboard_interrupt_persists_fail_report_in_created_run(tmp_path: Path) 
     assert summary["results"][0]["checks"]["Launch"]["status"] == "FAIL"
     assert summary["results"][0]["checks"]["Cleanup"]["status"] == "FAIL"
     assert (run_root / "report.html").is_file()
-    assert "must not be used as PASS evidence" in (run_root / "INTERRUPTED.txt").read_text(
-        encoding="utf-8"
-    )
+    assert "must not be used as PASS evidence" in (
+        run_root / "INTERRUPTED.txt"
+    ).read_text(encoding="utf-8")
 
 
 def test_normal_main_status_is_unchanged(tmp_path: Path) -> None:

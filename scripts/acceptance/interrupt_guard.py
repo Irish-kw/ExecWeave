@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from acceptance.reporting import Result, Status, write_report
+from acceptance.reporting import Result, write_report
 
 
 def _snapshot_directories(root: Path) -> set[Path]:
@@ -85,4 +85,4 @@ def run_guarded_main(
                 separators=(",", ":"),
             )
         )
-        return 1 if summary["status"] == Status.FAIL.value else 1
+        return 1
