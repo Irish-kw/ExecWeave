@@ -7,7 +7,10 @@ import pytest
 
 from execweave.viewer_external_endpoints import EXTERNAL_NODE_ID, LOCAL_NODE_ID
 from execweave.viewer_projection import project_viewer_graph
-from execweave.viewer_semantic_projection import ORPHAN_FILES_NODE_ID
+from execweave.viewer_semantic_projection import (
+    ORPHAN_FILES_NODE_ID,
+    collapse_inference_requests,
+)
 
 ALL_PROVIDERS = (
     "claude", "codex", "antigravity", "cursor", "opencode", "ollama",
@@ -86,6 +89,68 @@ def test_model_switches_keep_chronological_inference_occurrences(provider: str) 
     assert [item["request_ids"][0] for item in inferred[f"model:{provider}:model-a"]["viewer_occurrences"]] == [f"inference-request:{provider}:req-1", f"inference-request:{provider}:req-3"]
 
 
+@pytest.mark.parametrize("provider", PROVIDERS)
+def test_inferred_occurrence_keeps_root_prompt_answer_and_time(provider: str) -> None:
+    """Every provider keeps conversation content on /root while request evidence stays hidden."""
+    graph = _graph(provider)
+    root_id = f"agent:{provider}:root"
+    request_id = f"inference-request:{provider}:req-1"
+    model_id = f"model:{provider}:model-a"
+    entries = [
+        {
+            "provider": provider,
+            "source_id": root_id,
+            "evidence_source_id": request_id,
+            "evidence_source_type": "inference_request",
+            "conversation_preview": {
+                "agent_path": "/root",
+                "is_root": True,
+                "messages": [
+                    {
+                        "timestamp": "2026-09-07T00:00:01Z",
+                        "ordinal": 1,
+                        "kind": "user_message",
+                        "sender": "user",
+                        "recipient": "/root",
+                        "phase": None,
+                        "text": f"{provider} prompt",
+                    },
+                    {
+                        "timestamp": "2026-09-07T00:00:02Z",
+                        "ordinal": 2,
+                        "kind": "assistant_final_response",
+                        "sender": "assistant",
+                        "recipient": "user",
+                        "phase": "final_answer",
+                        "text": f"{provider} answer",
+                    },
+                ],
+            },
+        }
+    ]
+    nodes, edges, metadata = collapse_inference_requests(
+        copy.deepcopy(graph["nodes"]), copy.deepcopy(graph["edges"]), entries
+    )
+    assert not any(node.get("type") == "inference_request" for node in nodes)
+    inferred = next(
+        edge
+        for edge in edges
+        if edge.get("source") == root_id
+        and edge.get("target") == model_id
+        and edge.get("relation") == "INFERRED"
+    )
+    occurrence = inferred["viewer_occurrences"][0]
+    assert occurrence["first_seen"] == "2026-09-07T00:00:02Z"
+    assert occurrence["first_sequence"] == 2
+    assert occurrence["request_ids"] == [request_id]
+    assert [message["text"] for message in occurrence["messages"]] == [
+        f"{provider} prompt",
+        f"{provider} answer",
+    ]
+    assert entries[0]["conversation_preview"]["agent_path"] == "/root"
+    assert metadata["unresolved"] == []
+
+
 def test_same_inference_request_gateway_runtime_pair_counts_once() -> None:
     graph = _graph("ollama")
     gateway = {"id": "inference-request:openrouter:shared", "type": "inference_request", "name": "shared", "attributes": {"provider": "openrouter"}}
@@ -118,6 +183,7 @@ def test_remaining_orphan_types_are_reported_in_projection_metadata() -> None:
 
 def test_shared_dashboard_surfaces_inference_and_file_clusters() -> None:
     from execweave.dashboard_shell import DASHBOARD_HTML
+
     assert "execweaveInferenceHistory" in DASHBOARD_HTML
     assert "kind==='model'" in DASHBOARD_HTML
     assert "kind==='file_cluster'" in DASHBOARD_HTML
