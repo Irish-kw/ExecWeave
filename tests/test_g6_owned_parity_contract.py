@@ -4,7 +4,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from acceptance.g6_runner import validate_owned_evidence  # noqa: E402
+from acceptance.g6_runner import apply_cleanup_failures, validate_owned_evidence  # noqa: E402
+from acceptance.reporting import Result, Status  # noqa: E402
 
 
 def _graph(*, create_time: float = 12.5, with_edge: bool = True) -> dict:
@@ -80,3 +81,11 @@ def test_g6_finished_graph_must_retain_live_os_evidence() -> None:
     assert process_ok
     assert network_ok
     assert not parity_ok
+
+
+def test_g6_cleanup_instrumentation_is_fail_closed() -> None:
+    result = Result("python", "native-os-only", "EW-X", "linux")
+    result.check("Cleanup", True, "initial cleanup looked successful")
+    apply_cleanup_failures(result, ["browser close failed: fixture"])
+    assert result.checks["Cleanup"].status == Status.FAIL
+    assert result.status == Status.FAIL

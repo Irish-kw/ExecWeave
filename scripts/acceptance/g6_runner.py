@@ -1,4 +1,4 @@
-"""Post-validate G6 with exact owned-process and live/finished evidence parity."""
+"""Post-validate G6 with exact ownership, cleanup, and live/finished parity."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import _python_native_acceptance_impl as impl
-from acceptance.reporting import Status
+from acceptance.reporting import Result, Status, redact
 
 _ORIGINAL_RUN_NATIVE = impl._run_native
 _ORIGINAL_CHILD_PROGRAM = impl._child_program
@@ -111,6 +111,16 @@ def validate_owned_evidence(
     return process_ok, network_ok, parity_ok, detail
 
 
+def apply_cleanup_failures(result: Result, errors: list[str]) -> None:
+    if errors:
+        result.check(
+            "Cleanup",
+            False,
+            "G6 cleanup or transcript reader failed",
+            *errors,
+        )
+
+
 def run_native(
     *,
     output_root: Path,
@@ -120,14 +130,59 @@ def run_native(
     """Run the existing journey, then fail closed on weak ownership/parity evidence."""
 
     captured_live: list[dict[str, Any]] = []
+    cleanup_errors: list[str] = []
 
     def capture_live(page: Any) -> dict[str, Any]:
         graph = _ORIGINAL_LIVE_GRAPH(page)
         captured_live.append(graph)
         return graph
 
+    original_join = impl._LineCapture.join
+
+    def tracked_join(capture: Any) -> None:
+        try:
+            original_join(capture)
+        except (Exception, KeyboardInterrupt) as exc:  # noqa: BLE001
+            cleanup_errors.append(redact(f"transcript reader join failed: {exc}"))
+            return
+        thread = getattr(capture, "_thread", None)
+        if thread is not None and thread.is_alive():
+            cleanup_errors.append("transcript reader thread did not stop within bound")
+
+    browser_cls: Any = None
+    playwright_cls: Any = None
+    original_browser_close: Any = None
+    original_playwright_stop: Any = None
+    try:
+        from playwright.sync_api import Browser, Playwright
+
+        browser_cls = Browser
+        playwright_cls = Playwright
+        original_browser_close = Browser.close
+        original_playwright_stop = Playwright.stop
+
+        def tracked_browser_close(browser: Any, *args: Any, **kwargs: Any):
+            try:
+                return original_browser_close(browser, *args, **kwargs)
+            except (Exception, KeyboardInterrupt) as exc:  # noqa: BLE001
+                cleanup_errors.append(redact(f"browser close failed: {exc}"))
+                raise
+
+        def tracked_playwright_stop(playwright: Any, *args: Any, **kwargs: Any):
+            try:
+                return original_playwright_stop(playwright, *args, **kwargs)
+            except (Exception, KeyboardInterrupt) as exc:  # noqa: BLE001
+                cleanup_errors.append(redact(f"Playwright stop failed: {exc}"))
+                raise
+
+        Browser.close = tracked_browser_close
+        Playwright.stop = tracked_playwright_stop
+    except ImportError:
+        pass
+
     impl._child_program = _child_program
     impl._live_graph = capture_live
+    impl._LineCapture.join = tracked_join
     try:
         result = _ORIGINAL_RUN_NATIVE(
             output_root=output_root,
@@ -137,7 +192,13 @@ def run_native(
     finally:
         impl._child_program = _ORIGINAL_CHILD_PROGRAM
         impl._live_graph = _ORIGINAL_LIVE_GRAPH
+        impl._LineCapture.join = original_join
+        if browser_cls is not None and original_browser_close is not None:
+            browser_cls.close = original_browser_close
+        if playwright_cls is not None and original_playwright_stop is not None:
+            playwright_cls.stop = original_playwright_stop
 
+    apply_cleanup_failures(result, cleanup_errors)
     if result.status == Status.SKIP_UNAVAILABLE:
         return result
 
