@@ -320,12 +320,11 @@ class _LiveState(_BaseLiveState):
         )
 
     def _raw_graph_locked(self) -> dict[str, object]:
-        graph = (
+        return (
             dict(self._final_graph)
             if self._finished and self._final_graph is not None
             else self._accumulator.to_dict()
         )
-        return strip_internal_hook_execution_graph(graph)
 
     def _projected_graph_locked(self) -> dict[str, object]:
         projected = project_viewer_graph(self._raw_graph_locked())
