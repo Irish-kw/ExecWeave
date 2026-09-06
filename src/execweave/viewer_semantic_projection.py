@@ -165,8 +165,18 @@ def collapse_inference_requests(nodes: list[dict[str, Any]], edges: list[dict[st
             unresolved.append({"request_ids": sorted(members), "reason": "missing_owner" if owner is None else "missing_model"})
             continue
         related = [edge for edge in edges if edge.get("source") in members or edge.get("target") in members]
-        first_seen = min((str(edge.get("first_seen")) for edge in related if edge.get("first_seen")), default=None)
-        last_seen = max((str(edge.get("last_seen")) for edge in related if edge.get("last_seen")), default=None)
+        first_seen_values = [
+            str(node_by_id[value].get("first_seen"))
+            for value in members
+            if node_by_id[value].get("first_seen")
+        ] + [str(edge.get("first_seen")) for edge in related if edge.get("first_seen")]
+        last_seen_values = [
+            str(node_by_id[value].get("last_seen"))
+            for value in members
+            if node_by_id[value].get("last_seen")
+        ] + [str(edge.get("last_seen")) for edge in related if edge.get("last_seen")]
+        first_seen = min(first_seen_values, default=None)
+        last_seen = max(last_seen_values, default=None)
         seqs = [edge.get("first_sequence") for edge in related if isinstance(edge.get("first_sequence"), int)]
         last_seqs = [edge.get("last_sequence") for edge in related if isinstance(edge.get("last_sequence"), int)]
         refs = _content_refs(members, edges, node_by_id)
@@ -280,14 +290,31 @@ def project_provider_neutral_viewer_graph(graph: dict[str, Any]) -> dict[str, An
 
     result = deepcopy(filtered)
     result.update({"nodes": nodes, "edges": edges, "node_count": len(nodes), "edge_count": len(edges)})
+    audit = orphan_audit(nodes, edges)
+    topology_changed = bool(
+        hook_nodes
+        or hook_edges
+        or inference["collapsed_request_count"]
+        or local is not None
+        or files is not None
+    )
+    if not topology_changed:
+        if audit["count"]:
+            result["viewer_orphan_audit"] = audit
+        return result
+
     meta = dict(result.get("viewer_projection") or {"schema_version": "0.1", "viewer_only": True})
+    semantic_projection = bool(inference["collapsed_request_count"] or local is not None or files is not None)
     meta.update({
-        "kind": "provider_neutral_semantics", "local_endpoint_policy": "all_loopback",
+        "kind": "provider_neutral_semantics" if semantic_projection else "internal_hook_processes",
+        "local_endpoint_policy": "all_loopback",
         "local_endpoint_count": len(local.get("nodes") or []) if local else 0,
+        "cluster_count": (1 if local else 0) + (1 if files else 0),
         "orphan_file_node_count": len(files.get("nodes") or []) if files else 0,
         "inference_request_count": inference["collapsed_request_count"], "logical_inference_count": inference["logical_inference_count"],
         "direct_inference_edge_count": inference["direct_inference_edge_count"], "unresolved_inference_requests": inference["unresolved"],
         "internal_hook_node_count": len(hook_nodes), "internal_hook_edge_count": len(hook_edges),
+        "projection_topology_changed": True,
     })
     payload = deepcopy(result.get("expansion")) if isinstance(result.get("expansion"), dict) else {}
     clusters = deepcopy(payload.get("clusters")) if isinstance(payload.get("clusters"), dict) else {}
@@ -299,6 +326,7 @@ def project_provider_neutral_viewer_graph(graph: dict[str, Any]) -> dict[str, An
         payload.setdefault("schema_version", "0.1")
         payload["clusters"] = clusters
         result["expansion"] = payload
-    meta["orphan_audit"] = orphan_audit(nodes, edges)
+    meta["orphan_audit"] = audit
+    result["viewer_orphan_audit"] = audit
     result["viewer_projection"] = meta
     return result
