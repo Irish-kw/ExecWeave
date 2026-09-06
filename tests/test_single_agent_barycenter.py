@@ -6,8 +6,6 @@ from pathlib import Path
 import tempfile
 from typing import Any
 
-import pytest
-
 from execweave.dashboard_shell import DASHBOARD_HTML
 from execweave.live_view import LIVE_HTML
 from execweave.live_view_readability import LIVE_READABILITY_SCRIPT

@@ -246,7 +246,6 @@ class NodePlacement:
 
 def execweave_build_topology(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> dict[str, Any]:
     node_by_id = {n["id"]: n for n in nodes if "id" in n}
-    edge_by_id = {e["id"]: e for e in edges if "id" in e}
 
     spawn_for: dict[str, dict[str, Any]] = {}
     for edge in edges:

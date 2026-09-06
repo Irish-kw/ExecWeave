@@ -11,12 +11,6 @@ Verifies:
 from __future__ import annotations
 
 import re
-from typing import Any
-
-import pytest
-
-from execweave.live_view import LIVE_HTML
-from execweave.live_view_markup import LIVE_MARKUP
 from execweave.live_view_script_a import LIVE_SCRIPT_A
 from execweave.live_view_script_b import LIVE_SCRIPT_B
 from execweave.live_view_style import LIVE_STYLE

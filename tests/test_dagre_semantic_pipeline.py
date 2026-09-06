@@ -6,8 +6,6 @@ import subprocess
 import tempfile
 from typing import Any
 
-import pytest
-
 from execweave.dashboard_shell import DASHBOARD_HTML
 from execweave.live_view import LIVE_HTML
 from execweave.live_view_process_layout import LIVE_PROCESS_LAYOUT_SCRIPT

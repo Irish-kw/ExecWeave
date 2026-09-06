@@ -15,7 +15,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
-from measure_graph_metrics import (
+from measure_graph_metrics import (  # noqa: E402
     FIXTURE_FACTORIES,
     evaluate_graph_metrics,
 )
