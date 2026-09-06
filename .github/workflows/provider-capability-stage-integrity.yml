@@ -183,6 +183,12 @@ jobs:
                 tests/test_external_endpoints_all_providers.py)
                   args+=(--allow-test-change "$path=loopback endpoint presentation intentionally changed from individual raw nodes to one provider-neutral Local endpoints cluster while External behavior remains; historical test node IDs are retained and raw endpoint evidence is unchanged")
                   ;;
+                tests/test_viewer_projection.py)
+                  args+=(--allow-test-change "$path=approved provider-neutral endpoint semantics retire the old four-endpoint threshold and per-process loopback cluster shape: every loopback endpoint now folds into one Local endpoints node while source edges, chronology, expansion evidence, and historical test node IDs are retained")
+                  ;;
+                tests/test_dashboard_information_architecture.py)
+                  args+=(--allow-test-change "$path=approved orphan-file presentation now folds degree-zero file and directory nodes into the expandable Files / directories viewer cluster; the historical test node ID remains and the assertion now requires the original notes.txt evidence in cluster expansion")
+                  ;;
               esac
             done < <(git diff --name-only "$BASELINE_REF...HEAD" -- tests)
           fi
