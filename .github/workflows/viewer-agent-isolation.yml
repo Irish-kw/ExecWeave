@@ -38,14 +38,18 @@ jobs:
         env:
           EXECWEAVE_E2E_REQUIRED: "1"
           EXECWEAVE_VISUAL_ARTIFACT_DIR: visual-artifacts
-        run: xvfb-run -a python -m pytest -m viewer_e2e -v
+        run: xvfb-run -a python -m pytest -m viewer_e2e -v --junitxml=viewer-pytest-results.xml
 
       - name: Read live and viewer.html in a browser (macOS/Windows)
         if: runner.os != 'Linux'
         env:
           EXECWEAVE_E2E_REQUIRED: "1"
           EXECWEAVE_VISUAL_ARTIFACT_DIR: visual-artifacts
-        run: python -m pytest -m viewer_e2e -v
+        run: python -m pytest -m viewer_e2e -v --junitxml=viewer-pytest-results.xml
+
+      - name: Annotate viewer pytest failures
+        if: failure() && hashFiles('viewer-pytest-results.xml') != ''
+        run: python scripts/annotate_pytest_failures.py viewer-pytest-results.xml
 
       - name: Run formal offline dashboard acceptance
         run: >-
