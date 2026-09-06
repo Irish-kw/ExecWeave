@@ -177,6 +177,9 @@ jobs:
                 tests/test_live_auth.py)
                   args+=(--allow-test-change "$path=acceptance branch adds the native client-reset regression proving expected Windows disconnects are suppressed without hiding unexpected server errors")
                   ;;
+                tests/test_process_tree_layout.py)
+                  args+=(--allow-test-change "$path=acceptance branch replaces obsolete fixed layout coordinates with semantic lane and ordering assertions while retaining the historical test node IDs")
+                  ;;
               esac
             done < <(git diff --name-only "$BASELINE_REF...HEAD" -- tests)
           fi
