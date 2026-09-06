@@ -180,6 +180,9 @@ jobs:
                 tests/test_process_tree_layout.py)
                   args+=(--allow-test-change "$path=acceptance branch replaces obsolete fixed layout coordinates with semantic lane and ordering assertions while retaining the historical test node IDs")
                   ;;
+                tests/test_external_endpoints_all_providers.py)
+                  args+=(--allow-test-change "$path=loopback endpoint presentation intentionally changed from individual raw nodes to one provider-neutral Local endpoints cluster while External behavior remains; historical test node IDs are retained and raw endpoint evidence is unchanged")
+                  ;;
               esac
             done < <(git diff --name-only "$BASELINE_REF...HEAD" -- tests)
           fi
@@ -187,7 +190,7 @@ jobs:
             args+=(--allow-retired-provider "gemini=Gemini integration was retired and replaced by the AGY/Antigravity provider; only Gemini-owned test IDs and files may disappear")
             while IFS= read -r path; do
               case "$path" in
-                tests/fixtures/hooks/manifest.json|tests/test_agent_bootstrap.py|tests/test_agent_topology_evidence.py|tests/test_agent_trace_viewer_visibility.py|tests/test_antigravity_agent_collaboration.py|tests/test_antigravity_child_transcript_tools.py|tests/test_antigravity_cursor_launch.py|tests/test_antigravity_identity_topology.py|tests/test_antigravity_invocation_archive.py|tests/test_antigravity_official_contract.py|tests/test_antigravity_subagent_transcript_linkage.py|tests/test_antigravity_trace_capability_cli.py|tests/test_claude_adapter.py|tests/test_codex_real_multi_agent_conversation.py|tests/test_collector.py|tests/test_command.py|tests/test_conversation_access.py|tests/test_conversation_agent_isolation.py|tests/test_conversation_identity_merge.py|tests/test_conversation_provider_parity.py|tests/test_cross_provider_agent_trace.py|tests/test_cursor_adapter.py|tests/test_dashboard_information_architecture.py|tests/test_external_endpoints_all_providers.py|tests/test_hook_fixture_corpus.py|tests/test_provider_capability.py|tests/test_provider_conversation_evidence.py|tests/test_provider_lifecycle.py|tests/test_v064_live_auto_integrations.py)
+                tests/fixtures/hooks/manifest.json|tests/test_agent_bootstrap.py|tests/test_agent_topology_evidence.py|tests/test_agent_trace_viewer_visibility.py|tests/test_antigravity_agent_collaboration.py|tests/test_antigravity_child_transcript_tools.py|tests/test_antigravity_cursor_launch.py|tests/test_antigravity_identity_topology.py|tests/test_antigravity_invocation_archive.py|tests/test_antigravity_official_contract.py|tests/test_antigravity_subagent_transcript_linkage.py|tests/test_antigravity_trace_capability_cli.py|tests/test_claude_adapter.py|tests/test_codex_real_multi_agent_conversation.py|tests/test_collector.py|tests/test_command.py|tests/test_conversation_access.py|tests/test_conversation_agent_isolation.py|tests/test_conversation_identity_merge.py|tests/test_cross_provider_agent_trace.py|tests/test_cursor_adapter.py|tests/test_dashboard_information_architecture.py|tests/test_external_endpoints_all_providers.py|tests/test_hook_fixture_corpus.py|tests/test_provider_capability.py|tests/test_provider_conversation_evidence.py|tests/test_provider_lifecycle.py|tests/test_v064_live_auto_integrations.py)
                   args+=(--allow-test-change "$path=Gemini provider retirement and provider-neutral AGY/dashboard contract updates are intentional on this branch; existing test node IDs remain stable where the provider is still supported")
                   ;;
               esac
