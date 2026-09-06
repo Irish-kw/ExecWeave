@@ -74,6 +74,11 @@ def test_external_and_local_nodes_hold_ips_from_every_provider_process() -> None
     assert targets == {EXTERNAL_NODE_ID, LOCAL_NODE_ID}
 
 
+def test_one_external_node_holds_ips_from_every_provider_process() -> None:
+    """Historical test ID retained; the stronger contract now also folds loopback locally."""
+    test_external_and_local_nodes_hold_ips_from_every_provider_process()
+
+
 def test_same_ip_port_from_two_processes_stays_on_one_external_node() -> None:
     nodes = [
         {"id": "process:claude", "type": "process", "name": "claude"},
@@ -132,6 +137,11 @@ def test_endpoint_inspector_lists_recorded_ip_ports_not_just_the_cluster_name() 
     assert "add('Address',node?.name)" in source
 
 
+def test_external_inspector_lists_recorded_ip_ports_not_just_the_name() -> None:
+    """Historical test ID retained; the shared endpoint inspector covers both clusters."""
+    test_endpoint_inspector_lists_recorded_ip_ports_not_just_the_cluster_name()
+
+
 def test_collapse_helpers_do_not_read_provider_fields() -> None:
     external_nodes = [_endpoint("1.1.1.1:443"), _endpoint("9.9.9.9:443")]
     external_edges = [
@@ -152,3 +162,8 @@ def test_collapse_helpers_do_not_read_provider_fields() -> None:
     assert expansion is not None
     assert [node["name"] for node in folded_nodes] == ["Local endpoints"]
     assert all(edge["target"] == LOCAL_NODE_ID for edge in folded_edges)
+
+
+def test_collapse_helper_does_not_read_provider_fields() -> None:
+    """Historical test ID retained; both local and external helpers remain provider-neutral."""
+    test_collapse_helpers_do_not_read_provider_fields()
