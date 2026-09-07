@@ -395,7 +395,13 @@ class RuntimeCollector:
 
             previous = self._seen_processes[pid]
             if psutil.pid_exists(pid):
-                current = _safe_process_snapshot(psutil.Process(pid))
+                try:
+                    live_process = psutil.Process(pid)
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    # pid_exists() and Process(pid) are inherently racy. Without a
+                    # lifetime snapshot, do not manufacture an EXITED observation.
+                    continue
+                current = _safe_process_snapshot(live_process)
                 if current is None or self._same_process_lifetime(previous, current):
                     continue
 
