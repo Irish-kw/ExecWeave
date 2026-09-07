@@ -5,6 +5,7 @@ from pathlib import Path
 import execweave.live as live_module
 from execweave.content_store import FullFidelityContentStore
 from execweave.viewer_projection import project_viewer_graph, render_graph_html
+from execweave.viewer_semantic_projection import ORPHAN_FILES_NODE_ID
 
 
 def _node(node_id: str, node_type: str, name: str, **attributes: object) -> dict[str, object]:
@@ -112,7 +113,13 @@ def test_low_level_dashboard_cleanup_remains_presentation_only() -> None:
 
     assert {"process", "network_endpoint", "directory", "model", "agent_trace_capability"} <= raw_types
     assert ".execweave-content-xn4uvhqy" in raw_names
-    assert "notes.txt" in raw_names
+    assert "notes.txt" not in raw_names
+    assert "Files / directories" in raw_names
+    file_cluster = next(node for node in raw["nodes"] if node.get("id") == ORPHAN_FILES_NODE_ID)
+    entries = file_cluster["attributes"]["entries"]
+    assert any(item.get("name") == "notes.txt" and item.get("path") == "notes.txt" for item in entries)
+    expansion = raw["expansion"]["clusters"][ORPHAN_FILES_NODE_ID]
+    assert any(node.get("id") == "file:notes" and node.get("name") == "notes.txt" for node in expansion["nodes"])
     assert "dashboard_projection" not in raw
 
     html = render_graph_html(_mechanical_graph())

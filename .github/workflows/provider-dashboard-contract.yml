@@ -39,6 +39,7 @@ jobs:
           tests/test_provider_conversation_evidence.py
           tests/test_provider_conversation_history_integrity.py
           tests/test_external_endpoints_all_providers.py
+          tests/test_provider_neutral_viewer_semantics.py
           tests/test_graph.py
           tests/test_antigravity_field_run_regressions.py
           tests/test_antigravity_subagent_transcript_linkage.py
@@ -145,5 +146,6 @@ jobs:
           python -m pytest -q
           tests/test_provider_dashboard_contract.py
           ${{ matrix.tests }}
+          tests/test_provider_neutral_viewer_semantics.py
       - name: Check dashboard JavaScript syntax
         run: python -m pytest -q tests/test_live_dashboard_js.py tests/test_live_dashboard.py

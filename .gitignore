@@ -8,3 +8,5 @@ dist/
 build/
 *.egg-info/
 .execweave/
+.execweave-acceptance/
+artifacts/dashboard-acceptance/

@@ -22,8 +22,7 @@ def _base(event: str) -> dict:
     }
 
 
-def test_official_event_set_excludes_undocumented_interrupt() -> None:
-    assert "Interrupt" not in OFFICIAL_CODEX_HOOK_EVENTS
+def test_official_event_set_includes_interrupt() -> None:
     assert OFFICIAL_CODEX_HOOK_EVENTS == {
         "SessionStart",
         "SessionEnd",
@@ -36,6 +35,7 @@ def test_official_event_set_excludes_undocumented_interrupt() -> None:
         "SubagentStart",
         "SubagentStop",
         "Stop",
+        "Interrupt",
     }
 
 
@@ -137,6 +137,22 @@ def test_stop_is_observation_not_irreversible_completion() -> None:
     assert "hook_may_request_continuation" in event["target"]["attributes"]["completion_semantics"]
     assert event["attributes"]["last_assistant_message_stored_separately"] is True
     assert "final before any hook continuation" not in json.dumps(event)
+
+
+def test_interrupt_is_observation_and_cannot_block_interruption() -> None:
+    events = codex_official_hook_lifecycle_events(
+        {
+            **_base("Interrupt"),
+            "turn_id": "turn-interrupted",
+            "permission_mode": "default",
+        },
+        timestamp="2026-09-06T00:00:00Z",
+    )
+    event = events[0]
+    assert event["relation"] == "OBSERVED_TURN_INTERRUPT"
+    assert event["target"]["type"] == "agent_turn_interrupt"
+    assert event["target"]["attributes"]["turn_id"] == "turn-interrupted"
+    assert event["attributes"]["interrupt_cannot_be_blocked_by_hook"] is True
 
 
 def test_cli_writes_official_lifecycle_and_full_fidelity_together(

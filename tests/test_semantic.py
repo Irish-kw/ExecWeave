@@ -166,6 +166,45 @@ def test_semantic_merge_validates_and_materializes_agent_tool_process_graph(tmp_
     assert {"CALLED_TOOL", "SPAWNED_PROCESS", "CALLED_MCP"}.issubset(relations)
 
 
+@pytest.mark.parametrize("identity", ["conflict", "future", "exact_future", "exact_past"])
+def test_process_identity_evidence_survives_merge_and_graph(tmp_path: Path, identity: str) -> None:
+    """NEW-006: contradictory PID identity must not become a causal graph edge."""
+    from datetime import datetime
+
+    runtime_events = _runtime_events()
+    records = _semantic_events()
+    process = runtime_events[1]["target"]
+    reference = records[1]["target"]
+    event_epoch = datetime.fromisoformat(records[1]["timestamp"].replace("Z", "+00:00")).timestamp()
+    created = event_epoch + 1 if "future" in identity else event_epoch - 1
+    process["attributes"]["create_time"] = created
+    process["id"] = f"process:123:{int(created * 1_000_000)}"
+    if identity == "conflict":
+        reference["attributes"]["create_time"] = created - 10
+    elif identity.startswith("exact"):
+        reference["attributes"]["create_time"] = created
+    runtime, semantic, merged = (
+        tmp_path / name for name in ("events.jsonl", "semantic.jsonl", "merged.jsonl")
+    )
+    _write_jsonl(runtime, runtime_events)
+    _write_jsonl(semantic, records)
+    result = merge_semantic_sidecar(runtime, semantic, merged)
+    should_resolve = identity == "exact_past"
+    assert result.resolved_process_references == int(should_resolve)
+    assert result.unresolved_process_references == int(not should_resolve)
+    assert validate_event_stream(merged).valid
+    events = [json.loads(line) for line in merged.read_text(encoding="utf-8").splitlines()]
+    linked = next(event for event in events if event["event_type"] == "semantic.tool.process")
+    assert linked["target"]["id"] == (process["id"] if should_resolve else reference["id"])
+    graph = build_execution_graph(merged).to_dict()
+    edges = [edge for edge in graph["edges"] if edge["relation"] == "SPAWNED_PROCESS"]
+    assert edges
+    assert all(edge["target"] == linked["target"]["id"] for edge in edges)
+    if not should_resolve:
+        assert linked["target"]["attributes"]["unresolved"] is True
+        assert process["id"] in linked["target"]["attributes"]["candidate_process_ids"]
+
+
 def test_semantic_merge_keeps_unresolved_process_reference(tmp_path: Path) -> None:
     runtime = tmp_path / "runtime.jsonl"
     semantic = tmp_path / "semantic.jsonl"

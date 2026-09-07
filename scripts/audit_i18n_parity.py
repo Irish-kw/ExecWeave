@@ -31,18 +31,8 @@ DOCS = [
     (Path("docs/run-integrity.md"), "docs/run-integrity"),
 ]
 
-
-def current_release_tag() -> str:
-    pyproject = Path("pyproject.toml").read_text(encoding="utf-8")
-    match = re.search(r'(?m)^version\s*=\s*"([^\"]+)"\s*$', pyproject)
-    if match is None:
-        raise RuntimeError("project version not found in pyproject.toml")
-    return f"v{match.group(1)}"
-
-
 README_REQUIRED_SNIPPETS = [
-    "v0.6.9",
-    current_release_tag(),
+    "python -m pip install -U execweave",
     "execweave live --open -- cursor",
     "execweave live --open -- opencode",
     "execweave live --open -- ollama serve",
@@ -50,7 +40,8 @@ README_REQUIRED_SNIPPETS = [
     "conversations.json",
     "LM Studio",
     "LiteLLM Proxy",
-    "164,273 ev/s",
+    "complete_from_source: true",
+    "PolyForm Noncommercial License 1.0.0",
 ]
 
 HEADING_RE = re.compile(r"^(#{1,6})\s+.+$", re.M)
@@ -136,7 +127,7 @@ def audit_coverage() -> int:
         text = path.read_text(encoding="utf-8")
         missing = [snippet for snippet in README_REQUIRED_SNIPPETS if snippet not in text]
         if missing:
-            print(f"FAIL {lang:5} {path}: missing release anchors {missing}")
+            print(f"FAIL {lang:5} {path}: missing stable README anchors {missing}")
             failures += 1
     return failures
 

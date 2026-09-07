@@ -133,7 +133,10 @@ jobs:
       - name: Ruff
         run: ruff check .
       - name: Tests
-        run: pytest -q
+        run: pytest -q --junitxml=pytest-results.xml
+      - name: Annotate pytest failures
+        if: failure() && hashFiles('pytest-results.xml') != ''
+        run: python scripts/annotate_pytest_failures.py pytest-results.xml
       - name: Claude hook command smoke
         run: python scripts/check_claude_hook.py
       - name: Claude run-bound semantic and correlation smoke

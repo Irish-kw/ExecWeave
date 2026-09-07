@@ -17,6 +17,8 @@ import pytest
 
 from test_viewer_agent_isolation_e2e import _browser, _launch
 
+pytestmark = pytest.mark.viewer_e2e
+
 LONG_LABEL = "collaborationspawn_agent_with_a_very_long_provider_supplied_name"
 
 

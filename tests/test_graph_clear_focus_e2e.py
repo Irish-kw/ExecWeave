@@ -10,7 +10,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from test_graph_node_sizing_e2e import _browser, _graph_with, _launch, _render
+
+pytestmark = pytest.mark.viewer_e2e
 
 
 def _focused_page(page: Any) -> None:

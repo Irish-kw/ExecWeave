@@ -180,7 +180,6 @@ def test_codex_hook_config_matches_official_documented_event_set() -> None:
     config = codex_hook_config("execweave-codex-hook --strict")
     hooks = config["hooks"]
     assert set(hooks) == set(OFFICIAL_CODEX_HOOK_EVENTS)
-    assert "Interrupt" not in hooks
     assert set(hooks) == {
         "PreToolUse",
         "PermissionRequest",
@@ -193,12 +192,17 @@ def test_codex_hook_config_matches_official_documented_event_set() -> None:
         "SubagentStart",
         "SubagentStop",
         "Stop",
+        "Interrupt",
     }
     for event_name in {"PreToolUse", "PermissionRequest", "PostToolUse"}:
         assert hooks[event_name][0]["matcher"] == "*"
     for event_name in set(hooks) - {"PreToolUse", "PermissionRequest", "PostToolUse"}:
         assert "matcher" not in hooks[event_name][0]
     assert hooks["PreToolUse"][0]["hooks"][0]["command"] == "execweave-codex-hook --strict"
+    interrupt_handler = hooks["Interrupt"][0]["hooks"][0]
+    assert interrupt_handler["timeout"] == 3
+    assert interrupt_handler["async"] is True
+    assert hooks["SessionEnd"][0]["hooks"][0]["timeout"] == 3
 
 
 def test_sidecar_append_and_stdin_reader(tmp_path: Path) -> None:

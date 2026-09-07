@@ -1,5 +1,3 @@
-> Codex + AGY 與其餘受支援 provider 現已完成 conversation history、dashboard graph、raw event 與 file target 對齊。
-
 # ExecWeave
 
 <!-- i18n-nav:start -->
@@ -22,34 +20,36 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue" alt="License"></a>
 </p>
 
-**看見 AI Agent 在你的電腦上實際做了什麼。**
+**看清楚 AI Agent 在你的電腦上實際做了什麼。**
 
-ExecWeave 是一個 source-available、local-first 的可觀測性專案，會把 AI Agent 活動轉成互動式 execution graph，並明確區分 observed evidence、provider 明確提供的內容與 derived inference。
+ExecWeave 是一個 local-first 的 AI Agent 與 AI 開發工具可觀測性專案。它把 Provider 層的語意資訊與作業系統層的執行證據整合到同一個互動式 Execution Graph 中，同時保留不同證據層級之間的界線。
 
-> **Event 是 ground truth；Graph 是 materialized view。**
+> **Event 是證據；Graph 是由證據物化出的檢視。**
 
 <p align="center">
-  <img src="docs/assets/codex.gif" alt="ExecWeave animated live demo" width="100%">
+  <img src="docs/assets/codex.gif" alt="ExecWeave 即時 Dashboard 示範" width="100%">
 </p>
 
-本 README 對應 **v0.8.11**。
+## 為什麼需要 ExecWeave
 
-## 為什麼是 ExecWeave
+Agent 可以告訴你它呼叫了某個工具、修改了某個檔案，或連線到某個服務。這些 Provider 語意很有價值，但不等於作業系統真正觀察到的行為。ExecWeave 的核心目標就是把兩者放在同一個畫面中檢查，同時不把不同強度的證據混為一談。
 
-- **一個本機 inspection surface。** Live run、完成後的 run 與 standalone `viewer.html` 使用同一套 dashboard renderer，把 graph、logs、conversation 與 node details 放在同一個介面。
-- **Evidence-aware。** Direct observation、identity link、保守 inference 與 causal claim 不會被混成同一種關係。
-- **理解 Provider，但不虛構 Provider 沒提供的行為。** ExecWeave 只使用 provider 真正曝露的 routing / identity evidence；缺少的證據就保持缺少。
-- **不只支援特定 Agent。** OS-runtime telemetry 可以包住任何本機命令；有 provider adapter 時再補上更強的 semantic evidence。
+- **Live 與完成後使用同一套 Dashboard。** 執行中頁面、完成後結果與獨立 `viewer.html` 使用相同的 Graph 與對話模型。
+- **理解 Provider 語意。** Provider 有提供 hook、rollout transcript、plugin 或 runtime API 時，就使用可驗證的原生資訊。
+- **觀察 OS runtime。** 可獨立觀察 Process、File 與 Network endpoint，而不只依賴 Agent 自己回報。
+- **證據分層。** Direct observation、exact identity、保守推論與 causal claim 不會被壓成同一種關係。
+- **Local-first。** Run artifacts 預設留在本機，除非你自行複製或分享。
+- **不限定單一 Agent。** 即使沒有專用 Provider adapter，也可以包住一般本機指令進行 runtime 觀察。
 
 ## 安裝
 
-從 PyPI 安裝最新已發布版本：
+從 PyPI 安裝：
 
 ```bash
 python -m pip install -U execweave
 ```
 
-開發安裝：
+開發版本：
 
 ```bash
 git clone https://github.com/Irish-kw/ExecWeave.git
@@ -57,9 +57,9 @@ cd ExecWeave
 python -m pip install -e ".[dev]"
 ```
 
-## 60 秒快速開始
+## 快速開始
 
-Live OS-runtime telemetry 可用於**任何本機命令**。下列 Agent/runtime 名稱只是例子，不是白名單。
+任何本機指令都可以包在 `execweave live` 後面：
 
 ```bash
 execweave live --open -- claude
@@ -67,91 +67,121 @@ execweave live --open -- codex
 execweave live --open -- antigravity
 execweave live --open -- cursor
 execweave live --open -- opencode
-execweave live --open -- ollama serve
 execweave live --open -- python my_agent.py
 ```
 
-> **首次出現 Hook 權限提示時請同意。** 第一次使用 provider integration 時，Agent/IDE 可能會詢問是否允許 ExecWeave 啟用本機 Hook；請選 **Allow / Yes**。若不同意，OS-runtime telemetry 仍可能運作，但 provider-level 的 tool、model、conversation 與 supplied-content observability 會降低或不可用。
-
-Google Antigravity 目前使用 `agy` CLI；ExecWeave 也接受 `antigravity` 作為 friendly alias 並解析到 `agy`。Cursor 的 `execweave live --open -- cursor` 會先找一般 PATH launcher，找不到時在 macOS / Windows 嘗試標準 Cursor desktop application binary。
-
-建立 finalized run artifacts：
+若主要目的是產生完成後的 artifacts：
 
 ```bash
 execweave record --open -- python my_agent.py
 ```
 
-如果想讓 Agent 保持在原 terminal 互動，同時開 detached overview：
+若希望程式保留在目前 terminal 互動，同時另外開啟觀察介面：
 
 ```bash
 execweave top -- codex
 ```
 
+### Provider integration 授權
+
+部分 Agent 或 IDE 第一次啟用本機 hook / plugin 時會要求授權。如果你希望看到 Prompt、Response、Tool、Model 與 Conversation 等 Provider-level evidence，請允許 ExecWeave integration。若不允許，OS runtime 觀察仍可能正常運作，但 Provider 語意覆蓋會較少。
+
+Google Antigravity 目前實際 CLI 指令為 `agy`；ExecWeave 同時接受 `antigravity` 作為較好記的 alias。
+
+Windows 上直接輸入 `cursor` 時，ExecWeave 會依照使用者 PATH 指向的 Cursor 安裝位置處理；若你明確提供 launcher path，ExecWeave 會保留該路徑。
+
+## Ollama
+
+ExecWeave 支援兩種常見的本機 Ollama 使用方式。
+
+### Managed server capture
+
+先透過 ExecWeave 啟動 Ollama Server：
+
+```bash
+execweave live --open -- ollama serve
+```
+
+接著在另一個 terminal 正常使用 Ollama：
+
+```bash
+ollama run deepseek-r1:1.5b
+```
+
+SDK、OpenAI-compatible local request 與送到 managed local endpoint 的 `curl` request，也可以被關聯到同一個 ExecWeave run。第二個 terminal 不需要再包一層 ExecWeave。
+
+Managed relay 只處理本機 loopback endpoint，不會改寫 wildcard 或對外暴露的 Ollama listener。
+
+### Direct client capture
+
+若 Ollama Server 已經在執行，也可以直接包住 client：
+
+```bash
+execweave live --open -- ollama run deepseek-r1:1.5b
+```
+
+這個模式不會幫你啟動 Ollama Server，因此仍需要一個可連線的 upstream server。
+
 ## Dashboard
 
-ExecWeave 不會在 run 結束時換成另一套 viewer；Live、finished 與 standalone viewing 都沿用同一個 dashboard model。
+Dashboard 的設計目標是讓大型、多 Agent 執行仍然可讀，同時不修改底層 evidence。
 
-- **Execution graph：** 顯示 agents、processes、files、network endpoints、tools、model/runtime entities 與受支援的 semantic relations。
-- **Conversation rounds：** 最新一輪可直接讀，較舊的輪次仍各自可展開，不會被新回答蓋掉。
-- **Node details：** process node 顯示 command / PID context，file node 顯示 path / history context，network node 顯示 endpoint / process context。
-- **Large-run readability：** 每種類型超過預算後只保留最新成員直接畫出，舊成員收進可檢視 aggregate。門檻由 `--fold-budget N` 控制。
-- **Selection clarity：** multi-agent layout 維持穩定 root / child hierarchy，選取 agent 時會淡化無關 edges。
+- **Execution graph：** Agent、Process、File、Network endpoint、Tool、Model/runtime entity 與支援的關係。
+- **Conversation rounds：** 新舊輪次都維持在正確 Agent 下，不會因為後續回覆而把舊內容覆蓋掉。
+- **Node details：** 可檢查 Process identity、File history、Network endpoint、Tool 與 Provider conversation content。
+- **穩定的 Live update：** Run 狀態變化時原頁面持續更新，不需要整頁替換。
+- **大型 Graph folding：** 節點過多時可折疊較舊成員，同時保留可檢查性。
+- **Selection-focused layout：** 選取 Agent 或 runtime object 後，會弱化與目前目標無關的 Graph traffic。
 
-### v0.8.3 Dashboard 變更
+大型執行可以使用下列參數調整：
 
-v0.8.3 的重點是讓 dense、multi-round run 更容易讀，同時不改 raw evidence：
+```text
+--fold-budget N
+--viewer-max-nodes N
+--viewer-max-edges N
+--viewer-max-dom-elements N
+```
 
-- conversation panel 改成以 round 為單位，不再把舊 prompt 與新 reply 錯配；
-- 使用者明確設定的展開 / 收合狀態會跨 800 ms Live refresh 保留；
-- subagent response 會維持歸屬於真正產生它的 agent；
-- 選取 process、file、network 不再看到空白 detail panel；
-- 高基數 node type 會依可調整預算摺疊，不讓 graph 被數百或數千個 node 淹沒；
-- lifecycle return edge 不再扭曲 root / child rank，共用 tool/model traffic 使用更清楚的 routed geometry。
+## 支援的整合
 
-這些都是 presentation-layer change。Raw graph evidence 不變，Live、finished 與 `viewer.html` 仍共用同一 renderer。
-
-## 支援的 Integrations
-
-| Integration | 在 ExecWeave 下啟動時的 OS-runtime observation | Specialized evidence |
+| Integration | OS runtime 觀察 | 專用 evidence |
 | --- | --- | --- |
-| Claude Code | Yes | native hooks + full-fidelity supplied hook content + provider 明確曝露時的 exact subagent results |
-| OpenAI Codex | Yes | lifecycle hooks + validated rollout transcripts + agent-local task/message/final-response routing |
-| Google Antigravity / Antigravity CLI | Yes | passive native hooks + 可驗證時的 conversation/subagent routing |
-| Cursor | Yes | native hooks + 能取得時的 exact subagent task/summary routing |
-| OpenCode | Yes | project plugin + session/task routing + full-fidelity supplied plugin content |
-| Ollama | Yes | `execweave-model-runtime event/exchange/probe --runtime ollama` |
-| llama.cpp | Yes | `execweave-model-runtime event/exchange/probe --runtime llamacpp` |
-| vLLM | Yes | `execweave-model-runtime event/exchange/probe --runtime vllm` |
-| LM Studio | 僅限本機 process 由 ExecWeave 啟動 | `execweave-model-runtime event/exchange/probe --runtime lmstudio` |
-| LiteLLM Proxy | 設定好的 proxy 由 ExecWeave 啟動時為 Yes | metadata-oriented gateway callback/event integration |
-| OpenRouter | 觀察本機 client，而不是遠端 service process | `execweave-inference-gateway event/exchange/generation --gateway openrouter` |
+| Claude Code | 由 ExecWeave 啟動時支援 | native hooks 與 Provider 提供的 conversation/tool content |
+| OpenAI Codex | 支援 | lifecycle hooks、validated rollout transcripts、可觀察時的 agent/subagent routing |
+| Google Antigravity | 支援 | passive hooks 與可觀察時的 conversation/subagent routing |
+| Cursor | 支援 | native hooks 與可觀察時的 task/subagent routing |
+| OpenCode | 支援 | project plugin、session/task routing、Provider 提供的 plugin content |
+| Ollama | 支援 | managed local relay 與 model-runtime evidence |
+| llama.cpp | 支援 | model-runtime event/exchange/probe |
+| vLLM | 支援 | model-runtime event/exchange/probe |
+| LM Studio | 本機程序可觀察時 | model-runtime catalog/runtime evidence |
+| LiteLLM Proxy | 本機 proxy 可觀察時 | gateway metadata 與 event integration |
+| OpenRouter | 只能觀察本機 client，無法觀察遠端 service process | caller-supplied gateway event/exchange evidence |
 
-Cursor `tool_use_id`、Codex rollout thread identity、OpenCode `sessionID + callID` 這類 stable provider identifier 能證明 logical provider identity，但它們不是 OS PID。只有 provider 明確曝露 route、delegation 或 result 時，cross-agent content 才會被顯示。若 gateway / local runtime 只提供 root request/response，ExecWeave 就維持 root-only，不會虛構 subagent 或 hidden routing。
-
-OpenRouter `exchange` 是 caller-supplied request+response evidence，不是 transparent wire interception。LiteLLM Proxy 在目前 baseline 仍屬較窄的 metadata-oriented integration。Google CLI 使用情境應改用 Antigravity (`agy`)。
+Tool-call ID、session ID、rollout thread ID、subagent route 等 Provider identifier 是邏輯身份，不等於 OS PID。ExecWeave 只有在證據足夠時才會把不同層連起來。
 
 ## Evidence model
 
-ExecWeave 不會把所有 signal 壓成一條 trace，而是維持 evidence layer 邊界：
+ExecWeave 將 evidence 分成幾個主要層級：
 
 ```text
-Agent / IDE semantic + supplied content evidence
-          ↓
+Agent / IDE semantics 與 supplied content
+                ↓
 Inference gateway / routing evidence
-          ↓
+                ↓
 Model runtime / inference-server evidence
-          ↓
+                ↓
 OS runtime evidence: process / file / network
 ```
 
-只有底層 telemetry 真正支援 causal claim 時，relationship 才會標成 causal。保守的 Tool → Process bridge 會維持 derived evidence 標記：
+只有底層 telemetry 足以支持 causal claim 時，關係才應被標示為 causal。保守推論會明確保留 derived 標記，例如：
 
 ```text
 inferred: true
 causal: false
 ```
 
-Gateway 與 Model Runtime 之間 exact shared request identity 代表 identity evidence，不代表 causal evidence：
+共享 exact request identity 可以證明 identity，但不代表 causal：
 
 ```text
 identity_exact: true
@@ -159,23 +189,23 @@ inferred: false
 causal: false
 ```
 
-有歧義時就不建立 edge。
+如果 attribution 仍有歧義，ExecWeave 應該不建立 edge，而不是猜一條更強的關係。
 
 ### Full-fidelity supplied content
 
-從 **v0.6.9** 起，受支援的 integration point 可以把 provider / hook / API 明確提供的完整值保存進本機 SHA-256 content-addressed store，而 semantic event stream 只保留 reference：
+支援的 Provider hook、plugin 或 API 可以把 Provider 明確提供的完整值保存在本機 SHA-256 content-addressed store：
 
 ```text
 <run-root>/content/sha256/<sha256>.<json|txt|bin>
 ```
 
-依 integration 不同，保存內容可能包括 prompt/message、request/response object、tool input/result、assistant response、上游明確曝露的 reasoning/thinking text、shell/MCP output，以及 provider hook 提供的 file content。
+內容可能包含 Prompt、Message、Request/Response object、Tool input/result、Assistant response、Provider 明確暴露的 reasoning text、Shell output 與 supplied file content。
 
-`complete_from_source: true` 只表示 ExecWeave 完整保存了該 integration point 提供的值；**不代表**看到了 hidden model state、provider 未曝露的內部階段、未觀察到的 final wire request，或沒有被攔截的 bytes。
+`complete_from_source: true` 代表 ExecWeave 保存了該 integration point 所提供的完整內容；不代表 ExecWeave 能看到未暴露的模型內部狀態或 Provider 內部資料。
 
-## 常用命令
+## 常用指令
 
-### Agent / IDE recorders
+### Agent / IDE recorder
 
 ```bash
 execweave-claude-record --open -- claude
@@ -186,21 +216,19 @@ execweave-opencode-plugin --install
 execweave-opencode-record --open -- opencode
 ```
 
-### Gateways 與 model runtimes
+### Gateway 與 model runtime
 
 ```bash
 execweave-inference-gateway event --gateway openrouter --sidecar gateway.jsonl
 execweave-inference-gateway exchange --gateway openrouter --sidecar gateway.jsonl
-execweave-inference-gateway event --gateway litellm --sidecar gateway.jsonl
-
 execweave-model-runtime event --runtime ollama --sidecar model-runtime.jsonl
 execweave-model-runtime exchange --runtime ollama --sidecar model-runtime.jsonl
 execweave-model-runtime probe --runtime ollama --sidecar model-runtime.jsonl
 ```
 
-`event` 是 response-only evidence；`exchange` 保存 caller-supplied request+response object，不會宣稱 transparent interception。Runtime catalog relation 仍保留各自來源語義：`LOADED_MODEL`、`SERVES_MODEL`、`ADVERTISES_MODEL` 不可互換。LM Studio catalog visibility 仍是 `ADVERTISES_MODEL`，不能視為 weights 已在 memory 中 resident 的證明。
+`event` 表示單側 event evidence。`exchange` 保存由 caller 提供的 request/response pair，不宣稱透明攔截 wire traffic。
 
-### Runtime、graph、security 與 integrity
+### Runtime、Graph、安全與完整性
 
 ```bash
 execweave doctor
@@ -215,8 +243,6 @@ execweave-rule-pack graph.json --rule-pack local-policy.json --output report.jso
 execweave-integrity seal .execweave/runs/<run-id>
 execweave-integrity verify .execweave/runs/<run-id>
 ```
-
-Security finding 的 evidence grade 與 severity 分開。現有 grade 為 `A`、`B`、`C`、`D`、`U`；它們是 evidence-strength category，不是 probability 或 trust score。Rule pack 是 bounded、explainable 的 single-edge observation policy，不會執行 third-party code，也不能證明 byte-level exfiltration。
 
 ## Run artifacts
 
@@ -237,50 +263,37 @@ Provider-integrated run 可能包含：
 ├── events.correlated.jsonl
 ├── graph.correlated.json
 ├── viewer.correlated.html
-└── integrity.json            # after an explicit seal
+└── integrity.json
 ```
 
-Derived correlation 不會覆寫 raw runtime 或 provider sidecar evidence。
+Raw observation 與 derived semantic/correlation output 會維持分離。
 
 ## 限制與隱私
 
-- Portable collector 可在 Linux、macOS、Windows 執行。Portable filesystem observation 是 session-correlated，不是 process-causal；polling 也可能漏掉非常短命的 activity。
-- Linux 另有 syscall-backed `strace` reference backend，可為受支援執行提供較強的 process-attributed syscall evidence。
-- Native Linux eBPF、Windows ETW、macOS Endpoint Security collector 仍是 planned work，不是目前已完成的能力宣稱。
-- Full-fidelity provider content 可能完整保存 prompt、tool value、model response、shell output 或 supplied file 內的 secret。ExecWeave **不是**通用 secret scanner 或 content redactor。
-- Conversation isolation 是 attribution/display rule，不是 redaction boundary。若 provider 明確把內容 route 到其他 agent，參與端點仍可能合理地看到該內容。
-- Commands、paths、endpoints、identifiers、model metadata、prompts、tool values 與 content blobs 都可能敏感；分享前請檢查整個 run directory。
-- Local integrity seal 可偵測相對於 manifest 的檔案變更，但如果 evidence 與 manifest 都位在同一個可寫 trust boundary，就不能把它描述成 adversary-resistant tamper evidence。
+- Portable collector 可在 Linux、macOS、Windows 使用。Portable filesystem observation 屬於 session-correlated evidence，不一定能形成 process-causal attribution；polling 也可能漏掉非常短暫的活動。
+- Linux 另外提供 `strace` reference backend，可在支援的執行中取得更強的 syscall-attributed evidence。
+- Provider semantic coverage 完全取決於該 integration 真正暴露的資訊。未暴露的 Prompt、hidden reasoning、遠端 Provider internals 與 routing 無法被可靠重建。
+- Full-fidelity Provider content 可能包含 Credential、Secret、Source code、Prompt、Tool value、Model response、Shell output 與 File content。
+- Conversation isolation 是 attribution 規則，不是 redaction boundary。Provider 明確路由的內容可能合理地出現在多個參與者上。
+- 本機 integrity manifest 可以檢查相對於 manifest 的檔案變化，但如果 evidence 與 manifest 都位於同一個可寫 trust boundary，就不是 adversary-resistant trusted logging system。
+- 分享前請檢查完整 run directory。
 
-## 效能
+## 開發
 
-ExecWeave 包含 bounded filesystem/viewer protection、incremental Live JSONL tailing、large-graph safety guard、detached Top，以及針對已設定 provider integration 的 provisional live sidecar。
-
-可重現的 incremental `GraphAccumulator` reference result 在文件化 GitHub Actions workload 上、1M synthetic events 時達到 **164,273 ev/s**。這是 graph-accumulation benchmark，不是 end-to-end collector / browser throughput。
-
-請在代表性的 host/workload 上執行 package-level benchmark：
+執行測試：
 
 ```bash
-execweave-overhead --iterations 7 --strace auto --output-json benchmark-results.json
-execweave-scalability
+python -m pytest
 ```
 
-Reference data 與 methodology 位於 [`docs/benchmarks/`](docs/benchmarks/)。
+執行 lint：
 
-## 文件
+```bash
+python -m ruff check .
+```
 
-| 區域 | 文件 |
-| --- | --- |
-| Runtime 與 graph | [`Phase 1 — Runtime Collection`](docs/phase-1-runtime-collection.md) · [`Phase 2 — Execution Graph`](docs/phase-2-execution-graph.md) · [`Live Graph`](docs/live-graph.md) · [`Semantic Telemetry`](docs/semantic-telemetry.md) |
-| Agent / IDE integrations | [`Claude Code`](docs/claude-code-hooks.md) · [`OpenAI Codex`](docs/codex-hooks.md) · [`Google Antigravity`](docs/antigravity-hooks.md) · [`Cursor`](docs/cursor-hooks.md) · [`OpenCode`](docs/opencode-plugin.md) |
-| Gateways 與 runtimes | [`Inference Gateway / OpenRouter / LiteLLM`](docs/inference-gateway.md) · [`Model Runtime / Ollama / llama.cpp / vLLM / LM Studio`](docs/model-runtime.md) |
-| Trust 與 analysis | [`Runtime Threat Model`](docs/runtime-threat-model.md) · [`Evidence Grades`](docs/evidence-grades.md) · [`Rule Packs`](docs/rule-packs.md) · [`Run Integrity`](docs/run-integrity.md) · [`Security Analysis`](docs/security-analysis.md) |
-| 效能 | [`Benchmarks`](docs/benchmarks/README.md) |
-
-## 貢獻
-
-歡迎針對 native OS collector、Agent/IDE adapter、inference gateway、model runtime、evidence/correlation method、privacy/redaction、graph UX、multi-agent conversation attribution 與 performance evaluation 提交貢獻。
+歡迎提出 Issue 與 Pull Request。新增 integration 時，請明確區分「直接觀察」、「Provider 提供」與「推導所得」的 evidence。
 
 ## 授權
 
-從 v0.6.8 起，ExecWeave 採用 **PolyForm Noncommercial License 1.0.0**。依授權條款可進行非商業使用、修改與再散布；商業使用需要與 licensor 另行取得書面 commercial license。詳見 [`LICENSE`](LICENSE)。
+ExecWeave 使用 **PolyForm Noncommercial License 1.0.0**。完整條款請見 [LICENSE](LICENSE)。

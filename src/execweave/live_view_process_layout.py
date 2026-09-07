@@ -291,33 +291,288 @@ function execweaveLayoutDirectedGraph(topo){
   }
   return topo;
 }
+function execweaveRetargetRoutePoints(topo,dagrePlacement){
+  if(!topo||!topo.routePoints||!dagrePlacement)return;
+}
+function execweaveRestoreSemanticLayoutConstraints(topo,preferred,dagrePlacement){
+  if(!topo||!topo.spec||!preferred||!dagrePlacement)return topo;
+  if(typeof nodeById==='undefined'||typeof edgeById==='undefined'||typeof execweaveComponents!=='function')return topo;
+  topo.secondaryPackedIds=new Set();
+  const nodes=[...nodeById.values()],edges=[...edgeById.values()];
+  const componentOf=execweaveComponents(nodes,edges);
+
+  // X constraint: Semantic lanes define bounding constraints.
+  // Dynamically propagate corridor lower bounds across semantic ranks so Dagre
+  // horizontal positions are retained within their architectural corridors.
+  const laneRank = {
+    runtime: 0,
+    root: 1,
+    agent: 2,
+    model: 3,
+    tool: 4,
+    file: 5,
+    endpoint: 6,
+    other: 6
+  };
+
+  // Group non-process nodes by semantic rank
+  const nodesByRank = new Map();
+  for (const [id, before] of preferred) {
+    const node = nodeById.get(id);
+    if (!node) continue;
+    const type = String(node.type || '').toLowerCase();
+    if (type === 'process' || type === 'session' || type === 'runtime') continue;
+    const lane = topo.spec.get(id)?.lane || before.lane || 'other';
+    const rank = laneRank[lane] ?? 3;
+    if (!nodesByRank.has(rank)) nodesByRank.set(rank, []);
+    nodesByRank.get(rank).push(id);
+  }
+
+  // Handle process-like nodes first (pinned to process-tree coordinates)
+  let maxProcessRight = 0;
+  for (const [id, before] of preferred) {
+    const after = topo.spec.get(id), node = nodeById.get(id);
+    if (!after || !node) continue;
+    const type = String(node.type || '').toLowerCase();
+    if (type === 'process' || type === 'session' || type === 'runtime') {
+      if (Number.isFinite(before.x)) after.x = before.x;
+      const pw = topo.width?.get(id) || (typeof execweaveWidthOf === 'function' ? execweaveWidthOf(id) : 160);
+      const px = Number.isFinite(after.x) ? after.x : 0;
+      maxProcessRight = Math.max(maxProcessRight, px + pw);
+    }
+  }
+
+  // Propagate corridor lower bounds across ranks:
+  // rank 1 (root) < rank 2 (agent) < rank 3 (model) < rank 4 (tool) < rank 5 (file) < rank 6 (endpoint)
+  let minAllowedX = maxProcessRight;
+  for (let r = 1; r <= 6; r++) {
+    const ids = nodesByRank.get(r) || [];
+    if (!ids.length) continue;
+    let rankMaxX = minAllowedX;
+    for (const id of ids) {
+      const after = topo.spec.get(id);
+      const before = preferred.get(id);
+      const dagreX = dagrePlacement.get(id)?.x;
+      const laneX = topo.laneX && Number.isFinite(topo.laneX[after?.lane]) ? topo.laneX[after.lane] : before?.x;
+      if (!after) continue;
+
+      const isBundledTarget = edges.some(e => e.target === id && topo.bundleByEdge?.get(edgeId(e))?.size > 1);
+      const candidateX = isBundledTarget && Number.isFinite(laneX) ? laneX : dagreX;
+
+      if (Number.isFinite(candidateX) && candidateX >= minAllowedX) {
+        after.x = candidateX;
+      } else if (Number.isFinite(before?.x) && before.x >= minAllowedX) {
+        after.x = before.x;
+      } else {
+        after.x = minAllowedX;
+      }
+      rankMaxX = Math.max(rankMaxX, after.x);
+    }
+    minAllowedX = rankMaxX + 1;
+  }
+
+  // Y constraint: Dagre coordinates optimize positions within semantic lane/component bounds
+  const reorderable=new Set(['agent','model','tool','file','endpoint','other']);
+  const groups=new Map();
+  for(const [id,before] of preferred){
+    const spec=topo.spec.get(id);
+    if(!spec)continue;
+    const lane=spec.lane||before.lane;
+    if(!reorderable.has(lane)){
+      spec.y=before.y;
+      continue;
+    }
+    const component=componentOf.has(id)?componentOf.get(id):-1;
+    const key=`${lane}\0${component}`;
+    if(!groups.has(key))groups.set(key,[]);
+    groups.get(key).push(id);
+  }
+
+  for(const ids of groups.values()){
+    const slots=ids.map(id=>preferred.get(id)?.y).filter(Number.isFinite).sort((a,b)=>a-b);
+    if(!slots.length)continue;
+    const ordered=[...ids].sort((a,b)=>{
+      const ay=dagrePlacement.get(a)?.y??0,by=dagrePlacement.get(b)?.y??0;
+      return ay-by||String(a).localeCompare(String(b));
+    });
+    const minY=slots[0],maxY=slots[slots.length-1];
+    const nodeH=typeof execweaveHeightOf==='function'?execweaveHeightOf(ids[0]):(typeof EXECWEAVE_NODE_H!=='undefined'?EXECWEAVE_NODE_H:50);
+    const minStep=nodeH+16;
+    let prevY=-Infinity;
+
+    ordered.forEach((id,index)=>{
+      const spec=topo.spec.get(id);
+      if(!spec)return;
+      const targetY=dagrePlacement.get(id)?.y;
+      const slotY=slots[index];
+      if(Number.isFinite(targetY)&&targetY>=minY-20&&targetY<=maxY+30&&targetY>=prevY+minStep){
+        spec.y=targetY;
+      }else if(Number.isFinite(targetY)){
+        const bounded=Math.max(prevY+minStep,Math.min(maxY+30,Math.max(minY,targetY)));
+        spec.y=bounded;
+      }else if(Number.isFinite(slotY)){
+        spec.y=slotY;
+      }
+      prevY=spec.y;
+    });
+  }
+
+  // Secondary components 2D grid packing (wrapping with spineWidth)
+  if(!componentOf.size)return topo;
+  const sizes=new Map();
+  for(const value of componentOf.values())sizes.set(value,(sizes.get(value)||0)+1);
+  const roots=nodes.filter(typeof execweaveIsRoot==='function'?execweaveIsRoot:()=>false).sort(typeof execweaveStableNodeSort==='function'?execweaveStableNodeSort:(a,b)=>String(a.id).localeCompare(String(b.id)));
+  let primary=roots.length?componentOf.get(roots[0].id):undefined;
+  if(primary===undefined){
+    let best=-1;
+    for(const [value,size] of [...sizes.entries()].sort((a,b)=>a[0]-b[0]))if(size>best){best=size;primary=value}
+  }
+  const agentIds=new Set(nodes.filter(node=>node?.type==='agent').map(node=>node.id));
+  const spineComponents=new Set([...componentOf.entries()].filter(([id])=>agentIds.has(id)).map(([,value])=>value));
+  if(primary!==undefined)spineComponents.add(primary);
+
+  let spineLeft=Infinity,spineRight=-Infinity,spineFloor=-Infinity;
+  for(const [id,value] of componentOf){
+    if(!spineComponents.has(value))continue;
+    const spec=topo.spec.get(id);
+    if(!spec)continue;
+    const w=typeof execweaveWidthOf==='function'?execweaveWidthOf(id):(typeof EXECWEAVE_NODE_W!=='undefined'?EXECWEAVE_NODE_W:160);
+    const h=typeof execweaveHeightOf==='function'?execweaveHeightOf(id):(typeof EXECWEAVE_NODE_H!=='undefined'?EXECWEAVE_NODE_H:50);
+    spineLeft=Math.min(spineLeft,spec.x);
+    spineRight=Math.max(spineRight,spec.x+w);
+    spineFloor=Math.max(spineFloor,spec.y+h);
+  }
+  if(!Number.isFinite(spineLeft)){spineLeft=0;spineRight=600;spineFloor=100}
+  const spineWidth=Math.max(600,spineRight-spineLeft);
+  const bandGap=typeof EXECWEAVE_BAND_GAP!=='undefined'?EXECWEAVE_BAND_GAP:170;
+
+  const secondary=[...sizes.keys()].filter(value=>!spineComponents.has(value)).sort((a,b)=>a-b);
+  const compBoxes=secondary.map(value=>{
+    const members=[...componentOf.entries()].filter(entry=>entry[1]===value).map(entry=>entry[0]);
+    let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
+    for(const id of members){
+      const s=topo.spec.get(id);
+      if(s){
+        const w=typeof execweaveWidthOf==='function'?execweaveWidthOf(id):(typeof EXECWEAVE_NODE_W!=='undefined'?EXECWEAVE_NODE_W:160);
+        const h=typeof execweaveHeightOf==='function'?execweaveHeightOf(id):(typeof EXECWEAVE_NODE_H!=='undefined'?EXECWEAVE_NODE_H:50);
+        minX=Math.min(minX,s.x);maxX=Math.max(maxX,s.x+w);
+        minY=Math.min(minY,s.y);maxY=Math.max(maxY,s.y+h);
+      }
+    }
+    return{value,members,minX,maxX,minY,maxY,w:maxX-minX,h:maxY-minY};
+  }).filter(box=>Number.isFinite(box.minX));
+
+  let cursorX=spineLeft,cursorY=spineFloor+bandGap,rowHeight=0;
+  for(const box of compBoxes){
+    if(cursorX>spineLeft&&cursorX+box.w>spineLeft+spineWidth){
+      cursorX=spineLeft;cursorY+=rowHeight+bandGap;rowHeight=0;
+    }
+    const shiftX=cursorX-box.minX,shiftY=cursorY-box.minY;
+    for(const id of box.members){
+      const s=topo.spec.get(id);if(s){s.x+=shiftX;s.y+=shiftY;topo.secondaryPackedIds.add(id)}
+    }
+    cursorX+=box.w+bandGap;
+    rowHeight=Math.max(rowHeight,box.h);
+  }
+  return topo;
+}
 function execweaveApplyDirectedGraph(topo){
+  if(!topo||!topo.spec)return topo;
+
+  // Stage 1: PRE_DAGRE validation snapshot
+  const preDagre=new Map();
+  for(const [id,spec] of topo.spec.entries()){
+    preDagre.set(id,{x:spec.x,y:spec.y,lane:spec.lane,rank:spec.rank,order:spec.order});
+  }
+
+  // Stage 2: POST_DAGRE layout
   execweaveLayoutDirectedGraph(topo);
+  const postDagre=new Map();
+  for(const [id,spec] of topo.spec.entries()){
+    postDagre.set(id,{x:spec.x,y:spec.y,lane:spec.lane});
+  }
+
+  // Stage 3: POST_FINAL_CONSTRAINT integration
+  execweaveRestoreSemanticLayoutConstraints(topo,preDagre,postDagre);
   execweaveSeparateOverlappingNodes(topo);
-  // Ports were assigned before dagre moved nodes; rebuild against final Y so order matches crossing minimization.
+  execweaveRetargetRoutePoints(topo,postDagre);
   execweaveRecomputePorts(topo);
+
+  const postFinalConstraint=new Map();
+  for(const [id,spec] of topo.spec.entries()){
+    postFinalConstraint.set(id,{x:spec.x,y:spec.y,lane:spec.lane});
+  }
+
+  // Measure Dagre 2D retention rates
+  let xRetained=0,yRetained=0,total=postDagre.size;
+  for(const [id,dagrePos] of postDagre.entries()){
+    const finalPos=postFinalConstraint.get(id);
+    if(!finalPos)continue;
+    if(Math.abs(finalPos.x-dagrePos.x)<=2.0)xRetained++;
+    if(Math.abs(finalPos.y-dagrePos.y)<=2.0)yRetained++;
+  }
+  const xRetentionRate=total>0?(xRetained/total)*100:0;
+  const yRetentionRate=total>0?(yRetained/total)*100:0;
+
+  const stagesComplete = preDagre.size === total && postDagre.size === total && postFinalConstraint.size === total;
+  const retentionHealthy = total > 0 ? (xRetained > 0 && yRetained > 0) : true;
+  const pipelineStatus = (stagesComplete && retentionHealthy) ? 'PASS' : 'FAIL';
+
+  topo.dagrePipeline={
+    stages:{
+      PRE_DAGRE:preDagre,
+      POST_DAGRE:postDagre,
+      POST_FINAL_CONSTRAINT:postFinalConstraint,
+    },
+    metrics:{
+      totalNodes:total,
+      xRetained,
+      yRetained,
+      DAGRE_X_RETENTION_RATE:xRetentionRate,
+      DAGRE_Y_RETENTION_RATE:yRetentionRate,
+      DAGRE_SEMANTIC_CONSTRAINT_PIPELINE:pipelineStatus,
+    },
+  };
+  if(typeof window!=='undefined'){
+    window.__execweaveDagrePipeline=topo.dagrePipeline;
+  }
   return topo;
 }
 function execweaveRouteFromPoints(edge,points){
-  const sp=positions.get(edge.source)||{x:0,y:0},tp=positions.get(edge.target)||{x:0,y:0};
+  const sp=(typeof positions!=='undefined'&&positions.get(edge.source))||(execweaveTopology?.spec&&execweaveTopology.spec.get(edge.source))||{x:0,y:0};
+  const tp=(typeof positions!=='undefined'&&positions.get(edge.target))||(execweaveTopology?.spec&&execweaveTopology.spec.get(edge.target))||{x:0,y:0};
   const sourcePort=execweaveTopology.sourcePort.get(edgeId(edge)),targetPort=execweaveTopology.targetPort.get(edgeId(edge));
   const sourceSpec=execweaveTopology.spec.get(edge.source)||{},targetSpec=execweaveTopology.spec.get(edge.target)||{};
-  const forward=(targetSpec.x??0)>=(sourceSpec.x??0);
+  const forward=(targetSpec.rank??0)>=(sourceSpec.rank??0);
   const sx=forward?sp.x+execweaveWidthOf(edge.source):sp.x;
   const tx=forward?tp.x:tp.x+execweaveWidthOf(edge.target);
   const sy=execweavePortY(sp,sourcePort,edge.source),ty=execweavePortY(tp,targetPort,edge.target);
-  const mid=points.length>2?points.slice(1,-1):[];
+  const distance=Math.abs(tx-sx),bend=Math.max(44,distance*.42),sign=forward?1:-1;
+  const p0={x:sx,y:sy},p1={x:sx+sign*bend,y:sy},p2={x:tx-sign*bend,y:ty},p3={x:tx,y:ty};
+  const cubic=t=>{
+    const u=1-t;
+    return{
+      x:u*u*u*p0.x+3*u*u*t*p1.x+3*u*t*t*p2.x+t*t*t*p3.x,
+      y:u*u*u*p0.y+3*u*u*t*p1.y+3*u*t*t*p2.y+t*t*t*p3.y,
+    };
+  };
   let d=`M ${sx} ${sy}`;
-  for(const point of mid)d+=` L ${point.x} ${point.y}`;
+  for(let index=1;index<8;index++){
+    const point=cubic(index/8);d+=` L ${point.x} ${point.y}`;
+  }
   d+=` L ${tx} ${ty}`;
-  const labelPoint=mid.length?mid[Math.floor(mid.length/2)]:{x:(sx+tx)/2,y:(sy+ty)/2};
+  const labelPoint=cubic(.5);
   return{d,labelX:labelPoint.x,labelY:labelPoint.y-8,kind:execweaveIsSpawn(edge)?'spawn':(forward?'forward':'reverse'),bundle:null};
 }
 const execweaveBuildTopologyBase=execweaveBuildTopology;
 execweaveBuildTopology=function(){return execweaveApplyDirectedGraph(execweaveLayoutRelated(execweaveLayoutProcessTree(execweaveBuildTopologyBase())))};
-window.execweaveLayoutDirectedGraph=execweaveLayoutDirectedGraph;
-window.execweaveSeparateOverlappingNodes=execweaveSeparateOverlappingNodes;
-window.execweaveRecomputePorts=execweaveRecomputePorts;
+if(typeof window!=='undefined'){
+  window.execweaveLayoutDirectedGraph=execweaveLayoutDirectedGraph;
+  window.execweaveSeparateOverlappingNodes=execweaveSeparateOverlappingNodes;
+  window.execweaveRecomputePorts=execweaveRecomputePorts;
+  window.execweaveApplyDirectedGraph=execweaveApplyDirectedGraph;
+  window.execweaveRestoreSemanticLayoutConstraints=execweaveRestoreSemanticLayoutConstraints;
+}
 const execweaveRouteBase=execweaveRoute;
 execweaveRoute=function(edge){
   const bundle=execweaveTopology.bundleByEdge.get(edgeId(edge));
@@ -335,45 +590,76 @@ execweaveRoute=function(edge){
   const rail=Math.max(sx,tx)+offset;
   return{d:`M ${sx} ${sy} H ${rail} V ${ty} H ${tx}`,labelX:rail+8,labelY:(sy+ty)/2,kind:'column',bundle:null};
 };
+function execweaveIsNodeVisible(id){
+  if(typeof nodeById==='undefined'||!nodeById.has(id))return false;
+  if(typeof nodeElements==='undefined'||!nodeElements.has(id))return true;
+  const el=nodeElements.get(id);
+  if(!el)return false;
+  if(el.classList?.contains('dim'))return false;
+  if(el.style?.display==='none'||el.hasAttribute?.('hidden'))return false;
+  return true;
+}
+function execweaveIsEdgeVisible(edge){
+  if(!execweaveIsNodeVisible(edge.source)||!execweaveIsNodeVisible(edge.target))return false;
+  if(typeof edgeElements==='undefined')return true;
+  const id=typeof edgeId==='function'?edgeId(edge):edge.id;
+  const els=edgeElements.get(id);
+  if(!els)return true;
+  if(els.visible?.classList?.contains('dim')||els.visible?.style?.display==='none'||els.visible?.hasAttribute?.('hidden'))return false;
+  return true;
+}
 function execweaveArrangePositions(){
   execweaveTopology=execweaveBuildTopology();
   const next=new Map();
-  const ordered=[...nodeById.keys()].sort((a,b)=>{
+  const visibleIds=typeof nodeById!=='undefined'?[...nodeById.keys()].filter(execweaveIsNodeVisible):[];
+  const ordered=visibleIds.sort((a,b)=>{
     const av=execweaveTopology.spec.get(a)||{},bv=execweaveTopology.spec.get(b)||{};
     return Number(av.rank||0)-Number(bv.rank||0)||Number(av.processDepth||0)-Number(bv.processDepth||0)||Number(av.order||0)-Number(bv.order||0)||String(a).localeCompare(String(b));
   });
-  for(const id of ordered)next.set(id,execweavePlaceStable(id,execweaveDesiredPosition(id),next,id));
-  execweaveLayoutDirectedGraph(execweaveTopology);
-  execweaveSeparateOverlappingNodes(execweaveTopology);
-  execweaveRecomputePorts(execweaveTopology);
   for(const id of ordered){
     const spec=execweaveTopology.spec.get(id);
-    if(spec)next.set(id,{x:spec.x,y:spec.y});
+    next.set(id,spec?{x:spec.x,y:spec.y}:execweavePlaceStable(id,execweaveDesiredPosition(id),next,id));
+  }
+  if(typeof positions!=='undefined'){
+    for(const [id,p] of positions){
+      if(!next.has(id))next.set(id,p);
+    }
   }
   positions=next;layerRows=new Map();
   for(const [id,p] of positions){
     const spec=execweaveTopology.spec.get(id);
     if(spec)layerRows.set(spec.rank,Math.max(layerRows.get(spec.rank)||0,spec.order+1));
-    const group=nodeElements.get(id);
+    const group=typeof nodeElements!=='undefined'?nodeElements.get(id):null;
     if(group)group.setAttribute('transform',`translate(${p.x} ${p.y})`);
-    const node=nodeById.get(id);
-    if(node)updateNodeElement(node);
+    const node=typeof nodeById!=='undefined'?nodeById.get(id):null;
+    if(node&&typeof updateNodeElement==='function')updateNodeElement(node);
   }
-  for(const edge of edgeById.values())updateEdgeElement(edge);
-  svg.classList.toggle('execweave-crowded',execweaveTopology.crowded);
-  applySearch();
-  updateJumpLatest();
+  const visibleEdges=typeof edgeById!=='undefined'?[...edgeById.values()].filter(execweaveIsEdgeVisible):[];
+  for(const edge of visibleEdges)if(typeof updateEdgeElement==='function')updateEdgeElement(edge);
+  if(typeof svg!=='undefined'&&svg.classList)svg.classList.toggle('execweave-crowded',execweaveTopology.crowded);
+  if(typeof applySearch==='function')applySearch();
+  if(typeof updateJumpLatest==='function')updateJumpLatest();
   return new Map(positions);
 }
 execweaveArrangeGraph=execweaveArrangePositions;
-window.__execweaveArrangeGraph=execweaveArrangePositions;
-const arrangeButton=document.getElementById('arrange');
+if(typeof window!=='undefined'){
+  window.__execweaveArrangeGraph=execweaveArrangePositions;
+  window.execweaveArrangePositions=execweaveArrangePositions;
+  window.execweaveArrangeGraph=execweaveArrangePositions;
+}
+const arrangeButton=typeof document!=='undefined'?document.getElementById('arrange'):null;
 if(arrangeButton)arrangeButton.onclick=()=>execweaveArrangePositions();
 function execweaveWriteDirectedPositions(topo){
   const next=new Map();
   for(const id of nodeById.keys()){
     const spec=topo.spec.get(id);
-    next.set(id,spec?{x:spec.x,y:spec.y}:execweaveDesiredPosition(id));
+    const packed=topo.secondaryPackedIds?.has(id);
+    const laneX=(topo.laneX&&spec?.lane&&Number.isFinite(topo.laneX[spec.lane]))?topo.laneX[spec.lane]:spec?.x;
+    // Connected semantic lanes retain their established X contract. Only
+    // disconnected components use the final 2D packing X; forcing those back
+    // to the lane origin would stack every orphan node on the same rectangle.
+    const initialX=packed?spec?.x:laneX;
+    next.set(id,spec?{x:initialX,y:spec.y}:execweaveDesiredPosition(id));
   }
   positions=next;layerRows=new Map();
   for(const [id,p] of positions){

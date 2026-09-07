@@ -147,11 +147,62 @@ jobs:
               esac
             done < <(git diff --name-only "$BASELINE_REF...HEAD" -- tests)
           fi
+          if [[ "$HEAD_REF" == "test/live-dashboard-acceptance" ]]; then
+            while IFS= read -r path; do
+              case "$path" in
+                tests/test_command.py)
+                  args+=(--allow-test-change "$path=acceptance branch isolates the historical Windows shim fallback from installed Cursor desktop candidates; native desktop preference and custom-install contracts remain separate and existing test node IDs are unchanged")
+                  ;;
+                tests/test_codex_adapter.py)
+                  args+=(--allow-test-change "$path=Codex now documents Interrupt as a first-class hook with a bounded handler contract; the existing config test node ID is retained and now asserts the current official event and timeout semantics")
+                  ;;
+                tests/test_codex_hook_lifecycle.py)
+                  args+=(--allow-test-change "$path=Codex now documents Interrupt as a first-class lifecycle event; the historical test node ID is retained while its assertion is corrected to the current official contract")
+                  ;;
+                tests/test_v069_dashboard_release.py)
+                  args+=(--allow-test-change "$path=README policy is now stable product documentation instead of release notes; the historical test node IDs are retained while assertions require no hard-coded release tags and preserve dashboard/conversation/license anchors")
+                  ;;
+                tests/test_graph_clear_focus_e2e.py|tests/test_graph_edge_routing_e2e.py|tests/test_graph_node_sizing_e2e.py|tests/test_tool_traffic_e2e.py)
+                  args+=(--allow-test-change "$path=existing browser assertions are unchanged; the module-level viewer_e2e marker makes the dedicated three-OS browser workflow collect tests that were previously omitted")
+                  ;;
+                tests/test_graph_lane_separation_e2e.py)
+                  args+=(--allow-test-change "$path=layout acceptance separates endpoint projection from lane geometry using loopback fixtures and replaces obsolete fixed canvas coordinates with semantic lane/band invariants; historical test node IDs remain unchanged")
+                  ;;
+                tests/test_http_proxy.py)
+                  args+=(--allow-test-change "$path=NEW-005 adds native streaming-order regressions for content-length and chunked responses; existing test assertions and node IDs are unchanged")
+                  ;;
+                tests/test_conversation_access.py)
+                  args+=(--allow-test-change "$path=the historical live conversation-access test now requires bounded authenticated polling with AbortController cleanup at finished state; the test node ID and auth/path-boundary assertions remain unchanged")
+                  ;;
+                tests/test_semantic.py)
+                  args+=(--allow-test-change "$path=NEW-006 adds contradictory and future PID identity regressions through merge and graph materialization; existing test assertions and node IDs are unchanged")
+                  ;;
+                tests/test_live_auth.py)
+                  args+=(--allow-test-change "$path=acceptance branch adds the native client-reset regression proving expected Windows disconnects are suppressed without hiding unexpected server errors")
+                  ;;
+                tests/test_process_tree_layout.py)
+                  args+=(--allow-test-change "$path=acceptance branch replaces obsolete fixed layout coordinates with semantic lane and ordering assertions while retaining the historical test node IDs")
+                  ;;
+                tests/test_external_endpoints_all_providers.py)
+                  args+=(--allow-test-change "$path=loopback endpoint presentation intentionally changed from individual raw nodes to one provider-neutral Local endpoints cluster while External behavior remains; historical test node IDs are retained and raw endpoint evidence is unchanged")
+                  ;;
+                tests/test_viewer_projection.py)
+                  args+=(--allow-test-change "$path=approved provider-neutral endpoint semantics retire the old four-endpoint threshold and per-process loopback cluster shape: every loopback endpoint now folds into one Local endpoints node while source edges, chronology, expansion evidence, and historical test node IDs are retained")
+                  ;;
+                tests/test_dashboard_information_architecture.py)
+                  args+=(--allow-test-change "$path=approved orphan-file presentation now folds degree-zero file and directory nodes into the expandable Files / directories viewer cluster; the historical test node ID remains and the assertion now requires the original notes.txt evidence in cluster expansion")
+                  ;;
+                tests/test_viewer_agent_isolation_e2e.py)
+                  args+=(--allow-test-change "$path=live conversation ownership now reads the raw observed graph before viewer-only endpoint, request, and orphan collapse; historical test IDs and conversation completeness assertions remain unchanged and only the live-index fixture injection seam follows _raw_graph_locked")
+                  ;;
+              esac
+            done < <(git diff --name-only "$BASELINE_REF...HEAD" -- tests)
+          fi
           if [[ "$HEAD_REF" == "audit/remaining-providers-v0.8.7" ]]; then
             args+=(--allow-retired-provider "gemini=Gemini integration was retired and replaced by the AGY/Antigravity provider; only Gemini-owned test IDs and files may disappear")
             while IFS= read -r path; do
               case "$path" in
-                tests/fixtures/hooks/manifest.json|tests/test_agent_bootstrap.py|tests/test_agent_topology_evidence.py|tests/test_agent_trace_viewer_visibility.py|tests/test_antigravity_agent_collaboration.py|tests/test_antigravity_child_transcript_tools.py|tests/test_antigravity_cursor_launch.py|tests/test_antigravity_identity_topology.py|tests/test_antigravity_invocation_archive.py|tests/test_antigravity_official_contract.py|tests/test_antigravity_subagent_transcript_linkage.py|tests/test_antigravity_trace_capability_cli.py|tests/test_claude_adapter.py|tests/test_codex_real_multi_agent_conversation.py|tests/test_collector.py|tests/test_command.py|tests/test_conversation_access.py|tests/test_conversation_agent_isolation.py|tests/test_conversation_identity_merge.py|tests/test_conversation_provider_parity.py|tests/test_cross_provider_agent_trace.py|tests/test_cursor_adapter.py|tests/test_dashboard_information_architecture.py|tests/test_external_endpoints_all_providers.py|tests/test_hook_fixture_corpus.py|tests/test_provider_capability.py|tests/test_provider_conversation_evidence.py|tests/test_provider_lifecycle.py|tests/test_v064_live_auto_integrations.py)
+                tests/fixtures/hooks/manifest.json|tests/test_agent_bootstrap.py|tests/test_agent_topology_evidence.py|tests/test_agent_trace_viewer_visibility.py|tests/test_antigravity_agent_collaboration.py|tests/test_antigravity_child_transcript_tools.py|tests/test_antigravity_cursor_launch.py|tests/test_antigravity_identity_topology.py|tests/test_antigravity_invocation_archive.py|tests/test_antigravity_official_contract.py|tests/test_antigravity_subagent_transcript_linkage.py|tests/test_antigravity_trace_capability_cli.py|tests/test_claude_adapter.py|tests/test_codex_real_multi_agent_conversation.py|tests/test_collector.py|tests/test_command.py|tests/test_conversation_access.py|tests/test_conversation_agent_isolation.py|tests/test_conversation_identity_merge.py|tests/test_cross_provider_agent_trace.py|tests/test_cursor_adapter.py|tests/test_dashboard_information_architecture.py|tests/test_external_endpoints_all_providers.py|tests/test_hook_fixture_corpus.py|tests/test_provider_capability.py|tests/test_provider_conversation_evidence.py|tests/test_provider_lifecycle.py|tests/test_v064_live_auto_integrations.py)
                   args+=(--allow-test-change "$path=Gemini provider retirement and provider-neutral AGY/dashboard contract updates are intentional on this branch; existing test node IDs remain stable where the provider is still supported")
                   ;;
               esac

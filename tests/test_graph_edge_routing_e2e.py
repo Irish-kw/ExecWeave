@@ -15,7 +15,11 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from test_graph_node_sizing_e2e import _browser, _launch, _render
+
+pytestmark = pytest.mark.viewer_e2e
 
 # Measured on the fixture below at the commit that unified the routing families. The
 # count is dominated by the bundle trunk and the lifecycle returns, both of which are

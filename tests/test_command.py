@@ -48,6 +48,9 @@ def test_posix_path_script_is_resolved_and_launchable(tmp_path: Path, monkeypatc
 def test_windows_cmd_shim_is_resolved_and_launchable(
     agent: str, tmp_path: Path, monkeypatch
 ) -> None:
+    # This contract tests shim fallback, not a real user's desktop installation.
+    # Native desktop preference/custom install paths are covered separately.
+    monkeypatch.setattr("execweave.command._cursor_desktop_candidates", lambda: [])
     shim = tmp_path / f"{agent}.cmd"
     shim.write_text("@echo off\r\nexit /b 0\r\n", encoding="utf-8")
     _prepend_path(monkeypatch, tmp_path)

@@ -126,6 +126,12 @@ def _resolve_process_reference(
         unresolved.setdefault("attributes", {})["unresolved"] = True
         return unresolved, False
 
+    unresolved = deepcopy(entity)
+    unresolved.setdefault("attributes", {})["unresolved"] = True
+    unresolved["attributes"]["candidate_process_ids"] = sorted(
+        candidate.entity["id"] for candidate in options if isinstance(candidate.entity.get("id"), str)
+    )
+    event_epoch = timestamp.timestamp()
     explicit_create_time = attributes.get("create_time") if isinstance(attributes, dict) else None
     if isinstance(explicit_create_time, (int, float)) and not isinstance(explicit_create_time, bool):
         exact = [
@@ -134,13 +140,17 @@ def _resolve_process_reference(
             if candidate.create_time is not None
             and abs(candidate.create_time - float(explicit_create_time)) < 0.001
         ]
-        if len(exact) == 1:
+        if len(exact) == 1 and exact[0].create_time <= event_epoch:
             return deepcopy(exact[0].entity), True
+        # An explicit identity is evidence, not a hint that can be discarded in
+        # favour of a different process which happens to reuse the same PID.
+        return unresolved, False
 
     if len(options) == 1:
+        if options[0].create_time is not None and options[0].create_time > event_epoch:
+            return unresolved, False
         return deepcopy(options[0].entity), True
 
-    event_epoch = timestamp.timestamp()
     started = [
         candidate
         for candidate in options
@@ -156,11 +166,6 @@ def _resolve_process_reference(
         if len(nearest) == 1:
             return deepcopy(nearest[0].entity), True
 
-    unresolved = deepcopy(entity)
-    unresolved.setdefault("attributes", {})["unresolved"] = True
-    unresolved["attributes"]["candidate_process_ids"] = sorted(
-        candidate.entity["id"] for candidate in options if isinstance(candidate.entity.get("id"), str)
-    )
     return unresolved, False
 
 
