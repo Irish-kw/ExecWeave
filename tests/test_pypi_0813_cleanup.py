@@ -241,14 +241,16 @@ def test_cleanup_is_idempotent_and_rejects_stale_process_identity(tmp_path: Path
         sentinel.wait(timeout=8)
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX signals; not a Windows console acceptance")
-def test_real_sigint_cleans_the_owned_tree(tmp_path: Path) -> None:
+def test_interrupt_request_cleans_the_owned_tree(tmp_path: Path) -> None:
     owned: list[psutil.Process] = []
     env = dict(os.environ)
     source_root = str(Path(collector_module.__file__).resolve().parents[1])
     env["PYTHONPATH"] = os.pathsep.join(filter(None, [source_root, env.get("PYTHONPATH")]))
     runner_code = r'''
 import sys
+import os
+import threading
+import _thread
 from pathlib import Path
 from execweave.collector import RuntimeCollector
 from execweave.sink import JsonlSink
@@ -257,10 +259,18 @@ collector = RuntimeCollector(
     session_id="d003-sigint", sink=JsonlSink(root / "events.jsonl"),
     watch_root=root, poll_interval=0.02, collect_filesystem=False, collect_network=False,
 )
+if os.name == "nt":
+    # Hosted Windows may not have an attached console. Trigger the real Python
+    # SIGINT handler asynchronously, not an OS console Ctrl+C acceptance claim.
+    def request_interrupt():
+        if sys.stdin.buffer.read(1) == b"I":
+            _thread.interrupt_main()
+    threading.Thread(target=request_interrupt, daemon=True).start()
 sys.exit(collector.run(sys.argv[2:]))
 '''
     runner = subprocess.Popen(
-        [sys.executable, "-c", runner_code, str(tmp_path), *_command(tmp_path, "0")], env=env,
+        [sys.executable, "-c", runner_code, str(tmp_path), *_command(tmp_path, "0")],
+        env=env, stdin=subprocess.PIPE,
     )
     monitor = _remember(runner.pid, owned)
     sentinel = subprocess.Popen([sys.executable, "-c", _LEAF])
@@ -271,7 +281,12 @@ sys.exit(collector.run(sys.argv[2:]))
         roots = monitor.children()
         assert len(roots) == 1
         root = _remember(roots[0].pid, owned)
-        runner.send_signal(signal.SIGINT)
+        if os.name == "nt":
+            assert runner.stdin is not None
+            runner.stdin.write(b"I")
+            runner.stdin.flush()
+        else:
+            runner.send_signal(signal.SIGINT)
         assert runner.wait(timeout=15) == 130
         assert not any(_live(process) for process in [root, *family])
         assert _live(external)
@@ -281,11 +296,14 @@ sys.exit(collector.run(sys.argv[2:]))
     finally:
         _cleanup(owned)
         runner.wait(timeout=8)
+        if runner.stdin is not None:
+            runner.stdin.close()
         sentinel.wait(timeout=8)
 
 
-@pytest.mark.skipif(os.name == "nt", reason="Windows TerminateProcess does not deliver POSIX SIGTERM")
-def test_cleanup_escalates_an_ignored_sigterm(tmp_path: Path) -> None:
+def test_cleanup_escalates_a_survivor_after_grace_period(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     ready = tmp_path / "ignoring-sigterm"
     code = (
         "import signal,time; from pathlib import Path; "
@@ -297,6 +315,16 @@ def test_cleanup_escalates_an_ignored_sigterm(tmp_path: Path) -> None:
     process = _remember(parent.pid, owned)
     try:
         _wait_for(ready.exists)
+        if os.name == "nt":
+            # Windows terminate() is already forceful. Simulate an unsuccessful
+            # first attempt, but exercise real wait/kill and identity checks.
+            original_terminate = psutil.Process.terminate
+
+            def leave_target_alive(candidate: psutil.Process) -> None:
+                if candidate != process:
+                    original_terminate(candidate)
+
+            monkeypatch.setattr(psutil.Process, "terminate", leave_target_alive)
         collector = _collector(tmp_path)
         collector._sample_process_tree(process)
         collector._terminate_process_tree(parent)
@@ -308,3 +336,49 @@ def test_cleanup_escalates_an_ignored_sigterm(tmp_path: Path) -> None:
     finally:
         _cleanup(owned)
         parent.wait(timeout=8)
+
+
+@pytest.mark.parametrize("cleanup_available", [True, False])
+def test_cleanup_does_not_rediscover_and_lose_its_selected_processes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cleanup_available: bool,
+) -> None:
+    collector = _collector(tmp_path)
+    owned: list[psutil.Process] = []
+    family: list[psutil.Process] = []
+    original_owned = collector._owned_live_processes
+    released = False
+
+    def fail_sample(root: psutil.Process) -> None:
+        _remember(root.pid, owned)
+        _wait_for((tmp_path / "ready").exists)
+        pids = json.loads((tmp_path / "family.json").read_text(encoding="utf-8"))
+        family.extend(_remember(pid, owned) for pid in pids)
+        # Leave process discovery to the real cleanup routine, not the sampler.
+        raise RuntimeError("D003 failure before first sample")
+
+    def select_then_reparent(process: subprocess.Popen) -> list[psutil.Process]:
+        nonlocal released
+        selected = original_owned(process)
+        if selected and not released:
+            assert all(child in selected for child in family)
+            released = True
+            (tmp_path / "release").touch()
+            _wait_for(lambda: process.poll() is not None)
+        return selected
+
+    monkeypatch.setattr(collector, "_sample_process_tree", fail_sample)
+    monkeypatch.setattr(collector, "_owned_live_processes", select_then_reparent)
+    if not cleanup_available:
+        # Simulate denied termination: reporting must retain the selected orphan
+        # handles even when a fresh root-tree lookup can no longer find them.
+        monkeypatch.setattr(collector, "_terminate_process_tree", lambda process, *, owned: None)
+    try:
+        with pytest.raises(RuntimeError, match="D003 failure before first sample"):
+            collector.run(_command(tmp_path, "0"))
+        assert released and len(family) == 2
+        assert any(_live(child) for child in family) is (not cleanup_available)
+        finished = json.loads(collector.sink.path.read_text().splitlines()[-1])
+        assert finished["attributes"]["workload_alive_after_cleanup"] is (not cleanup_available)
+        assert finished["attributes"]["workload_terminated_due_to_collector_error"] is True
+    finally:
+        _cleanup(owned)
