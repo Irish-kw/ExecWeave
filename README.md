@@ -15,7 +15,7 @@
 
 <p align="center">
   <a href="https://pypi.org/project/execweave/"><img src="https://img.shields.io/pypi/v/execweave" alt="PyPI"></a>
-  <a href="https://github.com/Irish-kw/ExecWeave/actions/workflows/ci.yml"><img src="https://github.com/Irish-kw/ExecWeave/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/Irish-kw/ExecWeave/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Irish-kw/ExecWeave/ci.yml?branch=main" alt="CI"></a>
   <img src="https://img.shields.io/badge/Python-3.10%2B-blue" alt="Python 3.10+">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue" alt="License"></a>
 </p>
@@ -271,6 +271,9 @@ Raw observations remain separate from derived semantic and correlation outputs.
 ## Limits and privacy
 
 - The portable collector runs on Linux, macOS, and Windows. Portable filesystem observation is session-correlated rather than always process-causal, and polling can miss sufficiently short-lived activity.
+- **Process lifetime identity:** portable process tracking distinguishes PID reuse with the process creation time. A reused PID is recorded as a new process lifetime instead of being collapsed into the earlier process.
+- **Explicit degraded-state reporting:** terminal network collection health is reported as `available`, `degraded`, `unavailable`, `not_sampled`, or `not_requested`. A finished live conversation is considered synchronized only after the final conversation fetch succeeds; stopping polling alone is not treated as successful synchronization.
+- **Failure ownership cleanup:** if the portable collector fails unexpectedly after launching a managed workload, it terminates the workload it owns before recording terminal session state. A filesystem observer that only partially starts is also torn down before the startup error propagates.
 - Linux also provides a `strace` reference backend with stronger syscall-attributed evidence for supported executions.
 - Provider semantics depend on what each integration actually exposes. Missing prompts, hidden reasoning, remote provider internals, and unexposed routing cannot be reconstructed reliably.
 - Full-fidelity provider content may contain credentials, secrets, source code, prompts, tool values, model responses, shell output, and file contents.
