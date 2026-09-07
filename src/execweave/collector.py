@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import ctypes
 import os
 import subprocess
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,6 +22,10 @@ from .command import resolve_launch_command
 from .filesystem import FileWatcher
 from .schema import Entity, RuntimeEvent
 from .sink import JsonlSink
+
+
+_PR_SET_CHILD_SUBREAPER = 36
+_PR_GET_CHILD_SUBREAPER = 37
 
 
 @dataclass(frozen=True)
@@ -129,6 +135,7 @@ class RuntimeCollector:
         self._network_sample_successes = 0
         self._network_sample_errors = 0
         self._network_access_denied = 0
+        self._collector_children_baseline: dict[int, float] | None = None
 
     def _filesystem_excluded_roots(self) -> list[Path]:
         """Return ExecWeave-owned paths that must never become workload evidence.
@@ -201,6 +208,7 @@ class RuntimeCollector:
         interrupted = False
         collector_error_type: str | None = None
         workload_terminated_due_to_collector_error = False
+        subreaper_previous: bool | None = None
         post_command_probe = prepare_post_command_specialized_probe(command)
         try:
             if watcher is not None:
@@ -211,6 +219,12 @@ class RuntimeCollector:
                     command,
                     server_relay=True,
                 ) as launch_environment:
+                    subreaper_previous = self._enable_linux_child_subreaper()
+                    self._collector_children_baseline = (
+                        self._direct_child_lifetimes()
+                        if subreaper_previous is not None
+                        else None
+                    )
                     process = subprocess.Popen(
                         launch_command,
                         cwd=str(self.watch_root),
@@ -252,6 +266,7 @@ class RuntimeCollector:
                     collector_error_type is not None and bool(owned)
                 )
                 self._terminate_process_tree(process, owned=owned)
+            self._restore_linux_child_subreaper(subreaper_previous)
             if watcher is not None:
                 watcher.stop()
             # A failed termination must not become a false clean result merely
@@ -259,6 +274,7 @@ class RuntimeCollector:
             workload_alive_after_cleanup = any(
                 self._process_is_live(candidate) for candidate in owned
             ) or bool(process is not None and self._owned_live_processes(process))
+            self._collector_children_baseline = None
             self.sink.emit(
                 RuntimeEvent.create(
                     session_id=self.session_id,
@@ -285,6 +301,57 @@ class RuntimeCollector:
                     },
                 )
             )
+
+    @staticmethod
+    def _linux_child_subreaper_state() -> bool | None:
+        if not sys.platform.startswith("linux"):
+            return None
+        try:
+            libc = ctypes.CDLL(None, use_errno=True)
+            state = ctypes.c_int()
+            if libc.prctl(_PR_GET_CHILD_SUBREAPER, ctypes.byref(state), 0, 0, 0) != 0:
+                return None
+            return bool(state.value)
+        except (AttributeError, OSError):
+            return None
+
+    @staticmethod
+    def _set_linux_child_subreaper(enabled: bool) -> bool:
+        if not sys.platform.startswith("linux"):
+            return False
+        try:
+            libc = ctypes.CDLL(None, use_errno=True)
+            return libc.prctl(_PR_SET_CHILD_SUBREAPER, int(enabled), 0, 0, 0) == 0
+        except (AttributeError, OSError):
+            return False
+
+    @classmethod
+    def _enable_linux_child_subreaper(cls) -> bool | None:
+        previous = cls._linux_child_subreaper_state()
+        if previous is None:
+            return None
+        if not previous and not cls._set_linux_child_subreaper(True):
+            return None
+        return previous
+
+    @classmethod
+    def _restore_linux_child_subreaper(cls, previous: bool | None) -> None:
+        if previous is False:
+            cls._set_linux_child_subreaper(False)
+
+    @staticmethod
+    def _direct_child_lifetimes() -> dict[int, float]:
+        try:
+            children = psutil.Process(os.getpid()).children(recursive=False)
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            return {}
+        lifetimes: dict[int, float] = {}
+        for child in children:
+            try:
+                lifetimes[child.pid] = child.create_time()
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                continue
+        return lifetimes
 
     @staticmethod
     def _process_is_live(proc: psutil.Process) -> bool:
@@ -339,6 +406,21 @@ class RuntimeCollector:
                 add_with_descendants(psutil.Process(process.pid))
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 pass
+
+        baseline = self._collector_children_baseline
+        if baseline is not None:
+            try:
+                collector_children = psutil.Process(os.getpid()).children(recursive=False)
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                collector_children = []
+            for candidate in collector_children:
+                try:
+                    create_time = candidate.create_time()
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    continue
+                if baseline.get(candidate.pid) == create_time:
+                    continue
+                add_with_descendants(candidate)
 
         snapshots = {**self._seen_processes, **self._discovered_processes}
         for snapshot in snapshots.values():
