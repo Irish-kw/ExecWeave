@@ -548,7 +548,7 @@ def test_the_live_server_serves_the_same_index_the_file_would_carry(tmp_path: Pa
     event_path = tmp_path / "events.jsonl"
     event_path.write_text("", encoding="utf-8")
     state = live_module._LiveState("e2e", event_path)
-    state._projected_graph_locked = lambda: dict(graph)  # type: ignore[method-assign]
+    state._raw_graph_locked = lambda: dict(graph)  # type: ignore[method-assign]
     token = "e2e-token"
     server = live_module._LocalThreadingHTTPServer(
         ("127.0.0.1", 0), live_module._handler_factory(state, token)
