@@ -99,6 +99,18 @@ function execweaveDashboardGraph(data){
     if(!outgoing.has(edge.source))outgoing.set(edge.source,[]);
     incoming.get(edge.target).push(edge);outgoing.get(edge.source).push(edge);
   }
+  const fileDisplayMode=String(globalThis.__execweaveFileDisplayMode||'changed');
+  const fileTypes=new Set(['file','directory']);
+  const fileMutationEvents=new Set(['filesystem.created','filesystem.modified','filesystem.moved','filesystem.deleted']);
+  const fileMutationRelation=relation=>/(^|_)(WROTE|WRITE|WRITES|CREATE|CREATED|UPDATE|UPDATED|EDIT|EDITED|DELETE|DELETED|MOVE|MOVED|RENAME|RENAMED|PATCH|REPLACE|REPLACED|SAVE|SAVED|MODIFY|MODIFIED)($|_)/.test(String(relation||'').toUpperCase());
+  const fileActivity=node=>{
+    if(!fileTypes.has(String(node?.type||'')))return'other';
+    const eventTypes=Array.isArray(node?.event_types)?node.event_types:[];
+    if(eventTypes.some(value=>fileMutationEvents.has(String(value))))return'changed';
+    const related=[...(incoming.get(node.id)||[]),...(outgoing.get(node.id)||[])];
+    return related.some(edge=>fileMutationRelation(edge?.relation))?'changed':'observed';
+  };
+  const fileVisible=node=>{const activity=fileActivity(node);if(activity==='other')return true;if(fileDisplayMode==='hide')return false;if(fileDisplayMode==='all')return true;return activity==='changed'};
   const provider=node=>String(node?.attributes?.provider||'unknown').toLowerCase();
   const toolName=node=>String(node?.attributes?.tool_name||node?.attributes?.native_name||node?.name||'tool');
   const toolKey=node=>`${provider(node)}\u0000${toolName(node).trim().toLowerCase()}`;
@@ -205,7 +217,10 @@ function execweaveDashboardGraph(data){
   };
   for(const group of groups.values())group.occurrences.sort(occurrenceOrder);
   for(const list of toolOccurrences.values())list.sort(occurrenceOrder);
-  let visibleNodes=allNodes.filter(node=>node&&node.id&&!hiddenIds.has(node.id)).filter(node=>node.type!=='tool'||toolCanonicalId.get(node.id)===node.id).map(node=>{
+  const candidateNodes=allNodes.filter(node=>node&&node.id&&!hiddenIds.has(node.id)).filter(node=>node.type!=='tool'||toolCanonicalId.get(node.id)===node.id);
+  const hiddenFileObservationCount=candidateNodes.filter(node=>fileTypes.has(String(node?.type||''))&&!fileVisible(node)).length;
+  let visibleNodes=candidateNodes.filter(node=>fileVisible(node)).map(node=>{
+    if(fileTypes.has(String(node?.type||'')))return{...node,attributes:{...attrsOf(node),viewer_file_activity:fileActivity(node)}};
     if(node.type!=='tool')return node;
     const occurrences=toolOccurrences.get(node.id)||[],members=toolMembersByRepresentative.get(node.id)||[node];
     if(!occurrences.length&&members.length===1)return node;
@@ -214,7 +229,8 @@ function execweaveDashboardGraph(data){
   });
 
   const canonicalTypes=new Set(['process','file']);
-  const foldableTypes=new Set(['process','file','network_endpoint']);
+  const foldableTypes=new Set(['process','file','directory','network_endpoint']);
+  const foldType=node=>{const type=String(node?.type||'');return type==='file'||type==='directory'?'filesystem':type};
   const declaredBudget=Number(globalThis.__execweaveFoldBudget);
   const FOLD_BUDGET=Number.isFinite(declaredBudget)&&declaredBudget>=1?Math.floor(declaredBudget):12;
   const canonicalGroups=new Map();
@@ -246,19 +262,21 @@ function execweaveDashboardGraph(data){
 
   let foldedNodeCount=0;
   const byType=new Map();
-  for(const node of nodes){const type=String(node?.type||'');if(!foldableTypes.has(type))continue;if(!byType.has(type))byType.set(type,[]);byType.get(type).push(node)}
+  for(const node of nodes){const rawType=String(node?.type||'');if(!foldableTypes.has(rawType))continue;const type=foldType(node);if(!byType.has(type))byType.set(type,[]);byType.get(type).push(node)}
   const folds=[];
   for(const[type,members]of byType){
     if(members.length<=FOLD_BUDGET)continue;
     const recency=node=>String(node?.last_seen||node?.first_seen||'');
     const ordered=[...members].sort((a,b)=>recency(b).localeCompare(recency(a)));
     const older=ordered.slice(FOLD_BUDGET);if(!older.length)continue;
-    const keep=new Set(ordered.slice(0,FOLD_BUDGET).map(node=>node.id));
+    const removeIds=new Set(older.map(node=>node.id));
     const foldId=`viewer:folded:${type}`;
     for(const node of older)canonicalId.set(node.id,foldId);
     foldedNodeCount+=older.length;
-    folds.push({id:foldId,type,name:`${older.length} earlier ${type.replace(/_/g,' ')}${older.length===1?'':'s'}`,first_seen:older.reduce((value,node)=>earlier(value,node.first_seen),null),last_seen:older.reduce((value,node)=>later(value,node.last_seen),null),attributes:{viewer_folded:true,viewer_folded_type:type,viewer_folded_count:older.length,viewer_folded_members:older.map(node=>({id:node.id,name:node.name||node.id,first_seen:node.first_seen||null,last_seen:node.last_seen||null}))}});
-    for(let index=nodes.length-1;index>=0;index--)if(!keep.has(nodes[index].id)&&String(nodes[index].type||'')===type)nodes.splice(index,1);
+    const foldedType=type==='filesystem'?'file_cluster':type,foldedName=type==='filesystem'?`${older.length} earlier files / directories`:`${older.length} earlier ${type.replace(/_/g,' ')}${older.length===1?'':'s'}`;
+    const activities=[...new Set(older.map(node=>node?.attributes?.viewer_file_activity).filter(Boolean))];
+    folds.push({id:foldId,type:foldedType,name:foldedName,first_seen:older.reduce((value,node)=>earlier(value,node.first_seen),null),last_seen:older.reduce((value,node)=>later(value,node.last_seen),null),attributes:{viewer_folded:true,viewer_folded_type:type,viewer_folded_count:older.length,viewer_file_activity:type==='filesystem'?(activities.length===1?activities[0]:'mixed'):undefined,viewer_folded_members:older.map(node=>({id:node.id,type:node.type,name:node.name||node.id,activity:node?.attributes?.viewer_file_activity||null,first_seen:node.first_seen||null,last_seen:node.last_seen||null}))}});
+    for(let index=nodes.length-1;index>=0;index--)if(removeIds.has(nodes[index].id))nodes.splice(index,1);
   }
   nodes.push(...folds);
 
@@ -280,7 +298,7 @@ function execweaveDashboardGraph(data){
   const incident=new Set();for(const edge of edges){incident.add(edge.source);incident.add(edge.target)}
   visibleNodes=nodes.filter(node=>node.type!=='tool'||incident.has(node.id));
   nodeIds=new Set(visibleNodes.map(node=>node.id));edges=edges.filter(edge=>nodeIds.has(edge.source)&&nodeIds.has(edge.target));
-  return{...data,nodes:visibleNodes,edges,node_count:visibleNodes.length,edge_count:edges.length,dashboard_projection:{hidden_detail_node_count:hiddenDetailIds.size,hidden_internal_staging_node_count:internalStagingIds.size,canonicalized_process_occurrence_count:canonicalizedProcessOccurrenceCount,canonicalized_tool_entity_count:[...toolMembersByRepresentative.values()].reduce((sum,members)=>sum+Math.max(0,members.length-1),0),folded_node_count:foldedNodeCount,collapsed_tool_call_count:invocationMap.size,raw_tool_call_detail_count:allNodes.filter(node=>['tool_call','tool_call_observation'].includes(String(node?.type||''))).length}};
+  return{...data,nodes:visibleNodes,edges,node_count:visibleNodes.length,edge_count:edges.length,dashboard_projection:{hidden_detail_node_count:hiddenDetailIds.size,hidden_internal_staging_node_count:internalStagingIds.size,canonicalized_process_occurrence_count:canonicalizedProcessOccurrenceCount,canonicalized_tool_entity_count:[...toolMembersByRepresentative.values()].reduce((sum,members)=>sum+Math.max(0,members.length-1),0),folded_node_count:foldedNodeCount,collapsed_tool_call_count:invocationMap.size,raw_tool_call_detail_count:allNodes.filter(node=>['tool_call','tool_call_observation'].includes(String(node?.type||''))).length,file_display_mode:fileDisplayMode,hidden_file_observation_node_count:hiddenFileObservationCount}};
 }
 """.strip()
 
@@ -310,7 +328,7 @@ _LIVE_SET_SNAPSHOT_CLEAN = "function setSnapshot(data){const signature=`${data.n
 _LIVE_APPLY_DELTA_CLEAN = "function applyDelta(update){if(update.live_payload_compact){updateStats(update);enterProtectiveMode(update);return}const rawNodes=new Map((graph.nodes||[]).map(n=>[n.id,n])),rawEdges=new Map((graph.edges||[]).map(e=>[edgeId(e),e]));for(const node of [...(update.nodes_added||[]),...(update.nodes_updated||[])])if(node?.id)rawNodes.set(node.id,node);for(const edge of [...(update.edges_added||[]),...(update.edges_updated||[])])rawEdges.set(edgeId(edge),edge);graph={...graph,event_count:update.event_count,node_count:update.node_count,edge_count:update.edge_count,nodes:[...rawNodes.values()],edges:[...rawEdges.values()]};const display=execweaveDashboardGraph(graph);updateStats({...update,node_count:display.node_count,edge_count:display.edge_count});if(!withinRenderBudget(display)){enterProtectiveMode(display);return}if(protectedMode)leaveProtectiveMode();nodeById=new Map((display.nodes||[]).map(n=>[n.id,n]));edgeById=new Map((display.edges||[]).map(e=>[edgeId(e),e]));rebuildAdjacency();renderSnapshot();seedActivities();const sortedEdges=[...edgeById.values()].sort((a,b)=>String(a.last_seen||'').localeCompare(String(b.last_seen||''))),sortedNodes=[...nodeById.values()].sort((a,b)=>String(a.last_seen||'').localeCompare(String(b.last_seen||''))),lastEdge=sortedEdges.length?sortedEdges[sortedEdges.length-1]:null,lastNode=sortedNodes.length?sortedNodes[sortedNodes.length-1]:null;markLatest(lastEdge?.target||lastNode?.id||null,lastEdge?edgeId(lastEdge):null);scheduleCamera(false);if(!hasFitted&&positions.size){fit(false);hasFitted=true}}"
 
 _LIVE_CORE_EXPORT = "window.__execweaveCore={getActivities:()=>activities.slice(),getGraph:()=>graph,getPositions:()=>new Map(positions),selectEdge,selectNode,focusNode,markLatest,setCameraMode};"
-_LIVE_CORE_EXPORT_CLEAN = "window.__execweaveCore={getActivities:()=>activities.slice(),getGraph:()=>graph,getDisplayGraph:()=>({...graph,nodes:[...nodeById.values()],edges:[...edgeById.values()],node_count:nodeById.size,edge_count:edgeById.size}),getPositions:()=>new Map(positions),selectEdge,selectNode,focusNode,markLatest,setCameraMode};"
+_LIVE_CORE_EXPORT_CLEAN = "const execweaveFileGraphFilter=document.getElementById('file-graph-filter');globalThis.__execweaveFileDisplayMode=execweaveFileGraphFilter?.value||'changed';if(execweaveFileGraphFilter)execweaveFileGraphFilter.addEventListener('change',()=>{globalThis.__execweaveFileDisplayMode=execweaveFileGraphFilter.value||'changed';setSnapshot(graph)});window.__execweaveCore={getActivities:()=>activities.slice(),getGraph:()=>graph,getDisplayGraph:()=>({...graph,nodes:[...nodeById.values()],edges:[...edgeById.values()],node_count:nodeById.size,edge_count:edgeById.size}),getPositions:()=>new Map(positions),selectEdge,selectNode,focusNode,markLatest,setCameraMode};"
 
 _LIVE_NOOP_STATS = "else if(data.kind==='noop'){liveSequence=Number(data.sequence)||liveSequence;updateStats(data);}"
 _LIVE_NOOP_STATS_CLEAN = "else if(data.kind==='noop'){liveSequence=Number(data.sequence)||liveSequence;updateStats(protectedMode?data:{...data,node_count:nodeById.size,edge_count:edgeById.size});}"
@@ -338,6 +356,11 @@ def inject_standalone_dashboard_clean(html: str) -> str:
 
 def inject_live_dashboard_clean(html: str) -> str:
     """Simplify only the browser canvas; the live JSON protocol remains unchanged."""
+    control_seam = '<div class="panel-spacer"></div>\n    <div class="segmented" aria-label="Camera mode">'
+    control = '<div class="panel-spacer"></div>\n    <label class="graph-file-filter" title="Choose which file and directory nodes appear in the graph"><span>Files</span><select id="file-graph-filter"><option value="changed" selected>Changed only</option><option value="all">All observed</option><option value="hide">Hidden</option></select></label>\n    <div class="segmented" aria-label="Camera mode">'
+    if html.count(control_seam) != 1:
+        raise RuntimeError("file graph filter control seam changed")
+    html = html.replace(control_seam, control, 1)
     marker = "function renderSnapshot(){"
     if "function execweaveDashboardGraph(data){" not in html and marker in html:
         html = html.replace(marker, _DASHBOARD_JS + "\n" + marker, 1)
