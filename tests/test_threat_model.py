@@ -140,6 +140,8 @@ def test_outliving_child_is_not_falsely_reported_exited_when_root_observation_en
     child = _snapshot(301, 300)
     collector._record_process_start(child, parent=_session(), relation="SPAWNED")
     monkeypatch.setattr(collector_module.psutil, "pid_exists", lambda pid: pid == child.pid)
+    monkeypatch.setattr(collector_module.psutil, "Process", lambda pid: FakeProcess(child))
+    _patch_snapshots(monkeypatch)
 
     collector._mark_disappeared_processes(set())
 
