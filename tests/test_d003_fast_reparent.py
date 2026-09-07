@@ -13,12 +13,6 @@ from execweave.collector import RuntimeCollector
 from execweave.sink import JsonlSink
 
 
-pytestmark = pytest.mark.skipif(
-    not sys.platform.startswith("linux"),
-    reason="Linux subreaper coverage for detached/reparented workload children",
-)
-
-
 _SLEEP = "import time; time.sleep(60)"
 
 
@@ -60,7 +54,11 @@ def _detaching_command(pid_file: Path) -> list[str]:
     return [sys.executable, "-c", code, str(pid_file)]
 
 
-def _miss_short_lived_tree(monkeypatch: pytest.MonkeyPatch, collector: RuntimeCollector, pid_file: Path) -> None:
+def _miss_short_lived_tree(
+    monkeypatch: pytest.MonkeyPatch,
+    collector: RuntimeCollector,
+    pid_file: Path,
+) -> None:
     def miss_tree(root: psutil.Process) -> None:
         _wait_for(pid_file.exists)
         # Deliberately simulate the polling blind spot from issue #9: the launcher
@@ -70,10 +68,24 @@ def _miss_short_lived_tree(monkeypatch: pytest.MonkeyPatch, collector: RuntimeCo
     monkeypatch.setattr(collector, "_sample_process_tree", miss_tree)
 
 
+def _non_linux_guard() -> bool:
+    if sys.platform.startswith("linux"):
+        return False
+    # Fast detached-child recovery in this regression is a Linux subreaper path.
+    # On other platforms the implementation must remain disabled rather than
+    # silently attempting Linux prctl semantics.
+    assert RuntimeCollector._linux_child_subreaper_state() is None
+    assert RuntimeCollector._set_linux_child_subreaper(True) is False
+    return True
+
+
 def test_run_cleans_detached_child_even_when_polling_never_observed_it(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    if _non_linux_guard():
+        return
+
     collector = _collector(tmp_path)
     pid_file = tmp_path / "detached.pid"
     sentinel = subprocess.Popen([sys.executable, "-c", _SLEEP])
@@ -97,6 +109,9 @@ def test_fast_detached_survivor_is_reported_if_cleanup_does_not_terminate_it(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    if _non_linux_guard():
+        return
+
     collector = _collector(tmp_path)
     pid_file = tmp_path / "detached.pid"
     _miss_short_lived_tree(monkeypatch, collector, pid_file)
