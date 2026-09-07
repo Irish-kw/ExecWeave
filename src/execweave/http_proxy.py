@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlsplit
 
 from . import _http_proxy_base as _base
 from . import _http_proxy_stage as _stage
@@ -115,6 +116,35 @@ def _safe_http_reason(message: str | None) -> str | None:
     return single_line.encode("latin-1", errors="replace").decode("latin-1")
 
 
+def _uses_bounded_two_phase_capture(handler: Any) -> bool:
+    """Whether this request must publish request evidence before response completion.
+
+    The normal proxy recorder is intrinsically two-phase.  Managed ``ollama serve``
+    uses one production-only filtering callback so non-inference routes such as
+    ``/api/tags`` keep their historical no-capture behavior.  That callback forwards
+    inference exchanges to the same staged recorder, so recognized inference routes
+    must use the bounded two-phase relay too; otherwise the base handler waits for the
+    full response and Task A evidence (including REQUESTED_MODEL) arrives too late or
+    not at all.
+    """
+
+    recorder = handler.server.recorder
+    if recorder is _base.record_exchange_fail_open:
+        return True
+    try:
+        from .auto_specialized import (
+            _OLLAMA_INFERENCE_PATHS,
+            _record_ollama_inference_exchange,
+        )
+    except ImportError:
+        return False
+    return (
+        recorder is _record_ollama_inference_exchange
+        and str(handler.command or "").upper() == "POST"
+        and urlsplit(str(handler.path or "")).path in _OLLAMA_INFERENCE_PATHS
+    )
+
+
 class ExecWeaveHTTPProxyHandler(_base.ExecWeaveHTTPProxyHandler):
     """Security-equivalent handler used by the staged acceptance relay."""
 
@@ -137,8 +167,9 @@ class ExecWeaveHTTPProxyHandler(_base.ExecWeaveHTTPProxyHandler):
     def _relay(self) -> None:
         # The product default uses file-backed response capture so raw full-fidelity
         # evidence does not require retaining the entire provider response in RAM.
-        # Explicit custom recorders keep the historical bytes callback contract.
-        if self.server.recorder is _base.record_exchange_fail_open:
+        # The managed Ollama inference filter is also two-phase on its recognized
+        # routes; unrelated custom recorder callbacks keep the historical one-call API.
+        if _uses_bounded_two_phase_capture(self):
             from ._http_proxy_bounded import relay_default
 
             relay_default(self)
