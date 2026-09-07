@@ -1,0 +1,79 @@
+name: Release ExecWeave 0.8.15
+
+on:
+  push:
+    branches:
+      - ops/release-0.8.15
+    paths:
+      - .github/workflows/release-0.8.15.yml
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: b157b6a5e5491260051198cea11e5505bbdd38c0
+          fetch-depth: 0
+
+      - name: Verify exact release candidate and version
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "b157b6a5e5491260051198cea11e5505bbdd38c0"
+          python - <<'PY'
+          import re
+          import tomllib
+          from pathlib import Path
+
+          expected = "0.8.15"
+          package_version = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+          init_text = Path("src/execweave/__init__.py").read_text(encoding="utf-8")
+          match = re.search(r'__version__\s*=\s*["\']([^"\']+)["\']', init_text)
+          runtime_version = match.group(1) if match else None
+          if package_version != expected or runtime_version != expected:
+              raise SystemExit(f"version mismatch: package={package_version!r} runtime={runtime_version!r} expected={expected!r}")
+          print(f"Exact RC verified: {expected}")
+          PY
+
+      - name: Refuse an existing tag or release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v0.8.15
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; refusing to republish." >&2
+            exit 1
+          fi
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists; refusing to reuse it." >&2
+            exit 1
+          fi
+
+      - name: Publish GitHub Release at the validated RC
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v0.8.15
+          TARGET_SHA: b157b6a5e5491260051198cea11e5505bbdd38c0
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > release-notes.md <<'EOF'
+          ExecWeave 0.8.15 is a reliability and dashboard-evidence release validated against the exact release-candidate SHA b157b6a5e5491260051198cea11e5505bbdd38c0.
+
+          - Fix fast detached/reparented workload-child cleanup while preserving truthful survivor reporting and unrelated-process isolation.
+          - Add evidence-aware dashboard file/directory filtering with Changed only, All observed, and Hidden views, plus shared filesystem aggregation without mutating raw graph evidence.
+          - Make the threat-model survivor regression hermetic so ambient host PID allocation cannot cause false test failures.
+
+          Final Grok TEST-ONLY RC acceptance reported 1246 passed, 6 skipped, ruff clean, package build/install PASS, D001 PASS with no self-observation, D003 fast-reparent x5/exception/SIGINT/sentinel PASS, provider paths PASS, Live→Finished PASS, PRODUCT_BUGS_FOUND=0, RC_RELEASE_BLOCKER=NO, and READY_TO_RELEASE=YES. The safely infeasible truthful-survivor external-denial case remains explicitly NOT_VALIDATED rather than being counted as PASS.
+          EOF
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$TARGET_SHA" \
+            --title "ExecWeave v0.8.15" \
+            --notes-file release-notes.md
