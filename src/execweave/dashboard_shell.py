@@ -206,27 +206,24 @@ function execweaveFileClusterHistory(a){
 
 
 def _stop_conversation_polling_after_finish(html: str) -> str:
-    """Freeze polling only after one authoritative finished conversation sync.
+    """Freeze polling after one authoritative finished conversation sync attempt.
 
     The live graph announces ``live_finished`` while its HTTP server is still alive.
-    Older code stopped the interval and aborted the conversation request immediately
-    from ``onFinished``. That fixed a teardown reset, but it could also abort the
-    refresh kicked off by the terminal payload itself, leaving the selected live agent
-    panel one response behind the finalized standalone viewer. Stop periodic polling
-    immediately, wait for any in-flight refresh, perform exactly one final fetch from
-    the now-finished raw graph, then mark the panel synchronized. No request is issued
-    after that point, so HTTP teardown cannot race the browser.
+    Stop periodic polling immediately, wait for any in-flight refresh, then perform
+    exactly one final fetch from the finished raw graph. A failed fetch must remain a
+    failed synchronization: stopping the polling loop is not itself proof that the
+    selected conversation matches the finalized viewer.
     """
 
     seams = (
         (
             "let selectedNode=null,refreshing=false,selectedConversationSignature='';",
-            "let selectedNode=null,refreshing=false,conversationPollingFinished=false,conversationFinishing=false,conversationRefreshController=null,conversationRefreshTimer=null,conversationRefreshPromise=Promise.resolve(),conversationFinishPromise=Promise.resolve(),selectedConversationSignature='';",
+            "let selectedNode=null,refreshing=false,conversationPollingFinished=false,conversationFinishSynchronized=false,conversationFinishing=false,conversationRefreshController=null,conversationRefreshTimer=null,conversationRefreshPromise=Promise.resolve(false),conversationFinishPromise=Promise.resolve(false),selectedConversationSignature='';",
             "agent conversation polling state seam changed",
         ),
         (
             "async function refresh(){if(window.__execweaveStaticMode||refreshing)return;refreshing=true;try{const headers={};if(window.__execweaveToken)headers['X-ExecWeave-Token']=window.__execweaveToken;const response=await fetch('/conversations.json',{cache:'no-store',headers});if(response.ok){const payload=await response.json();setEntries(payload?.entries)}}catch(_){}finally{refreshing=false}}",
-            "async function refresh({allowDuringFinish=false}={}){if(window.__execweaveStaticMode||conversationPollingFinished||(conversationFinishing&&!allowDuringFinish))return;if(refreshing)return conversationRefreshPromise;refreshing=true;const controller=new AbortController();conversationRefreshController=controller;const task=(async()=>{try{const headers={};if(window.__execweaveToken)headers['X-ExecWeave-Token']=window.__execweaveToken;const response=await fetch('/conversations.json',{cache:'no-store',headers,signal:controller.signal});if(response.ok){const payload=await response.json();setEntries(payload?.entries)}}catch(_){}finally{if(conversationRefreshController===controller)conversationRefreshController=null;refreshing=false}})();conversationRefreshPromise=task;await task}",
+            "async function refresh({allowDuringFinish=false}={}){if(window.__execweaveStaticMode||conversationPollingFinished||(conversationFinishing&&!allowDuringFinish))return false;if(refreshing)return conversationRefreshPromise;refreshing=true;const controller=new AbortController();conversationRefreshController=controller;const task=(async()=>{try{const headers={};if(window.__execweaveToken)headers['X-ExecWeave-Token']=window.__execweaveToken;const response=await fetch('/conversations.json',{cache:'no-store',headers,signal:controller.signal});if(!response.ok)return false;const payload=await response.json();setEntries(payload?.entries);return true}catch(_){return false}finally{if(conversationRefreshController===controller)conversationRefreshController=null;refreshing=false}})();conversationRefreshPromise=task;return await task}",
             "agent conversation refresh seam changed",
         ),
         (
@@ -236,12 +233,12 @@ def _stop_conversation_polling_after_finish(html: str) -> str:
         ),
         (
             "const previous=window.__execweaveDashboard||{};window.__execweaveDashboard={...previous,onPayload(data){previous.onPayload?.(data);if(selectedNode)refresh()},onFinished(){previous.onFinished?.();if(selectedNode)refresh()}};",
-            "async function finishConversationPolling(){if(conversationPollingFinished)return;if(conversationFinishing)return conversationFinishPromise;conversationFinishing=true;if(conversationRefreshTimer!==null){clearInterval(conversationRefreshTimer);conversationRefreshTimer=null}conversationFinishPromise=(async()=>{await conversationRefreshPromise;if(selectedNode&&!window.__execweaveStaticMode)await refresh({allowDuringFinish:true})})().finally(()=>{conversationPollingFinished=true;conversationFinishing=false;if(conversationRefreshController!==null){conversationRefreshController.abort();conversationRefreshController=null}});await conversationFinishPromise}\nconst stopConversationPolling=finishConversationPolling;\nconst previous=window.__execweaveDashboard||{};window.__execweaveDashboard={...previous,onPayload(data){previous.onPayload?.(data);if(selectedNode&&!data?.live_finished&&!conversationFinishing&&!conversationPollingFinished)refresh()},onFinished(){previous.onFinished?.();void finishConversationPolling()}};",
+            "async function finishConversationPolling(){if(conversationPollingFinished)return conversationFinishSynchronized;if(conversationFinishing)return conversationFinishPromise;conversationFinishing=true;if(conversationRefreshTimer!==null){clearInterval(conversationRefreshTimer);conversationRefreshTimer=null}conversationFinishPromise=(async()=>{await conversationRefreshPromise;if(!selectedNode||window.__execweaveStaticMode)return true;return await refresh({allowDuringFinish:true})})().then(synchronized=>{conversationFinishSynchronized=Boolean(synchronized);return conversationFinishSynchronized}).finally(()=>{conversationPollingFinished=true;conversationFinishing=false;if(conversationRefreshController!==null){conversationRefreshController.abort();conversationRefreshController=null}});return await conversationFinishPromise}\nconst stopConversationPolling=finishConversationPolling;\nconst previous=window.__execweaveDashboard||{};window.__execweaveDashboard={...previous,onPayload(data){previous.onPayload?.(data);if(selectedNode&&!data?.live_finished&&!conversationFinishing&&!conversationPollingFinished)refresh()},onFinished(){previous.onFinished?.();void finishConversationPolling()}};",
             "agent conversation lifecycle seam changed",
         ),
         (
             "window.__execweaveAgentPanel={render,setEntries,refresh};",
-            "window.__execweaveAgentPanel={render,setEntries,refresh,finishConversationPolling,stopConversationPolling,whenFinished:()=>conversationFinishPromise,isFinishedSynchronized:()=>conversationPollingFinished};",
+            "window.__execweaveAgentPanel={render,setEntries,refresh,finishConversationPolling,stopConversationPolling,whenFinished:()=>conversationFinishPromise,isFinishedSynchronized:()=>conversationPollingFinished&&conversationFinishSynchronized};",
             "agent conversation export seam changed",
         ),
     )
