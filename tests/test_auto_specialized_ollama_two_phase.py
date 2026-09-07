@@ -111,11 +111,15 @@ def test_managed_ollama_filter_uses_request_phase_before_response(tmp_path: Path
     assert requested["attributes"]["inferred"] is False
     response_index = relations.index("OBSERVED_INFERENCE_RESPONSE")
     assert relations.index("REQUESTED_MODEL") < response_index
-    assert all(
-        event["attributes"].get("capture_phase") == "request"
+    assert relations.index("OBSERVED_INFERENCE_REQUEST_RAW") < response_index
+    phases_before_response = [
+        event["attributes"]["capture_phase"]
         for event in events[:response_index]
         if isinstance(event.get("attributes"), dict)
-    )
+        and "capture_phase" in event["attributes"]
+    ]
+    assert phases_before_response
+    assert set(phases_before_response) == {"request"}
 
 
 def test_managed_ollama_filter_does_not_capture_non_inference_route(tmp_path: Path) -> None:
