@@ -1,7 +1,110 @@
 from __future__ import annotations
 
+from typing import Any
+
 from . import _http_proxy_base as _base
+from . import _http_proxy_stage as _stage
+from . import model_runtime as _runtime_semantic
+from . import openai_compatible as _openai_semantic
 from ._http_proxy_stage import *  # noqa: F403
+
+
+_ORIGINAL_REQUEST_EVENTS_OLLAMA = _stage._request_events_ollama
+_ORIGINAL_REQUEST_EVENTS_OPENAI = _stage._request_events_openai
+
+
+def _requested_model_event(
+    *,
+    config: Any,
+    source: dict[str, Any],
+    model: str,
+    timestamp: str,
+) -> dict[str, Any]:
+    """Represent the model named by an observed proxy request without guessing usage.
+
+    The request phase has direct wire evidence for the provider-facing ``model`` field.
+    Recording it as REQUESTED_MODEL gives the viewer a request-specific model identity
+    even when a runtime probe only reports LOADED_MODEL state.  It deliberately does
+    not claim USED_MODEL: loaded state and actual request usage are different facts.
+    """
+
+    if config.mode == "ollama":
+        provider = "ollama"
+        target = _runtime_semantic._model_entity("ollama", model)
+    else:
+        provider = str(config.provider_name or "openai-compatible")
+        target = _openai_semantic._model_entity(provider, config.upstream, model)
+    return {
+        "timestamp": timestamp,
+        "event_type": "http_proxy.model.requested",
+        "relation": "REQUESTED_MODEL",
+        "source": source,
+        "target": target,
+        "attributes": {
+            "backend": "semantic",
+            "provider": provider,
+            "evidence_source": "localhost_http_proxy",
+            "attribution": "execweave_http_proxy",
+            "causal": False,
+            "inferred": False,
+        },
+    }
+
+
+def _append_requested_model(
+    events: list[dict[str, Any]],
+    *,
+    config: Any,
+    request: dict[str, Any],
+) -> list[dict[str, Any]]:
+    model = request.get("model")
+    if not isinstance(model, str) or not model.strip():
+        return events
+    if any(event.get("relation") == "REQUESTED_MODEL" for event in events):
+        return events
+    if not events:
+        return events
+    source = events[0].get("source")
+    timestamp = events[0].get("timestamp")
+    if not isinstance(source, dict) or not isinstance(timestamp, str) or not timestamp:
+        return events
+    events.append(
+        _requested_model_event(
+            config=config,
+            source=source,
+            model=model.strip(),
+            timestamp=timestamp,
+        )
+    )
+    return events
+
+
+def _request_events_ollama(
+    config: Any,
+    request: dict[str, Any],
+    store: Any,
+    exchange_id: str,
+) -> list[dict[str, Any]]:
+    events = _ORIGINAL_REQUEST_EVENTS_OLLAMA(config, request, store, exchange_id)
+    return _append_requested_model(events, config=config, request=request)
+
+
+def _request_events_openai(
+    config: Any,
+    request: dict[str, Any],
+    store: Any,
+    exchange_id: str,
+) -> list[dict[str, Any]]:
+    events = _ORIGINAL_REQUEST_EVENTS_OPENAI(config, request, store, exchange_id)
+    return _append_requested_model(events, config=config, request=request)
+
+
+# The staged recorder resolves these module globals at request time.  Patch only the
+# proxy request-event seam so full-fidelity APIs outside the localhost relay keep their
+# historical event surface.  The resulting model edge is raw evidence, not a viewer
+# fallback, and therefore remains available for audit/model-switch chronology.
+_stage._request_events_ollama = _request_events_ollama
+_stage._request_events_openai = _request_events_openai
 
 
 def _safe_http_reason(message: str | None) -> str | None:
@@ -50,6 +153,4 @@ _base.ExecWeaveHTTPProxyHandler = ExecWeaveHTTPProxyHandler
 
 
 def __getattr__(name: str):
-    from . import _http_proxy_stage as _stage
-
     return getattr(_stage, name)
