@@ -189,6 +189,9 @@ jobs:
                 tests/test_dashboard_information_architecture.py)
                   args+=(--allow-test-change "$path=approved orphan-file presentation now folds degree-zero file and directory nodes into the expandable Files / directories viewer cluster; the historical test node ID remains and the assertion now requires the original notes.txt evidence in cluster expansion")
                   ;;
+                tests/test_viewer_agent_isolation_e2e.py)
+                  args+=(--allow-test-change "$path=live conversation ownership now reads the raw observed graph before viewer-only endpoint, request, and orphan collapse; historical test IDs and conversation completeness assertions remain unchanged and only the live-index fixture injection seam follows _raw_graph_locked")
+                  ;;
               esac
             done < <(git diff --name-only "$BASELINE_REF...HEAD" -- tests)
           fi
