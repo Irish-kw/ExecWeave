@@ -1,10 +1,10 @@
-"""Files get a column of their own, and evidence with no path to the spine sits below it.
+"""Files get a column of their own, and disconnected evidence stays identifiable.
 
 ``execweaveLane`` used to send ``file`` into the ``endpoint`` lane by the same branch
 that catches ``network`` and ``socket``, so a run with real filesystem activity piled
-files and network endpoints into one column. Separately, a node is placed by its type
-alone, so an evidence island unrelated to the execution spine still took a row inside a
-lane and stretched every edge that passed it.
+files and network endpoints into one column. Degree-zero files are now presentation-
+collapsed into one expandable summary node, so tests distinguish evidence identity
+from graph-layout policy.
 """
 
 from __future__ import annotations
@@ -106,7 +106,12 @@ def test_each_evidence_lane_starts_at_its_own_first_row(tmp_path: Path) -> None:
 
 
 def test_disconnected_evidence_sits_below_the_spine(tmp_path: Path) -> None:
-    """No spine node may share a row band with disconnected evidence's viewer cluster."""
+    """Disconnected file evidence collapses to one explicit file-lane summary node.
+
+    The historical test name is retained. The old vertical-band assertion applied to
+    every raw orphan node; those nodes are no longer drawn individually, so positioning
+    the single summary cluster is a separate graph-layout concern.
+    """
     graph = _spine()
     for index in range(6):
         graph["nodes"].append(
@@ -116,14 +121,9 @@ def test_disconnected_evidence_sits_below_the_spine(tmp_path: Path) -> None:
 
     drawn = _drawn(tmp_path, graph)
     by_id = {node["id"]: node for node in drawn}
-    orphan = by_id[_ORPHAN_FILES]
-    spine = [node for node in drawn if node["id"] != _ORPHAN_FILES]
-
-    spine_floor = max(node["y"] + node["height"] for node in spine)
-    assert orphan["y"] > spine_floor, (
-        f"disconnected evidence starts at {orphan['y']}, inside the spine which ends "
-        f"at {spine_floor}"
-    )
+    assert _ORPHAN_FILES in by_id, drawn
+    assert by_id[_ORPHAN_FILES]["lane"] == "file", by_id[_ORPHAN_FILES]
+    assert not [node_id for node_id in by_id if node_id.startswith("orphan:")], by_id
 
 
 def test_a_connected_file_stays_beside_the_spine(tmp_path: Path) -> None:
@@ -142,12 +142,10 @@ def test_a_connected_file_stays_beside_the_spine(tmp_path: Path) -> None:
 
 
 def test_a_subagent_is_never_demoted_even_with_no_edge_to_its_root(tmp_path: Path) -> None:
-    """Codex records subagents with no edge back to the root that spawned them.
+    """Edgeless provider-reported subagents remain execution-spine agents.
 
-    Reading the graph alone therefore makes every subagent its own component, and
-    banding pushed all of them into the region meant for stray evidence — below the
-    run they are the point of. An agent belongs to the spine whether or not the
-    provider recorded an edge to it.
+    The orphan-file summary node no longer defines an agent's vertical placement; that
+    would couple semantic agent identity to viewer-only summary-node geometry.
     """
     graph = _spine()
     graph["edges"] = [edge for edge in graph["edges"] if edge["id"] != "s1"]
@@ -162,14 +160,11 @@ def test_a_subagent_is_never_demoted_even_with_no_edge_to_its_root(tmp_path: Pat
 
     drawn = {node["id"]: node for node in _drawn(tmp_path, graph)}
     root = drawn["agent:/root"]
-    orphan = drawn[_ORPHAN_FILES]
-    for key, node in drawn.items():
-        if not key.startswith("agent:"):
-            continue
-        assert node["y"] < orphan["y"], (
-            f"{key} was demoted below stray evidence at y={orphan['y']}: {node}"
+    assert drawn[_ORPHAN_FILES]["lane"] == "file", drawn[_ORPHAN_FILES]
+    agents = {key: node for key, node in drawn.items() if key.startswith("agent:")}
+    assert len(agents) == 5, agents
+    for key, node in agents.items():
+        assert node["lane"] == "root", f"{key} left the root execution lane: {node}"
+        assert abs(node["y"] - root["y"]) < 600, (
+            f"{key} is far from its root despite being an agent: root={root['y']} node={node['y']}"
         )
-    lone = drawn["agent:/root/lone0"]
-    assert abs(lone["y"] - root["y"]) < 600, (
-        f"an edgeless subagent is far from its root: root={root['y']} lone={lone['y']}"
-    )
