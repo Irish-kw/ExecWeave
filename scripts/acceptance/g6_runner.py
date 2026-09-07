@@ -8,6 +8,7 @@ from typing import Any
 
 import _python_native_acceptance_impl as impl
 from acceptance.reporting import Result, Status, redact
+from execweave import dashboard_shell as _dashboard_shell  # noqa: F401
 from execweave.viewer_projection import project_viewer_graph
 
 _ORIGINAL_RUN_NATIVE = impl._run_native
