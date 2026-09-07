@@ -56,6 +56,12 @@ def test_two_phase_proxy_capture_leaves_no_orphan_content_and_no_request_duplica
     assert "OBSERVED_INFERENCE_REQUEST" in request_relations
     assert "OBSERVED_INFERENCE_REQUEST_RAW" in request_relations
     assert config_relation in request_relations
+    assert request_relations.count("REQUESTED_MODEL") == 1
+    requested_model = next(event for event in request_events if event["relation"] == "REQUESTED_MODEL")
+    assert requested_model["source"]["type"] in {"inference_request", "provider_request"}
+    assert requested_model["target"]["type"] == "model"
+    assert requested_model["target"]["name"] == "demo"
+    assert requested_model["attributes"]["inferred"] is False
     assert not any("RESPONSE" in relation for relation in request_relations)
     assert "OBSERVED_PROVIDER_METADATA" not in request_relations
     _assert_all_content_is_referenced(tmp_path, request_events)
@@ -87,6 +93,7 @@ def test_two_phase_proxy_capture_leaves_no_orphan_content_and_no_request_duplica
     assert relations.count("OBSERVED_INFERENCE_REQUEST") == 1
     assert relations.count("OBSERVED_INFERENCE_REQUEST_RAW") == 1
     assert relations.count(config_relation) == 1
+    assert relations.count("REQUESTED_MODEL") == 1
     assert relations.count("OBSERVED_INFERENCE_RESPONSE") == 1
     assert relations.count("OBSERVED_INFERENCE_RESPONSE_RAW") == 1
     _assert_all_content_is_referenced(tmp_path, events)
