@@ -1,9 +1,9 @@
 name: Release ExecWeave 0.8.15
 
 on:
-  push:
+  pull_request:
     branches:
-      - ops/release-0.8.15
+      - main
     paths:
       - .github/workflows/release-0.8.15.yml
 
