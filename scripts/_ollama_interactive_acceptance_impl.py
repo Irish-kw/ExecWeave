@@ -578,6 +578,7 @@ def _run_interactive(
             arg=prompt_one,
             timeout=int(timeout * 1000),
         )
+        visible._wait_agent_card_observed(page, "Final response", timeout=timeout)
         first_details = page.locator("#details").inner_text()
         if "FINAL RESPONSE" not in first_details.upper():
             raise AssertionError("first interactive round has no visible Final response")
@@ -604,6 +605,7 @@ def _run_interactive(
             arg=prompt_two,
             timeout=int(timeout * 1000),
         )
+        visible._wait_agent_card_observed(page, "Final response", timeout=timeout)
         page.wait_for_function(
             "()=>window.__execweaveG5Document===document",
             timeout=int(timeout * 1000),
@@ -667,6 +669,9 @@ def _run_interactive(
         except subprocess.TimeoutExpired as exc:
             raise AssertionError("ExecWeave live did not finalize after interrupt") from exc
 
+        visible._wait_agent_panel_finished(page, timeout=min(timeout, 8.0))
+        completed_live_details = page.locator("#details").inner_text()
+
         viewer = session_root / "viewer.html"
         graph_path = session_root / "graph.json"
         if not viewer.is_file() or not graph_path.is_file():
@@ -704,8 +709,8 @@ def _run_interactive(
         _check(
             result,
             "Finished viewer",
-            finished_details == live_details,
-            "Finished viewer details equal the final live root details",
+            finished_details == completed_live_details,
+            "Finished viewer details equal the synchronized terminal live root details",
         )
         _check(result, "JS console", not page_errors, "No browser page errors", *page_errors)
 
