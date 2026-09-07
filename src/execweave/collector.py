@@ -123,6 +123,7 @@ class RuntimeCollector:
         self.collect_filesystem = collect_filesystem
         self.collect_network = collect_network
         self._seen_processes: dict[int, ProcessSnapshot] = {}
+        self._discovered_processes: dict[int, ProcessSnapshot] = {}
         self._seen_connections: set[tuple[str, str | None, str | None, str]] = set()
         self._network_sample_attempts = 0
         self._network_sample_successes = 0
@@ -246,6 +247,11 @@ class RuntimeCollector:
                 workload_terminated_due_to_collector_error = True
             raise
         finally:
+            # A workload exception is a nonzero child exit, not an exception in
+            # this collector. Finalize observed descendants on every exit path,
+            # including successful launchers that leave reparented children.
+            if process is not None and self._owned_live_processes(process):
+                self._terminate_process_tree(process)
             if watcher is not None:
                 watcher.stop()
             workload_alive_after_cleanup = bool(
@@ -293,12 +299,13 @@ class RuntimeCollector:
     def _process_for_snapshot(self, snapshot: ProcessSnapshot) -> psutil.Process | None:
         try:
             process = psutil.Process(snapshot.pid)
+            # Cleanup needs identity, not readable exe/name/cmdline metadata.
+            # Never treat a reused PID as the process we originally observed.
+            if process.create_time() != snapshot.create_time:
+                return None
+            return process
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             return None
-        current = _safe_process_snapshot(process)
-        if current is None or not self._same_process_lifetime(snapshot, current):
-            return None
-        return process
 
     def _owned_live_processes(
         self,
@@ -331,7 +338,8 @@ class RuntimeCollector:
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 pass
 
-        for snapshot in list(self._seen_processes.values()):
+        snapshots = {**self._seen_processes, **self._discovered_processes}
+        for snapshot in snapshots.values():
             tracked = self._process_for_snapshot(snapshot)
             if tracked is not None:
                 add_with_descendants(tracked)
@@ -392,6 +400,11 @@ class RuntimeCollector:
             current[snapshot.pid] = snapshot
             process_objects[snapshot.pid] = proc
 
+        # Preserve the complete discovered tree before any event/network callback
+        # can raise. _seen_processes only contains successfully registered starts;
+        # a root callback can fail after its children have already reparented.
+        # Retain only the latest sample here, not an unbounded lifetime history.
+        self._discovered_processes = current
         for snapshot in current.values():
             previous = self._seen_processes.get(snapshot.pid)
             if previous is None or not self._same_process_lifetime(previous, snapshot):
