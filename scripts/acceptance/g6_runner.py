@@ -8,6 +8,7 @@ from typing import Any
 
 import _python_native_acceptance_impl as impl
 from acceptance.reporting import Result, Status, redact
+from execweave.viewer_projection import project_viewer_graph
 
 _ORIGINAL_RUN_NATIVE = impl._run_native
 _ORIGINAL_CHILD_PROGRAM = impl._child_program
@@ -98,15 +99,30 @@ def validate_owned_evidence(
     live_graph: dict[str, Any],
     identity: dict[str, Any],
 ) -> tuple[bool, bool, bool, str]:
+    """Validate raw ownership and viewer parity without mixing identity domains.
+
+    ``graph`` is the finalized raw execution graph. ``live_graph`` is the graph carried
+    by the live dashboard; live.py intentionally projects that graph before it reaches
+    the browser. Raw PID/create-time ownership and the owned network edge therefore stay
+    validated against ``graph``, while Finished-viewer parity compares the browser's
+    projected live identities with the same projection of the finalized raw graph.
+    """
+
     process_id = _owned_process_id(graph, identity)
     process_ok = process_id is not None
     network_ok = bool(process_id) and _has_owned_network_edge(graph, str(process_id))
+
+    finished_view_graph = project_viewer_graph(graph)
     live_ids = _relevant_node_ids(live_graph)
-    finished_ids = _relevant_node_ids(graph)
-    parity_ok = bool(live_ids) and live_ids.issubset(finished_ids)
+    finished_view_ids = _relevant_node_ids(finished_view_graph)
+    live_only = sorted(live_ids - finished_view_ids)
+    finished_only = sorted(finished_view_ids - live_ids)
+    parity_ok = bool(live_ids) and not live_only
     detail = (
         f"owned_process={process_id or 'missing'}; "
-        f"live_relevant={len(live_ids)}; finished_relevant={len(finished_ids)}"
+        f"live_view_relevant={len(live_ids)}; "
+        f"finished_view_relevant={len(finished_view_ids)}; "
+        f"live_only={live_only}; finished_only={finished_only}"
     )
     return process_ok, network_ok, parity_ok, detail
 
@@ -223,19 +239,19 @@ def run_native(
     result.check(
         "Process",
         process_ok,
-        "Finished graph contains exactly one process matching the child PID/create-time identity",
+        "Finished raw graph contains exactly one process matching the child PID/create-time identity",
         detail,
     )
     result.check(
         "Network",
         network_ok,
-        "Finished graph contains a network edge sourced by the exact child PID/create-time process",
+        "Finished raw graph contains a network edge sourced by the exact child PID/create-time process",
         detail,
     )
     result.check(
         "Finished viewer",
         parity_ok,
-        "All live Process/File/Network node identities remain present in the finished graph after the browser clickability check",
+        "All live projected Process/File/Network identities remain present in the finished viewer projection after the browser clickability check",
         detail,
     )
     return result
