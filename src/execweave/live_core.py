@@ -4,6 +4,7 @@ import hmac
 import json
 import os
 import secrets
+import sys
 import threading
 import time
 import webbrowser
@@ -578,14 +579,20 @@ def _handler_factory(state: _LiveState, token: str):
             return
 
         def _send(self, body: bytes, content_type: str, status: int = 200) -> None:
-            self.send_response(status)
-            self.send_header("Content-Type", content_type)
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("X-Content-Type-Options", "nosniff")
-            self.send_header("Referrer-Policy", "no-referrer")
-            self.end_headers()
-            self.wfile.write(body)
+            try:
+                self.send_response(status)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.send_header("Referrer-Policy", "no-referrer")
+                self.end_headers()
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                # Browsers routinely cancel an in-flight poll while navigating or
+                # while the live server is shutting down.  The response belongs to
+                # that client only, so there is nothing left for the server to send.
+                self.close_connection = True
 
         def _authorized(self, parsed) -> bool:
             candidate = self.headers.get(_LIVE_TOKEN_HEADER)
@@ -643,6 +650,13 @@ class _LocalThreadingHTTPServer(ThreadingHTTPServer):
         host, port = self.server_address[:2]
         self.server_name = str(host)
         self.server_port = int(port)
+
+    def handle_error(self, request, client_address) -> None:  # type: ignore[no-untyped-def]
+        """Silence only expected browser disconnects at the handler lifecycle boundary."""
+        error = sys.exc_info()[1]
+        if isinstance(error, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)):
+            return
+        super().handle_error(request, client_address)
 
 
 def run_live(

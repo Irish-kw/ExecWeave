@@ -28,8 +28,18 @@ from .conversation_archive import codex_conversation_archive_events
 _CAPTURE_ERRORS = (OSError, RuntimeError, TimeoutError, TypeError, ValueError)
 
 
-def _hook_handler(command: str) -> dict[str, str]:
-    return {"type": "command", "command": command}
+def _hook_handler(
+    command: str,
+    *,
+    timeout: int | None = None,
+    asynchronous: bool = False,
+) -> dict[str, object]:
+    handler: dict[str, object] = {"type": "command", "command": command}
+    if timeout is not None:
+        handler["timeout"] = timeout
+    if asynchronous:
+        handler["async"] = True
+    return handler
 
 
 def _now() -> str:
@@ -66,13 +76,24 @@ def codex_hook_config(command: str = "execweave-codex-hook") -> dict[str, Any]:
         "PreCompact",
         "PostCompact",
         "SessionStart",
-        "SessionEnd",
         "UserPromptSubmit",
         "SubagentStart",
         "SubagentStop",
         "Stop",
     ):
         hooks[event] = [plain_group]
+
+    # Codex defaults both SessionEnd and Interrupt to one second and caps them at
+    # three seconds. Interrupt is observational only, so make it asynchronous as
+    # well; the installed --auto entry point also has a stdlib-only bounded path.
+    hooks["SessionEnd"] = [{"hooks": [_hook_handler(command, timeout=3)]}]
+    hooks["Interrupt"] = [
+        {
+            "hooks": [
+                _hook_handler(command, timeout=3, asynchronous=True),
+            ]
+        }
+    ]
     if set(hooks) != set(OFFICIAL_CODEX_HOOK_EVENTS):
         raise RuntimeError("Codex hook config drifted from the documented official event set")
     return {"hooks": hooks}
@@ -188,6 +209,13 @@ def main(argv: list[str] | None = None) -> int:
             stage="summary_append",
             failures=failures,
         )
+
+    # Explicit/non-auto Interrupt diagnostics can use the normal capture path, but
+    # there is no full-fidelity payload unique to Interrupt. Avoid needless content
+    # store/archive work even here; installed --auto Interrupt never reaches this
+    # module because codex_hook_entry uses its bounded fast path.
+    if payload.get("hook_event_name") == "Interrupt":
+        return 1 if args.strict and failures else 0
 
     # The content store is itself optional telemetry infrastructure. If it is
     # unavailable, the lifecycle/summary stream above must still survive.

@@ -548,7 +548,7 @@ def test_the_live_server_serves_the_same_index_the_file_would_carry(tmp_path: Pa
     event_path = tmp_path / "events.jsonl"
     event_path.write_text("", encoding="utf-8")
     state = live_module._LiveState("e2e", event_path)
-    state._projected_graph_locked = lambda: dict(graph)  # type: ignore[method-assign]
+    state._raw_graph_locked = lambda: dict(graph)  # type: ignore[method-assign]
     token = "e2e-token"
     server = live_module._LocalThreadingHTTPServer(
         ("127.0.0.1", 0), live_module._handler_factory(state, token)
@@ -698,6 +698,7 @@ def test_finishing_a_run_keeps_the_reader_on_the_same_dashboard(tmp_path: Path) 
     event_path.write_text("", encoding="utf-8")
     state = live_module._LiveState("finish", event_path)
     state._projected_graph_locked = lambda: dict(projected)  # type: ignore[method-assign]
+    state._raw_graph_locked = lambda: dict(graph)  # type: ignore[method-assign]
     state._viewer_projection_ever_active = True
     token = "finish-token"
     server = live_module._LocalThreadingHTTPServer(

@@ -32,7 +32,7 @@ const EXECWEAVE_LANE_ORDER=['runtime','root','agent','model','tool','file','endp
 // The gap that follows each lane. These are the differences in the fixed table this
 // replaced, so a graph whose labels all fit the minimum width lands on exactly the
 // x positions it did before: 0, 270, 540, 820, 1100, 1380.
-const EXECWEAVE_LANE_GAP={runtime:110,root:110,agent:120,model:120,tool:120,file:120};
+const EXECWEAVE_LANE_GAP={runtime:110,root:110,agent:120,model:120,tool:120,file:120,endpoint:120,other:120};
 // A component with no path to the execution spine is packed below it rather than
 // interleaved with it, so its rows never sit between two nodes that talk to each other.
 const EXECWEAVE_BAND_GAP=170;
@@ -154,8 +154,35 @@ function execweaveBuildTopology(){
     if(!touching.length)return Number.MAX_SAFE_INTEGER;
     return touching.reduce((sum,edge)=>sum+(childOrder.get(edge.source)||0),0)/touching.length;
   };
+  const rootNodeOrder=new Map(roots.map((node,index)=>[node.id,index]));
+  const rootEdges=edges.filter(edge=>rootNodeOrder.has(edge.source)).sort((a,b)=>execweaveMoment(a).localeCompare(execweaveMoment(b))||edgeId(a).localeCompare(edgeId(b)));
+  const rootEdgeOrder=new Map(rootEdges.map((edge,index)=>[edgeId(edge),index]));
+  const rootFallbackBarycenter=node=>{
+    const rootTouching=edges.filter(edge=>edge.target===node.id&&rootNodeOrder.has(edge.source));
+    if(!rootTouching.length)return Number.MAX_SAFE_INTEGER;
+    if(roots.length>1){
+      const primary=rootTouching.reduce((sum,edge)=>sum+(rootNodeOrder.get(edge.source)||0),0)/rootTouching.length;
+      const secondary=rootTouching.reduce((sum,edge)=>sum+(rootEdgeOrder.get(edgeId(edge))??0),0)/rootTouching.length;
+      return primary*10000+secondary;
+    }
+    return rootTouching.reduce((sum,edge)=>sum+(rootEdgeOrder.get(edgeId(edge))??0),0)/rootTouching.length;
+  };
+  const effectiveBarycentre=node=>{
+    const childTouching=edges.filter(edge=>edge.target===node.id&&childOrder.has(edge.source));
+    if(childTouching.length)return sourceBarycentre(node);
+    const rbc=rootFallbackBarycenter(node);
+    if(rbc!==Number.MAX_SAFE_INTEGER)return rbc;
+    return sourceBarycentre(node);
+  };
+  const effectiveAgentBarycenter=node=>{
+    const childTouching=edges.filter(edge=>edge.target===node.id&&childOrder.has(edge.source));
+    if(childTouching.length)return agentBarycenter(node);
+    const rbc=rootFallbackBarycenter(node);
+    if(rbc!==Number.MAX_SAFE_INTEGER)return rbc;
+    return agentBarycenter(node);
+  };
   const byBarycentre=(a,b)=>{
-    const ab=sourceBarycentre(a),bb=sourceBarycentre(b);
+    const ab=effectiveBarycentre(a),bb=effectiveBarycentre(b);
     return ab!==bb?ab-bb:execweaveStableNodeSort(a,b);
   };
   byLane.get('runtime').sort(execweaveStableNodeSort);
@@ -163,7 +190,7 @@ function execweaveBuildTopology(){
   byLane.get('tool').sort((a,b)=>{
     const ac=/spawn|send|wait|agent/i.test(String(a?.name||execweaveAttrs(a).tool_name||'')),bc=/spawn|send|wait|agent/i.test(String(b?.name||execweaveAttrs(b).tool_name||''));
     if(ac!==bc)return ac?-1:1;
-    const ab=agentBarycenter(a),bb=agentBarycenter(b);if(ab!==bb)return ab-bb;
+    const ab=effectiveAgentBarycenter(a),bb=effectiveAgentBarycenter(b);if(ab!==bb)return ab-bb;
     return execweaveStableNodeSort(a,b);
   });
   const width=new Map(),height=new Map(),widthByLane=new Map(),occupied=new Set();
@@ -217,17 +244,24 @@ function execweaveBuildTopology(){
     if(primary!==undefined)spineComponents.add(primary);
     const secondary=[...sizes.keys()].filter(value=>!spineComponents.has(value)).sort((a,b)=>a-b);
     if(secondary.length){
-      let floor=-Infinity;
-      for(const [id,value] of componentOf)if(spineComponents.has(value)){const s=spec.get(id);if(s)floor=Math.max(floor,s.y+(height.get(id)||EXECWEAVE_NODE_H))}
-      if(!Number.isFinite(floor))floor=0;
-      for(const value of secondary){
+      let spineFloor=-Infinity,spineLeft=Infinity,spineRight=-Infinity;
+      for(const [id,value] of componentOf)if(spineComponents.has(value)){const s=spec.get(id);if(s){spineFloor=Math.max(spineFloor,s.y+(height.get(id)||EXECWEAVE_NODE_H));spineLeft=Math.min(spineLeft,s.x);spineRight=Math.max(spineRight,s.x+(width.get(id)||EXECWEAVE_NODE_W))}}
+      if(!Number.isFinite(spineFloor))spineFloor=0;
+      if(!Number.isFinite(spineLeft)){spineLeft=0;spineRight=800}
+      const spineWidth=Math.max(600,spineRight-spineLeft);
+      const compBoxes=secondary.map(value=>{
         const members=[...componentOf.entries()].filter(entry=>entry[1]===value).map(entry=>entry[0]);
-        let top=Infinity,bottom=-Infinity;
-        for(const id of members){const s=spec.get(id);if(s){top=Math.min(top,s.y);bottom=Math.max(bottom,s.y+(height.get(id)||EXECWEAVE_NODE_H))}}
-        if(!Number.isFinite(top))continue;
-        const shift=floor+EXECWEAVE_BAND_GAP-top;
-        for(const id of members){const s=spec.get(id);if(s)s.y+=shift}
-        floor=bottom+shift;
+        let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
+        for(const id of members){const s=spec.get(id);if(s){minX=Math.min(minX,s.x);maxX=Math.max(maxX,s.x+(width.get(id)||EXECWEAVE_NODE_W));minY=Math.min(minY,s.y);maxY=Math.max(maxY,s.y+(height.get(id)||EXECWEAVE_NODE_H))}}
+        return{value,members,minX,maxX,minY,maxY,w:maxX-minX,h:maxY-minY};
+      }).filter(box=>Number.isFinite(box.minX));
+      let cursorX=spineLeft,cursorY=spineFloor+EXECWEAVE_BAND_GAP,rowHeight=0;
+      for(const box of compBoxes){
+        if(cursorX>spineLeft&&cursorX+box.w>spineLeft+spineWidth){cursorX=spineLeft;cursorY+=rowHeight+EXECWEAVE_BAND_GAP;rowHeight=0}
+        const shiftX=cursorX-box.minX,shiftY=cursorY-box.minY;
+        for(const id of box.members){const s=spec.get(id);if(s){s.x+=shiftX;s.y+=shiftY}}
+        cursorX+=box.w+EXECWEAVE_BAND_GAP;
+        rowHeight=Math.max(rowHeight,box.h);
       }
     }
   }
@@ -261,7 +295,7 @@ function execweaveBuildTopology(){
     list.sort((a,b)=>{const as=spec.get(a.source),bs=spec.get(b.source);return (as?.y??0)-(bs?.y??0)||(as?.rank??0)-(bs?.rank??0)||edgeId(a).localeCompare(edgeId(b))});
     list.forEach((edge,index)=>targetPort.set(edgeId(edge),{index,total:list.length}));
   }
-  return{spec,bundleByEdge,sourcePort,targetPort,routePoints:new Map(),width,height,laneX,crowded:edges.length>=16||nodes.length>=12};
+  return{spec,bundleByEdge,sourcePort,targetPort,routePoints:new Map(),width,height,laneX,crowded:edges.length>=16||nodes.length>=12,sourceBarycentre:effectiveBarycentre,agentBarycenter:effectiveAgentBarycenter,rootFallbackBarycenter};
 }
 function execweaveComponents(nodes,edges){
   const adjacent=new Map();
@@ -405,9 +439,15 @@ function execweaveFocusOneEdge(id){
 const execweaveBaseClearSelection=clearSelection;
 clearSelection=function(){execweaveBaseClearSelection();execweaveClearContextFocus()};
 const execweaveBaseSelectNode=selectNode;
-selectNode=function(id,options={}){execweaveBaseSelectNode(id,options);if(nodeById.has(id))execweaveFocusNodeEdges(id)};
+selectNode=function(id,options={}){
+  execweaveBaseSelectNode(id,options);
+  if(nodeById.has(id))execweaveFocusNodeEdges(id);
+};
 const execweaveBaseSelectEdge=selectEdge;
-selectEdge=function(id,options={}){execweaveBaseSelectEdge(id,options);if(edgeById.has(id))execweaveFocusOneEdge(id)};
+selectEdge=function(id,options={}){
+  execweaveBaseSelectEdge(id,options);
+  if(edgeById.has(id))execweaveFocusOneEdge(id);
+};
 
 // Manual placement and automatic arrangement are complementary. Polling preserves a
 // reader's manual position, while Arrange deliberately throws manual positions away

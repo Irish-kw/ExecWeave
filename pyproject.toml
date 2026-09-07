@@ -45,6 +45,7 @@ dependencies = [
 dev = [
   "pytest>=8.0",
   "ruff>=0.16,<0.17",
+  "pywinpty>=3.0.5,<4; platform_system == 'Windows'",
 ]
 release = [
   "build>=1.2",
@@ -54,6 +55,7 @@ release = [
 # development install stays small; CI installs it and requires the checks to run.
 e2e = [
   "playwright>=1.44",
+  "pywinpty>=3.0.5,<4; platform_system == 'Windows'",
 ]
 
 [project.urls]
@@ -67,7 +69,7 @@ execweave = "execweave.entry:main"
 execweave-top = "execweave.top_cli:main"
 execweave-claude-hook = "execweave.claude_hook_cli:main"
 execweave-claude-record = "execweave.claude_record:main"
-execweave-codex-hook = "execweave.codex_hook_cli:main"
+execweave-codex-hook = "execweave.codex_hook_entry:main"
 execweave-codex-record = "execweave.codex_record:main"
 execweave-antigravity-hook = "execweave.antigravity_hook_cli:main"
 execweave-antigravity-record = "execweave.antigravity_record:main"
@@ -93,6 +95,7 @@ packages = ["src/execweave"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src"]
 markers = [
   "viewer_e2e: drives a shipped viewer in a real browser; needs playwright and chromium",
 ]

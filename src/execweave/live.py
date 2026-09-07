@@ -102,14 +102,17 @@ def _handler_factory(state, token: str):
                 self._send(b"Not found", "text/plain; charset=utf-8", 404)
                 return
             with handle:
-                self.send_response(200)
-                self.send_header("Content-Type", content_type)
-                self.send_header("Content-Length", str(size))
-                self.send_header("Cache-Control", "no-store")
-                self.send_header("X-Content-Type-Options", "nosniff")
-                self.send_header("Referrer-Policy", "no-referrer")
-                self.end_headers()
-                shutil.copyfileobj(handle, self.wfile, length=1024 * 1024)
+                try:
+                    self.send_response(200)
+                    self.send_header("Content-Type", content_type)
+                    self.send_header("Content-Length", str(size))
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("X-Content-Type-Options", "nosniff")
+                    self.send_header("Referrer-Policy", "no-referrer")
+                    self.end_headers()
+                    shutil.copyfileobj(handle, self.wfile, length=1024 * 1024)
+                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                    self.close_connection = True
 
         def do_GET(self) -> None:
             parsed = _core.urlsplit(self.path)
@@ -316,13 +319,15 @@ class _LiveState(_BaseLiveState):
             updated_edges=updated_edges,
         )
 
-    def _projected_graph_locked(self) -> dict[str, object]:
-        raw_graph = (
+    def _raw_graph_locked(self) -> dict[str, object]:
+        return (
             dict(self._final_graph)
             if self._finished and self._final_graph is not None
             else self._accumulator.to_dict()
         )
-        projected = project_viewer_graph(raw_graph)
+
+    def _projected_graph_locked(self) -> dict[str, object]:
+        projected = project_viewer_graph(self._raw_graph_locked())
         if isinstance(projected.get("viewer_projection"), dict):
             self._viewer_projection_ever_active = True
         return projected
@@ -352,9 +357,9 @@ class _LiveState(_BaseLiveState):
         return self._projected_snapshot_locked()
 
     def conversation_index(self, run_root: Path) -> dict[str, object]:
-        """Project the conversation index from the graph observed so far."""
+        """Build conversation ownership from observed evidence, never viewer-only collapse."""
         with self._lock:
-            graph = self._projected_graph_locked()
+            graph = self._raw_graph_locked()
         return conversation_index_payload(graph, run_root)
 
     def _refresh_incremental_locked(self) -> None:

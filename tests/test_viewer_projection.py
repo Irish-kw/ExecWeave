@@ -5,7 +5,7 @@ from copy import deepcopy
 from pathlib import Path
 
 from execweave.live import _LiveState
-from execweave.viewer_external_endpoints import EXTERNAL_NODE_ID
+from execweave.viewer_external_endpoints import EXTERNAL_NODE_ID, LOCAL_NODE_ID
 from execweave.viewer_projection import project_viewer_graph, render_graph_html
 
 
@@ -77,6 +77,14 @@ def _clusters(projected: dict[str, object]) -> dict[str, dict[str, object]]:
     return clusters
 
 
+def _local(projected: dict[str, object]) -> dict[str, object]:
+    return next(
+        node
+        for node in projected["nodes"]
+        if isinstance(node, dict) and node.get("id") == LOCAL_NODE_ID
+    )
+
+
 def test_collapses_four_loopback_ephemeral_endpoints_without_mutating_raw_graph() -> None:
     raw = _graph(
         {
@@ -97,23 +105,23 @@ def test_collapses_four_loopback_ephemeral_endpoints_without_mutating_raw_graph(
     assert isinstance(projection, dict)
     assert projection["viewer_only"] is True
     assert projection["cluster_count"] == 1
-    assert projection["collapsed_node_count"] == 4
-    cluster_nodes = [
-        node
-        for node in projected["nodes"]
-        if isinstance(node, dict) and node.get("type") == "network_endpoint_cluster"
-    ]
-    assert len(cluster_nodes) == 1
-    cluster = cluster_nodes[0]
-    attributes = cluster["attributes"]
+    assert projection["local_endpoint_count"] == 4
+    local = _local(projected)
+    assert local["type"] == "network_endpoint"
+    assert local["name"] == "Local endpoints"
+    attributes = local["attributes"]
     assert isinstance(attributes, dict)
     assert attributes["viewer_only"] is True
     assert attributes["member_count"] == 4
-    assert attributes["reason"] == "loopback_ephemeral_ports"
-    assert attributes["port_min"] == 49152
-    assert attributes["port_max"] == 65535
+    assert attributes["reason"] == "local_endpoints"
+    assert {item["address"] for item in attributes["endpoints"]} == {
+        "127.0.0.1:49152",
+        "127.0.0.1:50001",
+        "127.0.0.2:50002",
+        "127.255.255.254:65535",
+    }
 
-    expansion = _clusters(projected)[str(cluster["id"])]
+    expansion = _clusters(projected)[LOCAL_NODE_ID]
     assert expansion["viewer_only"] is True
     assert {node["id"] for node in expansion["nodes"]} == {
         "endpoint:127.0.0.1:49152",
@@ -126,35 +134,46 @@ def test_collapses_four_loopback_ephemeral_endpoints_without_mutating_raw_graph(
     assert "endpoint:127.0.0.1:49152" not in base_ids
     assert projected["node_count"] == 2
     assert projected["edge_count"] == 1
+    edge = projected["edges"][0]
+    assert edge["source"] == "process:ollama:1"
+    assert edge["target"] == LOCAL_NODE_ID
+    assert edge["count"] == 4
 
 
 def test_threshold_requires_at_least_four_eligible_endpoints() -> None:
+    """Historical ID retained: Local endpoints intentionally has no count threshold now."""
     raw = _graph(
         {"process:p1": ["127.0.0.1:50001", "127.0.0.1:50002", "127.0.0.1:50003"]}
     )
+    before = deepcopy(raw)
     projected = project_viewer_graph(raw)
-    assert "viewer_projection" not in projected
-    assert projected == raw
+    assert raw == before
+    assert projected["viewer_projection"]["local_endpoint_count"] == 3
+    assert _local(projected)["attributes"]["member_count"] == 3
+    assert projected["edges"][0]["count"] == 3
 
 
 def test_edge_without_string_id_is_not_eligible_for_collapse() -> None:
+    """Historical ID retained: endpoint identity, not edge-id formatting, controls folding."""
     addresses = [f"127.0.0.1:{50000 + index}" for index in range(4)]
     raw = _graph({"process:p1": addresses})
     edge = raw["edges"][0]
     assert isinstance(edge, dict)
     edge.pop("id")
+    before = deepcopy(raw)
 
     projected = project_viewer_graph(raw)
 
-    assert "viewer_projection" not in projected
-    assert {node["id"] for node in projected["nodes"]} == {
-        "process:p1",
-        *(f"endpoint:{address}" for address in addresses),
-    }
-    assert len(projected["edges"]) == 4
+    assert raw == before
+    assert {node["id"] for node in projected["nodes"]} == {"process:p1", LOCAL_NODE_ID}
+    assert len(projected["edges"]) == 1
+    assert projected["edges"][0]["target"] == LOCAL_NODE_ID
+    occurrences = projected["edges"][0]["viewer_occurrences"]
+    assert any(item["edge_id"] is None for item in occurrences)
 
 
 def test_low_ports_and_non_loopback_addresses_do_not_collapse() -> None:
+    """Historical ID retained: all loopback ports fold locally; non-loopback folds External."""
     raw = _graph(
         {
             "process:p1": [
@@ -168,12 +187,12 @@ def test_low_ports_and_non_loopback_addresses_do_not_collapse() -> None:
     )
     projected = project_viewer_graph(raw)
     node_ids = {node["id"] for node in projected["nodes"] if isinstance(node, dict)}
-    assert "endpoint:127.0.0.1:49151" in node_ids
-    assert "endpoint:127.0.0.1:50004" in node_ids
-    assert EXTERNAL_NODE_ID in node_ids
-    assert "endpoint:192.168.1.2:50001" not in node_ids
-    assert "endpoint:10.0.0.1:50002" not in node_ids
-    assert "endpoint:8.8.8.8:50003" not in node_ids
+    assert {LOCAL_NODE_ID, EXTERNAL_NODE_ID, "process:p1"} == node_ids
+    local = _local(projected)
+    assert {item["address"] for item in local["attributes"]["endpoints"]} == {
+        "127.0.0.1:49151",
+        "127.0.0.1:50004",
+    }
     external = next(node for node in projected["nodes"] if node["id"] == EXTERNAL_NODE_ID)
     assert external["name"] == "External"
     assert {item["address"] for item in external["attributes"]["endpoints"]} == {
@@ -182,7 +201,7 @@ def test_low_ports_and_non_loopback_addresses_do_not_collapse() -> None:
         "8.8.8.8:50003",
     }
     assert not any(
-        node.get("type") == "network_endpoint_cluster" for node in projected["nodes"]
+        node.get("id", "").startswith("endpoint:") for node in projected["nodes"]
     )
 
 
@@ -199,13 +218,18 @@ def test_ipv6_loopback_endpoints_collapse_with_bracketed_or_plain_names() -> Non
     )
     projected = project_viewer_graph(raw)
     assert projected["viewer_projection"]["cluster_count"] == 1
-    cluster = next(
-        node for node in projected["nodes"] if node["type"] == "network_endpoint_cluster"
-    )
-    assert cluster["attributes"]["member_count"] == 4
+    local = _local(projected)
+    assert local["attributes"]["member_count"] == 4
+    assert {item["address"] for item in local["attributes"]["endpoints"]} == {
+        "[::1]:50001",
+        "[::1]:50002",
+        "[::1]:50003",
+        "[::1]:50004",
+    }
 
 
 def test_groups_are_kept_separate_per_source_process() -> None:
+    """Historical ID retained: occurrences share one Local node but source edges stay separate."""
     raw = _graph(
         {
             "process:p1": [f"127.0.0.1:{50000 + index}" for index in range(4)],
@@ -213,12 +237,19 @@ def test_groups_are_kept_separate_per_source_process() -> None:
         }
     )
     projected = project_viewer_graph(raw)
-    assert projected["viewer_projection"]["cluster_count"] == 2
-    cluster_edges = [edge for edge in projected["edges"] if edge.get("viewer_only") is True]
-    assert {edge["source"] for edge in cluster_edges} == {"process:p1", "process:p2"}
+    assert projected["viewer_projection"]["cluster_count"] == 1
+    assert _local(projected)["attributes"]["member_count"] == 8
+    local_edges = [
+        edge
+        for edge in projected["edges"]
+        if edge.get("relation") == "CONNECTED_TO" and edge.get("target") == LOCAL_NODE_ID
+    ]
+    assert {edge["source"] for edge in local_edges} == {"process:p1", "process:p2"}
+    assert {edge["count"] for edge in local_edges} == {4}
 
 
 def test_endpoint_with_additional_incident_semantic_edge_is_not_collapsed() -> None:
+    """Historical ID retained: extra semantic evidence is remapped, never discarded."""
     addresses = [f"127.0.0.1:{50000 + index}" for index in range(4)]
     target = f"endpoint:{addresses[0]}"
     raw = _graph(
@@ -234,11 +265,22 @@ def test_endpoint_with_additional_incident_semantic_edge_is_not_collapsed() -> N
             }
         ],
     )
+    before = deepcopy(raw)
     projected = project_viewer_graph(raw)
-    assert "viewer_projection" not in projected
+    assert raw == before
+    assert _local(projected)["attributes"]["member_count"] == 4
+    assert any(
+        edge.get("source") == "tool:semantic"
+        and edge.get("target") == LOCAL_NODE_ID
+        and edge.get("relation") == "OBSERVED_ENDPOINT"
+        for edge in projected["edges"]
+    )
+    expansion = _clusters(projected)[LOCAL_NODE_ID]
+    assert any(edge.get("id") == "tool:semantic--OBSERVED_ENDPOINT-->endpoint" for edge in expansion["edges"])
 
 
 def test_endpoint_with_multiple_incoming_connections_is_not_collapsed() -> None:
+    """Historical ID retained: multiple source processes remain as distinct Local edges."""
     addresses = [f"127.0.0.1:{50000 + index}" for index in range(4)]
     target = addresses[0]
     raw = _graph(
@@ -246,8 +288,17 @@ def test_endpoint_with_multiple_incoming_connections_is_not_collapsed() -> None:
         extra_nodes=[_process("process:p2")],
         extra_edges=[_connected("process:p2", target, 99)],
     )
+    before = deepcopy(raw)
     projected = project_viewer_graph(raw)
-    assert "viewer_projection" not in projected
+    assert raw == before
+    local_edges = [
+        edge
+        for edge in projected["edges"]
+        if edge.get("relation") == "CONNECTED_TO" and edge.get("target") == LOCAL_NODE_ID
+    ]
+    assert {edge["source"] for edge in local_edges} == {"process:p1", "process:p2"}
+    assert next(edge for edge in local_edges if edge["source"] == "process:p1")["count"] == 4
+    assert next(edge for edge in local_edges if edge["source"] == "process:p2")["count"] == 1
 
 
 def test_existing_expansion_payload_is_preserved_and_merged() -> None:
@@ -268,6 +319,7 @@ def test_existing_expansion_payload_is_preserved_and_merged() -> None:
     projected = project_viewer_graph(raw)
     clusters = _clusters(projected)
     assert "cluster:existing" in clusters
+    assert LOCAL_NODE_ID in clusters
     assert len(clusters) == 2
 
 
@@ -284,8 +336,10 @@ def test_projected_renderer_embeds_expandable_cluster_without_changing_raw_graph
     )[0]
     payload = json.loads(embedded)
     assert payload["viewer_projection"]["viewer_only"] is True
-    assert any(node["type"] == "network_endpoint_cluster" for node in payload["nodes"])
-    assert payload["expansion"]["clusters"]
+    local = next(node for node in payload["nodes"] if node["id"] == LOCAL_NODE_ID)
+    assert local["type"] == "network_endpoint"
+    assert local["attributes"]["expandable"] is True
+    assert LOCAL_NODE_ID in payload["expansion"]["clusters"]
     assert "window.__execweaveStaticGraph=" in html
     assert "Expand cluster" not in html
 
@@ -337,10 +391,11 @@ def test_live_switches_to_projected_snapshot_when_cluster_becomes_active(tmp_pat
     assert graph["viewer_projection"]["viewer_only"] is True
     assert graph["node_count"] == 2
     assert graph["edge_count"] == 1
-    assert any(node["type"] == "network_endpoint_cluster" for node in graph["nodes"])
+    assert _local(graph)["attributes"]["member_count"] == 4
 
 
 def test_live_keeps_delta_protocol_before_projection_threshold(tmp_path: Path) -> None:
+    """Historical ID retained: Local folding is active immediately, so snapshot is required."""
     event_path = tmp_path / "events.jsonl"
     event_path.write_text("", encoding="utf-8")
     state = _LiveState("live-projection", event_path)
@@ -349,6 +404,9 @@ def test_live_keeps_delta_protocol_before_projection_threshold(tmp_path: Path) -
 
     response = state.live_update(0)
 
-    assert response["kind"] == "delta"
-    assert response["updates"][0]["node_count"] == 4
-    assert response["updates"][0]["edge_count"] == 3
+    assert response["kind"] == "snapshot"
+    graph = response["graph"]
+    assert graph["viewer_projection"]["local_endpoint_count"] == 3
+    assert graph["node_count"] == 2
+    assert graph["edge_count"] == 1
+    assert _local(graph)["attributes"]["member_count"] == 3

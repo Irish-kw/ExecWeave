@@ -20,6 +20,7 @@ OFFICIAL_CODEX_HOOK_EVENTS = frozenset(
         "SubagentStart",
         "SubagentStop",
         "Stop",
+        "Interrupt",
     }
 )
 
@@ -31,6 +32,7 @@ _PROJECTED_EVENTS = frozenset(
         "PreCompact",
         "PostCompact",
         "Stop",
+        "Interrupt",
     }
 )
 
@@ -298,6 +300,36 @@ def _stop(payload: dict[str, Any], timestamp: str) -> list[dict[str, Any]]:
     ]
 
 
+def _interrupt(payload: dict[str, Any], timestamp: str) -> list[dict[str, Any]]:
+    turn_id = payload.get("turn_id")
+    if not isinstance(turn_id, str) or not turn_id:
+        raise ValueError("Interrupt requires turn_id")
+    observation_id = _observation_id(payload, timestamp=timestamp, phase="interrupt")
+    interrupt = _entity(
+        "agent_turn_interrupt",
+        f"agent-turn-interrupt:codex:{observation_id}",
+        name=f"Codex turn interrupt {turn_id}",
+        attributes={
+            "provider": "codex",
+            "session_id": payload.get("session_id"),
+            "turn_id": turn_id,
+            "interrupt_semantics": "provider_interrupt_hook_observation",
+        },
+    )
+    attrs = _common(payload)
+    attrs["interrupt_cannot_be_blocked_by_hook"] = True
+    return [
+        _event(
+            timestamp=timestamp,
+            event_type="semantic.codex.turn.interrupted",
+            relation="OBSERVED_TURN_INTERRUPT",
+            source=_main_agent(),
+            target=interrupt,
+            attributes=attrs,
+        )
+    ]
+
+
 def codex_official_hook_lifecycle_events(
     payload: dict[str, Any],
     *,
@@ -326,4 +358,6 @@ def codex_official_hook_lifecycle_events(
         return _compaction(payload, observed_at, phase="post")
     if hook_event == "Stop":
         return _stop(payload, observed_at)
+    if hook_event == "Interrupt":
+        return _interrupt(payload, observed_at)
     return []

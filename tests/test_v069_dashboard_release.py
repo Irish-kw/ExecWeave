@@ -116,26 +116,30 @@ def test_release_version_and_noncommercial_license_metadata_are_078() -> None:
 
 
 def test_all_readmes_use_current_release_dashboard_and_conversation_anchors() -> None:
+    """Historical node ID retained; README policy is now release-independent."""
+
+    hardcoded_release = re.compile(r"\bv\d+\.\d+(?:\.\d+)?\b", re.I)
     readmes = sorted(Path(".").glob("README*.md"))
     assert len(readmes) >= 8
     for path in readmes:
         text = path.read_text(encoding="utf-8")
         assert 'src="docs/assets/codex.gif"' in text, path
         assert "execweave-launch-demo-v5-x.gif" not in text, path
-        assert "v0.6.5" not in text, path
-        assert "v0.6.6" not in text, path
-        assert "v0.6.7" not in text, path
-        assert f"v{__version__}" in text, path
+        assert hardcoded_release.search(text) is None, path
         assert "conversations.json" in text, path
+        assert "execweave live --open -- ollama serve" in text, path
 
     readme = Path("README.md").read_text(encoding="utf-8")
-    assert f"This README documents **v{__version__}**." in readme
-    assert "subagent responses remain attributed to the agent that produced them" in readme
+    assert "This README documents" not in readme
+    assert "Conversation rounds" in readme
+    assert "correct agent" in readme
 
 
 def test_english_readme_declares_noncommercial_source_available_license() -> None:
+    """Historical node ID retained; licensing is stable product metadata, not a release note."""
+
     readme = Path("README.md").read_text(encoding="utf-8")
-    assert "source-available" in readme
     assert "PolyForm Noncommercial License 1.0.0" in readme
-    assert "Commercial use requires a separate written commercial license" in readme
-    assert "Starting with v0.6.8" in readme
+    assert "noncommercial" in readme.lower()
+    assert "Starting with v0.6.8" not in readme
+    assert re.search(r"\bv\d+\.\d+(?:\.\d+)?\b", readme, re.I) is None

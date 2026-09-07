@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
+import socket
+import struct
 import sys
 import threading
+import time
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlsplit
@@ -47,6 +51,49 @@ def test_live_handler_requires_token_for_all_evidence_routes(tmp_path: Path) -> 
         with urlopen(request, timeout=1) as response:
             payload = json.loads(response.read().decode("utf-8"))
         assert payload["session_id"] == "s1"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_client_reset_during_live_response_is_a_clean_disconnect(tmp_path: Path) -> None:
+    state = _LiveState("disconnect", tmp_path / "events.jsonl")
+    token = "disconnect-token"
+
+    class RecordingServer(_LocalThreadingHTTPServer):
+        unexpected: list[tuple[type[BaseException], BaseException]] = []
+
+        def handle_error(self, request, client_address) -> None:  # type: ignore[no-untyped-def]
+            error_type, error, _ = sys.exc_info()
+            if error_type is not None and error is not None and not isinstance(
+                error, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)
+            ):
+                self.unexpected.append((error_type, error))
+            super().handle_error(request, client_address)
+
+    server = RecordingServer(("127.0.0.1", 0), _handler_factory(state, token))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        for _ in range(8):
+            client = socket.create_connection(server.server_address, timeout=2)
+            client.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 256)
+            client.sendall(
+                f"GET /?t={token} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n".encode()
+            )
+            # Winsock exposes ``linger`` as two unsigned shorts; POSIX uses two
+            # ints. Supplying the four-byte Winsock layout to Linux/macOS is an
+            # invalid socket option even though the reset behavior is portable.
+            linger_format = "HH" if os.name == "nt" else "ii"
+            client.setsockopt(
+                socket.SOL_SOCKET,
+                socket.SO_LINGER,
+                struct.pack(linger_format, 1, 0),
+            )
+            client.close()
+        time.sleep(0.25)
+        assert server.unexpected == []
     finally:
         server.shutdown()
         server.server_close()
