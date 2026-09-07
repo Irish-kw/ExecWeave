@@ -79,7 +79,7 @@ def run_interactive(
     unavailable_reason: str | None = None
     cleanup_errors: list[str] = []
     started_at = time.monotonic()
-    live_details = ""
+    completed_live_details = ""
 
     try:
         terminal_reason = impl._terminal_backend_reason()
@@ -216,6 +216,7 @@ def run_interactive(
             arg=prompt_one,
             timeout=int(timeout * 1000),
         )
+        impl.visible._wait_agent_card_observed(page, "Final response", timeout=timeout)
         first_details = page.locator("#details").inner_text()
         if "FINAL RESPONSE" not in first_details.upper():
             raise AssertionError("first interactive round has no visible Final response")
@@ -242,6 +243,7 @@ def run_interactive(
             arg=prompt_two,
             timeout=int(timeout * 1000),
         )
+        impl.visible._wait_agent_card_observed(page, "Final response", timeout=timeout)
         page.wait_for_function(
             "()=>window.__execweaveG5Document===document",
             timeout=int(timeout * 1000),
@@ -253,7 +255,6 @@ def run_interactive(
             current_nodes >= initial_nodes,
             "Two interactive rounds appeared without replacing the live document",
         )
-        live_details = page.locator("#details").inner_text()
 
         older = page.locator("#details .execweave-agent-older")
         older.wait_for(state="visible", timeout=int(timeout * 1000))
@@ -318,6 +319,9 @@ def run_interactive(
         except subprocess.TimeoutExpired as exc:
             raise AssertionError("ExecWeave live did not finalize after interrupt") from exc
 
+        impl.visible._wait_agent_panel_finished(page, timeout=min(timeout, 8.0))
+        completed_live_details = page.locator("#details").inner_text()
+
         viewer = session_root / "viewer.html"
         graph_path = session_root / "graph.json"
         if not viewer.is_file() or not graph_path.is_file():
@@ -372,8 +376,8 @@ def run_interactive(
         impl._check(
             result,
             "Finished viewer",
-            finished_details == live_details,
-            "Finished viewer details equal the final live root details",
+            finished_details == completed_live_details,
+            "Finished viewer details equal the synchronized terminal live root details",
         )
         assert diagnostics is not None
         console_ok = diagnostics.finish(page, run_root)
