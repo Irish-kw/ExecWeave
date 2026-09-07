@@ -15,7 +15,7 @@
 
 <p align="center">
   <a href="https://pypi.org/project/execweave/"><img src="https://img.shields.io/pypi/v/execweave" alt="PyPI"></a>
-  <a href="https://github.com/Irish-kw/ExecWeave/actions/workflows/ci.yml"><img src="https://github.com/Irish-kw/ExecWeave/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/Irish-kw/ExecWeave/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Irish-kw/ExecWeave/ci.yml?branch=main" alt="CI"></a>
   <img src="https://img.shields.io/badge/Python-3.10%2B-blue" alt="Python 3.10+">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue" alt="License"></a>
 </p>
@@ -271,6 +271,9 @@ Raw observations остаются отделены от derived semantic/correla
 ## Ограничения и конфиденциальность
 
 - Portable collector работает в Linux, macOS и Windows. Portable filesystem observation является session-correlated и не всегда process-causal; polling может пропустить очень кратковременную активность.
+- **Идентичность жизненного цикла process:** portable process tracking отличает повторное использование PID по process creation time. Повторно использованный PID записывается как новый process lifetime, а не объединяется с предыдущим process.
+- **Явное состояние degraded:** при завершении collector состояние network collection записывается как `available`, `degraded`, `unavailable`, `not_sampled` или `not_requested`. Live conversation считается synchronized только после успешного финального conversation fetch; одна лишь остановка polling не считается успешной синхронизацией.
+- **Ownership cleanup при сбое:** если portable collector неожиданно завершается после запуска managed workload, он завершает принадлежащий ему workload до записи terminal session state. Частично запущенный filesystem observer также очищается до того, как startup error будет передана дальше.
 - В Linux также доступен `strace` reference backend с более сильной syscall-attributed evidence для поддерживаемых executions.
 - Provider semantic coverage полностью зависит от того, что конкретная integration действительно предоставляет. Неэкспонированные Prompt, hidden reasoning, remote Provider internals и routing нельзя надёжно восстановить.
 - Full-fidelity content может содержать Credential, Secret, Source code, Prompt, Tool value, Model response, Shell output и File content.

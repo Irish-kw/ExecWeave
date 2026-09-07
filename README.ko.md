@@ -15,7 +15,7 @@
 
 <p align="center">
   <a href="https://pypi.org/project/execweave/"><img src="https://img.shields.io/pypi/v/execweave" alt="PyPI"></a>
-  <a href="https://github.com/Irish-kw/ExecWeave/actions/workflows/ci.yml"><img src="https://github.com/Irish-kw/ExecWeave/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/Irish-kw/ExecWeave/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Irish-kw/ExecWeave/ci.yml?branch=main" alt="CI"></a>
   <img src="https://img.shields.io/badge/Python-3.10%2B-blue" alt="Python 3.10+">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue" alt="License"></a>
 </p>
@@ -271,6 +271,9 @@ Raw observation과 derived semantic/correlation output은 분리된 상태로 �
 ## 제한 및 개인정보
 
 - Portable collector는 Linux, macOS, Windows에서 동작합니다. Portable filesystem observation은 항상 process-causal한 것이 아니라 session-correlated이며, polling은 매우 짧은 activity를 놓칠 수 있습니다.
+- **Process lifetime identity:** Portable process tracking은 PID와 process creation time을 함께 사용해 PID reuse를 구분합니다. 같은 PID가 다시 사용되어도 이전 process와 합치지 않고 새로운 process lifetime으로 기록합니다.
+- **명시적인 degraded state:** collector 종료 시 network collection health를 `available`, `degraded`, `unavailable`, `not_sampled`, `not_requested` 중 하나로 기록합니다. Live conversation은 마지막 conversation fetch가 성공한 경우에만 synchronized로 간주하며, polling이 멈췄다는 사실만으로 동기화 성공으로 처리하지 않습니다.
+- **실패 시 ownership cleanup:** managed workload를 시작한 뒤 portable collector가 예기치 않게 실패하면 terminal session state를 기록하기 전에 자신이 소유한 workload를 종료합니다. filesystem observer가 부분적으로만 시작된 경우에도 startup error를 전달하기 전에 정리합니다.
 - Linux에는 지원되는 execution에서 더 강한 syscall-attributed evidence를 제공하는 `strace` reference backend도 있습니다.
 - Provider semantic coverage는 각 integration이 실제로 노출하는 정보에 달려 있습니다. 노출되지 않은 Prompt, hidden reasoning, remote Provider internals, routing은 안정적으로 재구성할 수 없습니다.
 - Full-fidelity content에는 Credential, Secret, Source code, Prompt, Tool value, Model response, Shell output, File content가 포함될 수 있습니다.

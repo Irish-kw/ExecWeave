@@ -15,7 +15,7 @@
 
 <p align="center">
   <a href="https://pypi.org/project/execweave/"><img src="https://img.shields.io/pypi/v/execweave" alt="PyPI"></a>
-  <a href="https://github.com/Irish-kw/ExecWeave/actions/workflows/ci.yml"><img src="https://github.com/Irish-kw/ExecWeave/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/Irish-kw/ExecWeave/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Irish-kw/ExecWeave/ci.yml?branch=main" alt="CI"></a>
   <img src="https://img.shields.io/badge/Python-3.10%2B-blue" alt="Python 3.10+">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue" alt="License"></a>
 </p>
@@ -271,6 +271,9 @@ Raw observation 與 derived semantic/correlation output 會維持分離。
 ## 限制與隱私
 
 - Portable collector 可在 Linux、macOS、Windows 使用。Portable filesystem observation 屬於 session-correlated evidence，不一定能形成 process-causal attribution；polling 也可能漏掉非常短暫的活動。
+- **Process lifetime identity：** Portable process tracking 會用 PID 加上 process creation time 區分 PID reuse；同一 PID 被重新使用時會記成新的 process lifetime，不會和先前程序合併。
+- **明確的 degraded state：** Collector 完成時會把 network collection health 記為 `available`、`degraded`、`unavailable`、`not_sampled` 或 `not_requested`。Live conversation 只有在最後一次 conversation fetch 成功後才算 synchronized；停止 polling 本身不等於同步成功。
+- **失敗時的 ownership cleanup：** Portable collector 若在已啟動 managed workload 後非預期失敗，會先終止自己擁有的 workload，再記錄 terminal session state；filesystem watcher 即使只啟動一部分，也會在錯誤往外傳前清理。
 - Linux 另外提供 `strace` reference backend，可在支援的執行中取得更強的 syscall-attributed evidence。
 - Provider semantic coverage 完全取決於該 integration 真正暴露的資訊。未暴露的 Prompt、hidden reasoning、遠端 Provider internals 與 routing 無法被可靠重建。
 - Full-fidelity Provider content 可能包含 Credential、Secret、Source code、Prompt、Tool value、Model response、Shell output 與 File content。
@@ -292,8 +295,8 @@ python -m pytest
 python -m ruff check .
 ```
 
-歡迎提出 Issue 與 Pull Request。新增 integration 時，請明確區分「直接觀察」、「Provider 提供」與「推導所得」的 evidence。
+歡迎提交 Issue 和 Pull Request。新增 integration 時，請明確區分「直接觀察」「Provider 提供」和「推導所得」的 evidence。
 
 ## 授權
 
-ExecWeave 使用 **PolyForm Noncommercial License 1.0.0**。完整條款請見 [LICENSE](LICENSE)。
+ExecWeave 採用 **PolyForm Noncommercial License 1.0.0**。完整條款請參閱 [LICENSE](LICENSE)。

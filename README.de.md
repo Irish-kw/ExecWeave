@@ -15,7 +15,7 @@
 
 <p align="center">
   <a href="https://pypi.org/project/execweave/"><img src="https://img.shields.io/pypi/v/execweave" alt="PyPI"></a>
-  <a href="https://github.com/Irish-kw/ExecWeave/actions/workflows/ci.yml"><img src="https://github.com/Irish-kw/ExecWeave/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/Irish-kw/ExecWeave/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Irish-kw/ExecWeave/ci.yml?branch=main" alt="CI"></a>
   <img src="https://img.shields.io/badge/Python-3.10%2B-blue" alt="Python 3.10+">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue" alt="License"></a>
 </p>
@@ -271,6 +271,9 @@ Raw observations bleiben von derived semantic/correlation outputs getrennt.
 ## Grenzen und Datenschutz
 
 - Der portable collector läuft unter Linux, macOS und Windows. Portable filesystem observation ist session-correlated und nicht immer process-causal; Polling kann sehr kurzlebige Aktivität verpassen.
+- **Process-Lifetime-Identität:** Portable Process-Observation unterscheidet PID-Reuse anhand der Process Creation Time. Wird dieselbe PID erneut verwendet, entsteht eine neue Process Lifetime statt einer Zusammenführung mit dem früheren Process.
+- **Expliziter degraded state:** Beim Abschluss des Collectors wird der Zustand der Network Collection als `available`, `degraded`, `unavailable`, `not_sampled` oder `not_requested` festgehalten. Eine Live Conversation gilt erst nach einem erfolgreichen finalen Conversation Fetch als synchronized; das Stoppen des Pollings allein gilt nicht als erfolgreiche Synchronisierung.
+- **Ownership-Cleanup bei Fehlern:** Schlägt der portable collector nach dem Start eines managed workload unerwartet fehl, beendet er den von ihm verwalteten workload, bevor der terminal session state geschrieben wird. Ein nur teilweise gestarteter filesystem observer wird ebenfalls beendet, bevor der Startup-Fehler weitergegeben wird.
 - Unter Linux gibt es zusätzlich einen `strace` reference backend mit stärkerer syscall-attributed evidence für unterstützte Executions.
 - Provider semantic coverage hängt vollständig davon ab, was die jeweilige Integration tatsächlich exponiert. Nicht exponierte Prompt, hidden reasoning, remote Provider internals oder routing lassen sich nicht zuverlässig rekonstruieren.
 - Full-fidelity content kann Credential, Secret, Source code, Prompt, Tool value, Model response, Shell output und File content enthalten.

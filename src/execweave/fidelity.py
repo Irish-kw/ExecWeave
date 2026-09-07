@@ -90,6 +90,7 @@ class FidelityAccumulator:
     filesystem_scope_downgraded_values: set[bool] = field(default_factory=set)
     network_requested_values: set[bool] = field(default_factory=set)
     network_collected_values: set[bool] = field(default_factory=set)
+    network_collection_statuses: set[str] = field(default_factory=set)
     attribution_modes: dict[str, set[str]] = field(
         default_factory=lambda: {
             "process": set(),
@@ -140,6 +141,11 @@ class FidelityAccumulator:
                 value = attributes.get(key)
                 if isinstance(value, bool):
                     target.add(value)
+
+        if event_type == "session.finished":
+            network_status = attributes.get("network_collection_status")
+            if isinstance(network_status, str) and network_status:
+                self.network_collection_statuses.add(network_status)
 
         for entity in (event.get("source"), event.get("target")):
             entity_backend = _entity_backend(entity)
@@ -192,10 +198,6 @@ class FidelityAccumulator:
         else:
             not_supported.add("short_lived_process_capture")
 
-        # Sampling is a capture mechanism, not an attribution/trust grade. A
-        # configured portable process interval is itself enough to establish that
-        # the run used sampled collection even if no process/network event happened
-        # to be emitted before the command exited.
         sampled = bool(self.configured_process_poll_intervals_ms) or any(
             "process_polled" in self.attribution_modes[channel]
             for channel in ("process", "network")
@@ -205,6 +207,7 @@ class FidelityAccumulator:
         filesystem_scope_downgraded = _single_or_none(
             self.filesystem_scope_downgraded_values
         )
+        network_collection_status = _single_or_none(self.network_collection_statuses)
         capture_context = {
             "platform": _single_or_none(self.platforms),
             "configured_process_poll_interval_ms": configured_interval,
@@ -214,6 +217,11 @@ class FidelityAccumulator:
             "network_requested": _single_or_none(self.network_requested_values),
             "network_collected": _single_or_none(self.network_collected_values),
         }
+        # Preserve the fidelity 0.1 shape for old streams that have no terminal
+        # network-health declaration. New collectors add the field only when the
+        # health state is actually observed.
+        if network_collection_status is not None:
+            capture_context["network_collection_status"] = network_collection_status
 
         limitations: list[str] = [
             "ExecWeave does not establish byte-level dataflow from these observations.",
@@ -243,6 +251,14 @@ class FidelityAccumulator:
             limitations.append(
                 "Session-correlated filesystem changes do not prove which process performed the write."
             )
+        if network_collection_status == "unavailable":
+            limitations.append(
+                "Network collection was requested but no process network sample succeeded; permission or OS errors prevented reliable network observation."
+            )
+        elif network_collection_status == "degraded":
+            limitations.append(
+                "Network collection was only partially available; at least one process network sample failed even though other samples succeeded."
+            )
         if self.unresolved_process_references:
             limitations.append(
                 "At least one observed process-start relationship referenced a parent that was not resolved in collector state; this proves incomplete parentage resolution, not a count of missed processes."
@@ -259,9 +275,6 @@ class FidelityAccumulator:
             "attribution_modes": modes,
             "sampled_evidence_present": sampled,
             "unresolved_process_references": self.unresolved_process_references,
-            # Current events do not contain a sound signal that distinguishes a
-            # missed descendant from an unresolved/out-of-scope parent. Null is
-            # deliberate: do not turn an unknowable quantity into a guessed zero.
             "missed_process_lower_bound": None,
             "claims_supported": sorted(supported),
             "claims_not_supported": sorted(not_supported),
