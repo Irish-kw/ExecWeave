@@ -196,8 +196,15 @@ class FileWatcher:
             )
 
     def _schedule_and_start(self) -> None:
-        self.observer.schedule(self.handler, str(self.root), recursive=True)
-        self.observer.start()
+        try:
+            self.observer.schedule(self.handler, str(self.root), recursive=True)
+            self.observer.start()
+        except BaseException:
+            # Observer.start() can allocate threads/resources before raising. Always
+            # tear down the partially initialized observer before propagating the
+            # failure or switching to the polling fallback.
+            self._shutdown_observer(timeout=1)
+            raise
         self._started = True
 
     def _shutdown_observer(self, timeout: float) -> None:
@@ -223,7 +230,6 @@ class FileWatcher:
         except OSError as exc:
             if not _is_linux_inotify_resource_error(exc) or self.observer_kind == "polling":
                 raise
-            self._shutdown_observer(timeout=1)
             self.fallback_reason = (
                 "Linux inotify watch or instance capacity was exhausted; ExecWeave is "
                 "using polling filesystem observation for this session. File-change "
@@ -235,6 +241,7 @@ class FileWatcher:
             self._schedule_and_start()
 
     def stop(self) -> None:
-        if not self._started:
-            return
+        # This is intentionally idempotent and also safe after a failed start. A
+        # watchdog backend may have partially initialized before raising even when
+        # _started never became true.
         self._shutdown_observer(timeout=5)
