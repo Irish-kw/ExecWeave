@@ -32,19 +32,24 @@ def _wait_for(predicate, *, timeout: float = 5.0) -> None:
     raise AssertionError("condition did not become true before timeout")
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX virtualenv Python uses launcher symlinks")
 def test_explicit_virtualenv_python_keeps_launcher_and_site_prefix(tmp_path: Path) -> None:
     venv_root = tmp_path / ".venv"
-    venv.EnvBuilder(with_pip=False, symlinks=True).create(venv_root)
-    venv_python = venv_root / "bin" / "python"
-    assert venv_python.is_symlink()
+    venv.EnvBuilder(with_pip=False, symlinks=os.name != "nt").create(venv_root)
+    venv_python = (
+        venv_root / "Scripts" / "python.exe"
+        if os.name == "nt"
+        else venv_root / "bin" / "python"
+    )
+    if os.name != "nt":
+        assert venv_python.is_symlink()
 
     launch = resolve_launch_command(
         [str(venv_python), "-c", "import sys; print(sys.prefix)"]
     )
 
     assert launch[0] == os.path.abspath(os.fspath(venv_python))
-    assert Path(launch[0]).is_symlink()
+    if os.name != "nt":
+        assert Path(launch[0]).is_symlink()
     completed = subprocess.run(
         launch,
         check=True,
