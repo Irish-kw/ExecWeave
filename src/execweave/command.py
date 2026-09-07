@@ -80,7 +80,12 @@ def _resolve_executable(executable: str, *, path: str | None = None) -> str:
         candidate = Path(executable).expanduser()
         if not candidate.is_file():
             raise FileNotFoundError(f"command executable not found: {executable!r}")
-        resolved = str(candidate.resolve())
+        # Keep the user-selected launcher path itself. In particular, a virtualenv
+        # Python executable is commonly a symlink to the base interpreter on POSIX;
+        # dereferencing it changes Python's prefix discovery and silently drops the
+        # virtualenv site-packages. ``abspath`` normalizes the argv path without
+        # resolving symlinks.
+        resolved = os.path.abspath(os.fspath(candidate))
     else:
         path_launcher = shutil.which(executable, path=path)
         if executable.lower() == "cursor" and _prefer_cursor_desktop_launcher():
