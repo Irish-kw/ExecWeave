@@ -36,11 +36,15 @@ jobs:
                   "from .sink import JsonlSink\n\n\n_PR_SET_CHILD_SUBREAPER = 36\n_PR_GET_CHILD_SUBREAPER = 37\n\n\n@dataclass(frozen=True)",
               ),
               (
+                  "        self._network_access_denied = 0\n",
+                  "        self._network_access_denied = 0\n"
+                  "        self._collector_children_baseline: dict[int, float] | None = None\n",
+              ),
+              (
                   "        workload_terminated_due_to_collector_error = False\n"
                   "        post_command_probe = prepare_post_command_specialized_probe(command)\n",
                   "        workload_terminated_due_to_collector_error = False\n"
                   "        subreaper_previous: bool | None = None\n"
-                  "        collector_children_baseline: dict[int, float] | None = None\n"
                   "        post_command_probe = prepare_post_command_specialized_probe(command)\n",
               ),
               (
@@ -48,39 +52,30 @@ jobs:
                   "                    process = subprocess.Popen(\n",
                   "                ) as launch_environment:\n"
                   "                    subreaper_previous = self._enable_linux_child_subreaper()\n"
-                  "                    if subreaper_previous is not None:\n"
-                  "                        collector_children_baseline = self._direct_child_lifetimes()\n"
+                  "                    self._collector_children_baseline = (\n"
+                  "                        self._direct_child_lifetimes()\n"
+                  "                        if subreaper_previous is not None\n"
+                  "                        else None\n"
+                  "                    )\n"
                   "                    process = subprocess.Popen(\n",
               ),
               (
-                  "            if process is not None:\n"
-                  "                owned = self._owned_live_processes(process)\n"
-                  "                workload_terminated_due_to_collector_error = (\n"
-                  "                    collector_error_type is not None and bool(owned)\n"
-                  "                )\n"
                   "                self._terminate_process_tree(process, owned=owned)\n"
                   "            if watcher is not None:\n",
-                  "            if process is not None:\n"
-                  "                owned = self._owned_live_processes(\n"
-                  "                    process,\n"
-                  "                    collector_children_baseline=collector_children_baseline,\n"
-                  "                )\n"
-                  "                workload_terminated_due_to_collector_error = (\n"
-                  "                    collector_error_type is not None and bool(owned)\n"
-                  "                )\n"
                   "                self._terminate_process_tree(process, owned=owned)\n"
                   "            self._restore_linux_child_subreaper(subreaper_previous)\n"
                   "            if watcher is not None:\n",
               ),
               (
-                  "            ) or bool(process is not None and self._owned_live_processes(process))\n",
-                  "            ) or bool(\n"
-                  "                process is not None\n"
-                  "                and self._owned_live_processes(\n"
-                  "                    process,\n"
-                  "                    collector_children_baseline=collector_children_baseline,\n"
-                  "                )\n"
-                  "            )\n",
+                  "            workload_alive_after_cleanup = any(\n"
+                  "                self._process_is_live(candidate) for candidate in owned\n"
+                  "            ) or bool(process is not None and self._owned_live_processes(process))\n"
+                  "            self.sink.emit(\n",
+                  "            workload_alive_after_cleanup = any(\n"
+                  "                self._process_is_live(candidate) for candidate in owned\n"
+                  "            ) or bool(process is not None and self._owned_live_processes(process))\n"
+                  "            self._collector_children_baseline = None\n"
+                  "            self.sink.emit(\n",
               ),
               (
                   "    @staticmethod\n"
@@ -135,20 +130,9 @@ jobs:
                   "    def _process_is_live(proc: psutil.Process) -> bool:\n",
               ),
               (
-                  "    def _owned_live_processes(\n"
-                  "        self,\n"
-                  "        process: subprocess.Popen[bytes],\n"
-                  "    ) -> list[psutil.Process]:\n",
-                  "    def _owned_live_processes(\n"
-                  "        self,\n"
-                  "        process: subprocess.Popen[bytes],\n"
-                  "        *,\n"
-                  "        collector_children_baseline: dict[int, float] | None = None,\n"
-                  "    ) -> list[psutil.Process]:\n",
-              ),
-              (
                   "        snapshots = {**self._seen_processes, **self._discovered_processes}\n",
-                  "        if collector_children_baseline is not None:\n"
+                  "        baseline = self._collector_children_baseline\n"
+                  "        if baseline is not None:\n"
                   "            try:\n"
                   "                collector_children = psutil.Process(os.getpid()).children(recursive=False)\n"
                   "            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):\n"
@@ -158,7 +142,7 @@ jobs:
                   "                    create_time = candidate.create_time()\n"
                   "                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):\n"
                   "                    continue\n"
-                  "                if collector_children_baseline.get(candidate.pid) == create_time:\n"
+                  "                if baseline.get(candidate.pid) == create_time:\n"
                   "                    continue\n"
                   "                add_with_descendants(candidate)\n\n"
                   "        snapshots = {**self._seen_processes, **self._discovered_processes}\n",
