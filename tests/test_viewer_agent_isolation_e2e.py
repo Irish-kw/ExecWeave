@@ -698,6 +698,7 @@ def test_finishing_a_run_keeps_the_reader_on_the_same_dashboard(tmp_path: Path) 
     event_path.write_text("", encoding="utf-8")
     state = live_module._LiveState("finish", event_path)
     state._projected_graph_locked = lambda: dict(projected)  # type: ignore[method-assign]
+    state._raw_graph_locked = lambda: dict(graph)  # type: ignore[method-assign]
     state._viewer_projection_ever_active = True
     token = "finish-token"
     server = live_module._LocalThreadingHTTPServer(
