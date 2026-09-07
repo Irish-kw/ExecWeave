@@ -476,7 +476,6 @@ def _run_interactive(
     page_errors: list[str] = []
     unavailable_reason: str | None = None
     started_at = time.monotonic()
-    live_details = ""
 
     try:
         live_command = [
@@ -617,7 +616,6 @@ def _run_interactive(
             current_nodes >= initial_nodes,
             "Two interactive rounds appeared without replacing the live document",
         )
-        live_details = page.locator("#details").inner_text()
 
         older = page.locator("#details .execweave-agent-older")
         older.wait_for(state="visible", timeout=int(timeout * 1000))
