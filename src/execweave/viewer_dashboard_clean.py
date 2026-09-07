@@ -103,14 +103,20 @@ function execweaveDashboardGraph(data){
   const fileTypes=new Set(['file','directory']);
   const fileMutationEvents=new Set(['filesystem.created','filesystem.modified','filesystem.moved','filesystem.deleted']);
   const fileMutationRelation=relation=>/(^|_)(WROTE|WRITE|WRITES|CREATE|CREATED|UPDATE|UPDATED|EDIT|EDITED|DELETE|DELETED|MOVE|MOVED|RENAME|RENAMED|PATCH|REPLACE|REPLACED|SAVE|SAVED|MODIFY|MODIFIED)($|_)/.test(String(relation||'').toUpperCase());
+  const fileReadRelation=relation=>/(^|_)(READ|OPEN|SCAN|LIST|STAT|INSPECT|OBSERVE|OBSERVED)($|_)/.test(String(relation||'').toUpperCase());
   const fileActivity=node=>{
     if(!fileTypes.has(String(node?.type||'')))return'other';
     const eventTypes=Array.isArray(node?.event_types)?node.event_types:[];
-    if(eventTypes.some(value=>fileMutationEvents.has(String(value))))return'changed';
     const related=[...(incoming.get(node.id)||[]),...(outgoing.get(node.id)||[])];
-    return related.some(edge=>fileMutationRelation(edge?.relation))?'changed':'observed';
+    const relatedEventTypes=related.flatMap(edge=>Array.isArray(edge?.event_types)?edge.event_types:[]);
+    const allEventTypes=[...eventTypes,...relatedEventTypes].map(String);
+    if(allEventTypes.some(value=>fileMutationEvents.has(value)))return'changed';
+    if(related.some(edge=>fileMutationRelation(edge?.relation)))return'changed';
+    const observedEvents=allEventTypes.some(value=>value.startsWith('filesystem.'));
+    if(observedEvents||related.some(edge=>fileReadRelation(edge?.relation)))return'observed';
+    return'unknown';
   };
-  const fileVisible=node=>{const activity=fileActivity(node);if(activity==='other')return true;if(fileDisplayMode==='hide')return false;if(fileDisplayMode==='all')return true;return activity==='changed'};
+  const fileVisible=node=>{const activity=fileActivity(node);if(activity==='other')return true;if(fileDisplayMode==='hide')return false;if(fileDisplayMode==='all')return true;return activity!=='observed'};
   const provider=node=>String(node?.attributes?.provider||'unknown').toLowerCase();
   const toolName=node=>String(node?.attributes?.tool_name||node?.attributes?.native_name||node?.name||'tool');
   const toolKey=node=>`${provider(node)}\u0000${toolName(node).trim().toLowerCase()}`;

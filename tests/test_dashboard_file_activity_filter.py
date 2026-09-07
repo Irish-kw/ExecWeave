@@ -16,7 +16,9 @@ def test_dashboard_file_projection_distinguishes_changes_from_scans() -> None:
     assert "fileMutationEvents=new Set(['filesystem.created','filesystem.modified','filesystem.moved','filesystem.deleted'])" in _DASHBOARD_JS
     assert "fileDisplayMode==='hide'" in _DASHBOARD_JS
     assert "fileDisplayMode==='all'" in _DASHBOARD_JS
-    assert "return activity==='changed'" in _DASHBOARD_JS
+    assert "relatedEventTypes=related.flatMap" in _DASHBOARD_JS
+    assert "return activity!=='observed'" in _DASHBOARD_JS
+    assert "return'unknown'" in _DASHBOARD_JS
     assert "hidden_file_observation_node_count" in _DASHBOARD_JS
 
 
