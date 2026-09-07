@@ -171,9 +171,6 @@ jobs:
                 tests/test_http_proxy.py)
                   args+=(--allow-test-change "$path=NEW-005 adds native streaming-order regressions for content-length and chunked responses; existing test assertions and node IDs are unchanged")
                   ;;
-                tests/test_http_proxy_request_phase.py)
-                  args+=(--allow-test-change "$path=the existing two-phase proxy test now requires one request-specific REQUESTED_MODEL edge from the observed wire model field and still forbids request duplication or orphaned content")
-                  ;;
                 tests/test_conversation_access.py)
                   args+=(--allow-test-change "$path=the historical live conversation-access test now requires bounded authenticated polling with AbortController cleanup at finished state; the test node ID and auth/path-boundary assertions remain unchanged")
                   ;;
