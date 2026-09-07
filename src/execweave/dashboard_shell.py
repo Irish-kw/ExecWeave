@@ -206,38 +206,42 @@ function execweaveFileClusterHistory(a){
 
 
 def _stop_conversation_polling_after_finish(html: str) -> str:
-    """Stop live conversation fetches before the live HTTP server is torn down.
+    """Freeze polling only after one authoritative finished conversation sync.
 
-    The agent panel polls ``/conversations.json`` while an agent node is selected. A
-    finished run used to leave that interval active, and an in-flight fetch could race
-    live server shutdown and surface ``ERR_CONNECTION_RESET``. Track the timer/request,
-    abort the current fetch, and forbid future polls once ``onFinished`` fires.
+    The live graph announces ``live_finished`` while its HTTP server is still alive.
+    Older code stopped the interval and aborted the conversation request immediately
+    from ``onFinished``. That fixed a teardown reset, but it could also abort the
+    refresh kicked off by the terminal payload itself, leaving the selected live agent
+    panel one response behind the finalized standalone viewer. Stop periodic polling
+    immediately, wait for any in-flight refresh, perform exactly one final fetch from
+    the now-finished raw graph, then mark the panel synchronized. No request is issued
+    after that point, so HTTP teardown cannot race the browser.
     """
 
     seams = (
         (
             "let selectedNode=null,refreshing=false,selectedConversationSignature='';",
-            "let selectedNode=null,refreshing=false,conversationPollingFinished=false,conversationRefreshController=null,conversationRefreshTimer=null,selectedConversationSignature='';",
+            "let selectedNode=null,refreshing=false,conversationPollingFinished=false,conversationFinishing=false,conversationRefreshController=null,conversationRefreshTimer=null,conversationRefreshPromise=Promise.resolve(),conversationFinishPromise=Promise.resolve(),selectedConversationSignature='';",
             "agent conversation polling state seam changed",
         ),
         (
             "async function refresh(){if(window.__execweaveStaticMode||refreshing)return;refreshing=true;try{const headers={};if(window.__execweaveToken)headers['X-ExecWeave-Token']=window.__execweaveToken;const response=await fetch('/conversations.json',{cache:'no-store',headers});if(response.ok){const payload=await response.json();setEntries(payload?.entries)}}catch(_){}finally{refreshing=false}}",
-            "async function refresh(){if(window.__execweaveStaticMode||refreshing||conversationPollingFinished)return;refreshing=true;const controller=new AbortController();conversationRefreshController=controller;try{const headers={};if(window.__execweaveToken)headers['X-ExecWeave-Token']=window.__execweaveToken;const response=await fetch('/conversations.json',{cache:'no-store',headers,signal:controller.signal});if(response.ok){const payload=await response.json();setEntries(payload?.entries)}}catch(_){}finally{if(conversationRefreshController===controller)conversationRefreshController=null;refreshing=false}}",
+            "async function refresh({allowDuringFinish=false}={}){if(window.__execweaveStaticMode||conversationPollingFinished||(conversationFinishing&&!allowDuringFinish))return;if(refreshing)return conversationRefreshPromise;refreshing=true;const controller=new AbortController();conversationRefreshController=controller;const task=(async()=>{try{const headers={};if(window.__execweaveToken)headers['X-ExecWeave-Token']=window.__execweaveToken;const response=await fetch('/conversations.json',{cache:'no-store',headers,signal:controller.signal});if(response.ok){const payload=await response.json();setEntries(payload?.entries)}}catch(_){}finally{if(conversationRefreshController===controller)conversationRefreshController=null;refreshing=false}})();conversationRefreshPromise=task;await task}",
             "agent conversation refresh seam changed",
         ),
         (
             "if(!window.__execweaveStaticMode)setInterval(()=>{if(selectedNode)refresh()},800);",
-            "if(!window.__execweaveStaticMode)conversationRefreshTimer=setInterval(()=>{if(selectedNode&&!conversationPollingFinished)refresh()},800);",
+            "if(!window.__execweaveStaticMode)conversationRefreshTimer=setInterval(()=>{if(selectedNode&&!conversationFinishing&&!conversationPollingFinished)refresh()},800);",
             "agent conversation interval seam changed",
         ),
         (
             "const previous=window.__execweaveDashboard||{};window.__execweaveDashboard={...previous,onPayload(data){previous.onPayload?.(data);if(selectedNode)refresh()},onFinished(){previous.onFinished?.();if(selectedNode)refresh()}};",
-            "function stopConversationPolling(){conversationPollingFinished=true;if(conversationRefreshTimer!==null){clearInterval(conversationRefreshTimer);conversationRefreshTimer=null}if(conversationRefreshController!==null){conversationRefreshController.abort();conversationRefreshController=null}}\nconst previous=window.__execweaveDashboard||{};window.__execweaveDashboard={...previous,onPayload(data){previous.onPayload?.(data);if(selectedNode&&!conversationPollingFinished)refresh()},onFinished(){previous.onFinished?.();stopConversationPolling()}};",
+            "async function finishConversationPolling(){if(conversationPollingFinished)return;if(conversationFinishing)return conversationFinishPromise;conversationFinishing=true;if(conversationRefreshTimer!==null){clearInterval(conversationRefreshTimer);conversationRefreshTimer=null}conversationFinishPromise=(async()=>{await conversationRefreshPromise;if(selectedNode&&!window.__execweaveStaticMode)await refresh({allowDuringFinish:true})})().finally(()=>{conversationPollingFinished=true;conversationFinishing=false;if(conversationRefreshController!==null){conversationRefreshController.abort();conversationRefreshController=null}});await conversationFinishPromise}\nconst previous=window.__execweaveDashboard||{};window.__execweaveDashboard={...previous,onPayload(data){previous.onPayload?.(data);if(selectedNode&&!data?.live_finished&&!conversationFinishing&&!conversationPollingFinished)refresh()},onFinished(){previous.onFinished?.();void finishConversationPolling()}};",
             "agent conversation lifecycle seam changed",
         ),
         (
             "window.__execweaveAgentPanel={render,setEntries,refresh};",
-            "window.__execweaveAgentPanel={render,setEntries,refresh,stopConversationPolling};",
+            "window.__execweaveAgentPanel={render,setEntries,refresh,finishConversationPolling,whenFinished:()=>conversationFinishPromise,isFinishedSynchronized:()=>conversationPollingFinished};",
             "agent conversation export seam changed",
         ),
     )
