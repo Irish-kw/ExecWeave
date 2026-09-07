@@ -17,6 +17,7 @@ def test_dashboard_file_projection_distinguishes_changes_from_scans() -> None:
     assert "fileDisplayMode==='hide'" in _DASHBOARD_JS
     assert "fileDisplayMode==='all'" in _DASHBOARD_JS
     assert "relatedEventTypes=related.flatMap" in _DASHBOARD_JS
+    assert "allEventTypes=[...eventTypes,...relatedEventTypes]" in _DASHBOARD_JS
     assert "return activity!=='observed'" in _DASHBOARD_JS
     assert "return'unknown'" in _DASHBOARD_JS
     assert "hidden_file_observation_node_count" in _DASHBOARD_JS
