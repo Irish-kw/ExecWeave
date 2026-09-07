@@ -216,8 +216,12 @@ class FidelityAccumulator:
             "filesystem_scope_downgraded": filesystem_scope_downgraded,
             "network_requested": _single_or_none(self.network_requested_values),
             "network_collected": _single_or_none(self.network_collected_values),
-            "network_collection_status": network_collection_status,
         }
+        # Preserve the fidelity 0.1 shape for old streams that have no terminal
+        # network-health declaration. New collectors add the field only when the
+        # health state is actually observed.
+        if network_collection_status is not None:
+            capture_context["network_collection_status"] = network_collection_status
 
         limitations: list[str] = [
             "ExecWeave does not establish byte-level dataflow from these observations.",
