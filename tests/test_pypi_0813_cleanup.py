@@ -249,6 +249,7 @@ def test_interrupt_request_cleans_the_owned_tree(tmp_path: Path) -> None:
     runner_code = r'''
 import sys
 import os
+import time
 import threading
 import _thread
 from pathlib import Path
@@ -263,14 +264,15 @@ if os.name == "nt":
     # Hosted Windows may not have an attached console. Trigger the real Python
     # SIGINT handler asynchronously, not an OS console Ctrl+C acceptance claim.
     def request_interrupt():
-        if sys.stdin.buffer.read(1) == b"I":
-            _thread.interrupt_main()
+        while not (root / "interrupt.requested").exists():
+            time.sleep(0.01)
+        _thread.interrupt_main()
     threading.Thread(target=request_interrupt, daemon=True).start()
 sys.exit(collector.run(sys.argv[2:]))
 '''
     runner = subprocess.Popen(
         [sys.executable, "-c", runner_code, str(tmp_path), *_command(tmp_path, "0")],
-        env=env, stdin=subprocess.PIPE,
+        env=env,
     )
     monitor = _remember(runner.pid, owned)
     sentinel = subprocess.Popen([sys.executable, "-c", _LEAF])
@@ -282,9 +284,7 @@ sys.exit(collector.run(sys.argv[2:]))
         assert len(roots) == 1
         root = _remember(roots[0].pid, owned)
         if os.name == "nt":
-            assert runner.stdin is not None
-            runner.stdin.write(b"I")
-            runner.stdin.flush()
+            (tmp_path / "interrupt.requested").touch()
         else:
             runner.send_signal(signal.SIGINT)
         assert runner.wait(timeout=15) == 130
@@ -296,8 +296,6 @@ sys.exit(collector.run(sys.argv[2:]))
     finally:
         _cleanup(owned)
         runner.wait(timeout=8)
-        if runner.stdin is not None:
-            runner.stdin.close()
         sentinel.wait(timeout=8)
 
 
