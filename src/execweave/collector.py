@@ -124,6 +124,10 @@ class RuntimeCollector:
         self.collect_network = collect_network
         self._seen_processes: dict[int, ProcessSnapshot] = {}
         self._seen_connections: set[tuple[str, str | None, str | None, str]] = set()
+        self._network_sample_attempts = 0
+        self._network_sample_successes = 0
+        self._network_sample_errors = 0
+        self._network_access_denied = 0
 
     def run(self, command: list[str]) -> int:
         if not command:
@@ -168,13 +172,17 @@ class RuntimeCollector:
                 sink=self.sink,
                 excluded_roots=[internal_root, self.sink.path],
             )
-            watcher.start()
 
         process: subprocess.Popen[bytes] | None = None
         return_code = 1
         interrupted = False
+        collector_error_type: str | None = None
+        workload_terminated_due_to_collector_error = False
         post_command_probe = prepare_post_command_specialized_probe(command)
         try:
+            if watcher is not None:
+                watcher.start()
+
             try:
                 with auto_specialized_launch(
                     command,
@@ -203,15 +211,25 @@ class RuntimeCollector:
                 return_code = 130
                 if process is not None:
                     self._terminate_process_tree(process)
+
             if not interrupted:
                 run_post_command_specialized_probe(
                     post_command_probe,
                     return_code=return_code,
                 )
             return return_code
+        except BaseException as exc:
+            collector_error_type = type(exc).__name__
+            if process is not None and process.poll() is None:
+                self._terminate_process_tree(process)
+                workload_terminated_due_to_collector_error = True
+            raise
         finally:
             if watcher is not None:
                 watcher.stop()
+            workload_alive_after_cleanup = bool(
+                process is not None and process.poll() is None
+            )
             self.sink.emit(
                 RuntimeEvent.create(
                     session_id=self.session_id,
@@ -223,6 +241,17 @@ class RuntimeCollector:
                         "root_pid": process.pid if process is not None else None,
                         "backend": self.backend_name,
                         "interrupted": interrupted,
+                        "collector_failed": collector_error_type is not None,
+                        "collector_error_type": collector_error_type,
+                        "workload_terminated_due_to_collector_error": (
+                            workload_terminated_due_to_collector_error
+                        ),
+                        "workload_alive_after_cleanup": workload_alive_after_cleanup,
+                        "network_collection_status": self._network_collection_status(),
+                        "network_sample_attempts": self._network_sample_attempts,
+                        "network_sample_successes": self._network_sample_successes,
+                        "network_sample_errors": self._network_sample_errors,
+                        "network_access_denied": self._network_access_denied,
                         "execweave_version": __version__,
                     },
                 )
@@ -269,6 +298,10 @@ class RuntimeCollector:
             except subprocess.TimeoutExpired:
                 pass
 
+    @staticmethod
+    def _same_process_lifetime(left: ProcessSnapshot, right: ProcessSnapshot) -> bool:
+        return left.entity.id == right.entity.id
+
     def _sample_process_tree(self, root: psutil.Process) -> None:
         processes: list[psutil.Process] = []
         try:
@@ -287,7 +320,8 @@ class RuntimeCollector:
             process_objects[snapshot.pid] = proc
 
         for snapshot in current.values():
-            if snapshot.pid not in self._seen_processes:
+            previous = self._seen_processes.get(snapshot.pid)
+            if previous is None or not self._same_process_lifetime(previous, snapshot):
                 parent_snapshot = current.get(snapshot.ppid) or self._seen_processes.get(
                     snapshot.ppid
                 )
@@ -314,8 +348,13 @@ class RuntimeCollector:
         parent: Entity,
         relation: str,
     ) -> None:
-        if snapshot.pid in self._seen_processes:
-            return
+        previous = self._seen_processes.get(snapshot.pid)
+        if previous is not None:
+            if self._same_process_lifetime(previous, snapshot):
+                return
+            self._seen_processes.pop(snapshot.pid, None)
+            self._record_process_exit(previous, reason="pid_reused")
+
         self._seen_processes[snapshot.pid] = snapshot
         self.sink.emit(
             RuntimeEvent.create(
@@ -332,28 +371,64 @@ class RuntimeCollector:
             )
         )
 
+    def _record_process_exit(self, snapshot: ProcessSnapshot, *, reason: str | None = None) -> None:
+        attributes: dict[str, object] = {
+            "attribution": "polling",
+            "backend": self.backend_name,
+        }
+        if reason is not None:
+            attributes["reason"] = reason
+        self.sink.emit(
+            RuntimeEvent.create(
+                session_id=self.session_id,
+                event_type="process.exited",
+                relation="EXITED",
+                source=snapshot.entity,
+                attributes=attributes,
+            )
+        )
+
     def _mark_disappeared_processes(self, active_pids: set[int]) -> None:
         for pid in list(self._seen_processes):
-            if pid in active_pids or psutil.pid_exists(pid):
+            if pid in active_pids:
                 continue
+
+            previous = self._seen_processes[pid]
+            if psutil.pid_exists(pid):
+                current = _safe_process_snapshot(psutil.Process(pid))
+                if current is None or self._same_process_lifetime(previous, current):
+                    continue
+
             snapshot = self._seen_processes.pop(pid)
-            self.sink.emit(
-                RuntimeEvent.create(
-                    session_id=self.session_id,
-                    event_type="process.exited",
-                    relation="EXITED",
-                    source=snapshot.entity,
-                    attributes={"attribution": "polling", "backend": self.backend_name},
-                )
-            )
+            self._record_process_exit(snapshot)
+
+    def _network_collection_status(self) -> str:
+        if not self.collect_network:
+            return "not_requested"
+        if self._network_sample_successes and self._network_sample_errors:
+            return "degraded"
+        if self._network_sample_successes:
+            return "available"
+        if self._network_sample_errors:
+            return "unavailable"
+        return "not_sampled"
 
     def _sample_network(self, proc: psutil.Process, snapshot: ProcessSnapshot) -> None:
+        self._network_sample_attempts += 1
         try:
             getter = getattr(proc, "net_connections", None)
             connections = getter(kind="inet") if getter else proc.connections(kind="inet")
-        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, OSError):
+        except psutil.AccessDenied:
+            self._network_sample_errors += 1
+            self._network_access_denied += 1
+            return
+        except (psutil.NoSuchProcess, psutil.ZombieProcess):
+            return
+        except OSError:
+            self._network_sample_errors += 1
             return
 
+        self._network_sample_successes += 1
         for connection in connections:
             remote = _format_address(connection.raddr)
             if remote is None:
