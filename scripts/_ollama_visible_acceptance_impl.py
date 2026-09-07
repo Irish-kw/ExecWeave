@@ -51,6 +51,18 @@ _ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 _LIVE_URL_RE = re.compile(r"ExecWeave live:\s+(http://127\.0\.0\.1:\d+/\?t=[^\s]+)")
 _NETWORK_NODE_TYPE = "network_endpoint"
 _NETWORK_RELATIONS = frozenset({"CONNECTED_TO", "NETWORK_CONNECTED_TO"})
+_AGENT_CARD_TEXT_JS = r"""
+label=>{
+  const wanted=String(label||'').trim().toLowerCase();
+  for(const card of document.querySelectorAll('#details .execweave-agent-card')){
+    const head=card.querySelector('.execweave-agent-label');
+    if(String(head?.textContent||'').trim().toLowerCase()!==wanted)continue;
+    const body=card.querySelector('.execweave-agent-body');
+    return String(body?.innerText||body?.textContent||'').trim();
+  }
+  return '';
+}
+"""
 
 
 def _free_loopback_port() -> int:
@@ -84,6 +96,42 @@ def _final_matches_client_output(final: str, client_output: str) -> bool:
         lines = lines[closing + 1:]
     observed = _canonical_text("\n".join(lines))
     return expected == observed
+
+
+def _agent_card_text(page: Any, label: str) -> str:
+    value = page.evaluate(_AGENT_CARD_TEXT_JS, label)
+    return str(value or "").strip()
+
+
+def _wait_agent_card_observed(page: Any, label: str, *, timeout: float) -> str:
+    page.wait_for_function(
+        r"""
+        label=>{
+          const wanted=String(label||'').trim().toLowerCase();
+          for(const card of document.querySelectorAll('#details .execweave-agent-card')){
+            const head=card.querySelector('.execweave-agent-label');
+            if(String(head?.textContent||'').trim().toLowerCase()!==wanted)continue;
+            const body=String(card.querySelector('.execweave-agent-body')?.innerText||'').trim();
+            const canonical=body.toLowerCase().replace(/[.]+$/,'');
+            return !!body&&!['not observed','placeholder'].includes(canonical);
+          }
+          return false;
+        }
+        """,
+        arg=label,
+        timeout=int(timeout * 1000),
+    )
+    value = _agent_card_text(page, label)
+    if not value:
+        raise AssertionError(f"agent card {label!r} became observed without visible text")
+    return value
+
+
+def _wait_agent_panel_finished(page: Any, *, timeout: float) -> None:
+    page.wait_for_function(
+        "()=>window.__execweaveAgentPanel?.isFinishedSynchronized?.()===true",
+        timeout=int(timeout * 1000),
+    )
 
 
 def _owned_process_node_ids(
@@ -577,22 +625,17 @@ def _run_visible(
             arg=marker,
             timeout=int(timeout * 1000),
         )
-        page.wait_for_function(
-            "()=>document.querySelector('#details').innerText.split('FINAL RESPONSE\\n')[1]?.trim().length>0",
-            timeout=int(timeout * 1000),
-        )
+        live_final = _wait_agent_card_observed(page, "Final response", timeout=timeout)
         live_details = page.locator("#details").inner_text()
-        live_final = live_details.partition("FINAL RESPONSE\n")[2].strip()
         _check(result, "Launch", True, "Owned relay, independent client and headed Chromium started")
         _check(result, "Prompt", prompt in live_details, "Unique real-client prompt is visible live")
         _check(
             result,
             "Final",
-            bool(live_final)
-            and live_final != prompt
+            live_final != prompt
             and foreign not in live_final
             and _final_matches_client_output(live_final, client_stdout),
-            "Live final equals independent client assistant output after terminal whitespace normalization",
+            "Observed live Final response card equals independent client assistant output after terminal whitespace normalization",
             "02-live-final.png",
         )
         _check(result, "/root", True, "Clicked real Ollama agent root at agent_path=/root")
@@ -611,6 +654,12 @@ def _run_visible(
             live_process.wait(timeout=timeout)
         except subprocess.TimeoutExpired as exc:
             raise AssertionError("ExecWeave live did not finalize after wrapped Ollama serve exit") from exc
+
+        _wait_agent_panel_finished(page, timeout=min(timeout, 8.0))
+        completed_live_details = page.locator("#details").inner_text()
+        completed_live_final = _agent_card_text(page, "Final response")
+        if not completed_live_final:
+            raise AssertionError("completed live agent panel lost its Final response")
 
         for required in (
             "events.jsonl",
@@ -632,9 +681,9 @@ def _run_visible(
         _check(
             result,
             "Final",
-            finished_final == live_final
+            finished_final == completed_live_final
             and _final_matches_client_output(finished_final, client_stdout),
-            "Finished final equals live final and is grounded in independent client stdout",
+            "Finished final equals the synchronized completed-live Final response and is grounded in independent client stdout",
         )
 
         nodes = [item for item in graph.get("nodes", []) if isinstance(item, dict)]
@@ -655,10 +704,10 @@ def _run_visible(
         _check(
             result,
             "Finished viewer",
-            finished_details == live_details
+            finished_details == completed_live_details
             and prompt in finished_details
             and finished_final in finished_details,
-            "Finished viewer details equal completed live details for the same real conversation",
+            "Finished viewer details equal the synchronized terminal live details for the same real conversation",
             "03-finished.png",
         )
         page.screenshot(path=str(run_root / "03-finished.png"))
