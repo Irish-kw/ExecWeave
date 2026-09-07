@@ -142,10 +142,11 @@ def test_a_connected_file_stays_beside_the_spine(tmp_path: Path) -> None:
 
 
 def test_a_subagent_is_never_demoted_even_with_no_edge_to_its_root(tmp_path: Path) -> None:
-    """Edgeless provider-reported subagents remain execution-spine agents.
+    """Edgeless provider-reported subagents retain semantic agent identity.
 
-    The orphan-file summary node no longer defines an agent's vertical placement; that
-    would couple semantic agent identity to viewer-only summary-node geometry.
+    The historical test name is retained. Whether an agent is above or below a viewer-
+    only orphan summary is graph-layout policy; this regression instead proves that an
+    edgeless child remains an agent-lane node and is never collapsed into file evidence.
     """
     graph = _spine()
     graph["edges"] = [edge for edge in graph["edges"] if edge["id"] != "s1"]
@@ -159,12 +160,11 @@ def test_a_subagent_is_never_demoted_even_with_no_edge_to_its_root(tmp_path: Pat
     )
 
     drawn = {node["id"]: node for node in _drawn(tmp_path, graph)}
-    root = drawn["agent:/root"]
     assert drawn[_ORPHAN_FILES]["lane"] == "file", drawn[_ORPHAN_FILES]
     agents = {key: node for key, node in drawn.items() if key.startswith("agent:")}
     assert len(agents) == 5, agents
+    assert agents["agent:/root"]["lane"] == "root", agents["agent:/root"]
     for key, node in agents.items():
-        assert node["lane"] == "root", f"{key} left the root execution lane: {node}"
-        assert abs(node["y"] - root["y"]) < 600, (
-            f"{key} is far from its root despite being an agent: root={root['y']} node={node['y']}"
-        )
+        if key == "agent:/root":
+            continue
+        assert node["lane"] == "agent", f"{key} lost child-agent identity: {node}"
