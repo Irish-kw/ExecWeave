@@ -78,6 +78,15 @@ jobs:
               && -n "$model_runtime_identity_changed" ]]; then
             args+=(--allow-test-change "tests/test_model_runtime.py=AUD-002 only: the historical llama.cpp request ID assertion now includes the sanitized endpoint scope; the test node ID and runtime privacy contract are unchanged")
           fi
+          threat_model_changed=""
+          if git diff --name-only "$BASELINE_REF...HEAD" \
+              | grep -qx 'tests/test_threat_model.py'; then
+            threat_model_changed=yes
+          fi
+          if [[ "$HEAD_REF" == "fix/0815-threat-model-pid-collision" \
+              && -n "$threat_model_changed" ]]; then
+            args+=(--allow-test-change "tests/test_threat_model.py=0.8.15 RC follow-up makes the existing outliving-child assertion hermetic against ambient host PID collisions; the historical test node ID and product expectation are unchanged")
+          fi
           if [[ "$HEAD_REF" == "fix/provider-isolation" ]]; then
             while IFS= read -r path; do
               case "$path" in
