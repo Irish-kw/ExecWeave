@@ -15,7 +15,7 @@
 
 <p align="center">
   <a href="https://pypi.org/project/execweave/"><img src="https://img.shields.io/pypi/v/execweave" alt="PyPI"></a>
-  <a href="https://github.com/Irish-kw/ExecWeave/actions/workflows/ci.yml"><img src="https://github.com/Irish-kw/ExecWeave/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/Irish-kw/ExecWeave/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Irish-kw/ExecWeave/ci.yml?branch=main" alt="CI"></a>
   <img src="https://img.shields.io/badge/Python-3.10%2B-blue" alt="Python 3.10+">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue" alt="License"></a>
 </p>
@@ -271,6 +271,9 @@ Raw observation 与 derived semantic/correlation output 保持分离。
 ## 限制与隐私
 
 - Portable collector 可用于 Linux、macOS、Windows。Portable filesystem observation 属于 session-correlated evidence，不一定形成 process-causal attribution；polling 也可能漏掉非常短暂的活动。
+- **Process lifetime identity：** Portable process tracking 使用 PID 加上 process creation time 区分 PID reuse；同一 PID 被重新使用时会记录成新的 process lifetime，不会与之前的进程合并。
+- **明确的 degraded state：** Collector 完成时会将 network collection health 记录为 `available`、`degraded`、`unavailable`、`not_sampled` 或 `not_requested`。Live conversation 只有在最后一次 conversation fetch 成功后才算 synchronized；仅仅停止 polling 不等于同步成功。
+- **失败时的 ownership cleanup：** Portable collector 如果在已启动 managed workload 后意外失败，会先终止自己拥有的 workload，再记录 terminal session state；filesystem watcher 即使只启动了一部分，也会在错误向外传播前清理。
 - Linux 另有 `strace` reference backend，可在支持的执行中获得更强的 syscall-attributed evidence。
 - Provider semantic coverage 完全取决于 integration 实际暴露的信息。未暴露的 Prompt、hidden reasoning、远端 Provider internals 与 routing 无法可靠重建。
 - Full-fidelity Provider content 可能包含 Credential、Secret、Source code、Prompt、Tool value、Model response、Shell output 与 File content。
