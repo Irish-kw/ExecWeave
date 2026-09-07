@@ -225,7 +225,12 @@ def test_live_dashboard_includes_conversation_panel_and_authenticated_links() ->
     assert "window.__execweaveAgentPanel" in html
     assert 'id="conversation-records"' not in html
     assert 'id="execweave-conversation-panel"' not in html
-    assert "fetch('/conversations.json',{cache:'no-store',headers})" in html
+    assert (
+        "fetch('/conversations.json',{cache:'no-store',headers,signal:controller.signal})"
+        in html
+    )
+    assert "stopConversationPolling" in html
+    assert "conversationRefreshController.abort()" in html
     assert "window.__execweaveToken" in live_module._AUTHENTICATED_LIVE_HTML
     assert "X-ExecWeave-Token" in live_module._AUTHENTICATED_LIVE_HTML
 
