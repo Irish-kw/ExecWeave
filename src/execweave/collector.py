@@ -123,6 +123,7 @@ class RuntimeCollector:
         self.collect_filesystem = collect_filesystem
         self.collect_network = collect_network
         self._seen_processes: dict[int, ProcessSnapshot] = {}
+        self._discovered_processes: dict[int, ProcessSnapshot] = {}
         self._seen_connections: set[tuple[str, str | None, str | None, str]] = set()
         self._network_sample_attempts = 0
         self._network_sample_successes = 0
@@ -195,6 +196,7 @@ class RuntimeCollector:
             )
 
         process: subprocess.Popen[bytes] | None = None
+        owned: list[psutil.Process] = []
         return_code = 1
         interrupted = False
         collector_error_type: str | None = None
@@ -230,8 +232,6 @@ class RuntimeCollector:
             except KeyboardInterrupt:
                 interrupted = True
                 return_code = 130
-                if process is not None:
-                    self._terminate_process_tree(process)
 
             if not interrupted:
                 run_post_command_specialized_probe(
@@ -241,16 +241,24 @@ class RuntimeCollector:
             return return_code
         except BaseException as exc:
             collector_error_type = type(exc).__name__
-            if process is not None and self._owned_live_processes(process):
-                self._terminate_process_tree(process)
-                workload_terminated_due_to_collector_error = True
             raise
         finally:
+            # A workload exception is a nonzero child exit, not an exception in
+            # this collector. Finalize observed descendants on every exit path,
+            # including successful launchers that leave reparented children.
+            if process is not None:
+                owned = self._owned_live_processes(process)
+                workload_terminated_due_to_collector_error = (
+                    collector_error_type is not None and bool(owned)
+                )
+                self._terminate_process_tree(process, owned=owned)
             if watcher is not None:
                 watcher.stop()
-            workload_alive_after_cleanup = bool(
-                process is not None and self._owned_live_processes(process)
-            )
+            # A failed termination must not become a false clean result merely
+            # because the selected child has since reparented out of the tree.
+            workload_alive_after_cleanup = any(
+                self._process_is_live(candidate) for candidate in owned
+            ) or bool(process is not None and self._owned_live_processes(process))
             self.sink.emit(
                 RuntimeEvent.create(
                     session_id=self.session_id,
@@ -293,12 +301,13 @@ class RuntimeCollector:
     def _process_for_snapshot(self, snapshot: ProcessSnapshot) -> psutil.Process | None:
         try:
             process = psutil.Process(snapshot.pid)
+            # Cleanup needs identity, not readable exe/name/cmdline metadata.
+            # Never treat a reused PID as the process we originally observed.
+            if process.create_time() != snapshot.create_time:
+                return None
+            return process
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             return None
-        current = _safe_process_snapshot(process)
-        if current is None or not self._same_process_lifetime(snapshot, current):
-            return None
-        return process
 
     def _owned_live_processes(
         self,
@@ -331,15 +340,24 @@ class RuntimeCollector:
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 pass
 
-        for snapshot in list(self._seen_processes.values()):
+        snapshots = {**self._seen_processes, **self._discovered_processes}
+        for snapshot in snapshots.values():
             tracked = self._process_for_snapshot(snapshot)
             if tracked is not None:
                 add_with_descendants(tracked)
 
         return list(owned.values())
 
-    def _terminate_process_tree(self, process: subprocess.Popen[bytes]) -> None:
-        owned = self._owned_live_processes(process)
+    def _terminate_process_tree(
+        self,
+        process: subprocess.Popen[bytes],
+        *,
+        owned: list[psutil.Process] | None = None,
+    ) -> None:
+        # A caller's selection must survive reparenting between discovery and
+        # termination. Re-querying here can lose children we just proved owned.
+        if owned is None:
+            owned = self._owned_live_processes(process)
         # Terminate descendants/tracked orphans before the launcher/root when it is
         # still alive. Holding psutil handles also keeps cleanup robust if a parent
         # exits while the loop is running.
@@ -392,6 +410,11 @@ class RuntimeCollector:
             current[snapshot.pid] = snapshot
             process_objects[snapshot.pid] = proc
 
+        # Preserve the complete discovered tree before any event/network callback
+        # can raise. _seen_processes only contains successfully registered starts;
+        # a root callback can fail after its children have already reparented.
+        # Retain only the latest sample here, not an unbounded lifetime history.
+        self._discovered_processes = current
         for snapshot in current.values():
             previous = self._seen_processes.get(snapshot.pid)
             if previous is None or not self._same_process_lifetime(previous, snapshot):
