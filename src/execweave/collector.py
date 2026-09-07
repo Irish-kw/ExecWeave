@@ -129,6 +129,28 @@ class RuntimeCollector:
         self._network_sample_errors = 0
         self._network_access_denied = 0
 
+    def _filesystem_excluded_roots(self) -> list[Path]:
+        """Return ExecWeave-owned paths that must never become workload evidence.
+
+        The default ``.execweave`` tree and the runtime event stream were already
+        internal. Live mode can also place ``events.jsonl`` and ``semantic.jsonl``
+        together in a caller-selected output directory inside the watch root. When
+        those files are siblings, exclude their whole run directory so ExecWeave's
+        own evidence writes cannot recursively manufacture filesystem evidence.
+        A separately configured semantic sidecar remains an exact-file exclusion.
+        """
+        sink_path = self.sink.path.expanduser().resolve()
+        excluded = [(self.watch_root / ".execweave").resolve(), sink_path]
+        configured = os.environ.get("EXECWEAVE_SEMANTIC_SIDECAR")
+        if not configured:
+            return excluded
+
+        semantic_path = Path(configured).expanduser().resolve()
+        excluded.append(
+            semantic_path.parent if semantic_path.parent == sink_path.parent else semantic_path
+        )
+        return excluded
+
     def run(self, command: list[str]) -> int:
         if not command:
             raise ValueError("command must not be empty")
@@ -163,14 +185,13 @@ class RuntimeCollector:
         )
 
         watcher: FileWatcher | None = None
-        internal_root = self.watch_root / ".execweave"
         if self.collect_filesystem:
             watcher = FileWatcher(
                 root=self.watch_root,
                 session_id=self.session_id,
                 session_entity=session,
                 sink=self.sink,
-                excluded_roots=[internal_root, self.sink.path],
+                excluded_roots=self._filesystem_excluded_roots(),
             )
 
         process: subprocess.Popen[bytes] | None = None
@@ -220,7 +241,7 @@ class RuntimeCollector:
             return return_code
         except BaseException as exc:
             collector_error_type = type(exc).__name__
-            if process is not None and process.poll() is None:
+            if process is not None and self._owned_live_processes(process):
                 self._terminate_process_tree(process)
                 workload_terminated_due_to_collector_error = True
             raise
@@ -228,7 +249,7 @@ class RuntimeCollector:
             if watcher is not None:
                 watcher.stop()
             workload_alive_after_cleanup = bool(
-                process is not None and process.poll() is None
+                process is not None and self._owned_live_processes(process)
             )
             self.sink.emit(
                 RuntimeEvent.create(
@@ -258,33 +279,85 @@ class RuntimeCollector:
             )
 
     @staticmethod
-    def _terminate_process_tree(process: subprocess.Popen[bytes]) -> None:
-        descendants: list[psutil.Process] = []
+    def _process_is_live(proc: psutil.Process) -> bool:
         try:
-            root = psutil.Process(process.pid)
-            descendants = root.children(recursive=True)
-        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-            pass
-
-        for child in reversed(descendants):
+            if not proc.is_running():
+                return False
             try:
-                child.terminate()
+                return proc.status() != psutil.STATUS_ZOMBIE
+            except psutil.AccessDenied:
+                return True
+        except (psutil.NoSuchProcess, psutil.ZombieProcess):
+            return False
+
+    def _process_for_snapshot(self, snapshot: ProcessSnapshot) -> psutil.Process | None:
+        try:
+            process = psutil.Process(snapshot.pid)
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            return None
+        current = _safe_process_snapshot(process)
+        if current is None or not self._same_process_lifetime(snapshot, current):
+            return None
+        return process
+
+    def _owned_live_processes(
+        self,
+        process: subprocess.Popen[bytes],
+    ) -> list[psutil.Process]:
+        """Return live processes still owned by this collector's launched workload.
+
+        A shell or launcher can exit before its children. Relying only on the current
+        root process tree then loses those reparented descendants. The collector's
+        lifetime-qualified process snapshots preserve enough ownership evidence to
+        find and clean them without risking a reused PID.
+        """
+        owned: dict[int, psutil.Process] = {}
+
+        def add_with_descendants(candidate: psutil.Process) -> None:
+            if not self._process_is_live(candidate):
+                return
+            owned[candidate.pid] = candidate
+            try:
+                descendants = candidate.children(recursive=True)
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-                pass
+                descendants = []
+            for child in descendants:
+                if self._process_is_live(child):
+                    owned[child.pid] = child
 
         if process.poll() is None:
             try:
-                process.terminate()
-            except OSError:
+                add_with_descendants(psutil.Process(process.pid))
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 pass
 
-        if descendants:
-            _, alive = psutil.wait_procs(descendants, timeout=2.0)
-            for child in alive:
+        for snapshot in list(self._seen_processes.values()):
+            tracked = self._process_for_snapshot(snapshot)
+            if tracked is not None:
+                add_with_descendants(tracked)
+
+        return list(owned.values())
+
+    def _terminate_process_tree(self, process: subprocess.Popen[bytes]) -> None:
+        owned = self._owned_live_processes(process)
+        # Terminate descendants/tracked orphans before the launcher/root when it is
+        # still alive. Holding psutil handles also keeps cleanup robust if a parent
+        # exits while the loop is running.
+        for candidate in sorted(owned, key=lambda item: item.pid == process.pid):
+            try:
+                candidate.terminate()
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                pass
+
+        if owned:
+            _, alive = psutil.wait_procs(owned, timeout=2.0)
+            for candidate in alive:
                 try:
-                    child.kill()
+                    candidate.kill()
                 except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                     pass
+            if alive:
+                psutil.wait_procs(alive, timeout=2.0)
 
         try:
             process.wait(timeout=2.0)
