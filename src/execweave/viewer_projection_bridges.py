@@ -20,14 +20,24 @@ PROJECTION_SCRIPT = r"""
   const sorted=values=>[...new Set(values)].sort();
   function scope(value){
     const a=value?.attributes||{};
-    return{
-      provider:text(a.provider||value?.provider).toLowerCase(),
-      conversation:text(a.conversation_id||a.antigravity_conversation_id||value?.conversation_id),
-      session:text(a.provider_session_id||a.session_id),
-      run:text(a.execweave_session_id||a.run_id)
-    };
+    // These aliases share an identity namespace. Never choose the first supplied
+    // value and silently discard contradictory evidence on the very same object.
+    // Top-level event.session_id is the recording run, NOT a provider session.
+    const groups={
+      provider:[a.provider,value?.provider],
+      conversation:[a.conversation_id,a.antigravity_conversation_id,value?.conversation_id,value?.antigravity_conversation_id],
+      session:[a.provider_session_id,a.session_id,value?.provider_session_id],
+      run:[a.execweave_session_id,a.run_id,value?.execweave_session_id,value?.run_id]
+    },result={};
+    for(const [name,values] of Object.entries(groups)){
+      const ids=sorted(values.map(text).filter(Boolean).map(v=>name==='provider'?v.toLowerCase():v));
+      if(ids.length>1)return null;
+      result[name]=ids[0]||'';
+    }
+    return result;
   }
   function joinScope(a,b){
+    if(!a||!b)return null;
     const result={...a};
     for(const [name,value] of Object.entries(b)){
       if(value&&result[name]&&value!==result[name])return null;
@@ -38,30 +48,36 @@ PROJECTION_SCRIPT = r"""
   function supportFor(leaf,visible,byId,incoming){
     const sources=new Set(),edges=new Map([[key(leaf),leaf]]),nodes=new Set([leaf.source,leaf.target]);
     const initial=joinScope(scope(leaf),scope(byId.get(leaf.source)));
-    if(!initial)return{sources:[],edges:[leaf],nodes:[...nodes],reason:'identity_conflict'};
-    const queue=[[leaf.source,initial]],seen=new Set();let reason='';
+    if(!initial)return{sources:[],edges:[leaf],nodes:sorted(nodes),missingSources:[],identity:null,reason:'identity_conflict'};
+    const queue=[[leaf.source,initial]],seen=new Set(),reasons=new Set(),missingSources=new Set();
+    let resolvedIdentity={};
     for(let index=0;index<queue.length;index++){
       const [id,identity]=queue[index],state=JSON.stringify([id,identity]);
       if(seen.has(state))continue;seen.add(state);
       for(const edge of incoming.get(id)||[]){
-        const source=byId.get(edge.source);
-        if(!source){reason='missing_source';continue;}
-        const joined=joinScope(identity,scope(edge));
-        const next=joined&&joinScope(joined,scope(source));
-        if(!next){reason='identity_conflict';continue;}
         edges.set(key(edge),edge);nodes.add(edge.source);
+        const source=byId.get(edge.source);
+        if(!source){
+          // A missing node is unknown, not proof that this competing path cannot
+          // lead to another agent. Keep context and diagnostics until it is known.
+          reasons.add('missing_source');missingSources.add(edge.source);continue;
+        }
+        const next=joinScope(joinScope(identity,scope(edge)),scope(source));
+        if(!next){reasons.add('identity_conflict');continue;}
         if(visible.has(source.id)){
-          if(source.type==='agent')sources.add(source.id);
-          else reason=reason||'non_agent_boundary';
+          if(source.type==='agent'){
+            sources.add(source.id);resolvedIdentity=joinScope(resolvedIdentity,next);
+            if(!resolvedIdentity)reasons.add('identity_conflict');
+          }else reasons.add('non_agent_boundary');
         }else if(hiddenTypes.has(String(source.type||''))){
           queue.push([source.id,next]);
-        }else{
-          reason=reason||'hidden_or_filtered_owner';
-        }
+        }else reasons.add('hidden_or_filtered_owner');
       }
     }
+    const priority=['identity_conflict','missing_source','hidden_or_filtered_owner','non_agent_boundary'];
+    const reason=priority.find(r=>reasons.has(r))||(sources.size===1?'':sources.size?'ambiguous_ancestry':'unattributed_observation');
     return{sources:sorted(sources),edges:[...edges.values()].sort((a,b)=>key(a).localeCompare(key(b))),
-      nodes:sorted(nodes),reason:reason||(sources.size===1?'':sources.size?'ambiguous_ancestry':'unattributed_observation')};
+      nodes:sorted(nodes),missingSources:sorted(missingSources),identity:resolvedIdentity,reason};
   }
   function repair(data,display){
     const rawNodes=Array.isArray(data?.nodes)?data.nodes:[],rawEdges=Array.isArray(data?.edges)?data.edges:[];
@@ -93,13 +109,15 @@ PROJECTION_SCRIPT = r"""
         if(!contexts.has(source.id))contexts.set(source.id,{...copy(source),
           attributes:{...copy(source.attributes||{}),viewer_retained_context:true,
             viewer_context_reason:support.reason,viewer_original_name:source.name||null}});
-        unresolved.push({source:source.id,target:leaf.target,reason:support.reason,ancestor_ids:support.sources});
+        unresolved.push({source:source.id,target:leaf.target,reason:support.reason,ancestor_ids:support.sources,
+          missing_source_ids:support.missingSources,supporting_edge_ids:support.edges.map(key)});
         edges.push({...copy(leaf),target,viewer_only:true,
-          viewer_original_target:leaf.target,viewer_retained_context_edge:true});
+          viewer_original_target:leaf.target,viewer_retained_context_edge:true,
+          viewer_supporting_edges:copy(support.edges),viewer_missing_source_ids:support.missingSources});
         continue;
       }
-      const owner=support.sources[0],groupKey=JSON.stringify([owner,leaf.relation||'',target]);
-      if(!groups.has(groupKey))groups.set(groupKey,{owner,target,relation:leaf.relation||'',leaves:[],supports:[]});
+      const owner=support.sources[0],groupKey=JSON.stringify([owner,leaf.relation||'',target,support.identity]);
+      if(!groups.has(groupKey))groups.set(groupKey,{owner,target,relation:leaf.relation||'',identity:support.identity,leaves:[],supports:[]});
       const group=groups.get(groupKey);group.leaves.push(leaf);group.supports.push(support);
     }
     for(const [groupKey,group] of [...groups].sort(([a],[b])=>a.localeCompare(b))){
@@ -122,7 +140,7 @@ PROJECTION_SCRIPT = r"""
         last_sequence:lastSequences.length?Math.max(...lastSequences):null,
         first_seen:first[0]||null,last_seen:last.at(-1)||null,
         evidence_ids:sorted(evidence.flatMap(e=>Array.isArray(e.evidence_ids)?e.evidence_ids:[])),
-        viewer_hidden_bridge:true,viewer_hidden_bridge_reason:'unique_visible_agent_ancestor',
+        viewer_hidden_bridge:true,viewer_identity_scope:group.identity,viewer_hidden_bridge_reason:'unique_visible_agent_ancestor',
         viewer_hidden_bridge_source:hiddenSources[0],viewer_hidden_bridge_sources:hiddenSources,
         viewer_original_targets:sorted(group.leaves.map(e=>e.target)),
         viewer_supporting_edges:copy(evidence),

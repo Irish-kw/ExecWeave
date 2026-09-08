@@ -87,3 +87,31 @@ def test_real_dashboard_hidden_type_chains_and_ambiguous_model(tmp_path):
                 page.close()
         finally:
             browser.close()
+
+
+@pytest.mark.parametrize('conflict', ['conversation', 'session'])
+def test_conflicting_identity_aliases_remain_inspectable_without_guessed_owner(tmp_path, conflict):
+    aliases = ({'conversation_id': 'one', 'antigravity_conversation_id': 'two'}
+               if conflict == 'conversation' else {'provider_session_id': 'one', 'session_id': 'two'})
+    raw = {'session_id': 'conflict-browser',
+           'nodes': [node('a', 'agent'), node('s', 'provider_session', **aliases), node('m', 'model')],
+           'edges': [edge('as', 'a', 's'), edge('sm', 's', 'm', 'INVOKES_MODEL', causal=False)]}
+    manager, executable = _browser()
+    with manager as playwright:
+        browser = _launch(playwright, executable)
+        try:
+            page = browser.new_page(viewport={'width': 1440, 'height': 1000})
+            errors = []
+            page.on('pageerror', lambda e: errors.append(str(e)))
+            page.set_content(render_static_dashboard_html(raw))
+            page.wait_for_selector('.node')
+            display = page.evaluate('window.__execweaveCore.getDisplayGraph()')
+            assert not any(e.get('viewer_hidden_bridge') for e in display['edges'])
+            assert page.locator('.node[data-id="s"]').count() == 1
+            assert page.locator('.edge[data-source="s"][data-target="m"]').count() == 1
+            assert page.locator('.edge[data-source="a"][data-target="m"]').count() == 0
+            page.locator('.node[data-id="s"]').click()
+            assert page.locator('.node[data-id="s"]').evaluate("e=>e.classList.contains('selected')")
+            assert not errors
+        finally:
+            browser.close()
