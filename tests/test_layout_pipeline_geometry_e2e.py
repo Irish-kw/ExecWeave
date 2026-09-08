@@ -61,15 +61,34 @@ def test_final_svg_geometry_matrix(tmp_path, monkeypatch, case, theme):
             assert metrics['NODE_OVERLAPS'] == 0, metrics['overlap_pairs']
             assert metrics['EDGE_NODE_INTERSECTIONS'] == 0, metrics['intersection_pairs']
             assert metrics['EDGE_CROSSINGS'] == actual['EDGE_CROSSINGS']
+            assert actual['FINAL_ORDER_AUTHORITY_MISMATCHES'] == 0, actual
+            assert actual['CROSSINGS_PER_EDGE'] >= 0
+            assert 0 <= actual['CROSSING_SPAN_RATE'] <= 1
+            assert actual['NODE_DENSITY'] > 0
+            assert actual['ASPECT_ERROR'] >= 0
+            if actual['VISIBLE_EDGE_COUNT']:
+                assert actual['P95_EDGE_STRETCH'] >= 1
+            if case in ('shared-model', 'shared-tool'):
+                assert actual['HUB_PORT_INVERSION_RATE'] == 0, actual
             assert metrics['EDGE_CROSSINGS'] <= quality['pre']['EDGE_CROSSINGS']
             if case in ('shared-tool', 'mixed'):
                 assert metrics['EDGE_CROSSINGS'] < quality['pre']['EDGE_CROSSINGS']
             assert all(e['kind'] != 'dagre-polyline' for e in first['edges'])
+
+            # Arrange is allowed to perform a stronger deterministic geometry search.
+            # It must never worsen the hard geometry gates or take over the camera.
             page.locator('#arrange').click()
             arranged = page.evaluate(READ_SVG)
-            assert _shape(first) == _shape(arranged), 'Arrange and initial layout diverged'
-            assert measure(arranged)['NODE_OVERLAPS'] == 0
+            arranged_metrics = measure(arranged)
+            arranged_actual = page.evaluate('window.__execweavePr70.metrics()')
+            assert arranged_metrics['NODE_OVERLAPS'] == 0, arranged_metrics['overlap_pairs']
+            assert arranged_metrics['EDGE_NODE_INTERSECTIONS'] == 0, arranged_metrics['intersection_pairs']
+            assert arranged_actual['EDGE_CROSSINGS'] <= actual['EDGE_CROSSINGS']
+            assert arranged_actual['FINAL_ORDER_AUTHORITY_MISMATCHES'] == 0, arranged_actual
             assert first['fit_scale'] == arranged['fit_scale'], 'Arrange took over camera'
+            page.locator('#arrange').click()
+            assert _shape(arranged) == _shape(page.evaluate(READ_SVG)), 'nondeterministic Arrange geometry'
+
             again = _open(browser, graph, theme)
             assert _shape(first) == _shape(again.evaluate(READ_SVG)), 'nondeterministic initial geometry'
             evidence = Path(os.environ.get('EXECWEAVE_VISUAL_ARTIFACT_DIR', str(tmp_path))) / f'geometry-{theme}-{case}'
@@ -114,6 +133,7 @@ def test_live_gate_executes_at_real_delta_callsite_and_preserves_manual_camera(t
             assert decision['newCrossings'] < decision['priorCrossings']
             assert after['EDGE_CROSSINGS'] < before['EDGE_CROSSINGS']
             assert after['NODE_OVERLAPS'] == 0
+            assert page.evaluate('window.__execweavePr70.metrics().FINAL_ORDER_AUTHORITY_MISMATCHES') == 0
             assert page.locator('#viewport').get_attribute('transform') == camera
             assert page.locator('.node.selected').get_attribute('data-id') == 'agent:/root/a0'
             assert page.locator('.node.context-dim').count() > 0
@@ -141,6 +161,7 @@ def test_live_gate_retains_equal_quality_y_and_retargets_ports(tmp_path):
             decision = page.evaluate('window.__execweavePr70.diagnostics().live')
             assert decision['restored'] is True
             assert _shape(before) == _shape(after)
+            assert page.evaluate('window.__execweavePr70.metrics().FINAL_ORDER_AUTHORITY_MISMATCHES') == 0
             boxes = {n['id']: n for n in after['nodes']}
             from layout_geometry_probe import polyline
             for edge in after['edges']:
@@ -179,7 +200,9 @@ def test_new_wide_runtime_dimensions_used_before_dagre_and_arrange(tmp_path):
             graph['nodes'].append(wide)
             graph['edges'].append(edge)
             again = _open(browser, graph)
-            assert _shape(page.evaluate(READ_SVG)) == _shape(again.evaluate(READ_SVG))
+            assert page.evaluate('window.__execweavePr70.metrics().FINAL_ORDER_AUTHORITY_MISMATCHES') == 0
+            assert measure(page.evaluate(READ_SVG))['NODE_OVERLAPS'] == 0
+            assert measure(again.evaluate(READ_SVG))['NODE_OVERLAPS'] == 0
             for checked in browser.contexts:
                 for observed in checked.pages:
                     assert not observed._execweave_errors, observed._execweave_errors
