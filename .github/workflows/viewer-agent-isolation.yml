@@ -21,6 +21,27 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Archive exact source provenance
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/source-provenance"
+          git rev-parse HEAD > "$RUNNER_TEMP/source-provenance/HEAD.txt"
+          git rev-parse HEAD^{tree} > "$RUNNER_TEMP/source-provenance/TREE.txt"
+          git status --porcelain > "$RUNNER_TEMP/source-provenance/status.txt"
+          git bundle create "$RUNNER_TEMP/source-provenance/source.bundle" --all
+
+      - name: Upload exact source provenance
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: rc-source-provenance
+          path: ${{ runner.temp }}/source-provenance
+          if-no-files-found: error
+          retention-days: 7
 
       - uses: actions/setup-python@v5
         with:
@@ -85,5 +106,6 @@ jobs:
           path: |
             visual-artifacts
             artifacts/dashboard-acceptance
+            viewer-pytest-results.xml
           if-no-files-found: error
           retention-days: 7

@@ -1,96 +1,15 @@
 from __future__ import annotations
 
+from .viewer_projection_bridges import PROJECTION_SCRIPT
+
 
 # PR70 keeps the raw evidence graph untouched.  These repairs run only in the shared
 # Dashboard shell, after the normal dashboard projection and Dagre layout have been
 # installed.  The projection repair exposes a conservative viewer-only bridge through
 # hidden provider/detail nodes; the geometry repair keeps Dagre's real route points and
 # lets a live update reflow Y only when it strictly reduces crossings.
-PR70_DASHBOARD_SCRIPT = r"""
+PR70_DASHBOARD_SCRIPT = PROJECTION_SCRIPT + "\n" + r"""
 (function(){
-  const pr70BaseDashboardGraph=execweaveDashboardGraph;
-  const pr70BridgeTypes=new Set([
-    'agent_execution','agent_turn','agent_turn_stop','context_compaction','conversation_item',
-    'observed_content','permission_request','provider_session','terminal_operation','tool_call',
-    'tool_call_observation'
-  ]);
-  const pr70NodeType=node=>String(node?.type||'');
-  const pr70RawMaps=data=>{
-    const nodes=Array.isArray(data?.nodes)?data.nodes:[],edges=Array.isArray(data?.edges)?data.edges:[];
-    const byId=new Map(nodes.filter(node=>node?.id).map(node=>[node.id,node]));
-    const incoming=new Map();
-    for(const edge of edges){
-      if(!edge?.source||!edge?.target)continue;
-      if(!incoming.has(edge.target))incoming.set(edge.target,[]);
-      incoming.get(edge.target).push(edge);
-    }
-    return{nodes,edges,byId,incoming};
-  };
-  function pr70VisibleAgentAncestors(startId,visibleIds,byId,incoming){
-    const found=new Set(),seen=new Set(),queue=[startId];
-    while(queue.length){
-      const current=queue.shift();
-      if(!current||seen.has(current))continue;
-      seen.add(current);
-      for(const edge of incoming.get(current)||[]){
-        const sourceId=edge.source,source=byId.get(sourceId);
-        if(!sourceId||!source)continue;
-        if(visibleIds.has(sourceId)){
-          if(pr70NodeType(source)==='agent')found.add(sourceId);
-          continue;
-        }
-        if(pr70BridgeTypes.has(pr70NodeType(source)))queue.push(sourceId);
-      }
-    }
-    return[...found].sort();
-  }
-  function pr70ProjectionRepair(data,display){
-    const raw=pr70RawMaps(data),visibleIds=new Set((display.nodes||[]).map(node=>node?.id).filter(Boolean));
-    const existing=new Set((display.edges||[]).map(edge=>`${edge.source}\u0000${edge.relation}\u0000${edge.target}`));
-    const bridgeEdges=[];
-    for(const edge of raw.edges){
-      if(!edge?.source||!edge?.target||!visibleIds.has(edge.target)||visibleIds.has(edge.source))continue;
-      const hiddenSource=raw.byId.get(edge.source),target=raw.byId.get(edge.target);
-      if(!hiddenSource||!target||!pr70BridgeTypes.has(pr70NodeType(hiddenSource)))continue;
-      const targetType=pr70NodeType(target).toLowerCase();
-      // Hidden-detail composition is only promoted onto the canvas for model/runtime
-      // identity.  Other hidden chains stay raw evidence rather than inventing a
-      // stronger visible relation.
-      if(!targetType.includes('model')&&!targetType.includes('inference')&&!targetType.includes('llm'))continue;
-      const ancestors=pr70VisibleAgentAncestors(edge.source,visibleIds,raw.byId,raw.incoming);
-      if(ancestors.length!==1)continue;
-      const source=ancestors[0],key=`${source}\u0000${edge.relation}\u0000${edge.target}`;
-      if(existing.has(key))continue;
-      existing.add(key);
-      bridgeEdges.push({
-        ...edge,
-        id:`viewer:hidden-bridge:${source}:${edge.relation}:${edge.target}:${edge.id||edge.source}`,
-        source,
-        viewer_only:true,
-        inferred:true,
-        causal:false,
-        viewer_hidden_bridge:true,
-        viewer_hidden_bridge_source:edge.source,
-        viewer_hidden_bridge_reason:'unique_visible_agent_ancestor',
-      });
-    }
-    const edges=[...(display.edges||[]),...bridgeEdges];
-    const incident=new Set(),rawIncident=new Set();
-    for(const edge of edges){if(edge?.source)incident.add(edge.source);if(edge?.target)incident.add(edge.target)}
-    for(const edge of raw.edges){if(edge?.source)rawIncident.add(edge.source);if(edge?.target)rawIncident.add(edge.target)}
-    const removed=[];
-    const nodes=(display.nodes||[]).filter(node=>{
-      if(!node?.id)return false;
-      if(incident.has(node.id)||!rawIncident.has(node.id)||pr70NodeType(node)==='agent')return true;
-      removed.push(node.id);return false;
-    });
-    const kept=new Set(nodes.map(node=>node.id));
-    const keptEdges=edges.filter(edge=>kept.has(edge.source)&&kept.has(edge.target));
-    const projection={...(display.dashboard_projection||{}),hidden_bridge_edge_count:bridgeEdges.length,removed_projection_orphan_count:removed.length,removed_projection_orphan_ids:removed};
-    return{...display,nodes,edges:keptEdges,node_count:nodes.length,edge_count:keptEdges.length,dashboard_projection:projection};
-  }
-  execweaveDashboardGraph=function(data){return pr70ProjectionRepair(data,pr70BaseDashboardGraph(data))};
-
   function pr70RetargetDagreRoutePoints(topo){
     const dagre=topo?.dagrePipeline?.stages?.POST_DAGRE;
     if(!(dagre instanceof Map)||!(topo?.routePoints instanceof Map)||!(topo?.spec instanceof Map))return topo;
@@ -168,7 +87,7 @@ PR70_DASHBOARD_SCRIPT = r"""
   }
 
   if(typeof window!=='undefined')window.__execweavePr70={
-    projectionRepair:pr70ProjectionRepair,
+    projectionRepair:window.__execweaveProjectionRepair,
     crossingCount:()=>pr70StraightCrossings(),
     routeFor:id=>{const edge=edgeById.get(id);return edge?execweaveRoute(edge):null},
     topology:()=>execweaveTopology,
