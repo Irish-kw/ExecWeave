@@ -48,14 +48,24 @@ global.edgeById=new Map([['e',edge]]);global.edgeId=e=>e.id;global.execweaveWidt
 global.execweaveHeightOf=()=>50;global.execweavePortY=p=>p.y+25;global.execweaveIsStopped=()=>false;
 """ + PR70_DASHBOARD_SCRIPT + r"""
 execweaveTopology=execweaveBuildTopology();
-process.stdout.write(JSON.stringify({route:execweaveRoute(edge),points:execweaveTopology.routePoints.get('a\u0000b')}));
+const before=execweaveRoute(edge),points=execweaveTopology.routePoints.get('a\u0000b');
+const raw=JSON.stringify([...execweaveTopology.rawDagreRoutePoints]);
+positions.get('a').y+=60;positions.get('b').y+=60;
+const moved=execweaveRoute(edge);
+process.stdout.write(JSON.stringify({route:before,points,moved,rawUnchanged:raw===JSON.stringify([...execweaveTopology.rawDagreRoutePoints])}));
 """
     result = subprocess.run([_node(), '-e', script], check=True, capture_output=True, text=True)
     payload = json.loads(result.stdout)
     assert payload['route']['usesDagrePoints'] is True
     assert ' C ' not in payload['route']['d']
-    assert payload['points'][1] == {'x': 155, 'y': 100}
-    assert 'L 155 100' in payload['route']['d']
+    # Mapping raw boundary points (not node top-lefts) onto actual side ports
+    # gives x=110 and y=40+((45-20)+(125-20))/2=105 for the middle bend.
+    assert payload['points'][0] == {'x': 110, 'y': 45}
+    assert payload['points'][1] == {'x': 110, 'y': 105}
+    assert payload['points'][-1] == {'x': 300, 'y': 125}
+    assert 'L 110 105' in payload['route']['d']
+    assert 'L 110 165' in payload['moved']['d']
+    assert payload['rawUnchanged'] is True
 
 
 def test_shared_dashboard_installs_crossing_aware_live_reflow_gate() -> None:

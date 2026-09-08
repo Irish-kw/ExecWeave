@@ -254,16 +254,17 @@ function execweaveLayoutDirectedGraph(topo){
   }
   try{
     const graph=new engine.graphlib.Graph();
-    graph.setGraph({rankdir:'LR',nodesep:EXECWEAVE_DAG_GAP,ranksep:48,marginx:16,marginy:16,edgesep:16});
+    graph.setGraph({rankdir:'LR',nodesep:EXECWEAVE_DAG_GAP,ranksep:48,marginx:0,marginy:16,edgesep:16});
     graph.setDefaultEdgeLabel(()=>({}));
     const ids=[];
-    for(const id of topo.spec.keys()){
+    for(const id of [...topo.spec.keys()].sort()){
       if(!nodeById.has(id))continue;
       graph.setNode(id,{width:execweaveWidthOf(id),height:execweaveHeightOf(id)});
       ids.push(id);
     }
     const seen=new Set();
-    for(const edge of edgeById.values()){
+    for(const edge of [...edgeById.values()].sort((a,b)=>edgeId(a).localeCompare(edgeId(b)))){
+      if(typeof execweaveIsStopped==='function'&&execweaveIsStopped(edge))continue;
       if(!topo.spec.has(edge.source)||!topo.spec.has(edge.target)||edge.source===edge.target)continue;
       const key=execweaveEdgeKey(edge.source,edge.target);
       if(seen.has(key))continue;
@@ -301,74 +302,24 @@ function execweaveRestoreSemanticLayoutConstraints(topo,preferred,dagrePlacement
   const nodes=[...nodeById.values()],edges=[...edgeById.values()];
   const componentOf=execweaveComponents(nodes,edges);
 
-  // X constraint: Semantic lanes define bounding constraints.
-  // Dynamically propagate corridor lower bounds across semantic ranks so Dagre
-  // horizontal positions are retained within their architectural corridors.
-  const laneRank = {
-    runtime: 0,
-    root: 1,
-    agent: 2,
-    model: 3,
-    tool: 4,
-    file: 5,
-    endpoint: 6,
-    other: 6
-  };
-
-  // Group non-process nodes by semantic rank
-  const nodesByRank = new Map();
-  for (const [id, before] of preferred) {
-    const node = nodeById.get(id);
-    if (!node) continue;
-    const type = String(node.type || '').toLowerCase();
-    if (type === 'process' || type === 'session' || type === 'runtime') continue;
-    const lane = topo.spec.get(id)?.lane || before.lane || 'other';
-    const rank = laneRank[lane] ?? 3;
-    if (!nodesByRank.has(rank)) nodesByRank.set(rank, []);
-    nodesByRank.get(rank).push(id);
+  // Constrain X to measured semantic corridors. Dagre supplies ordering and route
+  // control points; process-tree depth is retained within the runtime corridor.
+  // All render paths consume these final coordinates, including Arrange.
+  let floor=-Infinity;
+  for(const [id,before] of preferred){
+    const after=topo.spec.get(id),node=nodeById.get(id);
+    if(!after||!node||!isProcess(node))continue;
+    after.x=before.x;
+    floor=Math.max(floor,after.x+(topo.width?.get(id)||EXECWEAVE_NODE_W)+PROCESS_COL_GAP);
   }
-
-  // Handle process-like nodes first (pinned to process-tree coordinates)
-  let maxProcessRight = 0;
-  for (const [id, before] of preferred) {
-    const after = topo.spec.get(id), node = nodeById.get(id);
-    if (!after || !node) continue;
-    const type = String(node.type || '').toLowerCase();
-    if (type === 'process' || type === 'session' || type === 'runtime') {
-      if (Number.isFinite(before.x)) after.x = before.x;
-      const pw = topo.width?.get(id) || (typeof execweaveWidthOf === 'function' ? execweaveWidthOf(id) : 160);
-      const px = Number.isFinite(after.x) ? after.x : 0;
-      maxProcessRight = Math.max(maxProcessRight, px + pw);
-    }
-  }
-
-  // Propagate corridor lower bounds across ranks:
-  // rank 1 (root) < rank 2 (agent) < rank 3 (model) < rank 4 (tool) < rank 5 (file) < rank 6 (endpoint)
-  let minAllowedX = maxProcessRight;
-  for (let r = 1; r <= 6; r++) {
-    const ids = nodesByRank.get(r) || [];
-    if (!ids.length) continue;
-    let rankMaxX = minAllowedX;
-    for (const id of ids) {
-      const after = topo.spec.get(id);
-      const before = preferred.get(id);
-      const dagreX = dagrePlacement.get(id)?.x;
-      const laneX = topo.laneX && Number.isFinite(topo.laneX[after?.lane]) ? topo.laneX[after.lane] : before?.x;
-      if (!after) continue;
-
-      const isBundledTarget = edges.some(e => e.target === id && topo.bundleByEdge?.get(edgeId(e))?.size > 1);
-      const candidateX = isBundledTarget && Number.isFinite(laneX) ? laneX : dagreX;
-
-      if (Number.isFinite(candidateX) && candidateX >= minAllowedX) {
-        after.x = candidateX;
-      } else if (Number.isFinite(before?.x) && before.x >= minAllowedX) {
-        after.x = before.x;
-      } else {
-        after.x = minAllowedX;
-      }
-      rankMaxX = Math.max(rankMaxX, after.x);
-    }
-    minAllowedX = rankMaxX + 1;
+  for(const lane of ['root','agent','model','tool','file','endpoint','other']){
+    const ids=[...topo.spec.keys()].filter(id=>topo.spec.get(id)?.lane===lane&&!isProcess(nodeById.get(id)));
+    if(!ids.length)continue;
+    const laneX=Number.isFinite(topo.laneX?.[lane])?topo.laneX[lane]:Math.min(...ids.map(id=>preferred.get(id).x));
+    const x=Math.max(laneX,Number.isFinite(floor)?floor:laneX);
+    let right=x;
+    for(const id of ids){const after=topo.spec.get(id);after.x=x;right=Math.max(right,x+(topo.width?.get(id)||EXECWEAVE_NODE_W))}
+    floor=right+PROCESS_COL_GAP;
   }
 
   // Y constraint: Dagre coordinates optimize positions within semantic lane/component bounds
@@ -462,9 +413,15 @@ function execweaveRestoreSemanticLayoutConstraints(topo,preferred,dagrePlacement
     return{value,members,minX,maxX,minY,maxY,w:maxX-minX,h:maxY-minY};
   }).filter(box=>Number.isFinite(box.minX));
 
+  // Use an aspect-balanced shelf width for disconnected components instead of
+  // forcing every component wider than half a short spine onto its own row.
+  // Component shapes/ordering stay intact; this is packing, not raw graph repair.
+  const columns=Math.max(1,Math.ceil(Math.sqrt(compBoxes.length)));
+  const widest=compBoxes.reduce((width,box)=>Math.max(width,box.w),0);
+  const packingWidth=Math.max(spineWidth,columns*widest+(columns-1)*bandGap);
   let cursorX=spineLeft,cursorY=spineFloor+bandGap,rowHeight=0;
   for(const box of compBoxes){
-    if(cursorX>spineLeft&&cursorX+box.w>spineLeft+spineWidth){
+    if(cursorX>spineLeft&&cursorX+box.w>spineLeft+packingWidth){
       cursorX=spineLeft;cursorY+=rowHeight+bandGap;rowHeight=0;
     }
     const shiftX=cursorX-box.minX,shiftY=cursorY-box.minY;
@@ -565,7 +522,13 @@ function execweaveRouteFromPoints(edge,points){
   return{d,labelX:labelPoint.x,labelY:labelPoint.y-8,kind:execweaveIsSpawn(edge)?'spawn':(forward?'forward':'reverse'),bundle:null};
 }
 const execweaveBuildTopologyBase=execweaveBuildTopology;
-execweaveBuildTopology=function(){return execweaveApplyDirectedGraph(execweaveLayoutRelated(execweaveLayoutProcessTree(execweaveBuildTopologyBase())))};
+execweaveBuildTopology=function(){
+  // Width/height and lane helpers must see THIS build, never the previous graph.
+  const topo=execweaveBuildTopologyBase(),prior=execweaveTopology;
+  execweaveTopology=topo;
+  try{return execweaveApplyDirectedGraph(execweaveLayoutRelated(execweaveLayoutProcessTree(topo)))}
+  finally{execweaveTopology=prior}
+};
 if(typeof window!=='undefined'){
   window.execweaveLayoutDirectedGraph=execweaveLayoutDirectedGraph;
   window.execweaveSeparateOverlappingNodes=execweaveSeparateOverlappingNodes;
@@ -653,13 +616,7 @@ function execweaveWriteDirectedPositions(topo){
   const next=new Map();
   for(const id of nodeById.keys()){
     const spec=topo.spec.get(id);
-    const packed=topo.secondaryPackedIds?.has(id);
-    const laneX=(topo.laneX&&spec?.lane&&Number.isFinite(topo.laneX[spec.lane]))?topo.laneX[spec.lane]:spec?.x;
-    // Connected semantic lanes retain their established X contract. Only
-    // disconnected components use the final 2D packing X; forcing those back
-    // to the lane origin would stack every orphan node on the same rectangle.
-    const initialX=packed?spec?.x:laneX;
-    next.set(id,spec?{x:initialX,y:spec.y}:execweaveDesiredPosition(id));
+    next.set(id,spec?{x:spec.x,y:spec.y}:execweaveDesiredPosition(id));
   }
   positions=next;layerRows=new Map();
   for(const [id,p] of positions){
@@ -673,20 +630,19 @@ function execweaveWriteDirectedPositions(topo){
   for(const edge of edgeById.values())updateEdgeElement(edge);
   svg.classList.toggle('execweave-crowded',!!topo.crowded);
 }
-const execweaveFullLayoutBase=fullLayout;
+function execweaveInstallFinalLayout(priorY){
+  execweaveTopology=execweaveBuildTopology();
+  execweaveWriteDirectedPositions(execweaveTopology);
+  if(priorY.size&&typeof execweaveRestorePriorYUnlessWorse==='function'){
+    execweaveRestorePriorYUnlessWorse(priorY,execweaveTopology);
+    window.__execweavePr70.paint();
+  }
+}
 fullLayout=function(){
-  const prior=positions;
-  const incoming=[...nodeById.keys()].some(id=>!prior.has(id));
-  if(prior.size&&!incoming){execweaveFullLayoutBase();return}
-  execweaveTopology=execweaveBuildTopology();
-  execweaveWriteDirectedPositions(execweaveTopology);
+  execweaveInstallFinalLayout(new Map([...positions].map(([id,p])=>[id,p.y])));
 };
-const execweavePlaceAddedBase=placeAddedNodes;
-placeAddedNodes=function(ids){
-  const incoming=(ids||[]).filter(id=>nodeById.has(id)&&!positions.has(id));
-  if(!incoming.length){execweavePlaceAddedBase(ids);return}
-  execweaveTopology=execweaveBuildTopology();
-  execweaveWriteDirectedPositions(execweaveTopology);
+placeAddedNodes=function(_ids){
+  execweaveInstallFinalLayout(new Map([...positions].map(([id,p])=>[id,p.y])));
 };
 })();
 """.strip()
