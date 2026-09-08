@@ -4,8 +4,6 @@ import json
 import shutil
 import subprocess
 
-import pytest
-
 from execweave.dashboard_shell import DASHBOARD_HTML
 from execweave.viewer_layout_v2 import LAYOUT_V2_SCRIPT
 
@@ -13,7 +11,7 @@ from execweave.viewer_layout_v2 import LAYOUT_V2_SCRIPT
 def _node() -> str:
     executable = shutil.which("node")
     if executable is None:
-        pytest.skip("Node.js is required for Layout V2 JavaScript regression coverage")
+        raise RuntimeError("Node.js is required for Layout V2 JavaScript regression coverage")
     return executable
 
 
