@@ -25,6 +25,18 @@ _BUS_ROUTE_REPLACEMENT = """  function route(edge){
       if(layoutV2Bus)return layoutV2Bus;
     }
     if(bundle&&bundle.size>1){"""
+_BUILD_TOPOLOGY_SEAM = """  const pr70BuildTopologyBase=execweaveBuildTopology;
+  execweaveBuildTopology=function(){
+    const topo=pr70BuildTopologyBase();
+    return optimize(pr70RetargetDagreRoutePoints(topo));
+  };"""
+_BUILD_TOPOLOGY_REPLACEMENT = """  const pr70BuildTopologyBase=execweaveBuildTopology;
+  execweaveBuildTopology=function(){
+    const topo=pr70BuildTopologyBase();
+    const optimized=optimize(pr70RetargetDagreRoutePoints(topo));
+    return typeof execweaveLayoutV2FinalizeTopology==='function'
+      ?execweaveLayoutV2FinalizeTopology(optimized):optimized;
+  };"""
 _INPUT_KEY_SEAM = """      const inputKey=JSON.stringify({nodes:[...topo.spec].map(([id,s])=>[id,s.x,s.y,topo.width.get(id),topo.height.get(id)]).sort(),
         edges:[...edgeById.values()].map(e=>[edgeId(e),e.source,e.target,e.relation]).sort()});"""
 _INPUT_KEY_REPLACEMENT = """      const layoutMode=(typeof window!=='undefined'&&window.__execweaveLayoutV2Mode)||'live';
@@ -65,7 +77,6 @@ LAYOUT_V2_SCRIPT = r"""
     for(const [id,p] of placement){
       const spec=topo.spec.get(id);
       if(!spec||!Number.isFinite(p?.y))continue;
-      if(!Object.prototype.hasOwnProperty.call(spec,'semanticOrder'))spec.semanticOrder=spec.order;
       const key=String(spec.lane||'other');
       if(!byLane.has(key))byLane.set(key,[]);
       byLane.get(key).push(id);
@@ -78,7 +89,7 @@ LAYOUT_V2_SCRIPT = r"""
       });
       ids.forEach((id,index)=>{
         const spec=topo.spec.get(id);
-        if(spec)spec.order=index;
+        if(spec)spec.finalOrder=index;
         finalOrder.set(id,index);
       });
     }
@@ -102,7 +113,14 @@ LAYOUT_V2_SCRIPT = r"""
     const totalArea=boxes.reduce((sum,box)=>sum+Math.max(1,box.w+gap)*Math.max(1,box.h+gap),0);
     const widest=boxes.reduce((width,box)=>Math.max(width,box.w),0);
     const base=Math.max(spineWidth,widest,Math.sqrt(totalArea*targetAspect));
-    const candidates=[spineWidth,widest,...[.78,.9,1,1.12,1.28].map(scale=>base*scale)]
+    const widths=boxes.map(box=>box.w).sort((a,b)=>b-a);
+    const breakpoints=[];
+    let prefix=0;
+    for(let i=0;i<Math.min(widths.length,8);i++){
+      prefix+=widths[i];
+      breakpoints.push(prefix+i*gap);
+    }
+    const candidates=[spineWidth,widest,...breakpoints,...[.8,1,1.2,1.45].map(scale=>base*scale)]
       .map(value=>Math.max(widest,value))
       .sort((a,b)=>a-b)
       .filter((value,index,list)=>index===0||Math.abs(value-list[index-1])>1);
@@ -118,12 +136,94 @@ LAYOUT_V2_SCRIPT = r"""
       const height=Math.max(1,y+rowHeight),usedWidth=Math.max(1,maxRight);
       const area=usedWidth*height;
       const aspectError=Math.abs(Math.log((usedWidth/height)/targetAspect));
-      const cost=area*(1+.28*aspectError);
+      const cost=area*(1+.35*aspectError);
       if(cost<bestCost-1e-6||(Math.abs(cost-bestCost)<=1e-6&&width<bestWidth)){bestCost=cost;bestWidth=width}
     }
     return Math.max(spineWidth,bestWidth);
   }
   window.execweaveLayoutV2PackingWidth=execweaveLayoutV2PackingWidth;
+
+  function execweaveLayoutV2FinalizeTopology(topo){
+    if(!topo?.spec||typeof nodeById==='undefined'||typeof edgeById==='undefined'||typeof execweaveComponents!=='function')return topo;
+    const nodes=[...nodeById.values()].filter(node=>topo.spec.has(node.id));
+    const edges=[...edgeById.values()].filter(edge=>topo.spec.has(edge.source)&&topo.spec.has(edge.target));
+    const componentOf=execweaveComponents(nodes,edges);
+    if(!componentOf.size)return topo;
+    const sizes=new Map();
+    for(const value of componentOf.values())sizes.set(value,(sizes.get(value)||0)+1);
+    const roots=nodes.filter(typeof execweaveIsRoot==='function'?execweaveIsRoot:()=>false);
+    let primary=roots.length?componentOf.get(roots[0].id):undefined;
+    if(primary===undefined){
+      let best=-1;
+      for(const [value,size] of [...sizes.entries()].sort((a,b)=>a[0]-b[0]))if(size>best){best=size;primary=value}
+    }
+    const agentIds=new Set(nodes.filter(node=>node?.type==='agent').map(node=>node.id));
+    const spineComponents=new Set([...componentOf.entries()].filter(([id])=>agentIds.has(id)).map(([,value])=>value));
+    if(primary!==undefined)spineComponents.add(primary);
+    const secondary=[...sizes.keys()].filter(value=>!spineComponents.has(value)).sort((a,b)=>a-b);
+    topo.secondaryPackedIds=new Set();
+    if(!secondary.length){
+      const placement=new Map([...topo.spec].map(([id,spec])=>[id,{x:spec.x,y:spec.y}]));
+      execweaveLayoutV2SyncFinalOrder(topo,placement);
+      if(typeof execweaveRecomputePorts==='function')execweaveRecomputePorts(topo);
+      return topo;
+    }
+
+    let spineLeft=Infinity,spineRight=-Infinity,spineFloor=-Infinity;
+    for(const [id,value] of componentOf){
+      if(!spineComponents.has(value))continue;
+      const spec=topo.spec.get(id);if(!spec)continue;
+      const w=topo.width?.get(id)||execweaveWidthOf(id),h=topo.height?.get(id)||execweaveHeightOf(id);
+      spineLeft=Math.min(spineLeft,spec.x);spineRight=Math.max(spineRight,spec.x+w);spineFloor=Math.max(spineFloor,spec.y+h);
+    }
+    if(!Number.isFinite(spineLeft)){spineLeft=0;spineRight=600;spineFloor=100}
+    const gap=64,spineWidth=Math.max(600,spineRight-spineLeft),boxes=[];
+
+    for(const value of secondary){
+      const members=[...componentOf.entries()].filter(([,component])=>component===value).map(([id])=>id).sort();
+      // The global lane pass can give two nodes in one detached component hundreds
+      // of pixels of unrelated vertical separation. Compact each X column locally
+      // before packing components, while preserving the current within-column order.
+      const columns=new Map();
+      for(const id of members){
+        const spec=topo.spec.get(id);if(!spec)continue;
+        const key=Number(spec.x).toFixed(3);
+        if(!columns.has(key))columns.set(key,[]);
+        columns.get(key).push(id);
+      }
+      for(const ids of columns.values()){
+        ids.sort((a,b)=>(topo.spec.get(a).y-topo.spec.get(b).y)||String(a).localeCompare(String(b)));
+        let y=0;
+        for(const id of ids){
+          const spec=topo.spec.get(id),h=topo.height?.get(id)||execweaveHeightOf(id);
+          spec.y=y;y+=h+24;
+        }
+      }
+      let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
+      for(const id of members){
+        const spec=topo.spec.get(id);if(!spec)continue;
+        const w=topo.width?.get(id)||execweaveWidthOf(id),h=topo.height?.get(id)||execweaveHeightOf(id);
+        minX=Math.min(minX,spec.x);maxX=Math.max(maxX,spec.x+w);minY=Math.min(minY,spec.y);maxY=Math.max(maxY,spec.y+h);
+      }
+      if(Number.isFinite(minX))boxes.push({value,members,minX,maxX,minY,maxY,w:maxX-minX,h:maxY-minY});
+    }
+
+    const packingWidth=execweaveLayoutV2PackingWidth(boxes,spineWidth,gap);
+    let cursorX=spineLeft,cursorY=spineFloor+gap,rowHeight=0;
+    for(const box of boxes){
+      if(cursorX>spineLeft&&cursorX+box.w>spineLeft+packingWidth){cursorX=spineLeft;cursorY+=rowHeight+gap;rowHeight=0}
+      const shiftX=cursorX-box.minX,shiftY=cursorY-box.minY;
+      for(const id of box.members){
+        const spec=topo.spec.get(id);if(spec){spec.x+=shiftX;spec.y+=shiftY;topo.secondaryPackedIds.add(id)}
+      }
+      cursorX+=box.w+gap;rowHeight=Math.max(rowHeight,box.h);
+    }
+    const placement=new Map([...topo.spec].map(([id,spec])=>[id,{x:spec.x,y:spec.y}]));
+    execweaveLayoutV2SyncFinalOrder(topo,placement);
+    if(typeof execweaveRecomputePorts==='function')execweaveRecomputePorts(topo);
+    return topo;
+  }
+  window.execweaveLayoutV2FinalizeTopology=execweaveLayoutV2FinalizeTopology;
 
   function execweaveLayoutV2HubInversionRate(){
     if(typeof edgeById==='undefined'||typeof positions==='undefined'||!execweaveTopology?.targetPort)return 0;
@@ -163,7 +263,7 @@ LAYOUT_V2_SCRIPT = r"""
     let mismatches=0;
     for(const rows of byLane.values()){
       rows.sort((a,b)=>(a[1].y-b[1].y)||(a[1].x-b[1].x)||String(a[0]).localeCompare(String(b[0])));
-      rows.forEach((row,index)=>{if(Number(row[2].order)!==index)mismatches++});
+      rows.forEach((row,index)=>{if(Number(row[2].finalOrder)!==index)mismatches++});
     }
     return mismatches;
   }
@@ -171,7 +271,7 @@ LAYOUT_V2_SCRIPT = r"""
   const layoutV2MeasureBase=execweaveGeometry.measure.bind(execweaveGeometry);
   execweaveGeometry.measure=function(nodes,edges){
     const metrics=layoutV2MeasureBase(nodes,edges);
-    if(!nodes.length)return{...metrics,CROSSINGS_PER_EDGE:0,CROSSING_SPAN_RATE:0,NODE_DENSITY:0,ASPECT_ERROR:0,P95_EDGE_STRETCH:0,HUB_PORT_INVERSION_RATE:0,FINAL_ORDER_AUTHORITY_MISMATCHES:0};
+    if(!nodes.length)return{...metrics,CROSSINGS_PER_EDGE:0,CROSSING_SPAN_RATE:0,NONINCIDENT_EDGE_CROSSINGS:0,CROSSING_SPAN_PAIRS:0,NODE_DENSITY:0,ASPECT_ERROR:0,P95_EDGE_STRETCH:0,HUB_PORT_INVERSION_RATE:0,FINAL_ORDER_AUTHORITY_MISMATCHES:0};
     const left=Math.min(...nodes.map(n=>n.x)),right=Math.max(...nodes.map(n=>n.x+n.w));
     const top=Math.min(...nodes.map(n=>n.y)),bottom=Math.max(...nodes.map(n=>n.y+n.h));
     const width=Math.max(1,right-left),height=Math.max(1,bottom-top);
@@ -184,12 +284,16 @@ LAYOUT_V2_SCRIPT = r"""
       return{edge,points,left:Math.min(...points.map(p=>p.x)),right:Math.max(...points.map(p=>p.x)),
         top:Math.min(...points.map(p=>p.y)),bottom:Math.max(...points.map(p=>p.y))};
     });
-    let spanPairs=0;
+    let spanPairs=0,nonincidentCrossings=0;
     for(let i=0;i<routes.length;i++)for(let j=0;j<i;j++){
       const a=routes[i],b=routes[j],ae=a.edge,be=b.edge;
       if(ae.source===be.source||ae.source===be.target||ae.target===be.source||ae.target===be.target)continue;
       if(a.right<b.left||b.right<a.left||a.bottom<b.top||b.bottom<a.top)continue;
       spanPairs++;
+      let hit=false;
+      for(let ai=1;ai<a.points.length&&!hit;ai++)for(let bi=1;bi<b.points.length&&!hit;bi++)
+        hit=execweaveGeometry.crosses(a.points[ai-1],a.points[ai],b.points[bi-1],b.points[bi]);
+      if(hit)nonincidentCrossings++;
     }
     const stretch=routes.map(({points})=>{
       let length=0;
@@ -200,7 +304,9 @@ LAYOUT_V2_SCRIPT = r"""
     }).sort((a,b)=>a-b);
     return{...metrics,
       CROSSINGS_PER_EDGE:metrics.EDGE_CROSSINGS/Math.max(1,edges.length),
-      CROSSING_SPAN_RATE:metrics.EDGE_CROSSINGS/Math.max(1,spanPairs),
+      CROSSING_SPAN_RATE:nonincidentCrossings/Math.max(1,spanPairs),
+      NONINCIDENT_EDGE_CROSSINGS:nonincidentCrossings,
+      CROSSING_SPAN_PAIRS:spanPairs,
       NODE_DENSITY:density,
       ASPECT_ERROR:aspectError,
       P95_EDGE_STRETCH:stretch[Math.max(0,Math.ceil(stretch.length*.95)-1)]||0,
@@ -267,6 +373,7 @@ LAYOUT_V2_SCRIPT = r"""
 
   window.__execweaveLayoutV2={
     syncFinalOrder:execweaveLayoutV2SyncFinalOrder,
+    finalizeTopology:execweaveLayoutV2FinalizeTopology,
     packingWidth:execweaveLayoutV2PackingWidth,
     hubInversionRate:execweaveLayoutV2HubInversionRate,
     orderMismatches:execweaveLayoutV2OrderMismatches,
@@ -297,6 +404,9 @@ def inject_layout_v2(html: str) -> str:
     )
     html = _replace_once(
         html, _BUS_ROUTE_SEAM, _BUS_ROUTE_REPLACEMENT, "layout-v2 bundle route seam changed"
+    )
+    html = _replace_once(
+        html, _BUILD_TOPOLOGY_SEAM, _BUILD_TOPOLOGY_REPLACEMENT, "layout-v2 topology-finalize seam changed"
     )
     html = _replace_once(
         html, _INPUT_KEY_SEAM, _INPUT_KEY_REPLACEMENT, "layout-v2 cache-key seam changed"
