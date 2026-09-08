@@ -50,8 +50,9 @@ def _gif_graph() -> dict[str, object]:
     }
 
 
-@pytest.mark.parametrize("finished_live", [False, True], ids=["standalone", "finished-live"])
-def test_download_gif_is_nonzero_valid_and_repeatable(tmp_path: Path, finished_live: bool) -> None:
+def _assert_download_gif_is_nonzero_valid_and_repeatable(
+    tmp_path: Path, *, finished_live: bool
+) -> None:
     viewer = tmp_path / "viewer.html"
     viewer.write_text(render_static_dashboard_html(_gif_graph()), encoding="utf-8")
     manager, executable = _browser()
@@ -122,6 +123,15 @@ def test_download_gif_is_nonzero_valid_and_repeatable(tmp_path: Path, finished_l
             assert page.locator(".node").count() > 0
         finally:
             browser.close()
+
+
+def test_download_gif_is_nonzero_valid_and_repeatable(tmp_path: Path) -> None:
+    """Keep the historical test node ID stable for stage-integrity gating."""
+    _assert_download_gif_is_nonzero_valid_and_repeatable(tmp_path, finished_live=False)
+
+
+def test_finished_live_download_gif_is_nonzero_valid_and_repeatable(tmp_path: Path) -> None:
+    _assert_download_gif_is_nonzero_valid_and_repeatable(tmp_path, finished_live=True)
 
 
 def _evolving_graph(count: int) -> dict:
