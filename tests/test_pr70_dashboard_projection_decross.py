@@ -54,7 +54,12 @@ positions.get('a').y+=60;positions.get('b').y+=60;
 const moved=execweaveRoute(edge);
 process.stdout.write(JSON.stringify({route:before,points,moved,rawUnchanged:raw===JSON.stringify([...execweaveTopology.rawDagreRoutePoints])}));
 """
-    result = subprocess.run([_node(), '-e', script], check=True, capture_output=True, text=True)
+    # The shared renderer exceeds Windows' command-line limit. Feed its exact
+    # source via stdin; do not truncate the program or change the assertions.
+    result = subprocess.run(
+        [_node(), '-'], input=script, check=True, capture_output=True, text=True,
+        encoding='utf-8', timeout=30,
+    )
     payload = json.loads(result.stdout)
     assert payload['route']['usesDagrePoints'] is True
     assert ' C ' not in payload['route']['d']
