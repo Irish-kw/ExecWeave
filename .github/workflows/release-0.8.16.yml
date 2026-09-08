@@ -1,0 +1,81 @@
+name: Release ExecWeave 0.8.16
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/release-0.8.16.yml
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: e8d4285895b4879b92396ffb6abdb7a1ef186eb2
+          fetch-depth: 0
+
+      - name: Verify exact release candidate and version
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "e8d4285895b4879b92396ffb6abdb7a1ef186eb2"
+          python - <<'PY'
+          import re
+          import tomllib
+          from pathlib import Path
+
+          expected = "0.8.16"
+          package_version = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+          init_text = Path("src/execweave/__init__.py").read_text(encoding="utf-8")
+          match = re.search(r'__version__\s*=\s*["\']([^"\']+)["\']', init_text)
+          runtime_version = match.group(1) if match else None
+          if package_version != expected or runtime_version != expected:
+              raise SystemExit(f"version mismatch: package={package_version!r} runtime={runtime_version!r} expected={expected!r}")
+          print(f"Exact RC verified: {expected}")
+          PY
+
+      - name: Refuse an existing tag or release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v0.8.16
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; refusing to republish." >&2
+            exit 1
+          fi
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists; refusing to reuse it." >&2
+            exit 1
+          fi
+
+      - name: Publish GitHub Release at the validated RC
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v0.8.16
+          TARGET_SHA: e8d4285895b4879b92396ffb6abdb7a1ef186eb2
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > release-notes.md <<'EOF'
+          ExecWeave 0.8.16 fixes GIF export so the downloaded animation reflects the Dashboard that was actually displayed during the run.
+
+          - Record the real Dashboard SVG timeline instead of reconstructing animation from the final graph.
+          - Preserve labels, folding, edge routing, camera/viewport changes, and real elapsed timing in exported GIFs.
+          - Fail explicitly rather than silently producing misleading history when recording is unavailable or exceeds its bound.
+          - Add real-browser Playwright + independent Pillow decoding checks that compare downloaded GIF frames against Dashboard screenshots across evolving and crowded views, dark/light themes, text geometry, frame ordering, duration, and final-state parity.
+          - Reopened finished runs intentionally export a still image because they do not contain recorded live screen history.
+
+          PR #66 and the 0.8.16 release-candidate PR #67 both passed all required repository workflows, including CI, Viewer Agent Isolation, Provider Dashboard Contract, Provider Capability Stage Integrity, and Windows Launcher Compatibility before this release was created.
+          EOF
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$TARGET_SHA" \
+            --title "ExecWeave v0.8.16" \
+            --notes-file release-notes.md
