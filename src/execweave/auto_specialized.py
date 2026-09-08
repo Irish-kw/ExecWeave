@@ -14,6 +14,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
+from .runtime_endpoint_availability import windows_exclusive_endpoint_available
+
 from .model_runtime import (
     append_model_runtime_records,
     llamacpp_models_to_events,
@@ -212,6 +214,49 @@ def _probe_spec(command: list[str]) -> _ProbeSpec | None:
         endpoint = _server_endpoint(command, default_port=8000)
         return _ProbeSpec("vllm", endpoint, "/v1/models") if endpoint else None
     return None
+
+
+@dataclass(frozen=True)
+class _LiveProbeAdmission:
+    # Prepared before the child (and any managed relay) is launched. A grace
+    # period is a scheduling aid, never evidence of endpoint ownership.
+    spec: _ProbeSpec | None
+
+
+def prepare_live_specialized_probe(command: list[str]) -> _LiveProbeAdmission:
+    """Do not attach an already listening or uncertain endpoint to a new run.
+
+    A refused connection establishes absence at this pre-launch boundary. A
+    Windows connect timeout requires independent exclusive-bind proof for every
+    resolved loopback address; a timeout alone never authorizes a probe. Other
+    unknown/denied states abstain. This affects automatic catalog polling only,
+    not command execution or explicit request/response capture.
+    """
+    if not os.environ.get(_SEMANTIC_ENV):
+        return _LiveProbeAdmission(None)
+    spec = _probe_spec(command)
+    if spec is None:
+        return _LiveProbeAdmission(None)
+    address = urlsplit(spec.endpoint)
+    try:
+        with socket.create_connection(
+            (str(address.hostname), int(address.port or 80)),
+            timeout=_PROBE_TIMEOUT_SECONDS,
+        ):
+            pass
+    except ConnectionRefusedError:
+        return _LiveProbeAdmission(spec)
+    except TimeoutError:
+        if windows_exclusive_endpoint_available(str(address.hostname), int(address.port or 80)):
+            return _LiveProbeAdmission(spec)
+    except OSError:
+        pass
+    print(
+        f"ExecWeave {spec.runtime} probe: endpoint {spec.endpoint} was not "
+        "proven unused before launch; automatic catalog evidence is disabled.",
+        file=sys.stderr,
+    )
+    return _LiveProbeAdmission(None)
 
 
 def _get_json(url: str, *, timeout: float) -> dict[str, object]:
@@ -462,10 +507,18 @@ def auto_specialized_launch(
 
 
 @contextmanager
-def auto_specialized_probe(command: list[str]) -> Iterator[None]:
-    """Run supported local specialized probes without affecting command execution."""
+def auto_specialized_probe(
+    command: list[str],
+    *,
+    admission: _LiveProbeAdmission | None = None,
+) -> Iterator[None]:
+    """Poll a prepared launch, or an explicitly requested library observation.
+
+    RuntimeCollector always supplies pre-launch admission. A direct library
+    caller without admission retains the explicit endpoint-observation API.
+    """
     configured_sidecar = os.environ.get(_SEMANTIC_ENV)
-    spec = _probe_spec(command)
+    spec = admission.spec if admission is not None else _probe_spec(command)
     if not configured_sidecar or spec is None:
         yield
         return

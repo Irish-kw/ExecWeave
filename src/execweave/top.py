@@ -69,6 +69,12 @@ class TerminalState:
 
     def apply_update(self, update: dict[str, object]) -> None:
         self.sequence = int(update.get("sequence", self.sequence) or self.sequence)
+        final_graph = update.get("final_graph")
+        if update.get("terminal") and isinstance(final_graph, dict):
+            # The web client and Top must consume the same authoritative final
+            # entities, including canonical identity replacement, before stopping.
+            self.apply_snapshot(final_graph, self.sequence)
+            return
         self.event_count = int(update.get("event_count", self.event_count) or 0)
         self.node_count = int(update.get("node_count", self.node_count) or 0)
         self.edge_count = int(update.get("edge_count", self.edge_count) or 0)

@@ -549,6 +549,11 @@ class _LiveState:
             else _inject_final_theme(render_graph_html(final_graph))
         )
         with self._lock:
+            # The last browser poll may precede the collector's final batch.
+            # Drain complete runtime/semantic records for raw-log and evidence
+            # counters before publishing FINISHED. The canonical graph below,
+            # not the provisional accumulator, remains the graph authority.
+            self._refresh_incremental_locked()
             self._final_graph = final_graph
             self._final_html = rendered_final
             self._finished = True
@@ -563,6 +568,11 @@ class _LiveState:
                 "edges_added": [],
                 "edges_updated": [],
                 "terminal": True,
+                # A counts-only terminal delta loses unpolled nodes/edges and
+                # canonical identity/metadata changes. Reconcile in this same
+                # sequence-visible response, before the client stops polling.
+                # Use the normal projection and payload budget, as on reconnect.
+                "final_graph": self._snapshot_from_accumulator_locked(),
             }
             if not _within_live_payload_budget(node_count, edge_count):
                 terminal["live_payload_compact"] = True
