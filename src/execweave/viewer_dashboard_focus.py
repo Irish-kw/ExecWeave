@@ -54,9 +54,25 @@ execweaveDashboardGraph=function(data){
   }else if(antigravityRoot&&antigravityScoped.length){
     prepared=prepared.filter(node=>node.id!==antigravityRoot.id);
   }
-  // A single Ollama-looking agent and a single endpoint-scoped runtime are
-  // not the same identity. Keep runtime observations attached to that runtime;
-  // root/runtime relations, when actually recorded, remain explicit edges.
+  const ollamaRoots=prepared.filter(node=>node?.type==='agent'&&['agent:Ollama','agent:ollama'].includes(String(node.id||'')));
+  const ollamaRuntimes=prepared.filter(node=>node?.type==='model_runtime'&&String(node?.attributes?.provider||'').toLowerCase()==='ollama');
+  const runtimeContextSupport=new Map();
+  // Same provider/cardinality does not establish runtime ownership. Compress a
+  // context only when an explicit, unambiguous agent->runtime observation exists.
+  // Otherwise retain the runtime and its original catalog edges, including old
+  // failed-launch artifacts that contain observations of a pre-existing server.
+  for(const runtime of ollamaRuntimes){
+    const incoming=(projected.edges||[]).filter(e=>e?.target===runtime.id&&prepared.some(n=>n.id===e.source&&n.type==='agent'));
+    const owners=[...new Set(incoming.map(e=>e.source))];
+    const root=owners.length===1?ollamaRoots.find(n=>n.id===owners[0]):null;
+    const support=incoming.filter(e=>e.relation==='OBSERVED_MODEL_RUNTIME');
+    const conflict=(a,b)=>['provider','run_id','session_id','conversation_id','provider_session_id','agent_path'].some(k=>
+      a?.[k]&&b?.[k]&&String(a[k])!==String(b[k]));
+    const identities=[runtime.attributes||{},root?.attributes||{},...incoming.map(e=>e.attributes||{})];
+    if(!root||!support.length||identities.some((a,i)=>identities.slice(0,i).some(b=>conflict(a,b))))continue;
+    presentationAlias.set(runtime.id,root.id);runtimeContextSupport.set(runtime.id,support);
+    prepared=prepared.filter(node=>node.id!==runtime.id);
+  }
   const normalized=value=>String(value||'').trim().replaceAll('\\\\','/').replace(/\/+$/,'').toLowerCase();
   const canonicalKey=node=>{
     const type=String(node?.type||''),attrs=node?.attributes||{};
@@ -82,10 +98,15 @@ execweaveDashboardGraph=function(data){
   const remapped=[];for(const edge of(projected.edges||[])){
     if(!edge)continue;const source=canonicalId.get(edge.source)||edge.source,target=canonicalId.get(edge.target)||edge.target;
     if(!ids.has(source)||!ids.has(target)||source===target)continue;
-    remapped.push(source===edge.source&&target===edge.target?edge:{...edge,source,target,viewer_canonicalized:true,viewer_original_source:edge.source,viewer_original_target:edge.target});
+    const support=runtimeContextSupport.get(edge.source);
+    if(support){
+      remapped.push({...edge,source,target,viewer_only:true,inferred:true,causal:false,
+        viewer_runtime_context:true,viewer_original_source:edge.source,viewer_original_target:edge.target,
+        viewer_supporting_edges:[...support,edge]});
+    }else remapped.push(source===edge.source&&target===edge.target?edge:{...edge,source,target,viewer_canonicalized:true,viewer_original_source:edge.source,viewer_original_target:edge.target});
   }
   const edgeGroups=new Map();
-  for(const edge of remapped){const key=`${edge.source}\u0000${edge.relation||''}\u0000${edge.target}`,existing=edgeGroups.get(key);if(!existing){edgeGroups.set(key,{...edge,viewer_edge_occurrence_count:1,viewer_edge_occurrence_ids:[edge.id]});continue}existing.viewer_edge_occurrence_count+=1;existing.viewer_edge_occurrence_ids.push(edge.id);existing.count=Number(existing.count||1)+Number(edge.count||1);if(Number.isInteger(edge.first_sequence))existing.first_sequence=Number.isInteger(existing.first_sequence)?Math.min(existing.first_sequence,edge.first_sequence):edge.first_sequence;if(Number.isInteger(edge.last_sequence))existing.last_sequence=Number.isInteger(existing.last_sequence)?Math.max(existing.last_sequence,edge.last_sequence):edge.last_sequence;existing.first_seen=earlier(existing.first_seen,edge.first_seen);existing.last_seen=later(existing.last_seen,edge.last_seen)}
+  for(const edge of remapped){const key=`${edge.source}\u0000${edge.relation||''}\u0000${edge.target}${edge.viewer_runtime_context?'\u0000'+edge.viewer_original_source:''}`,existing=edgeGroups.get(key);if(!existing){edgeGroups.set(key,{...edge,viewer_edge_occurrence_count:1,viewer_edge_occurrence_ids:[edge.id]});continue}existing.viewer_edge_occurrence_count+=1;existing.viewer_edge_occurrence_ids.push(edge.id);existing.count=Number(existing.count||1)+Number(edge.count||1);if(Number.isInteger(edge.first_sequence))existing.first_sequence=Number.isInteger(existing.first_sequence)?Math.min(existing.first_sequence,edge.first_sequence):edge.first_sequence;if(Number.isInteger(edge.last_sequence))existing.last_sequence=Number.isInteger(existing.last_sequence)?Math.max(existing.last_sequence,edge.last_sequence):edge.last_sequence;existing.first_seen=earlier(existing.first_seen,edge.first_seen);existing.last_seen=later(existing.last_seen,edge.last_seen)}
   const edges=[...edgeGroups.values()];
   return{...projected,nodes,edges,node_count:nodes.length,edge_count:edges.length,dashboard_projection:{...(projected.dashboard_projection||{}),hidden_context_node_count:before.length-prepared.length,merged_context_node_count:mergedContextNodeCount,hidden_orphan_file_node_count:0}};
 };
