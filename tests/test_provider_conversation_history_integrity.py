@@ -160,6 +160,14 @@ def _ollama_graph(tmp_path: Path, rounds: int = 3) -> tuple[dict[str, object], P
         {"id": "model-runtime:ollama:viewer-duplicate", "type": "model_runtime", "name": "ollama", "attributes": {"provider": "ollama", "endpoint": "http://127.0.0.1:11434"}},
         {"id": "model:ollama:tiny", "type": "model", "name": "tiny", "attributes": {"provider": "ollama"}},
     ])
+    # A runtime is a different entity from a caller. Explicit context evidence
+    # makes this a supported compression fixture, rather than equating them just
+    # because exactly one of each exists. Negative ancestry cases live separately.
+    materialized["edges"].append({
+        "id": "root-observed-runtime", "source": "agent:Ollama",
+        "target": "model-runtime:ollama:viewer-duplicate",
+        "relation": "OBSERVED_MODEL_RUNTIME", "causal": False,
+    })
     materialized["edges"].append({
         "id": "runtime-model",
         "source": "model-runtime:ollama:viewer-duplicate",
@@ -323,6 +331,10 @@ def test_ollama_dashboard_has_one_owner_node_and_folded_history(tmp_path: Path) 
             visible_ids = page.eval_on_selector_all(".node", "nodes=>nodes.map(node=>node.dataset.id)")
             assert "model-runtime:ollama:viewer-duplicate" not in visible_ids
             assert "agent:Ollama" in visible_ids
+            catalog = page.evaluate("window.__execweaveCore.getDisplayGraph().edges.find(e=>e.viewer_runtime_context)")
+            assert catalog["viewer_only"] is True and catalog["inferred"] is True
+            assert catalog["causal"] is False
+            assert {e["id"] for e in catalog["viewer_supporting_edges"]} == {"root-observed-runtime", "runtime-model"}
             page.eval_on_selector(
                 '.node[data-id="agent:Ollama"]',
                 "node=>node.dispatchEvent(new MouseEvent('click',{bubbles:true}))",
