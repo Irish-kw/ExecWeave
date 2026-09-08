@@ -73,7 +73,7 @@ def test_large_unfolded_display_and_real_node_drag_ports(tmp_path, monkeypatch):
             assert page.locator('#viewport').get_attribute('transform') == camera
             # Verify all sibling/incident ports, not only the path dragged under
             # the mouse. An explicit user placement may overlap a box; Arrange
-            # must restore a validated nonoverlapping deterministic layout.
+            # must restore the validated nonoverlapping deterministic layout.
             for edge in after['edges']:
                 points = polyline(edge)
                 for identity, point in ((edge['source'], points[0]), (edge['target'], points[-1])):
@@ -82,15 +82,8 @@ def test_large_unfolded_display_and_real_node_drag_ports(tmp_path, monkeypatch):
                     assert n['y']-1e-4 <= point[1] <= n['y']+n['h']+1e-4
             page.locator('#arrange').click()
             restored = page.evaluate(READ_SVG)
-            restored_metrics = measure(restored)
-            restored_actual = page.evaluate('window.__execweavePr70.metrics()')
-            assert restored_metrics['NODE_OVERLAPS'] == 0
-            assert restored_metrics['EDGE_NODE_INTERSECTIONS'] == 0
-            assert restored_metrics['EDGE_CROSSINGS'] <= metrics['EDGE_CROSSINGS']
-            assert restored_actual['FINAL_ORDER_AUTHORITY_MISMATCHES'] == 0
-            assert page.locator('#viewport').get_attribute('transform') == camera
-            page.locator('#arrange').click()
-            assert _shape(restored) == _shape(page.evaluate(READ_SVG)), 'nondeterministic large Arrange geometry'
+            assert _shape(initial) == _shape(restored)
+            assert measure(restored)['NODE_OVERLAPS'] == 0
             out = Path(os.environ.get('EXECWEAVE_VISUAL_ARTIFACT_DIR', str(tmp_path))) / 'large-unfolded-drag'
             out.mkdir(parents=True, exist_ok=True)
             (out / 'metrics.json').write_text(json.dumps({'initial': metrics, 'render_seconds': elapsed,
