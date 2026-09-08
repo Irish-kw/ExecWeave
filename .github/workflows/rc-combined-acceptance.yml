@@ -55,12 +55,17 @@ jobs:
         working-directory: ${{ runner.temp }}/execweave-combined
         run: python scripts/acceptance_source_provenance.py --output artifacts/combined/source-before.json
       - name: Ruff and complete pytest including Chromium
+        shell: bash
         working-directory: ${{ runner.temp }}/execweave-combined
         env:
           EXECWEAVE_VISUAL_ARTIFACT_DIR: artifacts/combined/visuals
         run: |
           python -m ruff check .
-          python -m pytest -q --junitxml=artifacts/combined/pytest.xml
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            xvfb-run -a python -m pytest -q --junitxml=artifacts/combined/pytest.xml
+          else
+            python -m pytest -q --junitxml=artifacts/combined/pytest.xml
+          fi
       - name: Native Python and owned cleanup journeys
         shell: bash
         working-directory: ${{ runner.temp }}/execweave-combined
