@@ -49,7 +49,11 @@ const out=window.__execweavePr70.projectionRepair(raw,display);
 if(before!==JSON.stringify(raw)||displayBefore!==JSON.stringify(display))throw new Error('evidence mutated');
 process.stdout.write(JSON.stringify(out));
 """
-    result = subprocess.run([executable, '-e', script], check=True, capture_output=True, text=True)
+    # Feed the full shared renderer via stdin; its size grows with unrelated
+    # layout features and exceeds Windows' command-line limit. Preserve every
+    # fixture byte and assertion instead of truncating or skipping any case.
+    result = subprocess.run([executable, '-'], input=script, check=True,
+                            capture_output=True, text=True, encoding='utf-8', timeout=30)
     return json.loads(result.stdout)
 
 

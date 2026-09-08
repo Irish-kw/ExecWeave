@@ -124,7 +124,12 @@ def static_probe(browser, manifest: dict, out: Path) -> dict:
     viewer = out / 'fixture-viewer.html'
     viewer.write_text(html, encoding='utf-8')
     errors, requests = [], []
-    page = browser.new_page(viewport={'width': 1440, 'height': 1000}, accept_downloads=True)
+    # Byte-repeatability requires equal visual input. Latest-node/edge CSS
+    # animations otherwise deliberately change dash offset between clicks.
+    # Use the supported OS preference (not injected CSS or a replacement SVG).
+    # Native live acceptance still runs with normal motion below.
+    page = browser.new_page(viewport={'width': 1440, 'height': 1000},
+                            accept_downloads=True, reduced_motion='reduce')
     page.on('pageerror', lambda e: errors.append(str(e)))
     page.on('console', lambda msg: errors.append(msg.text) if msg.type == 'error' else None)
     page.on('request', lambda r: requests.append(r.url))
