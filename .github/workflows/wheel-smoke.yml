@@ -1,6 +1,7 @@
 name: Wheel Install Smoke
 
 on:
+  pull_request:
   push:
     branches: [main]
     paths:
@@ -26,9 +27,25 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Build wheel
+      - name: Build wheel and sdist
         run: |
-          python -m pip install --upgrade build
-          python -m build --wheel
+          python -m pip install --upgrade build hatchling
+          python -m build
+      - name: Preserve resolved acceptance dependencies
+        shell: bash
+        run: |
+          wheel="$(python -c "from pathlib import Path; print(next(Path('dist').glob('*.whl')).resolve())")"
+          python -m pip download --dest acceptance-wheelhouse "$wheel[dev,e2e,release]" hatchling
+          python -m pip freeze > acceptance-wheelhouse/build-environment.txt
+          git rev-parse HEAD > acceptance-wheelhouse/source-sha.txt
+      - name: Upload reproducible package and dependency artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: installed-package-inputs-${{ matrix.os }}
+          path: |
+            dist
+            acceptance-wheelhouse
+          if-no-files-found: error
+          retention-days: 7
       - name: Clean wheel install smoke
         run: python scripts/check_wheel_install.py

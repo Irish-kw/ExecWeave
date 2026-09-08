@@ -45,10 +45,10 @@ PROJECTION_SCRIPT = r"""
     }
     return result;
   }
-  function supportFor(leaf,visible,byId,incoming){
-    const sources=new Set(),edges=new Map([[key(leaf),leaf]]),nodes=new Set([leaf.source,leaf.target]);
+  function supportFor(leaf,visible,byId,incoming,omitLeaf=false){
+    const sources=new Set(),edges=new Map(omitLeaf?[]:[[key(leaf),leaf]]),nodes=new Set([leaf.source,leaf.target]);
     const initial=joinScope(scope(leaf),scope(byId.get(leaf.source)));
-    if(!initial)return{sources:[],edges:[leaf],nodes:sorted(nodes),missingSources:[],identity:null,reason:'identity_conflict'};
+    if(!initial)return{sources:[],edges:omitLeaf?[]:[leaf],nodes:sorted(nodes),missingSources:[],identity:null,reason:'identity_conflict'};
     const queue=[[leaf.source,initial]],seen=new Set(),reasons=new Set(),missingSources=new Set();
     let resolvedIdentity={};
     for(let index=0;index<queue.length;index++){
@@ -87,7 +87,7 @@ PROJECTION_SCRIPT = r"""
       if(!incoming.has(edge.target))incoming.set(edge.target,[]);
       incoming.get(edge.target).push(edge);
     }
-    const nodes=[...(display.nodes||[])],edges=[...(display.edges||[])];
+    const nodes=[...(display.nodes||[])];let edges=[...(display.edges||[])];
     const visible=new Set(nodes.map(n=>n.id)),aliases=new Map(),groups=new Map(),contexts=new Map();
     for(const node of nodes){
       aliases.set(node.id,node.id);
@@ -96,12 +96,72 @@ PROJECTION_SCRIPT = r"""
         ...(a.viewer_folded_members||[]).map(n=>n.id)];
       for(const id of members)if(byId.has(id)&&byId.get(id)?.type!=='agent')aliases.set(id,node.id);
     }
+    // The existing tool presentation already composes call occurrences into one
+    // CALLED_TOOL relation. Validate that ownership and enrich its support rather
+    // than adding a second agent->tool RESOLVED_TOOL edge for the very same call.
+    const representedToolPaths=new Set(),acceptedToolCalls=new Set(),rejectedToolCalls=new Set();
+    let rejectedToolOccurrences=0;
+    const scopedRows=rows=>sorted(rows.map(row=>JSON.stringify(row))).map(row=>JSON.parse(row));
+    edges=edges.flatMap(presented=>{
+      if(presented.relation!=='CALLED_TOOL'||!Array.isArray(presented.viewer_tool_call_occurrences))return[presented];
+      const kept=[],allSupport=new Map(),allNodes=new Set(),identities=[];
+      for(const row of presented.viewer_tool_call_occurrences){
+        const ids=Array.isArray(row.call_ids)?row.call_ids:[];
+        const proofs=[];let valid=ids.length>0;
+        for(const id of ids){
+          const call=byId.get(id);
+          if(!call){valid=false;break;}
+          const leaves=rawEdges.filter(edge=>edge.source===id&&aliases.get(edge.target)===presented.target);
+          const candidates=leaves.length?leaves:[{source:id,target:presented.target}];
+          for(const leaf of candidates){
+            const proof=supportFor(leaf,visible,byId,incoming,!leaves.length);
+            if(proof.reason||proof.sources.length!==1||proof.sources[0]!==presented.source){valid=false;break;}
+            proofs.push(proof);
+          }
+          if(!valid)break;
+        }
+        if(!valid){rejectedToolOccurrences++;for(const id of ids)rejectedToolCalls.add(id);continue;}
+        const scopes=scopedRows(proofs.map(proof=>proof.identity));
+        kept.push({...copy(row),viewer_identity_scopes:scopes});identities.push(...scopes);
+        for(const proof of proofs){for(const edge of proof.edges)allSupport.set(key(edge),edge);for(const id of proof.nodes)allNodes.add(id);}
+        for(const id of ids){acceptedToolCalls.add(id);representedToolPaths.add(JSON.stringify([id,presented.target]));}
+      }
+      if(!kept.length)return[];
+      const result={...presented,count:kept.length,evidence_call_count:kept.length,
+        viewer_tool_call_occurrences:kept,viewer_identity_scopes:scopedRows(identities),
+        viewer_supporting_edges:[...allSupport.values()].sort((a,b)=>key(a).localeCompare(key(b))).map(copy),
+        viewer_supporting_nodes:sorted(allNodes).filter(id=>byId.has(id)).map(id=>copy(byId.get(id)))};
+      // If some occurrences were rejected, do not leave the rejected chronology
+      // or multiplicity on the surviving summary. The raw calls remain untouched.
+      if(kept.length!==presented.viewer_tool_call_occurrences.length){
+        for(const field of ['first_sequence','last_sequence']){
+          const values=kept.map(row=>row[field]).filter(Number.isInteger);
+          result[field]=values.length?(field==='first_sequence'?Math.min(...values):Math.max(...values)):null;
+        }
+        for(const field of ['first_seen','last_seen']){
+          const values=kept.map(row=>row[field]).filter(Boolean).sort();
+          result[field]=(field==='first_seen'?values[0]:values.at(-1))||null;
+        }
+      }
+      return[result];
+    });
+    for(let index=0;index<nodes.length;index++){
+      const node=nodes[index],attrs=node.attributes||{};
+      if(node.type!=='tool'||!Array.isArray(attrs.viewer_tool_call_occurrences))continue;
+      const keep=row=>(row.call_ids||[]).every(id=>acceptedToolCalls.has(id)&&!rejectedToolCalls.has(id));
+      const kept=attrs.viewer_tool_call_occurrences.filter(keep),rejected=attrs.viewer_tool_call_occurrences.filter(row=>!keep(row));
+      if(!rejected.length)continue;
+      nodes[index]={...node,attributes:{...attrs,viewer_tool_call_occurrences:kept,viewer_occurrences:kept,
+        viewer_occurrence_ids:kept.map(row=>row.invocation_id),viewer_occurrence_count:kept.length,
+        viewer_aggregated_tool_call_count:kept.length,viewer_unattributed_tool_call_occurrences:rejected}};
+    }
     const represented=new Set(edges.flatMap(edge=>[edge.id,...(edge.viewer_edge_occurrence_ids||[])]).filter(Boolean));
     const unresolved=[];
     for(const leaf of [...rawEdges].sort((a,b)=>key(a).localeCompare(key(b)))){
       if(leaf?.id&&represented.has(leaf.id))continue;
       const target=aliases.get(leaf?.target),source=byId.get(leaf?.source);
       if(!target||!source||visible.has(source.id)||!hiddenTypes.has(String(source.type||'')))continue;
+      if(representedToolPaths.has(JSON.stringify([leaf.source,target])))continue;
       const support=supportFor(leaf,visible,byId,incoming);
       if(support.reason){
         // Keep the original source and incident relation. This is not a guessed
@@ -153,6 +213,7 @@ PROJECTION_SCRIPT = r"""
     const keptEdges=edges.filter(e=>ids.has(e.source)&&ids.has(e.target));
     return{...display,nodes,edges:keptEdges,node_count:nodes.length,edge_count:keptEdges.length,
       dashboard_projection:{...(display.dashboard_projection||{}),hidden_bridge_edge_count:groups.size,
+        represented_tool_path_count:representedToolPaths.size,rejected_tool_occurrence_count:rejectedToolOccurrences,
         retained_context_node_count:contexts.size,unresolved_hidden_paths:unresolved,
         removed_projection_orphan_count:0,removed_projection_orphan_ids:[]}};
   }
