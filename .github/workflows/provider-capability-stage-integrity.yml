@@ -87,6 +87,24 @@ jobs:
               && -n "$threat_model_changed" ]]; then
             args+=(--allow-test-change "tests/test_threat_model.py=0.8.15 RC follow-up makes the existing outliving-child assertion hermetic against ambient host PID collisions; the historical test node ID and product expectation are unchanged")
           fi
+          if [[ "$HEAD_REF" == "fix/gif-dashboard-parity" ]]; then
+            while IFS= read -r path; do
+              case "$path" in
+                tests/test_dashboard_gif_export_e2e.py)
+                  args+=(--allow-test-change "$path=GIF export now records the real displayed SVG timeline instead of reconstructing animation from the final graph; the historical repeatable-download test node ID is retained and new screenshot-to-decoded-frame parity regressions are added")
+                  ;;
+                tests/test_live_logs_export.py)
+                  args+=(--allow-test-change "$path=the GIF contract now requires captureGifFrame and forbids the retired sortedGifSteps reconstruction path; historical test node IDs remain unchanged")
+                  ;;
+                tests/test_pr25_premerge_hardening_contract.py)
+                  args+=(--allow-test-change "$path=GIF export now freezes measured SVG geometry directly, so the historical hardening assertion must reject the old separate drawGifFrame renderer while retaining the same test node ID")
+                  ;;
+                tests/test_v069_dashboard_release.py)
+                  args+=(--allow-test-change "$path=the GIF encoder changed from the historical fixed-code replay implementation to the recorded-SVG encoder and is now validated through an independent GIF decoder; release/version assertions and historical test node IDs remain intact")
+                  ;;
+              esac
+            done < <(git diff --name-only "$BASELINE_REF...HEAD" -- tests)
+          fi
           if [[ "$HEAD_REF" == "fix/provider-isolation" ]]; then
             while IFS= read -r path; do
               case "$path" in
