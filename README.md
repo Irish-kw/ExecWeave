@@ -133,6 +133,15 @@ The dashboard is designed to keep large, multi-agent runs inspectable without ch
 - **Large-run folding:** high-cardinality node types can collapse older members while keeping them inspectable.
 - **Selection-focused layout:** selecting an agent or runtime object de-emphasizes unrelated graph traffic.
 
+**Download GIF** saves the graph viewport as it appeared while this Dashboard page
+was open and visible, including labels, folding, camera changes, and elapsed time
+(sampled at up to 10 frames per second). It excludes the inspector and logs. A
+reopened finished run has no recorded screen history and exports a still image.
+Keep the viewport size fixed for a consistent frame; resizing adds padding rather
+than rescaling older frames. Recording stops with an explicit message if the page
+is hidden during a live run, rendering is paused, or the 64 MB recording limit is
+reached; it never substitutes an animation reconstructed from the final graph.
+
 You can tune large-run rendering with:
 
 ```text

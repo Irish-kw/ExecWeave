@@ -25,14 +25,9 @@ def test_shared_dashboard_contains_premerge_hardening() -> None:
             in html
         )
 
-        # GIF export is a renderer too: adaptive nodes must not fall back to the old
-        # 160x50 replay rectangles or their old fixed-centre edge anchors.
-        assert "p.x+execweaveCameraWidth(node.id)" in html
-        assert "p.y+execweaveCameraHeight(node.id)" in html
-        assert (
-            "w=execweaveCameraWidth(node.id)*scale,h=execweaveCameraHeight(node.id)*scale"
-            in html
-        )
+        # Export freezes actual measured SVG geometry, not another graph layout.
+        assert "gifSvg.cloneNode(true)" in html
+        assert "drawGifFrame" not in html
 
         assert "maxX:maxX+160" not in html
         assert "maxY:maxY+50" not in html
