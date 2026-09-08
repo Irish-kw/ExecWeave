@@ -14,6 +14,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
+from .runtime_endpoint_availability import windows_exclusive_endpoint_available
+
 from .model_runtime import (
     append_model_runtime_records,
     llamacpp_models_to_events,
@@ -224,10 +226,11 @@ class _LiveProbeAdmission:
 def prepare_live_specialized_probe(command: list[str]) -> _LiveProbeAdmission:
     """Do not attach an already listening or uncertain endpoint to a new run.
 
-    Only a refused connection establishes that no listener was present at this
-    pre-launch boundary. Timeout, permission failure and an occupied non-HTTP
-    port are not authorization. This disables only automatic catalog polling;
-    command execution and explicit request/response capture remain unchanged.
+    A refused connection establishes absence at this pre-launch boundary. A
+    Windows connect timeout requires independent exclusive-bind proof for every
+    resolved loopback address; a timeout alone never authorizes a probe. Other
+    unknown/denied states abstain. This affects automatic catalog polling only,
+    not command execution or explicit request/response capture.
     """
     if not os.environ.get(_SEMANTIC_ENV):
         return _LiveProbeAdmission(None)
@@ -243,6 +246,9 @@ def prepare_live_specialized_probe(command: list[str]) -> _LiveProbeAdmission:
             pass
     except ConnectionRefusedError:
         return _LiveProbeAdmission(spec)
+    except TimeoutError:
+        if windows_exclusive_endpoint_available(str(address.hostname), int(address.port or 80)):
+            return _LiveProbeAdmission(spec)
     except OSError:
         pass
     print(
