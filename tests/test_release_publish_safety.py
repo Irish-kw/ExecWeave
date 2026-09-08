@@ -28,11 +28,15 @@ def test_pypi_job_uses_only_the_verified_ubuntu_distribution_artifact() -> None:
     assert 'already exists on PyPI' in text
 
 
-def test_release_version_is_newer_than_published_0816_baseline() -> None:
+def test_release_version_bump_is_deferred_to_release_only_stage() -> None:
     pyproject = Path('pyproject.toml').read_text(encoding='utf-8')
     init = Path('src/execweave/__init__.py').read_text(encoding='utf-8')
-    assert 'version = "0.8.17"' in pyproject
-    assert '__version__ = "0.8.17"' in init
+    # Feature RC remains on the published baseline. The integrity gate explicitly
+    # requires the version bump to land in a later release/* metadata-only PR.
+    assert 'version = "0.8.16"' in pyproject
+    assert '__version__ = "0.8.16"' in init
+    assert 'release/*' in Path('.github/workflows/provider-capability-stage-integrity.yml').read_text(encoding='utf-8')
+    assert "release tag {tag_version!r} does not match package version" in workflow()
 
 
 def test_platform_independent_wheel_source_is_forced_to_lf() -> None:
