@@ -54,12 +54,9 @@ execweaveDashboardGraph=function(data){
   }else if(antigravityRoot&&antigravityScoped.length){
     prepared=prepared.filter(node=>node.id!==antigravityRoot.id);
   }
-  const ollamaRoots=prepared.filter(node=>node?.type==='agent'&&['agent:Ollama','agent:ollama'].includes(String(node.id||'')));
-  const ollamaRuntimes=prepared.filter(node=>node?.type==='model_runtime'&&String(node?.attributes?.provider||'').toLowerCase()==='ollama');
-  if(ollamaRoots.length===1&&ollamaRuntimes.length===1){
-    const root=ollamaRoots[0],runtime=ollamaRuntimes[0];presentationAlias.set(runtime.id,root.id);
-    prepared=prepared.filter(node=>node.id!==runtime.id).map(node=>node.id===root.id?{...node,name:'/root'}:node);
-  }
+  // A single Ollama-looking agent and a single endpoint-scoped runtime are
+  // not the same identity. Keep runtime observations attached to that runtime;
+  // root/runtime relations, when actually recorded, remain explicit edges.
   const normalized=value=>String(value||'').trim().replaceAll('\\\\','/').replace(/\/+$/,'').toLowerCase();
   const canonicalKey=node=>{
     const type=String(node?.type||''),attrs=node?.attributes||{};

@@ -10,6 +10,7 @@ from pathlib import Path
 import execweave.auto_specialized as auto_module
 import execweave.collector as collector_module
 from execweave.live import run_live
+from model_probe_runtime_fixture import free_port, owned_server_command
 
 
 class _OllamaHandler(BaseHTTPRequestHandler):
@@ -228,108 +229,72 @@ def test_run_live_automatically_materializes_ollama_loaded_model(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    server, thread = _start_ollama_server(
-        {
-            "models": [
-                {
-                    "name": "live-model:latest",
-                    "size": 123,
-                    "size_vram": 100,
-                    "details": {"parameter_size": "8B"},
-                }
-            ]
-        }
-    )
-    port = server.server_address[1]
+    # The previous setup started an unrelated server before the child and then
+    # launched a sleeping Python process. That exercised the forbidden foreign
+    # attribution, not a successful server launch. Keep every positive assertion
+    # below, but have the observed child actually own and serve the endpoint.
+    payload = {"models": [{"name": "live-model:latest", "size": 123,
+        "size_vram": 100, "details": {"parameter_size": "8B"}}]}
+    port = free_port()
     monkeypatch.setenv("OLLAMA_HOST", f"127.0.0.1:{port}")
+    launch = owned_server_command(tmp_path, payload=payload, model="live-model:latest")
     monkeypatch.setattr(auto_module, "_PROBE_STARTUP_GRACE_SECONDS", 0.01)
     monkeypatch.setattr(auto_module, "_PROBE_INTERVAL_SECONDS", 0.02)
     monkeypatch.setattr(auto_module, "_PROBE_TIMEOUT_SECONDS", 0.20)
-    monkeypatch.setattr(
-        collector_module,
-        "resolve_launch_command",
-        lambda command: [sys.executable, "-c", "import time; time.sleep(0.25)"],
-    )
+    monkeypatch.setattr(collector_module, "resolve_launch_command", lambda command: launch)
 
-    try:
-        result = run_live(
-            ["ollama", "serve"],
-            watch_root=tmp_path,
-            output_dir=tmp_path / "ollama-live",
-            poll_interval=0.03,
-            collect_filesystem=False,
-            collect_network=False,
-            port=0,
-            open_browser=False,
-            linger_seconds=0,
-        )
-        assert result.return_code == 0
-        assert result.semantic_sidecar.exists()
-        graph = json.loads(result.graph.read_text(encoding="utf-8"))
-        assert graph["source_path"].endswith("events.semantic.jsonl")
-        assert any(edge["relation"] == "LOADED_MODEL" for edge in graph["edges"])
-        assert any(
-            node.get("type") == "model" and node.get("name") == "live-model:latest"
-            for node in graph["nodes"]
-        )
-    finally:
-        _stop_server(server, thread)
+    result = run_live(
+        ["ollama", "serve"], watch_root=tmp_path, output_dir=tmp_path / "ollama-live",
+        poll_interval=0.03, collect_filesystem=False, collect_network=False,
+        port=0, open_browser=False, linger_seconds=0,
+    )
+    assert result.return_code == 0
+    assert result.semantic_sidecar.exists()
+    graph = json.loads(result.graph.read_text(encoding="utf-8"))
+    assert graph["source_path"].endswith("events.semantic.jsonl")
+    assert any(edge["relation"] == "LOADED_MODEL" for edge in graph["edges"])
+    assert any(
+        node.get("type") == "model" and node.get("name") == "live-model:latest"
+        for node in graph["nodes"]
+    )
 
 
 def test_run_live_auto_probes_llamacpp_and_vllm_catalogs(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    server, thread = _start_models_server({"data": [{"id": "catalog-model", "owned_by": "local"}]})
-    port = server.server_address[1]
+    payload = {"data": [{"id": "catalog-model", "owned_by": "local"}]}
     monkeypatch.setattr(auto_module, "_PROBE_STARTUP_GRACE_SECONDS", 0.01)
     monkeypatch.setattr(auto_module, "_PROBE_INTERVAL_SECONDS", 0.02)
     monkeypatch.setattr(auto_module, "_PROBE_TIMEOUT_SECONDS", 0.20)
-    monkeypatch.setattr(
-        collector_module,
-        "resolve_launch_command",
-        lambda command: [sys.executable, "-c", "import time; time.sleep(0.25)"],
-    )
 
-    cases = (
-        (
-            "llamacpp",
-            ["llama-server", "--host", "127.0.0.1", "--port", str(port)],
-        ),
-        (
-            "vllm",
-            ["vllm", "serve", "model-a", "--host", "0.0.0.0", "--port", str(port)],
-        ),
-    )
-    try:
-        for runtime, command in cases:
-            result = run_live(
-                command,
-                watch_root=tmp_path,
-                output_dir=tmp_path / f"{runtime}-live",
-                poll_interval=0.03,
-                collect_filesystem=False,
-                collect_network=False,
-                port=0,
-                open_browser=False,
-                linger_seconds=0,
-            )
-            assert result.return_code == 0
-            graph = json.loads(result.graph.read_text(encoding="utf-8"))
-            assert graph["source_path"].endswith("events.semantic.jsonl")
-            assert any(edge["relation"] == "SERVES_MODEL" for edge in graph["edges"])
-            assert any(
-                node.get("type") == "model" and node.get("name") == "catalog-model"
-                for node in graph["nodes"]
-            )
-            records = [
-                json.loads(line)
-                for line in result.semantic_sidecar.read_text(encoding="utf-8").splitlines()
-            ]
-            assert records
-            assert all(record["attributes"]["provider"] == runtime for record in records)
-    finally:
-        _stop_server(server, thread)
+    for runtime in ("llamacpp", "vllm"):
+        port = free_port()
+        command = (["llama-server", "--host", "127.0.0.1", "--port", str(port)]
+            if runtime == "llamacpp" else
+            ["vllm", "serve", "model-a", "--host", "0.0.0.0", "--port", str(port)])
+        launch = owned_server_command(tmp_path, payload=payload, model="catalog-model",
+                                      endpoint=f"http://127.0.0.1:{port}")
+        monkeypatch.setattr(collector_module, "resolve_launch_command", lambda command: launch)
+        result = run_live(
+            command, watch_root=tmp_path, output_dir=tmp_path / f"{runtime}-live",
+            poll_interval=0.03, collect_filesystem=False, collect_network=False,
+            port=0, open_browser=False, linger_seconds=0,
+        )
+        assert result.return_code == 0
+        graph = json.loads(result.graph.read_text(encoding="utf-8"))
+        assert graph["source_path"].endswith("events.semantic.jsonl")
+        assert any(edge["relation"] == "SERVES_MODEL" for edge in graph["edges"])
+        assert any(
+            node.get("type") == "model" and node.get("name") == "catalog-model"
+            for node in graph["nodes"]
+        )
+        records = [
+            json.loads(line)
+            for line in result.semantic_sidecar.read_text(encoding="utf-8").splitlines()
+        ]
+        assert records
+        assert all(record["attributes"]["provider"] == runtime for record in records)
 
 
 def test_startup_grace_does_not_claim_preexisting_ollama_server(

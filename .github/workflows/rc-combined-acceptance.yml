@@ -24,7 +24,7 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
     env:
       # Freeze the companion; a moved tip or main is a hard failure, not a stale PASS.
-      RC_PR69_SHA: 493c90c11afb92e8294fee3463c57b69e7fc223b
+      RC_PR69_SHA: 79d51bc7f15bca07dee6733cfaceec3cc0d9f7f7
       RC_PR70_SHA: ${{ github.event.pull_request.head.sha }}
       RC_MAIN_SHA: ${{ github.event.pull_request.base.sha }}
       EXECWEAVE_E2E_REQUIRED: "1"
