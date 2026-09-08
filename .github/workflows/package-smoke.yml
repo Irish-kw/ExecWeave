@@ -6,6 +6,9 @@ on:
     paths:
       - "pyproject.toml"
       - "src/**"
+      - "scripts/check_wheel_install.py"
+      - "scripts/check_sdist_install.py"
+      - "scripts/check_distribution_contents.py"
       - ".github/workflows/package-smoke.yml"
   workflow_dispatch:
 
@@ -26,17 +29,9 @@ jobs:
           python -m pip install build twine
           python -m build
           python -m twine check dist/*
-      - name: Install clean wheel
-        shell: bash
-        run: |
-          wheel="$(ls dist/*.whl)"
-          python -m venv .wheel-smoke
-          .wheel-smoke/bin/python -m pip install --upgrade pip
-          .wheel-smoke/bin/python -m pip install "$wheel"
-      - name: Smoke installed entry points
-        shell: bash
-        run: |
-          .wheel-smoke/bin/execweave --help
-          .wheel-smoke/bin/execweave top --help
-          .wheel-smoke/bin/execweave-top --help
-          .wheel-smoke/bin/execweave-scalability --help
+      - name: Verify distribution contents match runtime source
+        run: python scripts/check_distribution_contents.py
+      - name: Clean wheel install/uninstall/reinstall
+        run: python scripts/check_wheel_install.py
+      - name: Clean sdist install/uninstall/reinstall
+        run: python scripts/check_sdist_install.py

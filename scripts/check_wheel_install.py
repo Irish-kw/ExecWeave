@@ -37,12 +37,14 @@ def main() -> int:
     wheel = wheels[0].resolve()
 
     with tempfile.TemporaryDirectory(prefix="execweave-wheel-smoke-") as directory:
-        env_root = Path(directory) / "venv"
+        root = Path(directory)
+        env_root = root / "venv"
+        work = root / "work"
+        work.mkdir()
         venv.EnvBuilder(with_pip=True, clear=True).create(env_root)
         python = _venv_python(env_root)
 
-        _run([str(python), "-m", "pip", "install", "--upgrade", "pip"], cwd=repo)
-        _run([str(python), "-m", "pip", "install", str(wheel)], cwd=repo)
+        _run([str(python), "-m", "pip", "install", str(wheel)], cwd=work)
         _run(
             [
                 str(python),
@@ -53,7 +55,18 @@ def main() -> int:
                     "print(version('execweave'))"
                 ),
             ],
-            cwd=repo,
+            cwd=work,
+        )
+        _run(
+            [
+                str(python), "-I", "-c",
+                (
+                    "from pathlib import Path; import execweave; "
+                    f"source=Path({str(repo)!r}).resolve(); module=Path(execweave.__file__).resolve(); "
+                    "assert not module.is_relative_to(source), (module, source); print(module)"
+                ),
+            ],
+            cwd=work,
         )
 
         commands = [
@@ -70,9 +83,17 @@ def main() -> int:
         for command in commands:
             if not Path(command[0]).is_file():
                 raise RuntimeError(f"installed console script is missing: {command[0]}")
-            _run(command, cwd=repo)
+            _run(command, cwd=work)
 
-    print(f"clean wheel install smoke passed for ExecWeave {expected_version}")
+        _run([str(python), "-m", "pip", "uninstall", "-y", "execweave"], cwd=work)
+        _run([str(python), "-I", "-c", "import importlib.util; assert importlib.util.find_spec('execweave') is None"], cwd=work)
+        for name in ("execweave", "execweave-top"):
+            if _console_script(env_root, name).exists():
+                raise RuntimeError(f"console script remained after uninstall: {name}")
+        _run([str(python), "-m", "pip", "install", str(wheel)], cwd=work)
+        _run([str(_console_script(env_root, "execweave")), "--help"], cwd=work)
+
+    print(f"clean wheel install/uninstall/reinstall smoke passed for ExecWeave {expected_version}")
     return 0
 
 

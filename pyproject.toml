@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "execweave"
-# ExecWeave v0.8.16 release metadata
-version = "0.8.16"
+# ExecWeave v0.8.17 release metadata
+version = "0.8.17"
 description = "Turn AI-agent runtime behavior into a local interactive execution graph."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -94,6 +94,17 @@ execweave-scalability = "execweave.scalability_benchmark:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/execweave"]
+
+# Keep source distributions hermetic. Release acceptance intentionally writes
+# screenshots, JUnit, graphs, and other evidence into the checkout before the
+# package build; those files must never become installable release content.
+[tool.hatch.build.targets.sdist]
+include = [
+  "/src/execweave",
+  "/pyproject.toml",
+  "/README.md",
+  "/LICENSE",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Release tag to publish
+        description: Existing published GitHub Release tag to publish
         required: true
         type: string
 
@@ -15,48 +15,138 @@ permissions:
 
 env:
   RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+  EXECWEAVE_E2E_REQUIRED: "1"
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  verify:
+    name: verify release (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Verify release tag matches package version
+      - name: Verify published release, tag, main ancestry, version, and PyPI uniqueness
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
+          case "$RELEASE_TAG" in v*) ;; *) echo "release tag must start with v" >&2; exit 1;; esac
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          git merge-base --is-ancestor HEAD origin/main
+          if git ls-files --eol src/execweave | grep -q 'w/crlf'; then
+            echo "release source checkout contains CRLF runtime files" >&2
+            git ls-files --eol src/execweave | grep 'w/crlf' >&2
+            exit 1
+          fi
           python - <<'PY'
           import os
           import tomllib
+          import urllib.error
+          import urllib.request
           from pathlib import Path
 
-          package_version = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
-          tag_version = os.environ["RELEASE_TAG"].removeprefix("v")
+          package_version = tomllib.loads(Path('pyproject.toml').read_text(encoding='utf-8'))['project']['version']
+          tag_version = os.environ['RELEASE_TAG'].removeprefix('v')
           if tag_version != package_version:
-              raise SystemExit(
-                  f"release tag {tag_version!r} does not match package version {package_version!r}"
-              )
-          print(f"Publishing ExecWeave {package_version}")
+              raise SystemExit(f'release tag {tag_version!r} does not match package version {package_version!r}')
+          url = f'https://pypi.org/pypi/execweave/{package_version}/json'
+          try:
+              urllib.request.urlopen(url, timeout=20).close()
+          except urllib.error.HTTPError as error:
+              if error.code != 404:
+                  raise
+          else:
+              raise SystemExit(f'ExecWeave {package_version} already exists on PyPI')
+          print(f'Verified unreleased ExecWeave {package_version}')
           PY
-      - name: Build and validate distributions
+      - name: Install full release verification dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install build twine
-          python -m build
+          python -m pip install -e ".[dev,e2e,release]"
+          python -m playwright install --with-deps chromium
+      - name: Provision Linux collector
+        if: runner.os == 'Linux'
+        run: command -v strace >/dev/null || (sudo apt-get update && sudo apt-get install -y strace)
+      - name: Capture exact source before release verification
+        run: python scripts/acceptance_source_provenance.py --output artifacts/release/source-before.json
+      - name: Ruff and complete pytest including Chromium
+        shell: bash
+        env:
+          EXECWEAVE_VISUAL_ARTIFACT_DIR: artifacts/release/visuals
+        run: |
+          python -m ruff check .
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            xvfb-run -a python -m pytest -q --junitxml=artifacts/release/pytest.xml
+          else
+            python -m pytest -q --junitxml=artifacts/release/pytest.xml
+          fi
+      - name: Native, auth-compatible viewer, and owned cleanup journeys
+        shell: bash
+        run: |
+          python scripts/dashboard_acceptance.py --mode offline --output-dir artifacts/release/offline --require offline-ollama-fixture
+          python scripts/owned_cleanup_acceptance.py --output-dir artifacts/release/cleanup
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            xvfb-run -a python scripts/python_native_acceptance.py --output-dir artifacts/release/native --require python
+          else
+            python scripts/python_native_acceptance.py --output-dir artifacts/release/native --require python
+          fi
+      - name: Build distributions reproducibly
+        shell: bash
+        run: |
+          rm -rf dist dist-repro
+          export SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
+          python -m build --outdir dist
+          python -m build --outdir dist-repro
           python -m twine check dist/*
-      - name: Clean wheel install smoke
-        run: python scripts/check_wheel_install.py
+          python - <<'PY'
+          from hashlib import sha256
+          from pathlib import Path
+          left = {p.name: sha256(p.read_bytes()).hexdigest() for p in Path('dist').iterdir() if p.is_file()}
+          right = {p.name: sha256(p.read_bytes()).hexdigest() for p in Path('dist-repro').iterdir() if p.is_file()}
+          if left != right:
+              raise SystemExit(f'non-reproducible distributions: first={left}, second={right}')
+          print(left)
+          PY
+          python scripts/check_distribution_contents.py
+      - name: Clean wheel and sdist installation
+        run: |
+          python scripts/check_wheel_install.py
+          python scripts/check_sdist_install.py
+      - name: Installed wheel Dashboard, GIF, live/final parity
+        run: python scripts/check_installed_dashboard.py --output artifacts/release/installed
+      - name: Verify release acceptance did not mutate source
+        if: always()
+        run: python scripts/acceptance_source_provenance.py --output artifacts/release/source-after.json --compare artifacts/release/source-before.json
+      - name: Record release candidate identity
+        if: success()
+        shell: bash
+        run: |
+          git rev-parse HEAD > artifacts/release/RELEASE_SHA.txt
+          git rev-parse HEAD^{tree} > artifacts/release/RELEASE_TREE.txt
+          sha256sum dist/* > artifacts/release/DISTRIBUTION_SHA256.txt
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: python-package-distributions
-          path: dist/
+          name: python-package-distributions-${{ matrix.os }}
+          path: |
+            dist/
+            artifacts/release/
           if-no-files-found: error
+          retention-days: 14
 
   publish:
-    needs: build
+    needs: verify
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -66,22 +156,24 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: python-package-distributions
-          path: dist/
-      - name: Publish package distributions to PyPI
+          name: python-package-distributions-ubuntu-latest
+          path: candidate
+      - name: Publish the verified Ubuntu distribution artifact to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: candidate/dist/
 
   release-assets:
-    needs: [build, publish]
+    needs: [verify, publish]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: python-package-distributions
-          path: dist/
-      - name: Attach distributions to GitHub Release
+          name: python-package-distributions-ubuntu-latest
+          path: candidate
+      - name: Attach the same verified distributions to GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$RELEASE_TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
+        run: gh release upload "$RELEASE_TAG" candidate/dist/* --clobber --repo "$GITHUB_REPOSITORY"
