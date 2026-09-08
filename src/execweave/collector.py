@@ -16,6 +16,7 @@ from .auto_specialized import (
     auto_specialized_launch,
     auto_specialized_probe,
     prepare_post_command_specialized_probe,
+    prepare_live_specialized_probe,
     run_post_command_specialized_probe,
 )
 from .command import resolve_launch_command
@@ -209,6 +210,7 @@ class RuntimeCollector:
         collector_error_type: str | None = None
         workload_terminated_due_to_collector_error = False
         subreaper_previous: bool | None = None
+        live_probe_admission = prepare_live_specialized_probe(command)
         post_command_probe = prepare_post_command_specialized_probe(command)
         try:
             if watcher is not None:
@@ -235,7 +237,7 @@ class RuntimeCollector:
                     if snapshot is not None:
                         self._record_process_start(snapshot, parent=session, relation="LAUNCHED")
 
-                    with auto_specialized_probe(command):
+                    with auto_specialized_probe(command, admission=live_probe_admission):
                         while process.poll() is None:
                             self._sample_process_tree(root)
                             time.sleep(self.poll_interval)

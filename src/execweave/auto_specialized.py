@@ -214,6 +214,45 @@ def _probe_spec(command: list[str]) -> _ProbeSpec | None:
     return None
 
 
+@dataclass(frozen=True)
+class _LiveProbeAdmission:
+    # Prepared before the child (and any managed relay) is launched. A grace
+    # period is a scheduling aid, never evidence of endpoint ownership.
+    spec: _ProbeSpec | None
+
+
+def prepare_live_specialized_probe(command: list[str]) -> _LiveProbeAdmission:
+    """Do not attach an already listening or uncertain endpoint to a new run.
+
+    Only a refused connection establishes that no listener was present at this
+    pre-launch boundary. Timeout, permission failure and an occupied non-HTTP
+    port are not authorization. This disables only automatic catalog polling;
+    command execution and explicit request/response capture remain unchanged.
+    """
+    if not os.environ.get(_SEMANTIC_ENV):
+        return _LiveProbeAdmission(None)
+    spec = _probe_spec(command)
+    if spec is None:
+        return _LiveProbeAdmission(None)
+    address = urlsplit(spec.endpoint)
+    try:
+        with socket.create_connection(
+            (str(address.hostname), int(address.port or 80)),
+            timeout=_PROBE_TIMEOUT_SECONDS,
+        ):
+            pass
+    except ConnectionRefusedError:
+        return _LiveProbeAdmission(spec)
+    except OSError:
+        pass
+    print(
+        f"ExecWeave {spec.runtime} probe: endpoint {spec.endpoint} was not "
+        "proven unused before launch; automatic catalog evidence is disabled.",
+        file=sys.stderr,
+    )
+    return _LiveProbeAdmission(None)
+
+
 def _get_json(url: str, *, timeout: float) -> dict[str, object]:
     request = Request(url, headers={"Accept": "application/json"})
     with urlopen(request, timeout=timeout) as response:
@@ -462,10 +501,18 @@ def auto_specialized_launch(
 
 
 @contextmanager
-def auto_specialized_probe(command: list[str]) -> Iterator[None]:
-    """Run supported local specialized probes without affecting command execution."""
+def auto_specialized_probe(
+    command: list[str],
+    *,
+    admission: _LiveProbeAdmission | None = None,
+) -> Iterator[None]:
+    """Poll a prepared launch, or an explicitly requested library observation.
+
+    RuntimeCollector always supplies pre-launch admission. A direct library
+    caller without admission retains the explicit endpoint-observation API.
+    """
     configured_sidecar = os.environ.get(_SEMANTIC_ENV)
-    spec = _probe_spec(command)
+    spec = admission.spec if admission is not None else _probe_spec(command)
     if not configured_sidecar or spec is None:
         yield
         return
