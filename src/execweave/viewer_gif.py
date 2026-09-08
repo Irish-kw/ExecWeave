@@ -28,30 +28,46 @@ function captureGifFrame(_force=false){return null;}
 function gifEdgeId(edge){
   return edge?.id||`${edge?.source||''}:${edge?.relation||''}:${edge?.target||''}`;
 }
-function gifNodeMoment(node){
-  return String(node?.first_seen||node?.last_seen||'');
+function gifStableCompare(a,b){return a<b?-1:a>b?1:0;}
+function gifMoment(item){
+  const sequence=Number.isSafeInteger(item?.first_sequence)&&item.first_sequence>=0?item.first_sequence:null;
+  const parsed=Date.parse(String(item?.first_seen||item?.timestamp||''));
+  return{sequence,time:Number.isFinite(parsed)?parsed:null};
 }
-function gifEdgeMoment(edge){
-  const sequence=Number.isInteger(edge?.first_sequence)?edge.first_sequence:
-    (Number.isInteger(edge?.last_sequence)?edge.last_sequence:Number.MAX_SAFE_INTEGER);
-  return{sequence,time:String(edge?.first_seen||edge?.last_seen||''),id:gifEdgeId(edge)};
-}
-function gifCompareEdges(a,b){
-  const am=gifEdgeMoment(a),bm=gifEdgeMoment(b);
-  if(am.sequence!==bm.sequence)return am.sequence-bm.sequence;
-  const byTime=am.time.localeCompare(bm.time);
-  return byTime||am.id.localeCompare(bm.id);
-}
-function gifCompareNodes(a,b){
-  const byTime=gifNodeMoment(a).localeCompare(gifNodeMoment(b));
-  return byTime||String(a?.id||'').localeCompare(String(b?.id||''));
+function gifOrderedEvents(nodes,edges){
+  const events=[
+    ...edges.map(edge=>({kind:'edge',id:gifEdgeId(edge),item:edge,...gifMoment(edge)})),
+    ...nodes.map(node=>({kind:'node',id:node.id,item:node,...gifMoment(node)})),
+  ];
+  const tie=(a,b)=>(a.kind===b.kind?0:a.kind==='edge'?-1:1)||gifStableCompare(a.id,b.id);
+  const byTime=(a,b)=>((a.time??Infinity)-(b.time??Infinity))||tie(a,b);
+  const sequenced=events.filter(event=>event.sequence!==null)
+    .sort((a,b)=>a.sequence-b.sequence||byTime(a,b));
+  // Sequence is authoritative even under clock skew. Insert timestamp-only
+  // observations between monotone sequence/time anchors; do not use a pairwise
+  // sequence-or-time comparator, which can form cycles and depend on input order.
+  const clock=[];let latest=-Infinity;
+  for(const event of sequenced){latest=Math.max(latest,event.time??-Infinity);clock.push(latest);}
+  const buckets=Array.from({length:sequenced.length+1},()=>[]);
+  for(const event of events){
+    if(event.sequence!==null)continue;
+    let lo=0,hi=clock.length;
+    if(event.time===null)lo=hi;
+    else while(lo<hi){const mid=(lo+hi)>>1;if(clock[mid]<=event.time)lo=mid+1;else hi=mid;}
+    buckets[lo].push(event);
+  }
+  const ordered=[];
+  for(let i=0;i<buckets.length;i++){
+    for(const event of buckets[i].sort(byTime))ordered.push(event);
+    if(i<sequenced.length)ordered.push(sequenced[i]);
+  }
+  return ordered;
 }
 function gifTopologySteps(graph){
   const nodes=[...(graph?.nodes||[])].filter(node=>node?.id);
   const nodeIds=new Set(nodes.map(node=>node.id));
   const edges=[...(graph?.edges||[])]
-    .filter(edge=>edge&&nodeIds.has(edge.source)&&nodeIds.has(edge.target))
-    .sort(gifCompareEdges);
+    .filter(edge=>edge&&nodeIds.has(edge.source)&&nodeIds.has(edge.target));
   const seenNodes=new Set(),seenEdges=new Set(),steps=[];
   const pushNode=nodeId=>{
     if(!nodeId||seenNodes.has(nodeId)||!nodeIds.has(nodeId))return;
@@ -60,18 +76,21 @@ function gifTopologySteps(graph){
   const pushEdge=edge=>{
     const id=gifEdgeId(edge);
     if(!id||seenEdges.has(id))return;
-    // Never reveal two new nodes in one frame. The source gets its own frame first;
-    // the target may then appear together with the edge that introduces it.
     if(!seenNodes.has(edge.source))pushNode(edge.source);
     if(!seenNodes.has(edge.target)){
       seenNodes.add(edge.target);seenEdges.add(id);
-      steps.push({nodeId:edge.target,edgeId:id});
-      return;
+      steps.push({nodeId:edge.target,edgeId:id});return;
     }
     seenEdges.add(id);steps.push({nodeId:null,edgeId:id});
   };
-  for(const edge of edges)pushEdge(edge);
-  for(const node of nodes.sort(gifCompareNodes))pushNode(node.id);
+  const ordered=gifOrderedEvents(nodes,edges);
+  // Only explicit root identity establishes initial context; do not guess that
+  // an arbitrary disconnected node or the first edge's source is the root.
+  const roots=nodes.filter(node=>node.type==='agent'&&
+    (node.attributes?.agent_path==='/root'||node.agent_path==='/root'||node.name==='/root'));
+  const rootIds=new Set(roots.map(node=>node.id));
+  for(const event of ordered)if(event.kind==='node'&&rootIds.has(event.id))pushNode(event.id);
+  for(const event of ordered){if(event.kind==='edge')pushEdge(event.item);else pushNode(event.id);}
   return steps;
 }
 function gifStepDelayMs(stepCount){
@@ -135,7 +154,19 @@ function gifSnapshot(visibleNodeIds=null,visibleEdgeIds=null){
   dot.setAttribute('fill',`color-mix(in srgb,${getComputedStyle(gifSvg).getPropertyValue('--border')} 52%,transparent)`);
   pattern.appendChild(dot);defs.appendChild(pattern);clone.insertBefore(defs,background);
   const paper=background.cloneNode();paper.setAttribute('fill','url(#execweave-gif-paper)');background.after(paper);
-  return{svg:new XMLSerializer().serializeToString(clone),width,height};
+  return{svg:new XMLSerializer().serializeToString(clone),width,height,element:clone};
+}
+function gifReplaySnapshot(base,visibleNodeIds,visibleEdgeIds){
+  // Freeze geometry, camera, filtering, labels and theme once per export. A UI
+  // update during asynchronous rasterization must never rewrite later frames.
+  const clone=base.element.cloneNode(true);
+  for(const node of clone.querySelectorAll('.node[data-id]')){
+    if(!visibleNodeIds.has(node.getAttribute('data-id')))node.remove();
+  }
+  for(const edge of clone.querySelectorAll('.edge[data-edge-id],.edge-hit[data-edge-id],.label[data-edge-id]')){
+    if(!visibleEdgeIds.has(edge.getAttribute('data-edge-id')))edge.remove();
+  }
+  return{svg:new XMLSerializer().serializeToString(clone),width:base.width,height:base.height};
 }
 
 function pushWord(out,value){out.push(value&255,(value>>8)&255);}
@@ -212,27 +243,25 @@ async function downloadGif(){
   if(replaying){gifNotice.textContent='Wait for replay to finish before exporting.';return;}
   const protective=document.getElementById('protective');
   if(protective&&!protective.hidden){gifNotice.textContent='GIF unavailable: graph rendering is paused.';return;}
-  const graph=core.getDisplayGraph?.()||core.getGraph?.()||{};
-  const session=graph.session_id||core.getGraph?.()?.session_id||'run';
-  const steps=gifTopologySteps(graph);
-  if(!steps.length||!gifSvg.querySelector('.node')){gifNotice.textContent='No visible graph to replay.';return;}
-  const base=gifSnapshot();if(!base)return;
-  if(base.width>65535||base.height>65535){gifNotice.textContent='GIF unavailable: viewport is too large.';return;}
-
+  const original=gifButton.textContent,replayWasDisabled=replayButton.disabled;
   gifExporting=true;gifButton.disabled=true;replayButton.disabled=true;
-  const original=gifButton.textContent,visibleNodes=new Set(),visibleEdges=new Set();
-  const stepDelay=gifStepDelayMs(steps.length);
-  let encodedBytes=0;
   try{
+    const graph=core.getDisplayGraph?.()||core.getGraph?.()||{};
+    const session=graph.session_id||core.getGraph?.()?.session_id||'run';
+    const steps=gifTopologySteps(graph);
+    if(!steps.length||!gifSvg.querySelector('.node')){gifNotice.textContent='No visible graph to replay.';return;}
+    const base=gifSnapshot();if(!base){gifNotice.textContent='GIF unavailable: graph viewport has no size.';return;}
+    if(base.width>65535||base.height>65535){gifNotice.textContent='GIF unavailable: viewport is too large.';return;}
+    const visibleNodes=new Set(),visibleEdges=new Set(),stepDelay=gifStepDelayMs(steps.length);
     const header=[];pushText(header,'GIF89a');pushWord(header,base.width);pushWord(header,base.height);header.push(0x70,0,0);
     header.push(0x21,0xFF,0x0B);pushText(header,'NETSCAPE2.0');header.push(3,1,0,0,0);
-    const parts=[Uint8Array.from(header)];
+    const parts=[Uint8Array.from(header)];let encodedBytes=header.length;
     for(let i=0;i<steps.length;i++){
       const step=steps[i];
       if(step.nodeId)visibleNodes.add(step.nodeId);
       if(step.edgeId)visibleEdges.add(step.edgeId);
       gifButton.textContent=`Encoding ${i+1}/${steps.length}`;await sleep(0);
-      const frame=gifSnapshot(visibleNodes,visibleEdges);if(!frame)continue;
+      const frame=gifReplaySnapshot(base,visibleNodes,visibleEdges);
       const raster=await rasterGifFrame(frame,base.width,base.height);
       const frameParts=gifFrameParts(raster,base.width,base.height,i===steps.length-1?GIF_FINAL_HOLD_MS:stepDelay);
       for(const part of frameParts){encodedBytes+=part.byteLength;if(encodedBytes>GIF_MAX_BYTES)throw new Error('topology replay exceeded 64 MB');parts.push(part);}
@@ -243,7 +272,7 @@ async function downloadGif(){
     setTimeout(()=>URL.revokeObjectURL(url),1000);
     gifNotice.textContent=`Saved node-by-node replay (${steps.length} topology steps).`;
   }catch(error){gifNotice.textContent=`GIF export failed: ${error.message}`;}
-  finally{gifExporting=false;gifButton.disabled=false;replayButton.disabled=false;gifButton.textContent=original;}
+  finally{gifExporting=false;gifButton.disabled=false;replayButton.disabled=replayWasDisabled;gifButton.textContent=original;}
 }
 if(typeof window!=='undefined')window.__execweaveGifTopologySteps=gifTopologySteps;
 """
