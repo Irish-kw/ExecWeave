@@ -95,6 +95,14 @@ execweave-scalability = "execweave.scalability_benchmark:main"
 [tool.hatch.build.targets.wheel]
 packages = ["src/execweave"]
 
+[tool.hatch.build.targets.sdist]
+include = [
+  "/src/execweave",
+  "/pyproject.toml",
+  "/README.md",
+  "/LICENSE",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]

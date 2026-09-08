@@ -21,6 +21,27 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Archive exact source provenance
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/source-provenance"
+          git rev-parse HEAD > "$RUNNER_TEMP/source-provenance/HEAD.txt"
+          git rev-parse HEAD^{tree} > "$RUNNER_TEMP/source-provenance/TREE.txt"
+          git status --porcelain > "$RUNNER_TEMP/source-provenance/status.txt"
+          git bundle create "$RUNNER_TEMP/source-provenance/source.bundle" --all
+
+      - name: Upload exact source provenance
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: rc-source-provenance
+          path: ${{ runner.temp }}/source-provenance
+          if-no-files-found: error
+          retention-days: 7
 
       - uses: actions/setup-python@v5
         with:
@@ -29,6 +50,9 @@ jobs:
 
       - name: Install
         run: python -m pip install -e ".[dev,e2e]"
+
+      - name: Capture exact browser acceptance source
+        run: python scripts/acceptance_source_provenance.py --output acceptance-source-before.json
 
       - name: Install Chromium
         run: python -m playwright install --with-deps chromium
@@ -77,6 +101,10 @@ jobs:
           --output-dir "${{ github.workspace }}/artifacts/dashboard-acceptance/python-native"
           --require python
 
+      - name: Verify browser acceptance did not mutate source
+        if: always() && hashFiles('acceptance-source-before.json') != ''
+        run: python scripts/acceptance_source_provenance.py --output acceptance-source-after.json --compare acceptance-source-before.json
+
       - name: Upload visual release evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -85,5 +113,8 @@ jobs:
           path: |
             visual-artifacts
             artifacts/dashboard-acceptance
+            viewer-pytest-results.xml
+            acceptance-source-before.json
+            acceptance-source-after.json
           if-no-files-found: error
           retention-days: 7
