@@ -24,6 +24,7 @@ def test_layout_v2_is_installed_after_pr70() -> None:
     assert "geometryKind:'shared-resource-bus'" in DASHBOARD_HTML
     assert "mode:layoutMode" in DASHBOARD_HTML
     assert "layoutMode==='arrange'?4:2" in DASHBOARD_HTML
+    assert "execweaveLayoutV2FinalizeTopology" in DASHBOARD_HTML
 
 
 def test_final_order_is_single_authority_and_bus_uses_one_channel() -> None:
@@ -66,6 +67,7 @@ global.execweaveGeometry={
     const nums=[...String(d).matchAll(/[-+]?(?:\d*\.\d+|\d+\.?\d*)/g)].map(m=>Number(m[0]));
     return [{x:nums[0]||0,y:nums[1]||0},{x:nums.at(-2)||0,y:nums.at(-1)||0}];
   },
+  crosses:()=>false,
   throughBox:()=>false,
 };
 """
@@ -73,7 +75,8 @@ global.execweaveGeometry={
         + r"""
 window.__execweaveLayoutV2.syncFinalOrder(execweaveTopology,positions);
 const byY=[...positions.keys()].filter(id=>id!=='tool').sort((x,y)=>positions.get(x).y-positions.get(y).y);
-const orders=byY.map(id=>execweaveTopology.spec.get(id).order);
+const semanticOrders=byY.map(id=>execweaveTopology.spec.get(id).order);
+const finalOrders=byY.map(id=>execweaveTopology.spec.get(id).finalOrder);
 for(const edge of edges){
   const sourceIndex=byY.indexOf(edge.source);
   execweaveTopology.sourcePort.set(edge.id,{index:0,total:1});
@@ -82,7 +85,7 @@ for(const edge of edges){
 const routes=edges.map(edge=>window.__execweaveLayoutV2.busRoute(edge));
 const trunks=routes.map(route=>Number(route.d.match(/ H ([^ ]+) V /)[1]));
 process.stdout.write(JSON.stringify({
-  byY,orders,trunks,
+  byY,semanticOrders,finalOrders,trunks,
   mismatch:window.__execweaveLayoutV2.orderMismatches(),
   hub:window.__execweaveLayoutV2.hubInversionRate(),
   packing:window.__execweaveLayoutV2.packingWidth([{w:200,h:80},{w:120,h:80},{w:120,h:80}],400,64),
@@ -100,7 +103,8 @@ process.stdout.write(JSON.stringify({
     )
     payload = json.loads(proc.stdout)
     assert payload["byY"] == ["b", "c", "a"]
-    assert payload["orders"] == [0, 1, 2]
+    assert payload["semanticOrders"] == [1, 2, 0]
+    assert payload["finalOrders"] == [0, 1, 2]
     assert payload["mismatch"] == 0
     assert payload["hub"] == 0
     assert len(set(payload["trunks"])) == 1
