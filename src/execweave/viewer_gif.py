@@ -1,4 +1,4 @@
-"""Record the displayed SVG, rather than inventing history from the final graph."""
+"""Export a node-by-node replay using the Dashboard's real rendered SVG geometry."""
 
 GIF_SCRIPT = r"""
 const gifSvg=document.getElementById('svg');
@@ -6,21 +6,12 @@ const gifNotice=document.createElement('span');
 gifNotice.id='gif-notice';gifNotice.setAttribute('role','status');
 gifNotice.style.cssText='font-size:11px;color:var(--muted);max-width:230px';
 finishedActions.appendChild(gifNotice);
-const gifScope='Graph viewport only, at screen resolution. Records this page while it is visible; reopening a finished run exports a still image.';
+const gifScope="Graph viewport only. Exports a node-by-node topology replay using this Dashboard's real node positions, labels, edge paths, folding, theme, and camera.";
 gifButton.title=gifScope;
 gifButton.setAttribute('aria-description',gifScope);
-// Keep actual display states, including folding, labels, edge routing and camera.
-// Never discard old states silently to meet a frame or memory cap.
-const GIF_INTERVAL=100,GIF_MAX_BYTES=64*1024*1024;
-const gifHistory=[];
-let gifSnapshotOnly=!!window.__execweaveStaticMode;
-let gifBytes=0,gifSession=null,gifFailure='',gifExporting=false,gifLastSample=0,gifLastSvg='',gifEpoch=0;
-let gifDirty=true;
-const gifObserver=new MutationObserver(()=>{gifDirty=true;});
-gifObserver.observe(gifSvg,{subtree:true,childList:true,attributes:true,characterData:true});
-gifObserver.observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
-const gifResizeObserver=new ResizeObserver(()=>{gifDirty=true;});
-gifResizeObserver.observe(gifSvg);
+const GIF_MAX_BYTES=64*1024*1024,GIF_FINAL_HOLD_MS=900;
+let gifExporting=false;
+
 const gifProperties=[
   'color','fill','fill-opacity','fill-rule','stroke','stroke-width','stroke-opacity',
   'stroke-dasharray','stroke-dashoffset','stroke-linecap','stroke-linejoin',
@@ -30,39 +21,103 @@ const gifProperties=[
   'white-space','transform','transform-origin','transform-box','vector-effect',
   'marker-start','marker-mid','marker-end','clip-path','rx','ry'
 ];
-function gifError(message){
-  gifFailure=message;gifNotice.textContent=message;gifButton.disabled=true;
+
+function observeGifPayload(_data){}
+function captureGifFrame(_force=false){return null;}
+
+function gifEdgeId(edge){
+  return edge?.id||`${edge?.source||''}:${edge?.relation||''}:${edge?.target||''}`;
 }
-function observeGifPayload(data){
-  if(!gifHistory.length&&data.live_finished)gifSnapshotOnly=true;
-  if(!data.live_finished&&core.getGraph()?.session_id!==gifSession)gifSnapshotOnly=false;
+function gifNodeMoment(node){
+  return String(node?.first_seen||node?.last_seen||'');
 }
-function gifSnapshot(){
+function gifEdgeMoment(edge){
+  const sequence=Number.isInteger(edge?.first_sequence)?edge.first_sequence:
+    (Number.isInteger(edge?.last_sequence)?edge.last_sequence:Number.MAX_SAFE_INTEGER);
+  return{sequence,time:String(edge?.first_seen||edge?.last_seen||''),id:gifEdgeId(edge)};
+}
+function gifCompareEdges(a,b){
+  const am=gifEdgeMoment(a),bm=gifEdgeMoment(b);
+  if(am.sequence!==bm.sequence)return am.sequence-bm.sequence;
+  const byTime=am.time.localeCompare(bm.time);
+  return byTime||am.id.localeCompare(bm.id);
+}
+function gifCompareNodes(a,b){
+  const byTime=gifNodeMoment(a).localeCompare(gifNodeMoment(b));
+  return byTime||String(a?.id||'').localeCompare(String(b?.id||''));
+}
+function gifTopologySteps(graph){
+  const nodes=[...(graph?.nodes||[])].filter(node=>node?.id);
+  const nodeIds=new Set(nodes.map(node=>node.id));
+  const edges=[...(graph?.edges||[])]
+    .filter(edge=>edge&&nodeIds.has(edge.source)&&nodeIds.has(edge.target))
+    .sort(gifCompareEdges);
+  const seenNodes=new Set(),seenEdges=new Set(),steps=[];
+  const pushNode=nodeId=>{
+    if(!nodeId||seenNodes.has(nodeId)||!nodeIds.has(nodeId))return;
+    seenNodes.add(nodeId);steps.push({nodeId,edgeId:null});
+  };
+  const pushEdge=edge=>{
+    const id=gifEdgeId(edge);
+    if(!id||seenEdges.has(id))return;
+    // Never reveal two new nodes in one frame. The source gets its own frame first;
+    // the target may then appear together with the edge that introduces it.
+    if(!seenNodes.has(edge.source))pushNode(edge.source);
+    if(!seenNodes.has(edge.target)){
+      seenNodes.add(edge.target);seenEdges.add(id);
+      steps.push({nodeId:edge.target,edgeId:id});
+      return;
+    }
+    seenEdges.add(id);steps.push({nodeId:null,edgeId:id});
+  };
+  for(const edge of edges)pushEdge(edge);
+  for(const node of nodes.sort(gifCompareNodes))pushNode(node.id);
+  return steps;
+}
+function gifStepDelayMs(stepCount){
+  if(stepCount<=1)return GIF_FINAL_HOLD_MS;
+  return Math.max(90,Math.min(180,Math.round(7000/Math.max(1,stepCount))));
+}
+function gifSnapshot(visibleNodeIds=null,visibleEdgeIds=null){
   const box=gifSvg.getBoundingClientRect();
   const width=Math.round(box.width),height=Math.round(box.height);
   if(!width||!height)return null;
   const clone=gifSvg.cloneNode(true);
   const originals=[gifSvg,...gifSvg.querySelectorAll('*')];
   const copies=[clone,...clone.querySelectorAll('*')];
-  const styles=new Map();
+  const styles=new Map(),remove=[];
   for(let i=0;i<originals.length;i++){
-    const computed=getComputedStyle(originals[i]),copy=copies[i];
-    // Routing metadata contains NUL-delimited bundle keys, legal in HTML DOM
-    // attributes but not XML. It has no visual role once styles are frozen.
+    const original=originals[i],copy=copies[i],classes=original.classList;
+    const nodeId=classes?.contains('node')?original.dataset.id:null;
+    const edgeElement=classes?.contains('edge')||classes?.contains('edge-hit')||classes?.contains('label');
+    const edgeId=edgeElement?original.dataset.edgeId:null;
+    if(visibleNodeIds&&nodeId&&!visibleNodeIds.has(nodeId))remove.push(copy);
+    if(visibleEdgeIds&&edgeId&&!visibleEdgeIds.has(edgeId))remove.push(copy);
+
+    const computed=getComputedStyle(original);
+    // Routing metadata can contain NUL-delimited keys. Keep only the two identifiers
+    // needed to filter replay frames; all other data/ARIA attributes are non-visual.
     for(const attribute of [...copy.attributes]){
-      if(attribute.name.startsWith('data-')||attribute.name.startsWith('aria-'))copy.removeAttribute(attribute.name);
+      const keepReplayId=attribute.name==='data-id'||attribute.name==='data-edge-id';
+      if((attribute.name.startsWith('data-')&&!keepReplayId)||attribute.name.startsWith('aria-')){
+        copy.removeAttribute(attribute.name);
+      }
     }
     copy.removeAttribute('style');
     for(const property of gifProperties){
-      const value=computed.getPropertyValue(property).replace(/url\(["']?[^)"']*#([^)'" ]+)["']?\)/g,'url(#$1)');
+      const value=computed.getPropertyValue(property)
+        .replace(/url\(["']?[^)"']*#([^)"' ]+)["']?\)/g,'url(#$1)');
       if(value)copy.style.setProperty(property,value);
     }
-    // Freeze the sampled appearance; animations must not restart when decoded.
+    // Freeze the rendered appearance. The GIF is a topology replay, not a replay of
+    // CSS animations restarting on each decoded SVG.
     copy.style.setProperty('animation','none');copy.style.setProperty('transition','none');
     const css=copy.style.cssText;
     if(!styles.has(css))styles.set(css,`execweave-gif-style-${styles.size}`);
     copy.removeAttribute('style');copy.classList.add(styles.get(css));
   }
+  for(const copy of remove)copy.remove();
+
   clone.setAttribute('xmlns','http://www.w3.org/2000/svg');
   clone.setAttribute('width',width);clone.setAttribute('height',height);
   clone.setAttribute('viewBox',`0 0 ${width} ${height}`);
@@ -74,59 +129,14 @@ function gifSnapshot(){
   background.setAttribute('width',width);background.setAttribute('height',height);
   background.setAttribute('fill',getComputedStyle(document.getElementById('graph-panel')).backgroundColor);
   clone.insertBefore(background,clone.firstChild);
-  // The graph's dotted paper is CSS on #wrap, outside the SVG itself.
   const defs=document.createElementNS(ns,'defs'),pattern=document.createElementNS(ns,'pattern');
   pattern.id='execweave-gif-paper';pattern.setAttribute('width','22');pattern.setAttribute('height','22');pattern.setAttribute('patternUnits','userSpaceOnUse');
   const dot=document.createElementNS(ns,'circle');dot.setAttribute('cx','1');dot.setAttribute('cy','1');dot.setAttribute('r','1');
   dot.setAttribute('fill',`color-mix(in srgb,${getComputedStyle(gifSvg).getPropertyValue('--border')} 52%,transparent)`);
   pattern.appendChild(dot);defs.appendChild(pattern);clone.insertBefore(defs,background);
   const paper=background.cloneNode();paper.setAttribute('fill','url(#execweave-gif-paper)');background.after(paper);
-  return{svg:new XMLSerializer().serializeToString(clone),width,height,time:performance.now()};
+  return{svg:new XMLSerializer().serializeToString(clone),width,height};
 }
-function captureGifFrame(force=false){
-  if(gifExporting||replaying)return;
-  const graph=core.getGraph(),session=graph?.session_id;
-  if(!session)return;
-  if(session!==gifSession){gifHistory.length=0;gifBytes=0;gifSession=session;gifFailure='';gifLastSvg='';gifEpoch++;gifNotice.textContent='';gifButton.disabled=false;}
-  if(gifFailure||!gifSvg.querySelector('.node'))return;
-  if(document.hidden){gifError('GIF unavailable: this page was hidden during recording.');return;}
-  const protective=document.getElementById('protective');
-  if(protective&&!protective.hidden){gifError('GIF unavailable: graph rendering was paused.');return;}
-  const now=performance.now();
-  if(!force&&now-gifLastSample<GIF_INTERVAL)return;
-  if(!force&&!gifDirty&&!gifSvg.getAnimations({subtree:true}).some(a=>a.playState==='running'))return;
-  gifLastSample=now;
-  try{
-    const frame=gifSnapshot();if(!frame)return;
-    gifDirty=false;
-    if(gifHistory.length&&frame.svg===gifLastSvg)return;
-    gifLastSvg=frame.svg;
-    const raw=new Blob([frame.svg],{type:'image/svg+xml;charset=utf-8'}),bytes=raw.size;
-    if(gifBytes+bytes>GIF_MAX_BYTES){gifError('GIF unavailable: recording exceeded 64 MB.');return;}
-    delete frame.svg;
-    const epoch=gifEpoch;
-    // Compress immutable snapshots, never drop historical frames. Account for
-    // in-flight uncompressed bytes too, so a slow compressor cannot grow a queue.
-    frame.data=(async()=>{
-      if(typeof CompressionStream==='undefined')return raw;
-      try{
-        const compressed=await new Response(raw.stream().pipeThrough(new CompressionStream('gzip'))).blob();
-        frame.compressed=true;if(epoch===gifEpoch)gifBytes+=compressed.size-bytes;
-        return compressed;
-      }catch(_){return raw;}
-    })();
-    gifHistory.push(frame);gifBytes+=bytes;
-  }catch(error){gifError(`GIF unavailable: ${error.message}`);}
-}
-// Sample painted frames, not network events: camera motion and user layout changes
-// also matter. Stop sampling when the page closes; background gaps are explicit.
-let gifAnimationFrame=0;
-function sampleGif(){if(!gifSnapshotOnly)captureGifFrame();gifAnimationFrame=requestAnimationFrame(sampleGif);}
-gifAnimationFrame=requestAnimationFrame(sampleGif);
-window.addEventListener('pagehide',()=>{cancelAnimationFrame(gifAnimationFrame);gifObserver.disconnect();gifResizeObserver.disconnect();});
-document.addEventListener('visibilitychange',()=>{
-  if(document.hidden&&gifHistory.length&&!finishedShown)gifError('GIF unavailable: this page was hidden during recording.');
-});
 
 function pushWord(out,value){out.push(value&255,(value>>8)&255);}
 function pushText(out,text){for(let i=0;i<text.length;i++)out.push(text.charCodeAt(i)&255);}
@@ -149,7 +159,6 @@ function lzw(indices){
       emit(prefix);
       if(next<4096){
         dictionary.set(key,next++);
-        // The decoder adds each entry one emitted code later than the encoder.
         if(next>(1<<size)&&size<12)size++;
       }else{emit(clear);dictionary.clear();next=258;size=9;}
       prefix=symbol;
@@ -160,8 +169,6 @@ function lzw(indices){
   emit(end);if(bits)out.push(buffer&255);return Uint8Array.from(out);
 }
 function gifPixels(imageData){
-  // A local palette preserves dark backgrounds and small colored/text details;
-  // the old six-level cube quantized most of the dashboard to black.
   const data=imageData.data,counts=new Uint32Array(32768),rs=new Float64Array(32768),gs=new Float64Array(32768),bs=new Float64Array(32768);
   for(let i=0;i<data.length;i+=4){const key=(data[i]>>3)*1024+(data[i+1]>>3)*32+(data[i+2]>>3);counts[key]++;rs[key]+=data[i];gs[key]+=data[i+1];bs[key]+=data[i+2];}
   const colors=[];for(let key=0;key<counts.length;key++)if(counts[key])colors.push(key);
@@ -180,53 +187,63 @@ function gifPixels(imageData){
   return{palette,pixels};
 }
 async function rasterGifFrame(frame,width,height){
-  let data=await frame.data;
-  if(frame.compressed)data=await new Response(data.stream().pipeThrough(new DecompressionStream('gzip'))).blob();
-  const url=URL.createObjectURL(new Blob([data],{type:'image/svg+xml;charset=utf-8'}));
+  const url=URL.createObjectURL(new Blob([frame.svg],{type:'image/svg+xml;charset=utf-8'}));
   try{
     const image=new Image();image.src=url;await image.decode();
     const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;
     const ctx=canvas.getContext('2d',{willReadFrequently:true});
     ctx.fillStyle='#0a0f16';ctx.fillRect(0,0,width,height);
-    // Resizes are letterboxed at original pixel size, never re-laid out or scaled.
     ctx.drawImage(image,0,0,frame.width,frame.height);
     return gifPixels(ctx.getImageData(0,0,width,height));
   }finally{URL.revokeObjectURL(url);}
 }
+function gifFrameParts(raster,width,height,delayMs){
+  let delay=Math.max(2,Math.round(delayMs/10));
+  const parts=[];
+  do{
+    const chunk=Math.min(65535,delay),block=[0x21,0xF9,4,4];pushWord(block,chunk);block.push(0,0,0x2C);
+    pushWord(block,0);pushWord(block,0);pushWord(block,width);pushWord(block,height);block.push(0x87);
+    parts.push(Uint8Array.from(block),raster.palette,Uint8Array.of(8),gifBlocks(lzw(raster.pixels)));delay-=chunk;
+  }while(delay>0);
+  return parts;
+}
 async function downloadGif(){
   if(gifButton.disabled||gifExporting)return;
   if(replaying){gifNotice.textContent='Wait for replay to finish before exporting.';return;}
-  if(gifSnapshotOnly){gifHistory.length=0;gifBytes=0;gifLastSvg='';gifEpoch++;}
-  captureGifFrame(true);if(gifFailure)return;
-  if(!gifHistory.length){gifNotice.textContent='No visible graph recorded yet.';return;}
-  const frames=gifHistory.slice(),session=gifSession;
-  const stop=performance.now();
-  const width=Math.max(...frames.map(f=>f.width)),height=Math.max(...frames.map(f=>f.height));
-  if(width>65535||height>65535){gifError('GIF unavailable: viewport is too large.');return;}
+  const protective=document.getElementById('protective');
+  if(protective&&!protective.hidden){gifNotice.textContent='GIF unavailable: graph rendering is paused.';return;}
+  const graph=core.getDisplayGraph?.()||core.getGraph?.()||{};
+  const session=graph.session_id||core.getGraph?.()?.session_id||'run';
+  const steps=gifTopologySteps(graph);
+  if(!steps.length||!gifSvg.querySelector('.node')){gifNotice.textContent='No visible graph to replay.';return;}
+  const base=gifSnapshot();if(!base)return;
+  if(base.width>65535||base.height>65535){gifNotice.textContent='GIF unavailable: viewport is too large.';return;}
+
   gifExporting=true;gifButton.disabled=true;replayButton.disabled=true;
-  const original=gifButton.textContent;
+  const original=gifButton.textContent,visibleNodes=new Set(),visibleEdges=new Set();
+  const stepDelay=gifStepDelayMs(steps.length);
+  let encodedBytes=0;
   try{
-    const header=[];pushText(header,'GIF89a');pushWord(header,width);pushWord(header,height);header.push(0x70,0,0);
+    const header=[];pushText(header,'GIF89a');pushWord(header,base.width);pushWord(header,base.height);header.push(0x70,0,0);
     header.push(0x21,0xFF,0x0B);pushText(header,'NETSCAPE2.0');header.push(3,1,0,0,0);
-    const parts=[Uint8Array.from(header)];let previousEnd=0;
-    for(let i=0;i<frames.length;i++){
-      gifButton.textContent=`Encoding ${i+1}/${frames.length}`;await sleep(0);
-      const raster=await rasterGifFrame(frames[i],width,height);
-      const end=Math.round(((frames[i+1]?.time??stop)-frames[0].time)/10);
-      let delay=Math.max(2,end-previousEnd);previousEnd+=delay;
-      // GIF's delay field is 16-bit centiseconds; preserve long idle intervals.
-      do{
-        const chunk=Math.min(65535,delay),block=[0x21,0xF9,4,4];pushWord(block,chunk);block.push(0,0,0x2C);
-        pushWord(block,0);pushWord(block,0);pushWord(block,width);pushWord(block,height);block.push(0x87);
-        parts.push(Uint8Array.from(block),raster.palette,Uint8Array.of(8),gifBlocks(lzw(raster.pixels)));delay-=chunk;
-      }while(delay>0);
+    const parts=[Uint8Array.from(header)];
+    for(let i=0;i<steps.length;i++){
+      const step=steps[i];
+      if(step.nodeId)visibleNodes.add(step.nodeId);
+      if(step.edgeId)visibleEdges.add(step.edgeId);
+      gifButton.textContent=`Encoding ${i+1}/${steps.length}`;await sleep(0);
+      const frame=gifSnapshot(visibleNodes,visibleEdges);if(!frame)continue;
+      const raster=await rasterGifFrame(frame,base.width,base.height);
+      const frameParts=gifFrameParts(raster,base.width,base.height,i===steps.length-1?GIF_FINAL_HOLD_MS:stepDelay);
+      for(const part of frameParts){encodedBytes+=part.byteLength;if(encodedBytes>GIF_MAX_BYTES)throw new Error('topology replay exceeded 64 MB');parts.push(part);}
     }
     parts.push(Uint8Array.of(0x3B));
     const blob=new Blob(parts,{type:'image/gif'}),url=URL.createObjectURL(blob),a=document.createElement('a');
     a.href=url;a.download=`execweave-${session}.gif`;document.body.appendChild(a);a.click();a.remove();
     setTimeout(()=>URL.revokeObjectURL(url),1000);
-    gifNotice.textContent=frames.length===1?'Saved current graph (still image).':'Saved recorded graph viewport.';
+    gifNotice.textContent=`Saved node-by-node replay (${steps.length} topology steps).`;
   }catch(error){gifNotice.textContent=`GIF export failed: ${error.message}`;}
-  finally{gifExporting=false;gifButton.disabled=!!gifFailure;replayButton.disabled=false;gifButton.textContent=original;}
+  finally{gifExporting=false;gifButton.disabled=false;replayButton.disabled=false;gifButton.textContent=original;}
 }
+if(typeof window!=='undefined')window.__execweaveGifTopologySteps=gifTopologySteps;
 """
