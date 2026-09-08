@@ -49,8 +49,15 @@ def main() -> int:
     expected = runtime_files(repo)
 
     with zipfile.ZipFile(wheel) as archive:
-        names = archive.namelist()
+        infos = archive.infolist()
+        names = [info.filename for info in infos]
         safe(names)
+        noncanonical = [info.filename for info in infos if info.create_system != 3]
+        if noncanonical:
+            raise RuntimeError(
+                'wheel creator-platform metadata is not canonical: '
+                + ', '.join(noncanonical[:5])
+            )
         wheel_runtime = {
             name.removeprefix('execweave/'): digest(archive.read(name))
             for name in names if name.startswith('execweave/') and not name.endswith('/')
@@ -89,6 +96,7 @@ def main() -> int:
         'sdist_sha256': digest(sdist.read_bytes()),
         'wheel_source_parity': True,
         'sdist_source_parity': True,
+        'wheel_creator_platform_canonical': True,
     }
     print(json.dumps(report, sort_keys=True))
     return 0

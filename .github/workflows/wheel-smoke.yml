@@ -7,6 +7,8 @@ on:
     paths:
       - "pyproject.toml"
       - "src/execweave/**"
+      - "scripts/canonicalize_wheel.py"
+      - "scripts/check_distribution_contents.py"
       - "scripts/check_wheel_install.py"
       - "scripts/check_installed_dashboard.py"
       - "scripts/installed_dashboard_probe.py"
@@ -30,10 +32,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Build wheel and sdist
+      - name: Build canonical wheel and hermetic sdist
         run: |
           python -m pip install --upgrade build hatchling
           python -m build
+          python scripts/canonicalize_wheel.py dist
+          python scripts/check_distribution_contents.py
       - name: Preserve resolved acceptance dependencies
         shell: bash
         run: |
@@ -70,3 +74,29 @@ jobs:
           path: artifacts/installed-dashboard
           if-no-files-found: error
           retention-days: 7
+
+  cross-os-wheel-identity:
+    needs: wheel-smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: installed-package-inputs-*
+          path: package-inputs
+      - name: Require one byte-identical canonical wheel from every OS
+        run: |
+          python - <<'PY'
+          from hashlib import sha256
+          from pathlib import Path
+
+          wheels = sorted(
+              path for path in Path('package-inputs').rglob('execweave-*.whl')
+              if path.parent.name == 'dist'
+          )
+          if len(wheels) != 3:
+              raise SystemExit(f'expected exactly three wheel-smoke wheels, got {wheels}')
+          hashes = {str(path): sha256(path.read_bytes()).hexdigest() for path in wheels}
+          if len(set(hashes.values())) != 1:
+              raise SystemExit(f'cross-OS wheel bytes differ: {hashes}')
+          print(hashes)
+          PY

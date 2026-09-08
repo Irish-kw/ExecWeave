@@ -101,13 +101,14 @@ jobs:
           else
             python scripts/python_native_acceptance.py --output-dir artifacts/release/native --require python
           fi
-      - name: Build distributions reproducibly
+      - name: Build canonical distributions reproducibly
         shell: bash
         run: |
           rm -rf dist dist-repro
           export SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
           python -m build --outdir dist
           python -m build --outdir dist-repro
+          python scripts/canonicalize_wheel.py dist dist-repro
           python -m twine check dist/*
           python - <<'PY'
           from hashlib import sha256
@@ -145,8 +146,49 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  publish:
+  compare-distributions:
     needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: python-package-distributions-*
+          path: verified
+      - name: Require identical release identity and canonical wheel bytes across all OSes
+        run: |
+          python - <<'PY'
+          from hashlib import sha256
+          from pathlib import Path
+          import zipfile
+
+          roots = sorted(path for path in Path('verified').iterdir() if path.is_dir())
+          if len(roots) != 3:
+              raise SystemExit(f'expected three verified OS artifacts, got {roots}')
+          release_shas = {}
+          release_trees = {}
+          wheel_hashes = {}
+          for root in roots:
+              shas = list(root.rglob('RELEASE_SHA.txt'))
+              trees = list(root.rglob('RELEASE_TREE.txt'))
+              wheels = [p for p in root.rglob('execweave-*.whl') if p.parent.name == 'dist']
+              if len(shas) != 1 or len(trees) != 1 or len(wheels) != 1:
+                  raise SystemExit(f'incomplete release identity in {root}')
+              release_shas[root.name] = shas[0].read_text().strip()
+              release_trees[root.name] = trees[0].read_text().strip()
+              wheel = wheels[0]
+              wheel_hashes[root.name] = sha256(wheel.read_bytes()).hexdigest()
+              with zipfile.ZipFile(wheel) as archive:
+                  bad = [info.filename for info in archive.infolist() if info.create_system != 3]
+              if bad:
+                  raise SystemExit(f'non-canonical wheel metadata in {root.name}: {bad[:5]}')
+          for label, values in [('release SHAs', release_shas), ('release trees', release_trees), ('wheel hashes', wheel_hashes)]:
+              if len(set(values.values())) != 1:
+                  raise SystemExit(f'{label} differ across OS: {values}')
+          print({'release_shas': release_shas, 'release_trees': release_trees, 'wheel_hashes': wheel_hashes})
+          PY
+
+  publish:
+    needs: compare-distributions
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -164,7 +206,7 @@ jobs:
           packages-dir: candidate/dist/
 
   release-assets:
-    needs: [verify, publish]
+    needs: [compare-distributions, publish]
     runs-on: ubuntu-latest
     permissions:
       contents: write

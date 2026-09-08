@@ -77,11 +77,14 @@ jobs:
           else
             python scripts/python_native_acceptance.py --output-dir artifacts/combined/native --require python
           fi
-      - name: Build and test real installed combined wheel
+      - name: Build and test real installed combined distributions
         working-directory: ${{ runner.temp }}/execweave-combined
         run: |
           python -m build
+          python scripts/canonicalize_wheel.py dist
+          python scripts/check_distribution_contents.py
           python scripts/check_wheel_install.py
+          python scripts/check_sdist_install.py
           python scripts/check_installed_dashboard.py --output artifacts/combined/installed
       - name: Source invariance after acceptance
         if: always()
@@ -98,3 +101,30 @@ jobs:
             ${{ runner.temp }}/execweave-combined/dist
           if-no-files-found: error
           retention-days: 7
+
+  cross-os-wheel-identity:
+    if: github.event_name == 'pull_request' && github.event.pull_request.number == 70
+    needs: combined
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: rc-combined-*
+          path: combined-artifacts
+      - name: Require one byte-identical canonical wheel from every OS
+        run: |
+          python - <<'PY'
+          from hashlib import sha256
+          from pathlib import Path
+
+          wheels = sorted(
+              path for path in Path('combined-artifacts').rglob('execweave-*.whl')
+              if path.parent.name == 'dist'
+          )
+          if len(wheels) != 3:
+              raise SystemExit(f'expected exactly three combined wheels, got {wheels}')
+          hashes = {str(path): sha256(path.read_bytes()).hexdigest() for path in wheels}
+          if len(set(hashes.values())) != 1:
+              raise SystemExit(f'cross-OS wheel bytes differ: {hashes}')
+          print(hashes)
+          PY

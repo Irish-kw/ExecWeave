@@ -16,6 +16,7 @@ def test_publish_has_no_pull_request_trigger_and_requires_three_os_verification(
     assert 'python scripts/check_installed_dashboard.py' in text
     assert 'python scripts/check_sdist_install.py' in text
     assert 'python scripts/check_distribution_contents.py' in text
+    assert 'python scripts/canonicalize_wheel.py dist dist-repro' in text
 
 
 def test_pypi_job_uses_only_the_verified_ubuntu_distribution_artifact() -> None:
@@ -26,6 +27,10 @@ def test_pypi_job_uses_only_the_verified_ubuntu_distribution_artifact() -> None:
     assert 'pypa/gh-action-pypi-publish@release/v1' in text
     assert 'gh release view "$RELEASE_TAG"' in text
     assert 'already exists on PyPI' in text
+    assert 'compare-distributions:' in text
+    assert 'needs: compare-distributions' in text
+    assert 'wheel hashes' in text
+    assert 'info.create_system != 3' in text
 
 
 def test_release_version_bump_is_deferred_to_release_only_stage() -> None:
@@ -43,6 +48,7 @@ def test_platform_independent_wheel_source_is_forced_to_lf() -> None:
     attrs = Path('.gitattributes').read_text(encoding='utf-8')
     assert '* text=auto eol=lf' in attrs
     assert "git ls-files --eol src/execweave | grep -q 'w/crlf'" in workflow()
+    assert Path('scripts/canonicalize_wheel.py').is_file()
 
 
 def test_sdist_is_allowlisted_away_from_acceptance_artifacts() -> None:

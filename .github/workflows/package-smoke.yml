@@ -6,6 +6,7 @@ on:
     paths:
       - "pyproject.toml"
       - "src/**"
+      - "scripts/canonicalize_wheel.py"
       - "scripts/check_wheel_install.py"
       - "scripts/check_sdist_install.py"
       - "scripts/check_distribution_contents.py"
@@ -23,11 +24,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Build wheel and sdist
+      - name: Build canonical wheel and hermetic sdist
         run: |
           python -m pip install --upgrade pip
           python -m pip install build twine
           python -m build
+          python scripts/canonicalize_wheel.py dist
           python -m twine check dist/*
       - name: Verify distribution contents match runtime source
         run: python scripts/check_distribution_contents.py
