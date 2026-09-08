@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import re
-
 from .live_view_extra_style import LIVE_EXTRA_STYLE
 from .live_view_markup import LIVE_MARKUP
 from .live_view_process_layout import LIVE_PROCESS_LAYOUT_SCRIPT
@@ -13,21 +11,6 @@ from .live_view_script_d import LIVE_SCRIPT_D
 from .live_view_style import LIVE_STYLE
 from .viewer_agent_panel import inject_agent_panel
 from .viewer_dashboard_hardening_v2 import harden_dashboard_html
-
-
-_SAFE_GIF_LZW = (
-    "function lzw(indices,minCodeSize=8){"
-    "const clear=1<<minCodeSize,end=clear+1,out=[];"
-    "let buffer=0,bits=0;const codeSize=minCodeSize+1;"
-    "const chunk=Math.max(1,(1<<codeSize)-clear-8);"
-    "const emit=code=>{buffer|=code<<bits;bits+=codeSize;"
-    "while(bits>=8){out.push(buffer&255);buffer>>>=8;bits-=8}};"
-    "if(!indices.length)emit(clear);"
-    "for(let start=0;start<indices.length;start+=chunk){"
-    "emit(clear);const stop=Math.min(indices.length,start+chunk);"
-    "for(let i=start;i<stop;i++)emit(indices[i])}"
-    "emit(end);if(bits>0)out.push(buffer&255);return out}"
-)
 
 
 def _restore_live_safety_contracts(html: str) -> str:
@@ -61,16 +44,6 @@ def _restore_live_safety_contracts(html: str) -> str:
         "${data.edge_count||0}`;lastSignature=signature;graph=data;",
         1,
     )
-
-    html, lzw_count = re.subn(
-        r"function lzw\(indices,minCodeSize=8\)\{.*?\}\nfunction gifBlocks",
-        _SAFE_GIF_LZW + "\nfunction gifBlocks",
-        html,
-        count=1,
-        flags=re.DOTALL,
-    )
-    if lzw_count != 1:
-        raise RuntimeError("live GIF encoder patch target not found")
 
     open_final_button = '<button id="open-final" type="button">Open final graph</button>'
     if open_final_button not in html:

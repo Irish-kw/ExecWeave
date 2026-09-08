@@ -24,20 +24,6 @@ def _inline_script(html: str) -> str:
     return scripts[-1]
 
 
-def _unpack_fixed_9bit_codes(payload: bytes) -> list[int]:
-    buffer = 0
-    bits = 0
-    codes: list[int] = []
-    for value in payload:
-        buffer |= value << bits
-        bits += 8
-        while bits >= 9:
-            codes.append(buffer & 0x1FF)
-            buffer >>= 9
-            bits -= 9
-    return codes
-
-
 def test_final_graph_opens_separately_and_save_view_does_not_overlap_theme() -> None:
     # Historical test name retained. v0.7.9 keeps the finished run in the same
     # Dashboard DOM instead of opening or injecting a second final renderer.
@@ -57,43 +43,36 @@ def test_live_gif_export_uses_reset_bounded_lzw_and_emits_a_gif() -> None:
     if node is None:
         pytest.skip("node executable is required for GIF encoder validation")
 
+    from PIL import Image
+    import io
+    import random
+    import struct
+
+    # Keep the historical test name, but validate dictionary growth/reset with an
+    # independent GIF decoder instead of requiring the old uncompressed encoder.
     script = _inline_script(LIVE_HTML)
-    start = script.index("function palette()")
-    end = script.index("function nodeHex(")
-    gif_functions = script[start:end]
-    runner = f"""
-{gif_functions}
-(async()=>{{
-  const pixels=Uint8Array.from(Array.from({{length:300}},(_,i)=>i%216));
-  const compressed=lzw(pixels,8);
-  const frame=Uint8Array.from([0,1,2,3]);
-  const blob=gifBlob([frame],2,2,12);
-  const gif=new Uint8Array(await blob.arrayBuffer());
-  console.log(JSON.stringify({{
-    lzw:Buffer.from(compressed).toString('base64'),
-    gif:Buffer.from(gif).toString('base64')
-  }}));
-}})().catch(err=>{{console.error(err);process.exit(1)}});
-"""
-    result = subprocess.run(
-        [node, "-e", runner],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0, result.stderr or result.stdout
-    generated = json.loads(result.stdout.strip())
-
-    codes = _unpack_fixed_9bit_codes(base64.b64decode(generated["lzw"]))
-    assert codes[0] == 256
-    assert codes[-1] == 257
-    assert codes.count(256) >= 2
-    assert max(codes) <= 257
-
-    gif = base64.b64decode(generated["gif"])
-    assert gif.startswith(b"GIF89a")
-    assert gif.endswith(b"\x3b")
-    assert len(gif) > 800
+    start = script.index("function lzw(")
+    end = script.index("function gifPixels(", start)
+    rng = random.Random(14)
+    vectors = [[0] * 40000, [i % 256 for i in range(40000)],
+               [rng.randrange(256) for _ in range(40000)]]
+    vectors.extend([i % 256 for i in range(size)] for size in (1, 254, 255, 256, 257, 768))
+    for pixels in vectors:
+        runner = script[start:end] + "\nconsole.log(Buffer.from(lzw(Uint8Array.from(" + json.dumps(pixels) + "))).toString('base64'));"
+        result = subprocess.run([node], input=runner, capture_output=True, text=True)
+        assert result.returncode == 0, result.stderr
+        compressed = base64.b64decode(result.stdout.strip())
+        # Independently wrap the compressed indices in a GIF container.
+        payload = bytearray(b"GIF89a" + struct.pack("<HH", len(pixels), 1) + bytes([0xF7, 0, 0]))
+        payload.extend(component for value in range(256) for component in (value, value, value))
+        payload.extend(b"," + struct.pack("<HHHH", 0, 0, len(pixels), 1) + bytes([0, 8]))
+        for offset in range(0, len(compressed), 255):
+            block = compressed[offset:offset + 255]
+            payload.append(len(block))
+            payload.extend(block)
+        payload.extend(b"\x00;")
+        with Image.open(io.BytesIO(payload)) as image:
+            assert image.tobytes() == bytes(pixels)
 
 
 def test_release_version_and_noncommercial_license_metadata_are_078() -> None:

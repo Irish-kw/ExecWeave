@@ -397,9 +397,4 @@ def inject_live_dashboard_clean(html: str) -> str:
         html = html[:render_index] + html[render_index:].replace(render_marker, render_replacement, 1)
     html = html.replace(_LIVE_CORE_EXPORT, _LIVE_CORE_EXPORT_CLEAN, 1)
     html = html.replace(_LIVE_NOOP_STATS, _LIVE_NOOP_STATS_CLEAN, 1)
-    html = html.replace(
-        "const graph=core.getGraph(),positions=core.getPositions(),steps=sortedGifSteps(graph);",
-        "const graph=core.getDisplayGraph?.()||core.getGraph(),positions=core.getPositions(),steps=sortedGifSteps(graph);",
-        1,
-    )
     return html

@@ -44,6 +44,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "pytest>=8.0",
+  "pillow>=10.0",
   "ruff>=0.16,<0.17",
   "pywinpty>=3.0.5,<4; platform_system == 'Windows'",
 ]
@@ -55,6 +56,7 @@ release = [
 # development install stays small; CI installs it and requires the checks to run.
 e2e = [
   "playwright>=1.44",
+  "pillow>=10.0",
   "pywinpty>=3.0.5,<4; platform_system == 'Windows'",
 ]
 

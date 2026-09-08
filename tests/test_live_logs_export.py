@@ -75,9 +75,10 @@ def test_finished_dashboard_supports_replay_and_gif_export() -> None:
     assert 'id="download-gif"' in LIVE_HTML
     assert 'id="open-final"' not in LIVE_HTML
     assert "function replayRun()" in LIVE_HTML
-    assert "function gifBlob(" in LIVE_HTML
+    assert "async function downloadGif(" in LIVE_HTML
     assert "GIF89a" in LIVE_HTML
-    assert "maxFrames=48" in LIVE_HTML
+    assert "function captureGifFrame(" in LIVE_HTML
+    assert "sortedGifSteps" not in LIVE_HTML
     assert ".gif`" in LIVE_HTML
     assert "window.__execweaveDashboard?.onFinished?.()" in LIVE_HTML
 
