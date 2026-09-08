@@ -8,6 +8,9 @@ on:
       - "pyproject.toml"
       - "src/execweave/**"
       - "scripts/check_wheel_install.py"
+      - "scripts/check_installed_dashboard.py"
+      - "scripts/installed_dashboard_probe.py"
+      - "scripts/installed_dashboard_live_probe.py"
       - ".github/workflows/wheel-smoke.yml"
   workflow_dispatch:
 
@@ -49,3 +52,21 @@ jobs:
           retention-days: 7
       - name: Clean wheel install smoke
         run: python scripts/check_wheel_install.py
+
+      - name: Install resolved wheel browser driver
+        shell: bash
+        run: |
+          wheel="$(python -c "from pathlib import Path; print(next(Path('dist').glob('*.whl')).resolve())")"
+          python -m pip install --no-index --find-links acceptance-wheelhouse "$wheel[e2e]"
+      - name: Provision Chromium and OS libraries
+        run: python -m playwright install --with-deps chromium
+      - name: Clean isolated wheel Dashboard and GIF acceptance
+        run: python scripts/check_installed_dashboard.py --wheelhouse acceptance-wheelhouse
+      - name: Upload installed-product browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: installed-dashboard-${{ matrix.os }}
+          path: artifacts/installed-dashboard
+          if-no-files-found: error
+          retention-days: 7
