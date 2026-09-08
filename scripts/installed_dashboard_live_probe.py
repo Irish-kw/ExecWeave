@@ -1,6 +1,7 @@
 """Bounded native HTTP acceptance worker; copied outside the checkout by its launcher."""
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 import sys
@@ -92,6 +93,7 @@ def native_probe(browser, cli: Path, out: Path, export_and_decode) -> dict:
         assert requests.count('/live.json') == polls, 'polling continued after finish'
         assert '/final' not in requests
         live_graph = page.evaluate('window.__execweaveCore.getGraph()')
+        (out / 'completed-live-graph.json').write_text(json.dumps(live_graph, indent=2), encoding='utf-8')
         live_ids = sorted(n['id'] for n in live_graph['nodes'])
         result = {'live': export_and_decode(page, out / 'native-live'), 'live_nodes': live_ids,
                   'auth_401': True, 'header_auth_200': True, 'token_removed': True, 'polling_stopped': True}
@@ -99,7 +101,10 @@ def native_probe(browser, cli: Path, out: Path, export_and_decode) -> dict:
         page.goto((run / 'viewer.html').as_uri())
         page.wait_for_selector('.node')
         reopened = page.evaluate('window.__execweaveCore.getGraph()')
+        (out / 'reopened-graph.json').write_text(json.dumps(reopened, indent=2), encoding='utf-8')
         assert sorted(n['id'] for n in reopened['nodes']) == live_ids
+        for kind in ('nodes', 'edges'):
+            assert sorted(reopened[kind], key=lambda row: row['id']) == sorted(live_graph[kind], key=lambda row: row['id']), f'{kind} final evidence differs'
         result['reopened'] = export_and_decode(page, out / 'native-reopened')
         assert not errors, errors
         result['js_errors'] = errors
