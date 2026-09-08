@@ -185,12 +185,44 @@ PR70_DASHBOARD_SCRIPT = PROJECTION_SCRIPT + "\n" + LAYOUT_GEOMETRY_SCRIPT + "\n"
     }finally{positions=previousPositions;execweaveTopology=previousTopology;geometryTopology=null}
   }
 
+  function clearLabelFromNodes(label){
+    // Solve placement using the rendered text box, never estimated characters.
+    // At the existing route-label X, each overlapping node forbids one interval
+    // of text-baseline Y values. The nearest endpoint of their merged union is
+    // the minimum vertical displacement that keeps the whole label readable.
+    // This changes text placement only: topology, node positions and SVG routes
+    // remain exactly the ones selected by the layout/port pipeline.
+    const box=label.getBBox(),baseline=Number(label.getAttribute('y'));
+    if(!(box.width>0&&box.height>0&&Number.isFinite(baseline)))return;
+    const padding=2,offset=box.y-baseline,intervals=[];
+    for(const [id,p] of positions){
+      if(!nodeById.has(id))continue;
+      const w=execweaveWidthOf(id),h=execweaveHeightOf(id);
+      if(box.x+box.width<=p.x-padding||box.x>=p.x+w+padding)continue;
+      intervals.push([p.y-padding-box.height-offset,p.y+h+padding-offset]);
+    }
+    intervals.sort((a,b)=>a[0]-b[0]||a[1]-b[1]);
+    const merged=[];
+    for(const current of intervals){
+      const last=merged[merged.length-1];
+      if(last&&current[0]<=last[1])last[1]=Math.max(last[1],current[1]);
+      else merged.push([...current]);
+    }
+    for(const [lo,hi] of merged){
+      if(baseline>lo&&baseline<hi){
+        label.setAttribute('y',baseline-lo<=hi-baseline?lo:hi);
+        break;
+      }
+    }
+  }
+
   if(typeof updateEdgeElement==='function'){
   const updateBase=updateEdgeElement;
   updateEdgeElement=function(edge){
     updateBase(edge);const els=edgeElements.get(edgeId(edge));if(!els)return;
     const r=route(edge);els.visible.dataset.geometryKind=r.geometryKind||r.kind;
     els.hit.dataset.geometryKind=r.geometryKind||r.kind;
+    clearLabelFromNodes(els.label);
   };
   }
   if(typeof execweaveRefreshIncidentEdges==='function')execweaveRefreshIncidentEdges=function(){paint()};
