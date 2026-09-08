@@ -1,0 +1,95 @@
+name: RC Combined PR69 PR70
+
+# Temporary pairing infrastructure; permanent behavior regressions also run in
+# the ordinary Viewer/CI/Wheel jobs after both PRs land. Never writes remote refs.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rc-combined-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  combined:
+    if: github.event_name == 'pull_request' && github.event.pull_request.number == 70
+    name: combined (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    env:
+      # Freeze the companion; a moved tip or main is a hard failure, not a stale PASS.
+      RC_PR69_SHA: 493c90c11afb92e8294fee3463c57b69e7fc223b
+      RC_PR70_SHA: ${{ github.event.pull_request.head.sha }}
+      RC_MAIN_SHA: ${{ github.event.pull_request.base.sha }}
+      EXECWEAVE_E2E_REQUIRED: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Pin both open PRs and prove both merge orders
+        shell: bash
+        run: |
+          git fetch --no-tags origin +refs/heads/main:refs/rc/main +refs/pull/69/head:refs/rc/pr69 +refs/pull/70/head:refs/rc/pr70
+          test "$(git rev-parse refs/rc/main)" = "$RC_MAIN_SHA"
+          test "$(git rev-parse refs/rc/pr69)" = "$RC_PR69_SHA"
+          test "$(git rev-parse refs/rc/pr70)" = "$RC_PR70_SHA"
+          python scripts/prepare_combined_acceptance.py --main "$RC_MAIN_SHA" --pr69 "$RC_PR69_SHA" --pr70 "$RC_PR70_SHA" --output "$RUNNER_TEMP/execweave-combined" --manifest "$RUNNER_TEMP/execweave-combined-manifest.json"
+      - name: Install combined tree and browser
+        working-directory: ${{ runner.temp }}/execweave-combined
+        run: |
+          python -m pip install -e ".[dev,e2e,release]"
+          python -m playwright install --with-deps chromium
+      - name: Provision Linux collector
+        if: runner.os == 'Linux'
+        run: command -v strace >/dev/null || (sudo apt-get update && sudo apt-get install -y strace)
+      - name: Capture combined source before acceptance
+        working-directory: ${{ runner.temp }}/execweave-combined
+        run: python scripts/acceptance_source_provenance.py --output artifacts/combined/source-before.json
+      - name: Ruff and complete pytest including Chromium
+        working-directory: ${{ runner.temp }}/execweave-combined
+        env:
+          EXECWEAVE_VISUAL_ARTIFACT_DIR: artifacts/combined/visuals
+        run: |
+          python -m ruff check .
+          python -m pytest -q --junitxml=artifacts/combined/pytest.xml
+      - name: Native Python and owned cleanup journeys
+        shell: bash
+        working-directory: ${{ runner.temp }}/execweave-combined
+        run: |
+          python scripts/dashboard_acceptance.py --mode offline --output-dir artifacts/combined/offline --require offline-ollama-fixture
+          python scripts/owned_cleanup_acceptance.py --output-dir artifacts/combined/cleanup
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            xvfb-run -a python scripts/python_native_acceptance.py --output-dir artifacts/combined/native --require python
+          else
+            python scripts/python_native_acceptance.py --output-dir artifacts/combined/native --require python
+          fi
+      - name: Build and test real installed combined wheel
+        working-directory: ${{ runner.temp }}/execweave-combined
+        run: |
+          python -m build
+          python scripts/check_wheel_install.py
+          python scripts/check_installed_dashboard.py --output artifacts/combined/installed
+      - name: Source invariance after acceptance
+        if: always()
+        working-directory: ${{ runner.temp }}/execweave-combined
+        run: python scripts/acceptance_source_provenance.py --output artifacts/combined/source-after.json --compare artifacts/combined/source-before.json
+      - name: Archive combined evidence and package
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rc-combined-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/execweave-combined-manifest.json
+            ${{ runner.temp }}/execweave-combined/artifacts/combined
+            ${{ runner.temp }}/execweave-combined/dist
+          if-no-files-found: error
+          retention-days: 7
