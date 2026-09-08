@@ -51,9 +51,6 @@ jobs:
           if [[ "$HEAD_REF" == release/* && -n "$release_metadata_changed" ]]; then
             args+=(--allow-test-change "tests/test_v069_dashboard_release.py=release metadata assertions may advance only on a release/* pull request; the historical test name remains stable because the node-ID floor refuses renames")
           fi
-          if [[ "$HEAD_REF" == "fix/dashboard-projection-decrosing" && -n "$release_metadata_changed" ]]; then
-            args+=(--allow-test-change "tests/test_v069_dashboard_release.py=0.8.17 release metadata advances from the already-published 0.8.16 baseline during final RC hardening; the historical test ID remains unchanged and still pins package/version/license parity")
-          fi
           conversation_focus_changed=""
           if git diff --name-only "$BASELINE_REF...HEAD" \
               | grep -qx 'tests/test_conversation_agent_focus.py'; then
