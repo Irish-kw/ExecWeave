@@ -5,6 +5,8 @@ Ambiguous/unattributed observations retain their original source as a visible co
 raw degree-zero nodes and deliberate file filters are never 'repaired' by deletion.
 """
 
+from .viewer_tool_mirror_identity import TOOL_MIRROR_SCRIPT
+
 PROJECTION_SCRIPT = r"""
 (function(){
   const baseProjection=execweaveDashboardGraph;
@@ -79,6 +81,7 @@ PROJECTION_SCRIPT = r"""
     return{sources:sorted(sources),edges:[...edges.values()].sort((a,b)=>key(a).localeCompare(key(b))),
       nodes:sorted(nodes),missingSources:sorted(missingSources),identity:resolvedIdentity,reason};
   }
+  /* EXACT_TOOL_MIRROR_IDENTITY */
   function repair(data,display){
     const rawNodes=Array.isArray(data?.nodes)?data.nodes:[],rawEdges=Array.isArray(data?.edges)?data.edges:[];
     const byId=new Map(rawNodes.filter(n=>n?.id).map(n=>[n.id,n])),incoming=new Map();
@@ -107,22 +110,10 @@ PROJECTION_SCRIPT = r"""
       const kept=[],allSupport=new Map(),allNodes=new Set(),identities=[];
       for(const row of presented.viewer_tool_call_occurrences){
         const ids=Array.isArray(row.call_ids)?row.call_ids:[];
-        const proofs=[];let valid=ids.length>0;
-        for(const id of ids){
-          const call=byId.get(id);
-          if(!call){valid=false;break;}
-          const leaves=rawEdges.filter(edge=>edge.source===id&&aliases.get(edge.target)===presented.target);
-          const candidates=leaves.length?leaves:[{source:id,target:presented.target}];
-          for(const leaf of candidates){
-            const proof=supportFor(leaf,visible,byId,incoming,!leaves.length);
-            if(proof.reason||proof.sources.length!==1||proof.sources[0]!==presented.source){valid=false;break;}
-            proofs.push(proof);
-          }
-          if(!valid)break;
-        }
-        if(!valid){rejectedToolOccurrences++;for(const id of ids)rejectedToolCalls.add(id);continue;}
+        const proofs=proveToolOccurrence(ids,presented,visible,byId,incoming,rawEdges,aliases);
+        if(!proofs){rejectedToolOccurrences++;for(const id of ids)rejectedToolCalls.add(id);continue;}
         const scopes=scopedRows(proofs.map(proof=>proof.identity));
-        kept.push({...copy(row),viewer_identity_scopes:scopes});identities.push(...scopes);
+        kept.push({...copy(row),viewer_identity_scopes:scopes,viewer_mirror_identity_evidence:proofs.filter(p=>p.mirror).map(p=>copy(p.mirror))});identities.push(...scopes);
         for(const proof of proofs){for(const edge of proof.edges)allSupport.set(key(edge),edge);for(const id of proof.nodes)allNodes.add(id);}
         for(const id of ids){acceptedToolCalls.add(id);representedToolPaths.add(JSON.stringify([id,presented.target]));}
       }
@@ -220,4 +211,4 @@ PROJECTION_SCRIPT = r"""
   execweaveDashboardGraph=data=>repair(data,baseProjection(data));
   if(typeof window!=='undefined')window.__execweaveProjectionRepair=repair;
 })();
-""".strip()
+""".strip().replace("/* EXACT_TOOL_MIRROR_IDENTITY */", TOOL_MIRROR_SCRIPT)
