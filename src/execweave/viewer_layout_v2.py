@@ -63,7 +63,8 @@ _ARRANGE_SEAM = """function execweaveArrangePositions(){
   execweaveTopology=execweaveBuildTopology();"""
 _ARRANGE_REPLACEMENT = """function execweaveArrangePositions(){
   const execweavePriorLayoutV2Mode=(typeof window!=='undefined'&&window.__execweaveLayoutV2Mode)||'live';
-  if(typeof window!=='undefined')window.__execweaveLayoutV2Mode='arrange';
+  const execweaveNextLayoutV2Mode=(typeof nodeById!=='undefined'&&nodeById.size>96)?'live':'arrange';
+  if(typeof window!=='undefined')window.__execweaveLayoutV2Mode=execweaveNextLayoutV2Mode;
   try{execweaveTopology=execweaveBuildTopology()}
   finally{if(typeof window!=='undefined')window.__execweaveLayoutV2Mode=execweavePriorLayoutV2Mode}"""
 
