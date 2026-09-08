@@ -1,4 +1,4 @@
-name: Dispatch ExecWeave 0.8.16 Trusted Publishing
+name: Verify ExecWeave 0.8.16 on public PyPI
 
 on:
   pull_request:
@@ -9,61 +9,42 @@ on:
 
 permissions:
   contents: read
-  actions: write
 
 jobs:
-  dispatch-publish:
+  verify-pypi:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          ref: e8d4285895b4879b92396ffb6abdb7a1ef186eb2
-          fetch-depth: 0
+          python-version: "3.12"
 
-      - name: Verify exact validated release and version
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: v0.8.16
-          TARGET_SHA: e8d4285895b4879b92396ffb6abdb7a1ef186eb2
+      - name: Install exact public PyPI version in a clean environment
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$TARGET_SHA"
-          python - <<'PY'
-          import re
-          import tomllib
-          from pathlib import Path
+          python -m venv /tmp/execweave-pypi-0816
+          /tmp/execweave-pypi-0816/bin/python -m pip install --upgrade pip
+          /tmp/execweave-pypi-0816/bin/python -m pip install --no-cache-dir --index-url https://pypi.org/simple "execweave==0.8.16"
+          /tmp/execweave-pypi-0816/bin/python - <<'PY'
+          import importlib.metadata
+          import pathlib
+          import execweave
 
           expected = "0.8.16"
-          package_version = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
-          init_text = Path("src/execweave/__init__.py").read_text(encoding="utf-8")
-          match = re.search(r'__version__\s*=\s*["\']([^"\']+)["\']', init_text)
-          runtime_version = match.group(1) if match else None
-          if package_version != expected or runtime_version != expected:
-              raise SystemExit(f"version mismatch: package={package_version!r} runtime={runtime_version!r} expected={expected!r}")
-          print(f"Exact RC version verified: {expected}")
+          dist_version = importlib.metadata.version("execweave")
+          runtime_version = execweave.__version__
+          module_path = pathlib.Path(execweave.__file__).resolve()
+          print(f"DIST_VERSION={dist_version}")
+          print(f"RUNTIME_VERSION={runtime_version}")
+          print(f"MODULE_PATH={module_path}")
+          if dist_version != expected or runtime_version != expected:
+              raise SystemExit(
+                  f"public PyPI version mismatch: dist={dist_version!r} runtime={runtime_version!r} expected={expected!r}"
+              )
+          if not str(module_path).startswith("/tmp/execweave-pypi-0816/"):
+              raise SystemExit(f"unexpected module source: {module_path}")
+          print("PUBLIC_PYPI_EXACT_INSTALL=PASS")
           PY
-          release_json="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json tagName,targetCommitish,isDraft,isPrerelease)"
-          python - "$release_json" "$TARGET_SHA" <<'PY'
-          import json
-          import sys
-          obj = json.loads(sys.argv[1])
-          target = sys.argv[2]
-          if obj.get("tagName") != "v0.8.16":
-              raise SystemExit(f"unexpected tag: {obj}")
-          if obj.get("targetCommitish") != target:
-              raise SystemExit(f"release target mismatch: {obj.get('targetCommitish')} != {target}")
-          if obj.get("isDraft") or obj.get("isPrerelease"):
-              raise SystemExit(f"release is not final: {obj}")
-          print("Published GitHub Release target verified")
-          PY
-
-      - name: Dispatch existing Trusted Publishing workflow
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          printf '%s\n' '{"ref":"main","inputs":{"release_tag":"v0.8.16"}}' \
-            | gh api --method POST "repos/$GITHUB_REPOSITORY/actions/workflows/publish.yml/dispatches" --input -
-          echo "Dispatched .github/workflows/publish.yml for v0.8.16"
+          /tmp/execweave-pypi-0816/bin/python -m pip show execweave
+          /tmp/execweave-pypi-0816/bin/execweave --help >/dev/null
+          echo "PUBLIC_PYPI_CLI_SMOKE=PASS"
