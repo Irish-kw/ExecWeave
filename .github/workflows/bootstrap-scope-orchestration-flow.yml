@@ -27,53 +27,42 @@ jobs:
 
           path = Path('src/execweave/viewer_orchestration_projection.py')
           text = path.read_text(encoding='utf-8')
-          old_activation = '''    model_observations = _model_observations(
-              nodes, edges, orchestration_calls=orchestration_calls
-          )
-          if not orchestration_calls and not model_observations:
-              return projected
-          '''.replace('      ', '')
-          new_activation = '''    if not orchestration_calls:
-              return projected
-          model_observations = _model_observations(
-              nodes, edges, orchestration_calls=orchestration_calls
-          )
-          '''.replace('      ', '')
-          if text.count(old_activation) != 1:
-              raise SystemExit(f'activation seam count={text.count(old_activation)}')
-          text = text.replace(old_activation, new_activation, 1)
 
-          old_rank = '''    for node in nodes:
-              node_id = node.get("id")
-              if node_id in depths and node.get("type") == "agent":
-                  node["attributes"] = {
-                      **_attrs(node),
-                      "viewer_flow_rank": depths[str(node_id)] * 3,
-                      "viewer_execution_flow_identity": True,
-                  }
-          '''.replace('      ', '')
-          new_rank = '''    flow_agent_ids = {str(row["owner"]) for row in orchestration_calls}
-          for row in orchestration_calls:
-              flow_agent_ids.update(
-                  str(target) for target in row["targets"] if target in agent_ids
-              )
-          for pairs in spawn_assignments.values():
-              flow_agent_ids.update(
-                  str(target) for target, _edge in pairs if target in agent_ids
-              )
+          activation_start = text.index('    model_observations = _model_observations(\n')
+          activation_end = text.index('\n    spawn_edges = [', activation_start)
+          activation = "\n".join([
+              '    if not orchestration_calls:',
+              '        return projected',
+              '    model_observations = _model_observations(',
+              '        nodes, edges, orchestration_calls=orchestration_calls',
+              '    )',
+          ])
+          text = text[:activation_start] + activation + text[activation_end:]
 
-          for node in nodes:
-              node_id = node.get("id")
-              if node_id in flow_agent_ids and node.get("type") == "agent":
-                  node["attributes"] = {
-                      **_attrs(node),
-                      "viewer_flow_rank": depths[str(node_id)] * 3,
-                      "viewer_execution_flow_identity": True,
-                  }
-          '''.replace('      ', '')
-          if text.count(old_rank) != 1:
-              raise SystemExit(f'rank seam count={text.count(old_rank)}')
-          path.write_text(text.replace(old_rank, new_rank, 1), encoding='utf-8', newline='\n')
+          rank_marker = '    for node in nodes:\n        node_id = node.get("id")\n        if node_id in depths and node.get("type") == "agent":\n'
+          rank_start = text.index(rank_marker)
+          rank_end = text.index('\n    model_context_ids:', rank_start)
+          rank = "\n".join([
+              '    flow_agent_ids = {str(row["owner"]) for row in orchestration_calls}',
+              '    for row in orchestration_calls:',
+              '        flow_agent_ids.update(',
+              '            str(target) for target in row["targets"] if target in agent_ids',
+              '        )',
+              '    for pairs in spawn_assignments.values():',
+              '        flow_agent_ids.update(',
+              '            str(target) for target, _edge in pairs if target in agent_ids',
+              '        )',
+              '',
+              '    for node in nodes:',
+              '        node_id = node.get("id")',
+              '        if node_id in flow_agent_ids and node.get("type") == "agent":',
+              '            node["attributes"] = {',
+              '                **_attrs(node),',
+              '                "viewer_flow_rank": depths[str(node_id)] * 3,',
+              '                "viewer_execution_flow_identity": True,',
+              '            }',
+          ])
+          path.write_text(text[:rank_start] + rank + text[rank_end:], encoding='utf-8', newline='\n')
           PY
       - name: Install focused dependencies
         run: python -m pip install -e ".[dev,e2e]"
