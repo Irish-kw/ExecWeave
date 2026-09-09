@@ -1,0 +1,96 @@
+name: Bootstrap scoped orchestration flow ranks
+
+on:
+  push:
+    branches: [feature/model-orchestration-flow]
+    paths: [.github/workflows/bootstrap-scope-orchestration-flow.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/model-orchestration-flow
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Scope execution-flow activation and agent ranks
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/execweave/viewer_orchestration_projection.py')
+          text = path.read_text(encoding='utf-8')
+          old_activation = '''    model_observations = _model_observations(
+              nodes, edges, orchestration_calls=orchestration_calls
+          )
+          if not orchestration_calls and not model_observations:
+              return projected
+          '''.replace('      ', '')
+          new_activation = '''    if not orchestration_calls:
+              return projected
+          model_observations = _model_observations(
+              nodes, edges, orchestration_calls=orchestration_calls
+          )
+          '''.replace('      ', '')
+          if text.count(old_activation) != 1:
+              raise SystemExit(f'activation seam count={text.count(old_activation)}')
+          text = text.replace(old_activation, new_activation, 1)
+
+          old_rank = '''    for node in nodes:
+              node_id = node.get("id")
+              if node_id in depths and node.get("type") == "agent":
+                  node["attributes"] = {
+                      **_attrs(node),
+                      "viewer_flow_rank": depths[str(node_id)] * 3,
+                      "viewer_execution_flow_identity": True,
+                  }
+          '''.replace('      ', '')
+          new_rank = '''    flow_agent_ids = {str(row["owner"]) for row in orchestration_calls}
+          for row in orchestration_calls:
+              flow_agent_ids.update(
+                  str(target) for target in row["targets"] if target in agent_ids
+              )
+          for pairs in spawn_assignments.values():
+              flow_agent_ids.update(
+                  str(target) for target, _edge in pairs if target in agent_ids
+              )
+
+          for node in nodes:
+              node_id = node.get("id")
+              if node_id in flow_agent_ids and node.get("type") == "agent":
+                  node["attributes"] = {
+                      **_attrs(node),
+                      "viewer_flow_rank": depths[str(node_id)] * 3,
+                      "viewer_execution_flow_identity": True,
+                  }
+          '''.replace('      ', '')
+          if text.count(old_rank) != 1:
+              raise SystemExit(f'rank seam count={text.count(old_rank)}')
+          path.write_text(text.replace(old_rank, new_rank, 1), encoding='utf-8', newline='\n')
+          PY
+      - name: Install focused dependencies
+        run: python -m pip install -e ".[dev,e2e]"
+      - name: Install Chromium
+        run: python -m playwright install --with-deps chromium
+      - name: Validate scoped behavior
+        env:
+          EXECWEAVE_E2E_REQUIRED: "1"
+        run: |
+          python -m ruff check src/execweave/viewer_orchestration_projection.py tests/test_orchestration_flow_activation.py tests/test_orchestration_flow_projection.py tests/test_orchestration_send_input_fallback.py tests/test_orchestration_flow_layout_e2e.py
+          python -m pytest -q tests/test_orchestration_flow_activation.py tests/test_orchestration_flow_projection.py tests/test_orchestration_send_input_fallback.py
+          xvfb-run -a python -m pytest -q tests/test_orchestration_flow_layout_e2e.py tests/test_graph_node_sizing_e2e.py::test_lanes_keep_their_established_positions_when_nothing_is_wide
+      - name: Commit source fix
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/execweave/viewer_orchestration_projection.py
+          git commit -m "Scope model orchestration flow to participating agents"
+          git push origin HEAD:feature/model-orchestration-flow
