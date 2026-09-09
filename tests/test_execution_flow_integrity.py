@@ -5,6 +5,8 @@ import copy
 import json
 import shutil
 import subprocess
+import tempfile
+from pathlib import Path
 
 import pytest
 
@@ -33,27 +35,33 @@ def _project(raw: dict, display: dict | None = None) -> dict:
     display = copy.deepcopy(display if display is not None else raw)
     raw_before = json.dumps(raw, sort_keys=True, default=str)
     script = _hardened_script()
-    harness = (
-        "const payload=JSON.parse(require('fs').readFileSync(0,'utf8'));\n"
-        "global.window=global;\n"
-        "global.document={};\n"
-        + script
-        + "\n"
-        "const api=window.__execweaveExecutionFlow;\n"
-        "if(!api||typeof api.project!=='function'){"
-        "throw new Error('execution flow project API missing');}\n"
-        "const out=api.project("
-        "JSON.parse(JSON.stringify(payload.display)),"
-        "JSON.parse(JSON.stringify(payload.raw)));\n"
-        "process.stdout.write(JSON.stringify({display:out,raw:payload.raw}));\n"
-    )
-    proc = subprocess.run(
-        [NODE, "-e", harness],
-        input=json.dumps({"raw": raw, "display": display}),
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    # Write the harness to a temp file: embedding the full hardened script in
+    # ``node -e`` exceeds Windows CreateProcess command-line limits (WinError 206).
+    parts = [
+        "const fs=require('fs');",
+        "const payload=JSON.parse(fs.readFileSync(0,'utf8'));",
+        "global.window=global;",
+        "global.document={};",
+        script,
+        "const api=window.__execweaveExecutionFlow;",
+        "if(!api||typeof api.project!=='function'){",
+        "throw new Error('execution flow project API missing');}",
+        "const out=api.project(",
+        "JSON.parse(JSON.stringify(payload.display)),",
+        "JSON.parse(JSON.stringify(payload.raw)));",
+        "process.stdout.write(JSON.stringify({display:out,raw:payload.raw}));",
+    ]
+    harness = "\n".join(parts)
+    with tempfile.TemporaryDirectory() as tmp:
+        runner = Path(tmp) / "project_flow.js"
+        runner.write_text(harness, encoding="utf-8")
+        proc = subprocess.run(
+            [NODE, str(runner)],
+            input=json.dumps({"raw": raw, "display": display}),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
     if proc.returncode != 0:
         raise AssertionError(proc.stderr or proc.stdout or "node failed")
     result = json.loads(proc.stdout)
