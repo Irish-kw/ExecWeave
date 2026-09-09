@@ -186,8 +186,10 @@ _SAFE_DIRECT_ACTION_LOOP = """    for(const edge of rawEdges){
         evidenceEdges.map(edge=>edge.id).filter(Boolean)
       );
     }"""
-_HIERARCHY_ACTION_ONLY = "      if(group.kind!=='spawn_agent')continue;"
-_HIERARCHY_ACTION_SAFE = "      if(!['spawn_agent','assign_agent_task'].includes(group.kind))continue;"
+_HIERARCHY_PARENT_ONLY = "      if(group.kind!=='spawn_agent')continue;"
+_HIERARCHY_PARENT_SAFE = "      if(!['spawn_agent','assign_agent_task'].includes(group.kind))continue;"
+_HIERARCHY_RANK_ONLY = "        if(group.kind!=='spawn_agent'||!agentRank.has(group.owner))continue;"
+_HIERARCHY_RANK_SAFE = "        if(!['spawn_agent','assign_agent_task'].includes(group.kind)||!agentRank.has(group.owner))continue;"
 _FLOW_EARLY_RETURN = "    if(ranked.length<2)return topo;"
 _FLOW_SAFE_EARLY_RETURN = """    const finalizeFlowGeometry=()=>{
       const previousTopology=execweaveTopology;
@@ -282,9 +284,10 @@ def harden_execution_flow_projection(html: str) -> str:
         raise RuntimeError("execution-flow direct action evidence seam changed")
     html = html.replace(_DIRECT_ACTION_LOOP, _SAFE_DIRECT_ACTION_LOOP, 1)
 
-    if html.count(_HIERARCHY_ACTION_ONLY) != 2:
+    if html.count(_HIERARCHY_PARENT_ONLY) != 1 or html.count(_HIERARCHY_RANK_ONLY) != 1:
         raise RuntimeError("execution-flow hierarchy action seam changed")
-    html = html.replace(_HIERARCHY_ACTION_ONLY, _HIERARCHY_ACTION_SAFE)
+    html = html.replace(_HIERARCHY_PARENT_ONLY, _HIERARCHY_PARENT_SAFE, 1)
+    html = html.replace(_HIERARCHY_RANK_ONLY, _HIERARCHY_RANK_SAFE, 1)
 
     if _FLOW_EARLY_RETURN not in html or _FLOW_END not in html:
         raise RuntimeError("execution-flow final geometry seam changed")
