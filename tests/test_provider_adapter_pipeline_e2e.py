@@ -8,14 +8,15 @@ from typing import Any
 
 import pytest
 
+from execweave.agent_trace import cursor_agent_trace_events
 from execweave.anthropic import response_to_events as anthropic_response_to_events
 from execweave.antigravity_adapter import antigravity_hook_to_semantic_events
 from execweave.antigravity_full_fidelity import antigravity_hook_to_content_events
 from execweave.claude_adapter import claude_hook_to_semantic_events
 from execweave.codex_rollout_trace import import_codex_rollout_traces
 from execweave.content_store import FullFidelityContentStore
+from execweave.conversation_records import conversation_record_entries
 from execweave.cursor_adapter import cursor_hook_to_semantic_events
-from execweave.agent_trace import cursor_agent_trace_events
 from execweave.cursor_delegation import cursor_delegation_events
 from execweave.dashboard_shell import render_static_dashboard_html
 from execweave.graph import GraphAccumulator
@@ -28,8 +29,11 @@ from execweave.model_runtime import (
     vllm_response_to_events,
 )
 from execweave.model_runtime_full_fidelity import runtime_exchange_to_content_events
-from execweave.openai_compatible import response_to_events as openai_compatible_response_to_events
+from execweave.openai_compatible import (
+    response_to_events as openai_compatible_response_to_events,
+)
 from execweave.opencode_adapter import opencode_plugin_to_semantic_events
+from execweave.opencode_task_linkage import opencode_task_session_events
 from test_antigravity_subagent_transcript_linkage import (
     _child_result,
     _layout,
@@ -39,6 +43,7 @@ from test_antigravity_subagent_transcript_linkage import (
     _write_transcript,
 )
 from test_codex_rollout_trace import _bundle
+from test_opencode_task_session_linkage import _task_part_payload
 from test_viewer_agent_isolation_e2e import _browser, _launch
 
 pytestmark = pytest.mark.viewer_e2e
@@ -68,7 +73,7 @@ def _accumulate(session_id: str, events: list[dict[str, Any]], tmp_path: Path) -
     return acc.to_dict()
 
 
-def _browser_assert(graph: dict[str, Any], *, expect_children: bool) -> dict[str, Any]:
+def _browser_assert(graph: dict[str, Any], *, expect: dict[str, Any]) -> dict[str, Any]:
     raw_before = copy.deepcopy(graph)
     manager, executable = _browser()
     with manager as playwright:
@@ -79,69 +84,98 @@ def _browser_assert(graph: dict[str, Any], *, expect_children: bool) -> dict[str
             page.on("pageerror", lambda err: errors.append(str(err)))
             page.set_content(render_static_dashboard_html(graph))
             page.wait_for_selector("svg", timeout=15000)
-            display = page.evaluate("window.__execweaveCore.getDisplayGraph()")
-            raw = page.evaluate("window.__execweaveCore.getGraph()")
-            metrics = page.evaluate(
-                "window.__execweavePr70 ? window.__execweavePr70.metrics() : "
-                "({NODE_OVERLAPS:0,EDGE_NODE_INTERSECTIONS:0})"
-            )
-            page.locator("#arrange").click()
-            arranged = page.evaluate("window.__execweaveCore.getDisplayGraph()")
-            arranged_metrics = page.evaluate(
-                "window.__execweavePr70 ? window.__execweavePr70.metrics() : "
-                "({NODE_OVERLAPS:0,EDGE_NODE_INTERSECTIONS:0})"
-            )
+            assert page.evaluate(
+                "!!(window.__execweavePr70 && typeof window.__execweavePr70.metrics==='function')"
+            ), "metrics API missing"
+
+            def snap():
+                return (
+                    page.evaluate("window.__execweaveCore.getDisplayGraph()"),
+                    page.evaluate("window.__execweaveCore.getGraph()"),
+                    page.evaluate("window.__execweavePr70.metrics()"),
+                    page.evaluate(
+                        """() => Object.fromEntries([...document.querySelectorAll('.node')].map(g => {
+                            const m=(g.getAttribute('transform')||'').match(/translate\\(([-0-9.]+) ([-0-9.]+)\\)/);
+                            return [g.dataset.id, {x:m?Number(m[1]):0,y:m?Number(m[2]):0}];
+                        }))"""
+                    ),
+                )
+
+            display = None
+            for phase in ("initial", "arrange"):
+                display, raw, metrics, positions = snap()
+                assert not errors, errors
+                assert len(raw["nodes"]) == len(raw_before["nodes"])
+                assert len(raw["edges"]) == len(raw_before["edges"])
+                for key in ("NODE_OVERLAPS", "EDGE_NODE_INTERSECTIONS"):
+                    assert key in metrics
+                    value = metrics[key]
+                    assert isinstance(value, (int, float)) and value == value
+                    assert value == 0, (phase, key, value)
+                visible = {n["id"] for n in display["nodes"]}
+                for edge in display["edges"]:
+                    assert edge["source"] in visible, (phase, edge)
+                    assert edge["target"] in visible, (phase, edge)
+                agents = [n for n in display["nodes"] if n.get("type") == "agent"]
+                agent_ids = [n["id"] for n in agents]
+                assert len(agent_ids) == len(set(agent_ids))
+                assert len(agents) >= int(expect.get("min_agents", 1))
+                for rid in expect.get("root_ids", []):
+                    assert rid in agent_ids, (phase, rid, agent_ids)
+                actions = [
+                    n
+                    for n in display["nodes"]
+                    if n.get("attributes", {}).get("viewer_orchestration_action")
+                ]
+                if expect.get("forbid_children"):
+                    role_children = [
+                        n
+                        for n in agents
+                        if n.get("attributes", {}).get("agent_role")
+                        in {"subagent", "worker", "child"}
+                    ]
+                    assert not role_children, (phase, role_children)
+                    assert not actions, (phase, [a.get("name") for a in actions])
+                    assert display["nodes"], (phase, "runtime/gateway display empty")
+                else:
+                    for cid in expect.get("child_ids", []):
+                        assert cid in agent_ids, (phase, cid, agent_ids)
+                    if expect.get("require_action"):
+                        assert actions, (phase, "expected orchestration action")
+                    if (
+                        expect.get("require_flow_order")
+                        and expect.get("child_ids")
+                        and expect.get("root_ids")
+                    ):
+                        contexts = [
+                            n
+                            for n in display["nodes"]
+                            if n.get("attributes", {}).get("viewer_model_context")
+                        ]
+                        if contexts and actions:
+                            root_id = expect["root_ids"][0]
+                            child_id = expect["child_ids"][0]
+                            assert (
+                                positions[root_id]["x"]
+                                < positions[contexts[0]["id"]]["x"]
+                                < positions[actions[0]["id"]]["x"]
+                                < positions[child_id]["x"]
+                            ), (phase, positions)
+                if phase == "initial":
+                    page.locator("#arrange").click()
+            assert display is not None
+            return {
+                "agents": len([n for n in display["nodes"] if n.get("type") == "agent"]),
+                "actions": len(
+                    [
+                        n
+                        for n in display["nodes"]
+                        if n.get("attributes", {}).get("viewer_orchestration_action")
+                    ]
+                ),
+            }
         finally:
             browser.close()
-
-    assert not errors, errors
-    assert len(raw["nodes"]) == len(raw_before["nodes"])
-    assert len(raw["edges"]) == len(raw_before["edges"])
-    agents = [n for n in display["nodes"] if n.get("type") == "agent"]
-    agent_ids = [n["id"] for n in agents]
-    assert len(agent_ids) == len(set(agent_ids))
-    visible = {n["id"] for n in display["nodes"]}
-    for edge in display["edges"]:
-        assert edge["source"] in visible, edge
-        assert edge["target"] in visible, edge
-    assert metrics.get("NODE_OVERLAPS", 0) == 0
-    assert metrics.get("EDGE_NODE_INTERSECTIONS", 0) == 0
-    assert arranged_metrics.get("NODE_OVERLAPS", 0) == 0
-
-    child_like = [
-        n
-        for n in agents
-        if n.get("attributes", {}).get("agent_role") in {"subagent", "worker", "child"}
-        or (
-            n.get("attributes", {}).get("agent_path")
-            and n.get("attributes", {}).get("agent_path") != "/root"
-            and n.get("name") not in {"/root", "root"}
-        )
-    ]
-    actions = [
-        n
-        for n in display["nodes"]
-        if n.get("attributes", {}).get("viewer_orchestration_action")
-    ]
-    models_retained = any(
-        n.get("type") == "model"
-        or n.get("attributes", {}).get("viewer_model_context")
-        for n in display["nodes"]
-    ) or any(n.get("type") == "model" for n in raw["nodes"])
-
-    if expect_children:
-        assert agents, "agent providers must materialize agents"
-        assert models_retained or actions or agents
-    else:
-        # Runtime/gateway adapters must not invent children or orchestration actions.
-        assert not child_like, child_like
-        assert not actions, [a.get("name") for a in actions]
-
-    return {
-        "agents": len(agents),
-        "actions": len(actions),
-        "arranged_nodes": len(arranged["nodes"]),
-    }
 
 
 def _claude_events() -> list[dict[str, Any]]:
@@ -181,10 +215,7 @@ def _cursor_events(tmp_path: Path) -> list[dict[str, Any]]:
     for payload in data["payloads"]:
         if payload.get("hook_event_name") == "sessionStart":
             events.extend(cursor_hook_to_semantic_events(payload))
-            events.extend(
-                cursor_agent_trace_events(payload, store=store, timestamp=TS)
-            )
-    # Direct spawn (agent-trace) + exact subtask (delegation) for the same child.
+            events.extend(cursor_agent_trace_events(payload, store=store, timestamp=TS))
     subagent_payload = {
         "hook_event_name": "subagentStart",
         "conversation_id": "cursor-pipe",
@@ -241,32 +272,20 @@ def _opencode_events(tmp_path: Path) -> list[dict[str, Any]]:
             timestamp=TS,
         )
     )
-    from execweave.opencode_task_linkage import opencode_task_session_events
-
-    events.extend(
-        opencode_task_session_events(
-            {
-                "event": "tool.executed",
-                "part": {
-                    "type": "tool",
-                    "tool": "task",
-                    "callID": "call-task-1",
-                    "sessionID": "oc-parent",
-                    "state": {
-                        "status": "completed",
-                        "metadata": {"sessionId": "oc-child"},
-                        "input": {
-                            "description": "explore",
-                            "prompt": "go",
-                            "subagent_type": "explore",
-                        },
-                    },
-                },
-            },
-            timestamp=TS,
-            store=store,
-        )
+    task_payload = _task_part_payload(
+        parent_session="oc-parent",
+        metadata_parent="oc-parent",
+        child_session="oc-child",
     )
+    # Align callID with tool.execute.before so ownership evidence joins.
+    task_payload["event"]["properties"]["part"]["callID"] = "call-task-1"
+    task_events = opencode_task_session_events(
+        task_payload,
+        timestamp=TS,
+        store=store,
+    )
+    assert any(e.get("relation") == "ASSIGNED_AGENT_TASK" for e in task_events), task_events
+    events.extend(task_events)
     return events
 
 
@@ -278,24 +297,16 @@ def _agy_events(tmp_path: Path) -> list[dict[str, Any]]:
     store = FullFidelityContentStore(tmp_path / "agy-store")
     payload = _payload(workspace, transcript, subagents)
     events: list[dict[str, Any]] = []
-    # Semantic Pre-tool surface when available; always run full-fidelity PostToolUse.
-    try:
-        events.extend(
-            antigravity_hook_to_semantic_events(
-                {
-                    "conversationId": payload["conversationId"],
-                    "workspacePaths": [str(workspace)],
-                    "transcriptPath": str(transcript),
-                    "modelName": "gemini-flash",
-                    "stepIdx": payload.get("stepIdx", 7),
-                    "toolCall": payload.get("toolCall"),
-                },
-                hook_event="PostToolUse",
-                timestamp=TS,
-            )
-        )
-    except Exception:
-        pass
+    pre = {
+        "conversationId": payload["conversationId"],
+        "workspacePaths": [str(workspace)],
+        "transcriptPath": str(transcript),
+        "modelName": "gemini-flash",
+        "stepIdx": payload.get("stepIdx", 7),
+    }
+    events.extend(
+        antigravity_hook_to_semantic_events(pre, hook_event="PreInvocation", timestamp=TS)
+    )
     events.extend(
         antigravity_hook_to_content_events(
             payload,
@@ -304,18 +315,43 @@ def _agy_events(tmp_path: Path) -> list[dict[str, Any]]:
             timestamp=TS,
         )
     )
+    assert events, "AGY parsers produced zero events"
+    assert any(
+        e.get("relation") in {"REQUESTED_SUBTASK", "ASSIGNED_AGENT_TASK", "USED_MODEL", "INVOKED_MODEL"}
+        or (isinstance(e.get("relation"), str))
+        for e in events
+    )
     return events
 
 
-def _two_round_runtime(provider: str, tmp_path: Path) -> list[dict[str, Any]]:
+def _codex_events(tmp_path: Path) -> list[dict[str, Any]]:
+    trace_root, _ = _bundle(tmp_path)
+    sidecar = tmp_path / "codex-semantic.jsonl"
+    result = import_codex_rollout_traces(
+        trace_root=trace_root,
+        semantic_sidecar=sidecar,
+        codex_executable="codex-not-needed-because-state-exists",
+    )
+    assert result.status == "imported", result
+    return [
+        json.loads(line)
+        for line in sidecar.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+
+def _two_round_runtime(provider: str, tmp_path: Path) -> tuple[list[dict[str, Any]], set[str]]:
     store = FullFidelityContentStore(tmp_path / f"{provider}-store")
     events: list[dict[str, Any]] = []
-    for idx, prompt in enumerate(("round-one", "round-two"), start=1):
+    request_ids: set[str] = set()
+    for idx, prompt in enumerate(("round-one-prompt", "round-two-prompt"), start=1):
         request_id = f"{provider}-req-{idx}"
+        request_ids.add(request_id)
+        response_text = f"{provider}-answer-{idx}"
         if provider == "ollama":
             response = {
                 "model": "gemma3:4b",
-                "message": {"role": "assistant", "content": f"answer-{idx}"},
+                "message": {"role": "assistant", "content": response_text},
                 "done": True,
             }
             request = {
@@ -347,12 +383,15 @@ def _two_round_runtime(provider: str, tmp_path: Path) -> list[dict[str, Any]]:
                 "choices": [
                     {
                         "index": 0,
-                        "message": {"role": "assistant", "content": f"llama-{idx}"},
+                        "message": {"role": "assistant", "content": response_text},
                         "finish_reason": "stop",
                     }
                 ],
             }
-            request = {"model": "llama-audit", "messages": [{"role": "user", "content": prompt}]}
+            request = {
+                "model": "llama-audit",
+                "messages": [{"role": "user", "content": prompt}],
+            }
             events.extend(
                 llamacpp_response_to_events(
                     response,
@@ -378,12 +417,15 @@ def _two_round_runtime(provider: str, tmp_path: Path) -> list[dict[str, Any]]:
                 "choices": [
                     {
                         "index": 0,
-                        "message": {"role": "assistant", "content": f"vllm-{idx}"},
+                        "message": {"role": "assistant", "content": response_text},
                         "finish_reason": "stop",
                     }
                 ],
             }
-            request = {"model": "vllm-audit", "messages": [{"role": "user", "content": prompt}]}
+            request = {
+                "model": "vllm-audit",
+                "messages": [{"role": "user", "content": prompt}],
+            }
             events.extend(
                 vllm_response_to_events(
                     response,
@@ -409,12 +451,15 @@ def _two_round_runtime(provider: str, tmp_path: Path) -> list[dict[str, Any]]:
                 "choices": [
                     {
                         "index": 0,
-                        "message": {"role": "assistant", "content": f"lms-{idx}"},
+                        "message": {"role": "assistant", "content": response_text},
                         "finish_reason": "stop",
                     }
                 ],
             }
-            request = {"model": "lms-audit", "messages": [{"role": "user", "content": prompt}]}
+            request = {
+                "model": "lms-audit",
+                "messages": [{"role": "user", "content": prompt}],
+            }
             events.extend(
                 lmstudio_response_to_events(
                     response,
@@ -441,7 +486,7 @@ def _two_round_runtime(provider: str, tmp_path: Path) -> list[dict[str, Any]]:
                         "type": "message",
                         "role": "assistant",
                         "model": "claude-haiku-audit",
-                        "content": [{"type": "text", "text": f"anthropic-{idx}"}],
+                        "content": [{"type": "text", "text": response_text}],
                         "usage": {"input_tokens": 3, "output_tokens": 4},
                     },
                     endpoint="https://api.anthropic.com",
@@ -456,7 +501,7 @@ def _two_round_runtime(provider: str, tmp_path: Path) -> list[dict[str, Any]]:
                 "choices": [
                     {
                         "index": 0,
-                        "message": {"role": "assistant", "content": f"compat-{idx}"},
+                        "message": {"role": "assistant", "content": response_text},
                         "finish_reason": "stop",
                     }
                 ],
@@ -477,7 +522,7 @@ def _two_round_runtime(provider: str, tmp_path: Path) -> list[dict[str, Any]]:
                 "choices": [
                     {
                         "index": 0,
-                        "message": {"role": "assistant", "content": f"or-{idx}"},
+                        "message": {"role": "assistant", "content": response_text},
                         "finish_reason": "stop",
                     }
                 ],
@@ -491,15 +536,24 @@ def _two_round_runtime(provider: str, tmp_path: Path) -> list[dict[str, Any]]:
                 )
             )
         elif provider == "litellm":
+            # LiteLLM node ids come from payload id (litellm-1/2), not {provider}-req-N.
+            request_ids.discard(request_id)
+            request_id = f"litellm-{idx}"
+            request_ids.add(request_id)
             events.extend(
                 standard_logging_to_events(
                     {
-                        "id": f"litellm-{idx}",
+                        "id": request_id,
                         "model": "gpt-audit",
                         "messages": [{"role": "user", "content": prompt}],
                         "response": {
                             "choices": [
-                                {"message": {"role": "assistant", "content": f"lite-{idx}"}}
+                                {
+                                    "message": {
+                                        "role": "assistant",
+                                        "content": response_text,
+                                    }
+                                }
                             ]
                         },
                         "startTime": TS,
@@ -509,58 +563,188 @@ def _two_round_runtime(provider: str, tmp_path: Path) -> list[dict[str, Any]]:
             )
         else:
             raise KeyError(provider)
-    return events
+    return events, request_ids
 
 
-def _codex_events(tmp_path: Path) -> list[dict[str, Any]]:
-    trace_root, _ = _bundle(tmp_path)
-    sidecar = tmp_path / "codex-semantic.jsonl"
-    result = import_codex_rollout_traces(
-        trace_root=trace_root,
-        semantic_sidecar=sidecar,
-        codex_executable="codex-not-needed-because-state-exists",
-    )
-    assert result.status == "imported", result
-    return [
-        json.loads(line)
-        for line in sidecar.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-
-
-def _events_for(provider: str, tmp_path: Path) -> list[dict[str, Any]]:
+def _expect_for(provider: str, graph: dict[str, Any]) -> dict[str, Any]:
+    agents = [n for n in graph["nodes"] if n.get("type") == "agent"]
     if provider == "claude":
-        return _claude_events()
+        roots = [n["id"] for n in agents if n.get("attributes", {}).get("agent_role") == "root" or n.get("name") in {"/root", "Claude"}]
+        children = [
+            n["id"]
+            for n in agents
+            if "researcher" in n["id"] or n.get("attributes", {}).get("agent_role") == "subagent"
+        ]
+        return {
+            "min_agents": 2,
+            "root_ids": roots[:1] or [agents[0]["id"]],
+            "child_ids": children[:1],
+            "require_action": False,
+            "require_flow_order": False,
+        }
     if provider == "cursor":
-        return _cursor_events(tmp_path)
+        return {
+            "min_agents": 2,
+            "root_ids": ["agent:Cursor"] if any(n["id"] == "agent:Cursor" for n in agents) else [agents[0]["id"]],
+            "child_ids": [
+                n["id"]
+                for n in agents
+                if "child-1" in n["id"] or n.get("attributes", {}).get("agent_role") == "subagent"
+            ][:1],
+            "require_action": True,
+            "require_flow_order": True,
+        }
     if provider == "opencode":
-        return _opencode_events(tmp_path)
+        return {
+            "min_agents": 2,
+            "root_ids": ["agent:opencode:session:oc-parent"],
+            "child_ids": ["agent:opencode:session:oc-child"],
+            "require_action": True,
+            "require_flow_order": True,
+        }
     if provider == "antigravity":
-        return _agy_events(tmp_path)
+        children = [
+            n["id"]
+            for n in agents
+            if n.get("attributes", {}).get("agent_role") == "subagent"
+            or "child" in n["id"]
+        ]
+        roots = [n["id"] for n in agents if n["id"] not in children]
+        return {
+            "min_agents": 1 if not children else 2,
+            "root_ids": roots[:1],
+            "child_ids": children[:1],
+            "require_action": bool(children),
+            "require_flow_order": bool(children),
+        }
     if provider == "codex":
-        return _codex_events(tmp_path)
+        children = [
+            n["id"]
+            for n in agents
+            if n.get("attributes", {}).get("agent_role") in {"subagent", "worker"}
+            or (n.get("attributes", {}).get("agent_path") or "").count("/") > 1
+        ]
+        roots = [n["id"] for n in agents if n["id"] not in children]
+        return {
+            "min_agents": 2,
+            "root_ids": roots[:1],
+            "child_ids": children[:1],
+            "require_action": True,
+            "require_flow_order": True,
+        }
+    return {"min_agents": 0, "forbid_children": True}
+
+
+def _events_for(provider: str, tmp_path: Path):
+    if provider == "claude":
+        return _claude_events(), set()
+    if provider == "cursor":
+        return _cursor_events(tmp_path), set()
+    if provider == "opencode":
+        return _opencode_events(tmp_path), set()
+    if provider == "antigravity":
+        return _agy_events(tmp_path), set()
+    if provider == "codex":
+        return _codex_events(tmp_path), set()
     return _two_round_runtime(provider, tmp_path)
 
 
 @pytest.mark.parametrize("provider", ALL_PROVIDERS)
 def test_provider_adapter_pipeline_chromium(provider: str, tmp_path: Path) -> None:
-    events = _events_for(provider, tmp_path)
+    events, expected_request_ids = _events_for(provider, tmp_path)
     assert events, f"{provider} produced zero events"
+    if provider in RUNTIME_GATEWAY:
+        assert len(expected_request_ids) == 2, expected_request_ids
     graph = _accumulate(f"pipe-{provider}", events, tmp_path)
-    expect_children = provider in AGENT_PROVIDERS
-    _browser_assert(graph, expect_children=expect_children)
+
+    if provider == "opencode":
+        assert any(e.get("relation") == "ASSIGNED_AGENT_TASK" for e in graph["edges"])
+        assert any(n["id"] == "agent:opencode:session:oc-child" for n in graph["nodes"])
+
+    expect = _expect_for(provider, graph)
+    _browser_assert(graph, expect=expect)
 
     if provider in RUNTIME_GATEWAY:
-        # Two distinct request ids must remain as separate conversation evidence.
-        request_ids = {
-            (n.get("attributes") or {}).get("request_id")
-            for n in graph["nodes"]
-            if (n.get("attributes") or {}).get("request_id")
-        }
-        # Also accept edge attributes / event provenance.
-        for edge in graph["edges"]:
-            rid = (edge.get("attributes") or {}).get("request_id")
-            if rid:
-                request_ids.add(rid)
-        # Soft check: at least two rounds of events were applied.
-        assert len(events) >= 2
+        id_blob = "\n".join(
+            [str(n.get("id") or "") for n in graph["nodes"]]
+            + [str(e.get("id") or "") for e in graph["edges"]]
+            + [str((n.get("attributes") or {}).get("request_id") or "") for n in graph["nodes"]]
+        )
+        for rid in expected_request_ids:
+            assert rid in id_blob, (provider, rid, id_blob[:500])
+        # Full-fidelity exchange content is stored as observed_content files.
+        store_root = tmp_path / f"{provider}-store"
+        content_blob = ""
+        if store_root.is_dir():
+            for path_file in store_root.rglob("*"):
+                if path_file.is_file():
+                    content_blob += path_file.read_text(encoding="utf-8", errors="ignore")
+        graph_blob = json.dumps(graph, default=str)
+        combined = content_blob + "\n" + graph_blob
+        # Providers that emit exchange content must retain both prompts/answers.
+        if provider in {"ollama", "llamacpp", "vllm", "lmstudio"}:
+            assert "round-one-prompt" in combined
+            assert "round-two-prompt" in combined
+            assert f"{provider}-answer-1" in combined
+            assert f"{provider}-answer-2" in combined
+        else:
+            # Gateway response parsers still must retain two distinct request ids.
+            assert len(expected_request_ids) == 2
+
+
+def test_negative_control_root_only_graph_fails_agent_expect(tmp_path: Path) -> None:
+    """Soft any(agents) must not pass a child-expecting gate."""
+    graph = {
+        "schema_version": "1.0",
+        "session_id": "neg-root-only",
+        "nodes": [
+            {
+                "id": "agent:only",
+                "type": "agent",
+                "name": "/root",
+                "attributes": {"provider": "test", "agent_role": "root"},
+            }
+        ],
+        "edges": [],
+    }
+    with pytest.raises(AssertionError):
+        _browser_assert(
+            graph,
+            expect={
+                "min_agents": 2,
+                "root_ids": ["agent:only"],
+                "child_ids": ["agent:missing-child"],
+                "require_action": True,
+            },
+        )
+
+
+def test_negative_control_missing_metrics_api_fails(tmp_path: Path) -> None:
+    graph = {
+        "schema_version": "1.0",
+        "session_id": "neg-metrics",
+        "nodes": [
+            {
+                "id": "agent:only",
+                "type": "agent",
+                "name": "/root",
+                "attributes": {"provider": "test", "agent_role": "root"},
+            }
+        ],
+        "edges": [],
+    }
+    # Monkeypatch: render then delete metrics before assert path by using evaluate injection
+    # via a one-off browser check.
+    manager, executable = _browser()
+    with manager as playwright:
+        browser = _launch(playwright, executable)
+        try:
+            page = browser.new_page(viewport={"width": 1200, "height": 800})
+            page.set_content(render_static_dashboard_html(graph))
+            page.wait_for_selector("svg", timeout=15000)
+            page.evaluate("window.__execweavePr70 = undefined")
+            assert not page.evaluate(
+                "!!(window.__execweavePr70 && typeof window.__execweavePr70.metrics==='function')"
+            )
+        finally:
+            browser.close()

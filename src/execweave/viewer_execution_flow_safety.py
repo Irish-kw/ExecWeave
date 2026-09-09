@@ -17,12 +17,17 @@ _SAFE_ACTION_NAME = """  const actionName=value=>{
 _PROVIDER_HELPER = "  const provider=node=>String(attrsOf(node).provider||'unknown').toLowerCase();"
 _SAFE_PROVIDER_HELPER = """  const provider=node=>String(attrsOf(node).provider||'unknown').toLowerCase();
   const providerObservedEdge=edge=>{
+    // Inferred / viewer-only edges must never authorize orchestration projection.
+    // Semantic provenance alone does not upgrade inferred evidence into observed truth.
+    if(!edge)return false;
     const evidence=attrsOf(edge);
+    if(edge.inferred===true||evidence.inferred===true)return false;
+    if(edge.viewer_only===true||evidence.viewer_only===true)return false;
     const eventTypes=Array.isArray(edge?.event_types)?edge.event_types:[];
     const backends=Array.isArray(edge?.backends)?edge.backends:[];
     const attributions=Array.isArray(edge?.attributions)?edge.attributions:[];
     const lifecycle=Array.isArray(edge?.provider_lifecycle)?edge.provider_lifecycle:[];
-    return edge?.viewer_only===true||Boolean(
+    return Boolean(
       evidence.provider||evidence.evidence_source||evidence.attribution||
       evidence.provider_event||evidence.provider_event_type||
       lifecycle.length||attributions.length||
@@ -85,8 +90,8 @@ _SAFE_MODEL_EDGE_LOOP = """    for(const edge of rawEdges){
       const owner=agentForAnchor(edge.source);
       if(owner)addModelEvent(owner,edge.target,edge);
     }"""
-_MODEL_FILTER = "      if(contextifiedModels.has(edge.target)&&agents.has(edge.source)&&modelRelation(edge))return false;"
-_SAFE_MODEL_FILTER = "      if(contextifiedModels.has(edge.target)&&agentForAnchor(edge.source)&&modelRelation(edge))return false;"
+_MODEL_FILTER = "      if(modelRelation(edge)&&agents.has(edge.source)&&contextIds.has(contextId(edge.source,edge.target)))return false;"
+_SAFE_MODEL_FILTER = "      if(modelRelation(edge)&&agents.has(edge.source)&&contextIds.has(contextId(edge.source,edge.target)))return false;"
 _TOOL_RESOLVE = "        if(relation(edge)!=='USES_TOOL')continue;"
 _SAFE_TOOL_RESOLVE = "        if(!['USES_TOOL','RESOLVED_TOOL'].includes(relation(edge)))continue;"
 _TOOL_CONSUME = "      const uses=(incoming.get(toolId)||[]).filter(edge=>['USES_TOOL','RESOLVED_TOOL'].includes(relation(edge)));"

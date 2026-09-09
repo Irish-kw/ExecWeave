@@ -494,12 +494,14 @@ EXECUTION_FLOW_SCRIPT = r"""
     for(const [toolId,node] of [...rawById].filter(([,n])=>n?.type==='tool')){
       const uses=(incoming.get(toolId)||[]).filter(edge=>['USES_TOOL','RESOLVED_TOOL'].includes(relation(edge)));
       if(!uses.length)continue;
-      const fromCalls=uses.filter(edge=>{
+      // Keep shared tool definitions when any live use remains: another owner's
+      // unconsumed call, an agent-direct USES_TOOL, or unresolved evidence.
+      const allConsumedCalls=uses.every(edge=>{
         const src=rawById.get(edge.source);
-        return ['tool_call','tool_call_observation'].includes(String(src?.type||''));
+        const isCall=['tool_call','tool_call_observation'].includes(String(src?.type||''));
+        return isCall&&consumedCallIds.has(edge.source);
       });
-      if(!fromCalls.length)continue;
-      if(fromCalls.every(edge=>consumedCallIds.has(edge.source)))hideToolDefs.add(toolId);
+      if(allConsumedCalls)hideToolDefs.add(toolId);
     }
 
     const flowNodes=display.nodes.map(node=>{
@@ -518,12 +520,16 @@ EXECUTION_FLOW_SCRIPT = r"""
         return !consumedRawEdges.has(edge.id);
       }
       if(hideToolDefs.has(edge.source)||hideToolDefs.has(edge.target))return false;
-      if(contextifiedModels.has(edge.target)&&agents.has(edge.source)&&modelRelation(edge))return false;
+      // Only supersede an owner→model edge when THAT owner already has a viewer
+      // model-context for the same model. Other owners' shared-model usage stays.
+      if(modelRelation(edge)&&agents.has(edge.source)&&contextIds.has(contextId(edge.source,edge.target)))return false;
       return true;
     });
 
     for(const modelId of contextifiedModels){
       const remaining=edges.filter(edge=>edge.source===modelId||edge.target===modelId);
+      // Keep the raw model resource whenever any non-superseded usage remains
+      // (another owner, unresolved call, or non-agent attachment).
       if(!remaining.length)nodes=nodes.filter(node=>node.id!==modelId);
     }
 

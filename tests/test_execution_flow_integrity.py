@@ -32,11 +32,13 @@ def _hardened_script() -> str:
 
 
 def _project(raw: dict, display: dict | None = None) -> dict:
+    """Project display through hardened+normalized EXECUTION_FLOW_SCRIPT via Node.
+
+    Mutability: the exact object passed as ``raw`` into the JS projector is compared
+    after the call. The harness must not assert against an unused clone.
+    """
     display = copy.deepcopy(display if display is not None else raw)
-    raw_before = json.dumps(raw, sort_keys=True, default=str)
     script = _hardened_script()
-    # Write the harness to a temp file: embedding the full hardened script in
-    # ``node -e`` exceeds Windows CreateProcess command-line limits (WinError 206).
     parts = [
         "const fs=require('fs');",
         "const payload=JSON.parse(fs.readFileSync(0,'utf8'));",
@@ -46,12 +48,17 @@ def _project(raw: dict, display: dict | None = None) -> dict:
         "const api=window.__execweaveExecutionFlow;",
         "if(!api||typeof api.project!=='function'){",
         "throw new Error('execution flow project API missing');}",
-        "const out=api.project(",
-        "JSON.parse(JSON.stringify(payload.display)),",
-        "JSON.parse(JSON.stringify(payload.raw)));",
-        "process.stdout.write(JSON.stringify({display:out,raw:payload.raw}));",
+        "const rawObj=payload.raw;",
+        "const displayObj=payload.display;",
+        "const before=JSON.stringify(rawObj);",
+        "const out=api.project(displayObj, rawObj);",
+        "process.stdout.write(JSON.stringify({",
+        "  display:out,",
+        "  rawUnchanged: JSON.stringify(rawObj)===before,",
+        "  rawAfter: rawObj",
+        "}));",
     ]
-    harness = "\n".join(parts)
+    harness = '\n'.join(parts)
     with tempfile.TemporaryDirectory() as tmp:
         runner = Path(tmp) / "project_flow.js"
         runner.write_text(harness, encoding="utf-8")
@@ -65,8 +72,10 @@ def _project(raw: dict, display: dict | None = None) -> dict:
     if proc.returncode != 0:
         raise AssertionError(proc.stderr or proc.stdout or "node failed")
     result = json.loads(proc.stdout)
-    assert json.dumps(result["raw"], sort_keys=True, default=str) == raw_before
+    assert result["rawUnchanged"] is True, "projector mutated the raw graph object"
+    assert result["rawAfter"] == raw
     return result["display"]
+
 
 
 def _edge(eid, src, tgt, rel, seq=1, **extra):
