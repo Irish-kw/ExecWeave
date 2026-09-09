@@ -52,6 +52,16 @@ _WAIT_AWARE_ACTIVATION = """    const providerObservedEdge=edge=>{
         if(!ended)occurrence.targets.add(child);
       }
     }
+    // The branch model answers "which model does this target agent belong to?".
+    // Prefer a unanimous target-agent model context over the actor's current model.
+    // This keeps old children under gpt-5.5 even if /root later switches to Luna.
+    for(const occurrence of occurrences){
+      if(!occurrence.targets.size)continue;
+      const targetModels=new Set(
+        [...occurrence.targets].map(target=>resolveModel(target,occurrence.item)).filter(Boolean)
+      );
+      if(targetModels.size===1)occurrence.modelId=[...targetModels][0];
+    }
     const resolvedOccurrences=occurrences.filter(occurrence=>occurrence.targets.size>0);
     if(!resolvedOccurrences.length)return display;
     const flowKey=occurrence=>`${occurrence.owner}\\u0000${occurrence.kind}\\u0000${occurrence.modelId||''}`;
@@ -95,15 +105,16 @@ def harden_execution_flow_projection(html: str) -> str:
     """Fail closed on ambiguous or evidence-poor execution-flow projection.
 
     A model context is shown only for orchestration that resolves to real target agents.
-    Explicit targets are preferred. Target-less ``wait_agent`` calls may use the
-    provider-evidenced active-child set: children spawned before the wait and without
-    stop/close evidence before that wait. Once an action group has real targets,
-    target-less call evidence from the same owner/model/action is folded into that
-    single viewer action so the raw collaboration tool is not rendered as a duplicate.
-    Provider tool-call vocabularies ``USES_TOOL`` and ``RESOLVED_TOOL`` are treated as
-    equivalent call-to-tool support for this presentation-only consumption step.
-    Bare tool names and ambiguous provider subtask/profile evidence never rewrite the
-    main hierarchy.
+    The target agents' evidenced model context is authoritative when all resolved targets
+    agree; the actor model is only a fallback. Explicit targets are preferred.
+    Target-less ``wait_agent`` calls may use the provider-evidenced active-child set:
+    children spawned before the wait and without stop/close evidence before that wait.
+    Once an action group has real targets, target-less call evidence from the same
+    owner/model/action is folded into that single viewer action so the raw collaboration
+    tool is not rendered as a duplicate. Provider tool-call vocabularies ``USES_TOOL``
+    and ``RESOLVED_TOOL`` are equivalent call-to-tool support for this presentation-only
+    consumption step. Bare tool names and ambiguous provider subtask/profile evidence
+    never rewrite the main hierarchy.
     """
 
     for unsafe in (_DIRECT_ASSIGN, _DIRECT_SUBTASK):
