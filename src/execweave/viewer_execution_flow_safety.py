@@ -148,9 +148,9 @@ _SAFE_DIRECT_ACTION_LOOP = """    for(const edge of rawEdges){
     // direct parent -> child spawn edge: requester -> subtask -> assigned child.
     // Project that chain only when both endpoints are unique and the provider has
     // supplied exact child linkage. This admits real Antigravity/Cursor evidence
-    // while continuing to abstain on OpenCode profile-only or otherwise ambiguous
-    // subtasks. The raw subtask and child-session edges remain embedded evidence;
-    // they are merely superseded on the main canvas by the single action path.
+    // while continuing to abstain on profile-only or otherwise ambiguous subtasks.
+    // The raw subtask and child-session edges remain embedded evidence; they are
+    // merely superseded on the main canvas by the single action path.
     const exactAssignmentRelation=['ASSIGNED','AGENT','TASK'].join('_');
     const exactDelegationEdge=edge=>edge?.identity_exact===true||attrsOf(edge).identity_exact===true;
     const seenDelegationSubtasks=new Set();
@@ -185,6 +185,33 @@ _SAFE_DIRECT_ACTION_LOOP = """    for(const edge of rawEdges){
       pushOccurrence(
         'assign_agent_task',owner,[target],assignmentSeed,[subtask.id],
         evidenceEdges.map(edge=>edge.id).filter(Boolean)
+      );
+    }
+
+    // A provider can also expose the exact child directly from an owner-bound tool
+    // call. Keep the generic assignment relation disabled: only an exact materialized
+    // identity edge plus a unique call owner and real agent target can enter the flow.
+    for(const assignment of rawEdges){
+      if(relation(assignment)!==exactAssignmentRelation||!providerObservedEdge(assignment)||!exactDelegationEdge(assignment))continue;
+      const anchor=rawById.get(assignment.source);
+      if(anchor?.type!=='tool_call')continue;
+      const owner=agentForAnchor(anchor.id),target=agentForAnchor(assignment.target);
+      if(!owner||!target||owner===target)continue;
+      const scopedProviders=[provider(agents.get(owner)),provider(agents.get(target)),provider(anchor)]
+        .filter(value=>value&&value!=='unknown');
+      if(new Set(scopedProviders).size>1)continue;
+      const supportEdges=[
+        ...(incoming.get(anchor.id)||[]).filter(edge=>
+          relation(edge)==='REQUESTED_TOOL_CALL'&&providerObservedEdge(edge)&&agentForAnchor(edge.source)===owner
+        ),
+        ...(outgoing.get(anchor.id)||[]).filter(edge=>
+          ['USES_TOOL','RESOLVED_TOOL'].includes(relation(edge))&&providerObservedEdge(edge)
+        ),
+        assignment,
+      ];
+      pushOccurrence(
+        'assign_agent_task',owner,[target],assignment,[anchor.id],
+        supportEdges.map(edge=>edge.id).filter(Boolean)
       );
     }"""
 _HIERARCHY_PARENT_ONLY = "      if(group.kind!=='spawn_agent')continue;"
@@ -221,8 +248,9 @@ def harden_execution_flow_projection(html: str) -> str:
     agree; the actor model is only a fallback. Explicit targets are preferred.
     Target-less ``wait_agent`` calls may use the provider-evidenced active-child set:
     children spawned before the wait and without stop/close evidence before that wait.
-    Exact requester -> subtask -> assigned-child chains are accepted when provider evidence
-    proves a unique owner and child; ambiguous/profile-only subtasks still fail closed.
+    Exact requester -> subtask -> assigned-child chains and exact owner-bound tool-call
+    assignments are accepted when provider evidence proves a unique owner and child;
+    ambiguous/profile-only subtasks and non-exact assignments still fail closed.
     Once an action group has real targets, target-less call evidence from the same
     owner/model/action is folded into that single viewer action so the raw collaboration
     tool is not rendered as a duplicate. Provider tool-call vocabularies ``USES_TOOL``
