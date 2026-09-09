@@ -8,6 +8,7 @@ from .viewer_agent_panel import inject_agent_panel
 from .viewer_dashboard_clean import fold_budget_bootstrap, inject_live_dashboard_clean
 from .viewer_dashboard_focus import inject_live_dashboard_focus
 from .viewer_dashboard_pr70 import inject_pr70_dashboard_repairs
+from .viewer_execution_flow import inject_execution_flow
 from .viewer_layout_v2 import inject_layout_v2
 from .viewer_layout_v2_detached import inject_layout_v2_detached_cluster_policy
 from .viewer_limits import resolve_viewer_limits, viewer_limits_bootstrap
@@ -76,6 +77,7 @@ def _build_dashboard_html() -> str:
     html = inject_pr70_dashboard_repairs(html)
     html = inject_layout_v2(html)
     html = inject_layout_v2_detached_cluster_policy(html)
+    html = inject_execution_flow(html)
     return _align_agent_panel_topology(inject_agent_panel(_guard_compact_live_snapshot(html)))
 
 
