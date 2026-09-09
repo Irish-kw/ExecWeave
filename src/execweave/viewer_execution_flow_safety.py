@@ -20,6 +20,36 @@ _MODEL_ONLY_ACTIVATION = (
 _ACTION_ONLY_ACTIVATION = "    if(!occurrences.length)return display;"
 _TARGETED_ACTIVATION = """    const resolvedOccurrences=occurrences.filter(occurrence=>occurrence.targets.size>0);
     if(!resolvedOccurrences.length)return display;"""
+_WAIT_AWARE_ACTIVATION = """    const providerObservedEdge=edge=>{
+      const evidence=attrsOf(edge);
+      return edge?.viewer_only===true||Boolean(
+        evidence.provider||evidence.evidence_source||evidence.attribution||
+        evidence.provider_event||evidence.provider_event_type
+      );
+    };
+    const spawnEdges=rawEdges.filter(edge=>
+      providerObservedEdge(edge)&&['SPAWNED_AGENT','SPAWNED_SUBAGENT'].includes(relation(edge))&&
+      agents.has(agentForAnchor(edge.source))&&agents.has(agentForAnchor(edge.target))
+    );
+    const terminalEdges=rawEdges.filter(edge=>
+      providerObservedEdge(edge)&&['SUBAGENT_STOPPED','CLOSED_AGENT'].includes(relation(edge))
+    );
+    for(const occurrence of occurrences){
+      if(occurrence.kind!=='wait_agent'||occurrence.targets.size)continue;
+      const at=moment(occurrence.item);
+      for(const spawn of spawnEdges){
+        const owner=agentForAnchor(spawn.source),child=agentForAnchor(spawn.target);
+        if(owner!==occurrence.owner||!child||child===owner||!momentLE(moment(spawn),at))continue;
+        const ended=terminalEdges.some(edge=>{
+          const r=relation(edge),a=agentForAnchor(edge.source),b=agentForAnchor(edge.target);
+          const touches=r==='SUBAGENT_STOPPED'?a===child&&b===owner:a===owner&&b===child;
+          return touches&&momentLE(moment(edge),at);
+        });
+        if(!ended)occurrence.targets.add(child);
+      }
+    }
+    const resolvedOccurrences=occurrences.filter(occurrence=>occurrence.targets.size>0);
+    if(!resolvedOccurrences.length)return display;"""
 _GROUP_LOOP = "    for(const occurrence of occurrences){"
 _TARGETED_GROUP_LOOP = "    for(const occurrence of resolvedOccurrences){"
 _EAGER_CONTEXTS = """    for(const [owner,list] of modelEventsByAgent){
@@ -50,11 +80,11 @@ _SAFE_DIRECT_ACTION_LOOP = """    for(const edge of rawEdges){
 def harden_execution_flow_projection(html: str) -> str:
     """Fail closed on ambiguous or evidence-poor execution-flow projection.
 
-    A model context is shown only for a real orchestration occurrence with at least one
-    resolved target agent. Bare tool names, bare topology fixtures, and ambiguous
-    subtask/profile evidence remain available in raw/inspector evidence but cannot
-    rewrite the main execution hierarchy. Tagged provider enums are normalized before
-    action matching so Codex-style ``{"type": ...}`` kinds are handled losslessly.
+    A model context is shown only for orchestration that resolves to real target agents.
+    Explicit targets are preferred.  Target-less ``wait_agent`` calls may use the
+    provider-evidenced active-child set: children spawned before the wait and without
+    stop/close evidence before that wait. Bare tool names and ambiguous provider
+    subtask/profile evidence never rewrite the main hierarchy.
     """
 
     for unsafe in (_DIRECT_ASSIGN, _DIRECT_SUBTASK):
@@ -75,6 +105,9 @@ def harden_execution_flow_projection(html: str) -> str:
     if _ACTION_ONLY_ACTIVATION not in html:
         raise RuntimeError("execution-flow targeted activation seam changed")
     html = html.replace(_ACTION_ONLY_ACTIVATION, _TARGETED_ACTIVATION, 1)
+    if _TARGETED_ACTIVATION not in html:
+        raise RuntimeError("execution-flow wait target seam changed")
+    html = html.replace(_TARGETED_ACTIVATION, _WAIT_AWARE_ACTIVATION, 1)
 
     if _GROUP_LOOP not in html:
         raise RuntimeError("execution-flow resolved occurrence seam changed")
