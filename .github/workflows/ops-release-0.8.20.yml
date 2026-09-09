@@ -1,0 +1,114 @@
+name: Ops Release ExecWeave 0.8.20
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  release:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.head_ref == 'ops/release-0.8.20' &&
+      github.base_ref == 'main'
+    runs-on: ubuntu-latest
+    env:
+      EXPECTED_SHA: 7c6c028a32cc7f21217e3b23420c938670ff5f97
+      RELEASE_TAG: v0.8.20
+      EXPECTED_VERSION: 0.8.20
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Guard exact owner and main SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${{ github.actor }}" = "Irish-kw"
+          current="$(git ls-remote https://github.com/${GITHUB_REPOSITORY}.git refs/heads/main | awk '{print $1}')"
+          test "$current" = "$EXPECTED_SHA" || {
+            echo "main moved: expected $EXPECTED_SHA, got $current" >&2
+            exit 1
+          }
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_SHA }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify release boundary is unused and metadata is exact
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          python - <<'PY'
+          import re
+          import tomllib
+          import urllib.error
+          import urllib.request
+          from pathlib import Path
+
+          expected = "0.8.20"
+          project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+          if project["project"]["version"] != expected:
+              raise SystemExit(f"pyproject version mismatch: {project['project']['version']!r}")
+          init_text = Path("src/execweave/__init__.py").read_text(encoding="utf-8")
+          match = re.search(r'__version__\s*=\s*"([^"]+)"', init_text)
+          if not match or match.group(1) != expected:
+              raise SystemExit(f"runtime version mismatch: {match.group(1) if match else None!r}")
+          try:
+              urllib.request.urlopen(f"https://pypi.org/pypi/execweave/{expected}/json", timeout=20).close()
+          except urllib.error.HTTPError as error:
+              if error.code != 404:
+                  raise
+          else:
+              raise SystemExit(f"execweave {expected} already exists on PyPI")
+          print(f"Verified unused PyPI version {expected}")
+          PY
+          if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "$RELEASE_TAG already exists" >&2
+            exit 1
+          fi
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "GitHub Release $RELEASE_TAG already exists" >&2
+            exit 1
+          fi
+
+      - name: Create exact GitHub Release and tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/release-notes.md" <<'EOF'
+          ExecWeave v0.8.20
+
+          - Fixes the Claude process-to-root route crossing External network evidence by applying local edge detours while keeping network routes and node positions fixed.
+          - Recognizes production Claude subagent provenance from the real top-level GraphEdge fields, so the visible flow is root → model context → spawn_agent → unique Claude subagents without rewriting raw evidence.
+          - PR #77 exact feature SHA `9104f226e350823180d8c17054d3c1c02b63eb7e` passed independent GrokBot release gate #39 with `DISCOVERED_BUGS=0`.
+          - Release candidate PR #78 passed CI, three-OS Viewer/Chromium, three-OS clean wheel Dashboard/GIF, cross-OS canonical wheel identity, provider, integrity, and Windows launcher gates.
+          EOF
+          gh release create "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$EXPECTED_SHA" \
+            --title "ExecWeave $RELEASE_TAG" \
+            --notes-file "$RUNNER_TEMP/release-notes.md"
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json tagName,targetCommitish,isDraft,isPrerelease,url
+          target="$(git ls-remote --tags origin "refs/tags/$RELEASE_TAG" | awk '{print $1}')"
+          test "$target" = "$EXPECTED_SHA" || {
+            echo "tag points to $target instead of $EXPECTED_SHA" >&2
+            exit 1
+          }
+
+      - name: Dispatch existing Trusted Publishing workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh workflow run publish.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f release_tag="$RELEASE_TAG"
+          echo "Dispatched publish.yml for $RELEASE_TAG at $EXPECTED_SHA"
