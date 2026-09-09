@@ -8,11 +8,13 @@ from test_viewer_agent_isolation_e2e import _browser, _launch
 pytestmark = pytest.mark.viewer_e2e
 
 
-def test_tagged_codex_agent_interaction_projects_through_model_without_agent_clone():
+def test_tagged_codex_interaction_and_implicit_wait_use_one_child_identity():
     root_id = "agent:codex:rollout:r:thread:root"
     child_id = "agent:codex:rollout:r:thread:child"
     model_id = "model:codex:gpt-5.5"
     interaction_id = "agent-interaction:codex:r:edge-1"
+    wait_call_id = "tool-call:codex:rollout:r:wait-1"
+    wait_tool_id = "tool:codex:wait_agent"
     graph = {
         "schema_version": "1.0",
         "session_id": "codex-native-flow",
@@ -61,6 +63,24 @@ def test_tagged_codex_agent_interaction_projects_through_model_without_agent_clo
                     "target_anchor": "child",
                 },
             },
+            {
+                "id": wait_call_id,
+                "type": "tool_call",
+                "name": "wait_agent",
+                "first_sequence": 6,
+                "attributes": {
+                    "provider": "codex",
+                    "rollout_id": "r",
+                    "tool_call_id": "wait-1",
+                    "kind": {"type": "wait_agent"},
+                },
+            },
+            {
+                "id": wait_tool_id,
+                "type": "tool",
+                "name": "wait_agent",
+                "attributes": {"provider": "codex", "native_name": "wait_agent"},
+            },
         ],
         "edges": [
             {
@@ -91,6 +111,40 @@ def test_tagged_codex_agent_interaction_projects_through_model_without_agent_clo
                 "target": child_id,
                 "relation": "TARGETED_BY_AGENT_INTERACTION",
                 "first_sequence": 4,
+                "attributes": {
+                    "provider": "codex",
+                    "evidence_source": "codex_rollout_trace",
+                },
+            },
+            {
+                "id": "spawn-direct",
+                "source": root_id,
+                "target": child_id,
+                "relation": "SPAWNED_AGENT",
+                "first_sequence": 4,
+                "attributes": {
+                    "provider": "codex",
+                    "evidence_source": "codex_rollout_trace",
+                    "interaction_edge_id": "edge-1",
+                },
+            },
+            {
+                "id": "wait-request",
+                "source": root_id,
+                "target": wait_call_id,
+                "relation": "REQUESTED_TOOL_CALL",
+                "first_sequence": 6,
+                "attributes": {
+                    "provider": "codex",
+                    "evidence_source": "codex_rollout_trace",
+                },
+            },
+            {
+                "id": "wait-tool",
+                "source": wait_call_id,
+                "target": wait_tool_id,
+                "relation": "USES_TOOL",
+                "first_sequence": 7,
                 "attributes": {
                     "provider": "codex",
                     "evidence_source": "codex_rollout_trace",
@@ -128,22 +182,24 @@ def test_tagged_codex_agent_interaction_projects_through_model_without_agent_clo
         node for node in display["nodes"]
         if node.get("attributes", {}).get("viewer_model_context")
     ]
-    actions = [
-        node for node in display["nodes"]
+    actions = {
+        node["name"]: node
+        for node in display["nodes"]
         if node.get("attributes", {}).get("viewer_orchestration_action")
-    ]
+    }
     assert len(contexts) == 1 and contexts[0]["name"] == "gpt-5.5"
-    assert len(actions) == 1 and actions[0]["name"] == "spawn_agent"
-    assert any(
-        edge["source"] == contexts[0]["id"] and edge["target"] == actions[0]["id"]
-        for edge in display["edges"]
-    )
-    assert any(
-        edge["source"] == actions[0]["id"] and edge["target"] == child_id
-        for edge in display["edges"]
-    )
+    assert {"spawn_agent", "wait_agent"} <= set(actions)
+    for action_name in ("spawn_agent", "wait_agent"):
+        assert any(
+            edge["source"] == contexts[0]["id"] and edge["target"] == actions[action_name]["id"]
+            for edge in display["edges"]
+        )
+        assert any(
+            edge["source"] == actions[action_name]["id"] and edge["target"] == child_id
+            for edge in display["edges"]
+        )
     assert positions[root_id]["x"] < positions[contexts[0]["id"]]["x"]
-    assert positions[contexts[0]["id"]]["x"] < positions[actions[0]["id"]]["x"]
-    assert positions[actions[0]["id"]]["x"] < positions[child_id]["x"]
+    assert positions[contexts[0]["id"]]["x"] < positions[actions["spawn_agent"]["id"]]["x"]
+    assert positions[actions["spawn_agent"]["id"]]["x"] < positions[child_id]["x"]
     assert metrics["NODE_OVERLAPS"] == 0
     assert metrics["EDGE_NODE_INTERSECTIONS"] == 0
