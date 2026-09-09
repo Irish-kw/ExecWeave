@@ -68,6 +68,8 @@ _SAFE_MODEL_EDGE_LOOP = """    for(const edge of rawEdges){
       const owner=agentForAnchor(edge.source);
       if(owner)addModelEvent(owner,edge.target,edge);
     }"""
+_MODEL_FILTER = "      if(contextifiedModels.has(edge.target)&&agents.has(edge.source)&&modelRelation(edge))return false;"
+_SAFE_MODEL_FILTER = "      if(contextifiedModels.has(edge.target)&&agentForAnchor(edge.source)&&modelRelation(edge))return false;"
 _TOOL_RESOLVE = "        if(relation(edge)!=='USES_TOOL')continue;"
 _SAFE_TOOL_RESOLVE = "        if(!['USES_TOOL','RESOLVED_TOOL'].includes(relation(edge)))continue;"
 _TOOL_CONSUME = "          if(relation(edge)==='USES_TOOL')actionToolIds.add(edge.target);"
@@ -246,6 +248,9 @@ def harden_execution_flow_projection(html: str) -> str:
     if _MODEL_EDGE_LOOP not in html:
         raise RuntimeError("execution-flow model ownership seam changed")
     html = html.replace(_MODEL_EDGE_LOOP, _SAFE_MODEL_EDGE_LOOP, 1)
+    if _MODEL_FILTER not in html:
+        raise RuntimeError("execution-flow contextified-model filter seam changed")
+    html = html.replace(_MODEL_FILTER, _SAFE_MODEL_FILTER, 1)
 
     if _TOOL_RESOLVE not in html or _TOOL_CONSUME not in html:
         raise RuntimeError("execution-flow tool-resolution seam changed")
