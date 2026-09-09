@@ -105,7 +105,7 @@ def test_cursor_subtask_viewer_marks_exact_child_linkage_and_payloads() -> None:
     assert "ASSIGNED_AGENT_TASK" in html
     assert "HAS_SUBTASK_PROMPT" in html
     assert "HAS_SUBTASK_DESCRIPTION" in html
-    assert '\"exact_child_agent_linkage\":true' in html
+    assert '"exact_child_agent_linkage":true' in html
     assert f"content/sha256/{'a' * 64}.txt" in html
     assert f"content/sha256/{'b' * 64}.txt" in html
     assert "Delegation Evidence" not in html
@@ -170,10 +170,7 @@ def test_opencode_subtask_viewer_does_not_invent_child_session_join() -> None:
     assert "TARGETS_AGENT_PROFILE" in html
     assert "HAS_SUBTASK_PROMPT" in html
     assert "HAS_CHILD_AGENT_SESSION" in html
-    # Inspect the serialized input graph, not implementation literals embedded in the
-    # Dashboard JavaScript. The safety projector is expected to know this relation name;
-    # this fixture must simply not contain an invented assignment edge of its own.
-    assert '\"relation\":\"ASSIGNED_AGENT_TASK\"' not in html
+    assert "ASSIGNED_AGENT_TASK" not in html
     assert "Delegation Evidence" not in html
 
 
