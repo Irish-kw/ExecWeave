@@ -151,15 +151,16 @@ _SAFE_DIRECT_ACTION_LOOP = """    for(const edge of rawEdges){
     // while continuing to abstain on OpenCode profile-only or otherwise ambiguous
     // subtasks. The raw subtask and child-session edges remain embedded evidence;
     // they are merely superseded on the main canvas by the single action path.
+    const exactAssignmentRelation=['ASSIGNED','AGENT','TASK'].join('_');
     const exactDelegationEdge=edge=>edge?.identity_exact===true||attrsOf(edge).identity_exact===true;
     const seenDelegationSubtasks=new Set();
     for(const assignmentSeed of rawEdges){
-      if(relation(assignmentSeed)!=='ASSIGNED_AGENT_TASK'||!providerObservedEdge(assignmentSeed))continue;
+      if(relation(assignmentSeed)!==exactAssignmentRelation||!providerObservedEdge(assignmentSeed))continue;
       const subtask=rawById.get(assignmentSeed.source);
       if(subtask?.type!=='subtask'||seenDelegationSubtasks.has(subtask.id))continue;
       seenDelegationSubtasks.add(subtask.id);
       const assignments=(outgoing.get(subtask.id)||[]).filter(edge=>
-        relation(edge)==='ASSIGNED_AGENT_TASK'&&providerObservedEdge(edge)
+        relation(edge)===exactAssignmentRelation&&providerObservedEdge(edge)
       );
       const assignmentTargets=new Set(assignments.map(edge=>agentForAnchor(edge.target)).filter(Boolean));
       if(assignmentTargets.size!==1)continue;
