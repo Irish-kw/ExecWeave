@@ -25,6 +25,8 @@ PROVIDERS = (
 
 
 def _edge(edge_id: str, source: str, target: str, relation: str, seq: int, **attrs):
+    parts = source.split(":", 2)
+    provider = parts[1] if len(parts) > 2 else "fixture"
     return {
         "id": edge_id,
         "source": source,
@@ -32,7 +34,11 @@ def _edge(edge_id: str, source: str, target: str, relation: str, seq: int, **att
         "relation": relation,
         "first_sequence": seq,
         "last_sequence": seq,
-        "attributes": attrs,
+        "attributes": {
+            "provider": provider,
+            "evidence_source": "provider_fixture",
+            **attrs,
+        },
     }
 
 
@@ -153,17 +159,20 @@ def _display(provider: str):
                 }))"""
             )
             raw = page.evaluate("window.__execweaveCore.getGraph()")
+            metrics = page.evaluate("window.__execweavePr70.metrics()")
+            flow_version = page.evaluate("window.__execweaveExecutionFlow?.version")
             assert not errors, errors
-            return graph, display, positions, raw
+            return graph, display, positions, raw, metrics, flow_version
         finally:
             browser.close()
 
 
 @pytest.mark.parametrize("provider", PROVIDERS)
 def test_every_provider_uses_model_orchestration_unique_agent_flow(provider):
-    graph, display, positions, raw = _display(provider)
+    graph, display, positions, raw, metrics, flow_version = _display(provider)
     edges = display["edges"]
 
+    assert flow_version == 1
     assert len(raw["nodes"]) == len(graph["nodes"])
     assert any(edge["relation"] == "SPAWNED_AGENT" for edge in raw["edges"])
 
@@ -235,13 +244,12 @@ def test_every_provider_uses_model_orchestration_unique_agent_flow(provider):
     assert positions[actions["spawn_agent"]["id"]]["x"] < positions[singer_id]["x"]
     assert positions[actions["spawn_agent"]["id"]]["x"] < positions[rawls_id]["x"]
 
-    projection = display["dashboard_projection"]
-    assert projection["execution_flow_projection"] is True
-    assert projection["unique_agent_node_count"] == 3
+    assert metrics["NODE_OVERLAPS"] == 0
+    assert metrics["EDGE_NODE_INTERSECTIONS"] == 0
 
 
 def test_model_switch_keeps_action_contexts_separate_without_cloning_agents():
-    _, display, _, _ = _display("codex")
+    _, display, _, _, metrics, _ = _display("codex")
     actions = [
         node
         for node in display["nodes"]
@@ -253,3 +261,5 @@ def test_model_switch_keeps_action_contexts_separate_without_cloning_agents():
     assert by_name["wait_agent"]["attributes"]["model_resource_id"].endswith("gpt-5.6-luna")
     assert len([node for node in display["nodes"] if node["name"] == "Singer" and node["type"] == "agent"]) == 1
     assert len([node for node in display["nodes"] if node["name"] == "Rawls" and node["type"] == "agent"]) == 1
+    assert metrics["NODE_OVERLAPS"] == 0
+    assert metrics["EDGE_NODE_INTERSECTIONS"] == 0
