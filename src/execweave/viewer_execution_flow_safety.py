@@ -73,9 +73,10 @@ _WAIT_AWARE_ACTIVATION = """    const providerObservedEdge=edge=>{
     const groupedOccurrences=occurrences.filter(occurrence=>
       occurrence.targets.size>0||resolvedKeys.has(flowKey(occurrence))
     );"""
-_GROUP_LOOP = "    for(const occurrence of occurrences){"
-_TARGETED_GROUP_LOOP = "    for(const occurrence of resolvedOccurrences){"
-_EVIDENCE_GROUP_LOOP = "    for(const occurrence of groupedOccurrences){"
+_GROUP_BLOCK_START = """    const groups=new Map();
+    for(const occurrence of occurrences){"""
+_EVIDENCE_GROUP_BLOCK_START = """    const groups=new Map();
+    for(const occurrence of groupedOccurrences){"""
 _EAGER_CONTEXTS = """    for(const [owner,list] of modelEventsByAgent){
       for(const modelId of new Set(list.map(item=>item.modelId)))ensureContext(owner,modelId);
     }
@@ -143,12 +144,12 @@ def harden_execution_flow_projection(html: str) -> str:
         raise RuntimeError("execution-flow wait target seam changed")
     html = html.replace(_TARGETED_ACTIVATION, _WAIT_AWARE_ACTIVATION, 1)
 
-    if _GROUP_LOOP not in html:
-        raise RuntimeError("execution-flow resolved occurrence seam changed")
-    html = html.replace(_GROUP_LOOP, _TARGETED_GROUP_LOOP, 1)
-    if _TARGETED_GROUP_LOOP not in html:
-        raise RuntimeError("execution-flow evidence merge seam changed")
-    html = html.replace(_TARGETED_GROUP_LOOP, _EVIDENCE_GROUP_LOOP, 1)
+    # Anchor the evidence-group replacement on ``const groups``. Matching the bare
+    # loop text is unsafe because the wait/model-resolution block intentionally has
+    # earlier ``for(const occurrence of occurrences)`` loops of its own.
+    if _GROUP_BLOCK_START not in html:
+        raise RuntimeError("execution-flow evidence grouping seam changed")
+    html = html.replace(_GROUP_BLOCK_START, _EVIDENCE_GROUP_BLOCK_START, 1)
 
     if _EAGER_CONTEXTS not in html:
         raise RuntimeError("execution-flow eager model-context seam changed")
