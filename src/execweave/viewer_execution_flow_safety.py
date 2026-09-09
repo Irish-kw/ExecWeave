@@ -9,6 +9,10 @@ _MODEL_ONLY_ACTIVATION = (
     "    if(!occurrences.length&&![...modelEventsByAgent.values()].some(list=>list.length))return display;"
 )
 _ACTION_ONLY_ACTIVATION = "    if(!occurrences.length)return display;"
+_TARGETED_ACTIVATION = """    const resolvedOccurrences=occurrences.filter(occurrence=>occurrence.targets.size>0);
+    if(!resolvedOccurrences.length)return display;"""
+_GROUP_LOOP = "    for(const occurrence of occurrences){"
+_TARGETED_GROUP_LOOP = "    for(const occurrence of resolvedOccurrences){"
 _EAGER_CONTEXTS = """    for(const [owner,list] of modelEventsByAgent){
       for(const modelId of new Set(list.map(item=>item.modelId)))ensureContext(owner,modelId);
     }
@@ -37,9 +41,10 @@ _SAFE_DIRECT_ACTION_LOOP = """    for(const edge of rawEdges){
 def harden_execution_flow_projection(html: str) -> str:
     """Fail closed on ambiguous or evidence-poor execution-flow projection.
 
-    Model context is a presentation layer for an evidenced orchestration action, not a
-    reason to rewrite every ordinary model edge.  Likewise, bare topology fixtures and
-    provider-ambiguous subtask/profile relations must not synthesize orchestration.
+    A model context is shown only for a real orchestration occurrence with at least one
+    resolved target agent.  Bare tool names, bare topology fixtures, and ambiguous
+    subtask/profile evidence remain available in raw/inspector evidence but cannot
+    rewrite the main execution hierarchy.
     """
 
     for unsafe in (_DIRECT_ASSIGN, _DIRECT_SUBTASK):
@@ -53,6 +58,13 @@ def harden_execution_flow_projection(html: str) -> str:
     if _MODEL_ONLY_ACTIVATION not in html:
         raise RuntimeError("execution-flow activation seam changed")
     html = html.replace(_MODEL_ONLY_ACTIVATION, _ACTION_ONLY_ACTIVATION, 1)
+    if _ACTION_ONLY_ACTIVATION not in html:
+        raise RuntimeError("execution-flow targeted activation seam changed")
+    html = html.replace(_ACTION_ONLY_ACTIVATION, _TARGETED_ACTIVATION, 1)
+
+    if _GROUP_LOOP not in html:
+        raise RuntimeError("execution-flow resolved occurrence seam changed")
+    html = html.replace(_GROUP_LOOP, _TARGETED_GROUP_LOOP, 1)
 
     if _EAGER_CONTEXTS not in html:
         raise RuntimeError("execution-flow eager model-context seam changed")
