@@ -87,6 +87,80 @@ const execweaveGeometry=(function(){
     return{points:out,detours,obstructedGuides:points.length-guides.length};
   }
 
+  function avoidCrossings(points,boxes,segments,clearance=7){
+    const protectedSegments=(Array.isArray(segments)?segments:[]).filter(segment=>
+      segment?.a&&segment?.b&&Number.isFinite(segment.a.x)&&Number.isFinite(segment.a.y)&&
+      Number.isFinite(segment.b.x)&&Number.isFinite(segment.b.y)&&
+      Math.hypot(segment.b.x-segment.a.x,segment.b.y-segment.a.y)>epsilon
+    );
+    if(!Array.isArray(points)||points.length<2||!protectedSegments.length){
+      return{points:Array.isArray(points)?points:[],detours:0,crossingsAvoided:0};
+    }
+    const nodeBoxes=Array.isArray(boxes)?boxes:[];
+    const inside=p=>nodeBoxes.some(box=>p.x>box.x&&p.x<box.x+box.w&&p.y>box.y&&p.y<box.y+box.h);
+    const blocked=(a,b)=>nodeBoxes.some(box=>throughBox(a,b,box))||
+      protectedSegments.some(segment=>crosses(a,b,segment.a,segment.b));
+    const crossingCount=route=>{
+      let count=0;
+      for(let i=1;i<route.length;i++)for(const segment of protectedSegments)
+        if(crosses(route[i-1],route[i],segment.a,segment.b))count++;
+      return count;
+    };
+    const before=crossingCount(points);
+    if(!before)return{points,detours:0,crossingsAvoided:0};
+
+    const portals=[];
+    for(const segment of protectedSegments){
+      const dx=segment.b.x-segment.a.x,dy=segment.b.y-segment.a.y,length=Math.hypot(dx,dy);
+      if(length<=epsilon)continue;
+      const tx=dx/length,ty=dy/length,nx=-ty,ny=tx;
+      for(const endpoint of [segment.a,segment.b])for(const normal of [-1,1])for(const tangent of [-1,1]){
+        const p={
+          x:endpoint.x+normal*clearance*nx+tangent*clearance*tx,
+          y:endpoint.y+normal*clearance*ny+tangent*clearance*ty,
+        };
+        if(!inside(p))portals.push(p);
+      }
+    }
+
+    const solve=(a,b,includeBoxes)=>{
+      const vertices=[a,b,...portals];
+      if(includeBoxes){
+        for(const box of nodeBoxes){
+          const l=box.x-2,r=box.x+box.w+2,t=box.y-2,d=box.y+box.h+2;
+          for(const p of [{x:l,y:t},{x:l,y:d},{x:r,y:t},{x:r,y:d}])if(!inside(p))vertices.push(p);
+        }
+      }
+      const dist=vertices.map(()=>Infinity),prev=vertices.map(()=>-1),used=new Set();dist[0]=0;
+      for(let i=0;i<vertices.length;i++){
+        let u=-1;for(let j=0;j<vertices.length;j++)if(!used.has(j)&&(u<0||dist[j]<dist[u]))u=j;
+        if(u<0||!Number.isFinite(dist[u]))break;
+        if(u===1)break;used.add(u);
+        for(let v=0;v<vertices.length;v++){
+          if(v===u||used.has(v)||blocked(vertices[u],vertices[v]))continue;
+          const next=dist[u]+Math.hypot(vertices[u].x-vertices[v].x,vertices[u].y-vertices[v].y);
+          if(next<dist[v]-1e-6){dist[v]=next;prev[v]=u}
+        }
+      }
+      if(!Number.isFinite(dist[1]))return null;
+      const found=[];let at=1;
+      while(at>0){found.push(vertices[at]);at=prev[at]}
+      found.reverse();return found;
+    };
+
+    const out=[points[0]];let detours=0;
+    for(let part=1;part<points.length;part++){
+      const a=out[out.length-1],b=points[part];
+      const directCrosses=protectedSegments.some(segment=>crosses(a,b,segment.a,segment.b));
+      if(!directCrosses){out.push(b);continue}
+      const found=solve(a,b,false)||solve(a,b,true);
+      if(found){out.push(...found);detours++}else out.push(b);
+    }
+    const after=crossingCount(out);
+    if(after>=before)return{points,detours:0,crossingsAvoided:0};
+    return{points:out,detours,crossingsAvoided:before-after};
+  }
+
   function measure(nodes,edges){
     const routes=edges.map(e=>{const points=sample(e.d);return{...e,points,left:Math.min(...points.map(p=>p.x)),right:Math.max(...points.map(p=>p.x)),top:Math.min(...points.map(p=>p.y)),bottom:Math.max(...points.map(p=>p.y))}});
     let crossings=0,overlaps=0,intersections=0;
@@ -113,6 +187,6 @@ const execweaveGeometry=(function(){
       MAX_EDGE_LENGTH:lengths.at(-1)||0,P95_EDGE_LENGTH:lengths[Math.max(0,Math.ceil(lengths.length*.95)-1)]||0,
       VISIBLE_NODE_COUNT:nodes.length,VISIBLE_EDGE_COUNT:edges.length};
   }
-  return{polyline,sample,crosses,throughBox,measure,avoidNodes};
+  return{polyline,sample,crosses,throughBox,measure,avoidNodes,avoidCrossings};
 })();
 """.strip()
