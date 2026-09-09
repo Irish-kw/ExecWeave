@@ -161,6 +161,12 @@ def opencode_task_session_events(
         "attribution": "opencode_task_tool_metadata",
         "causal": False,
         "inferred": False,
+        # GraphEdge deliberately persists identity_exact / identity_method while
+        # provider-specific booleans remain event-level evidence. Mark the provider's
+        # explicit parentSessionId + sessionId join in the generic fidelity contract so
+        # downstream viewers can safely distinguish it from heuristic task linkage.
+        "identity_exact": True,
+        "identity_method": "opencode_task_tool_parent_and_child_session_ids",
         "opencode_event_type": event_type,
         "provider_task_session_id_exact": True,
         "provider_parent_session_id_exact": True,
