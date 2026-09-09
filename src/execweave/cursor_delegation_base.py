@@ -134,6 +134,11 @@ def cursor_delegation_events(
     subtask = _subtask(payload, child)
     visibility = agent_trace_visibility("cursor")
     exact = {
+        # Persist the provider's exact subagent id through GraphEdge.to_dict(), not
+        # only in event-specific booleans, so the provider-neutral viewer can make
+        # the same fail-closed delegation decision from a materialized graph.
+        "identity_exact": True,
+        "identity_method": "cursor_provider_subagent_id",
         "provider_subagent_id_exact": True,
         "exact_child_agent_linkage": True,
         **visibility,
