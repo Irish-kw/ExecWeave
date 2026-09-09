@@ -6,8 +6,7 @@ _DIRECT_SUBTASK = "    ['REQUESTED_SUBTASK','assign_agent_task'],\n"
 _ASSIGN_TARGET = "    ['assign_agent_task','ASSIGNED_AGENT_TASK'],"
 _SAFE_ASSIGN_TARGET = "    ['assign_agent_task','TARGETED_AGENT'],"
 _ACTION_NAME = """  const actionName=value=>{
-    const raw=value&&typeof value==='object'&&typeof value.type==='string'?value.type:value;
-    const text=String(raw||'').trim().toLowerCase().replace(/[\\s-]+/g,'_');
+    const text=String(value||'').trim().toLowerCase().replace(/[\\s-]+/g,'_');
     return ACTION_ALIASES.get(text)||null;
   };"""
 _SAFE_ACTION_NAME = """  const actionName=value=>{
