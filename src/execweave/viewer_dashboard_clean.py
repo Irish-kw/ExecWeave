@@ -80,7 +80,7 @@ def fold_budget_bootstrap(budget: int | None = None) -> str:
 
 _DASHBOARD_JS = r"""
 function execweaveDashboardGraph(data){
-  const allNodes=Array.isArray(data?.nodes)?data.nodes:[],allEdges=Array.isArray(data?.edges)?data.edges:[];
+  const allNodes=Array.isArray(data?.nodes)?data.nodes:[],allEdges=(Array.isArray(data?.edges)?data.edges:[]).filter(edge=>!edge?.viewer_flow_superseded);
   const allById=new Map(allNodes.filter(node=>node&&node.id).map(node=>[node.id,node]));
   const hiddenTypes=new Set(['agent_execution','observed_content','tool_call','agent_turn','tool_call_observation','conversation_item','provider_session','permission_request','context_compaction','agent_turn_stop','compaction','compaction_request','terminal_operation']);
   const hiddenDetailIds=new Set(allNodes.filter(node=>node&&hiddenTypes.has(String(node.type||''))).map(node=>node.id).filter(Boolean));
@@ -91,7 +91,8 @@ function execweaveDashboardGraph(data){
     return values.some(value=>/(^|[\\/])\.execweave-content-[^\\/]+$/.test(String(value||'')));
   };
   const internalStagingIds=new Set(allNodes.filter(node=>node&&internalStaging(node)).map(node=>node.id).filter(Boolean));
-  const hiddenIds=new Set([...hiddenDetailIds,...internalStagingIds]);
+  const flowSupersededIds=new Set(allNodes.filter(node=>node?.attributes?.viewer_flow_superseded===true).map(node=>node.id).filter(Boolean));
+  const hiddenIds=new Set([...hiddenDetailIds,...internalStagingIds,...flowSupersededIds]);
   const incoming=new Map(),outgoing=new Map();
   for(const edge of allEdges){
     if(!edge)continue;

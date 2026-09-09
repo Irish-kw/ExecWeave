@@ -313,7 +313,7 @@ function execweaveRestoreSemanticLayoutConstraints(topo,preferred,dagrePlacement
     floor=Math.max(floor,after.x+(topo.width?.get(id)||EXECWEAVE_NODE_W)+PROCESS_COL_GAP);
   }
   for(const lane of ['root','agent','model','tool','file','endpoint','other']){
-    const ids=[...topo.spec.keys()].filter(id=>topo.spec.get(id)?.lane===lane&&!isProcess(nodeById.get(id)));
+    const ids=[...topo.spec.keys()].filter(id=>{const node=nodeById.get(id),flowRank=Number(typeof execweaveAttrs==='function'?execweaveAttrs(node).viewer_flow_rank:NaN);return topo.spec.get(id)?.lane===lane&&!isProcess(node)&&!Number.isFinite(flowRank)});
     if(!ids.length)continue;
     const laneX=Number.isFinite(topo.laneX?.[lane])?topo.laneX[lane]:Math.min(...ids.map(id=>preferred.get(id).x));
     const x=Math.max(laneX,Number.isFinite(floor)?floor:laneX);

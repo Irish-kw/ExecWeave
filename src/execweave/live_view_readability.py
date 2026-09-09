@@ -188,6 +188,8 @@ function execweaveBuildTopology(){
   byLane.get('runtime').sort(execweaveStableNodeSort);
   for(const lane of ['model','file','endpoint','other'])byLane.get(lane).sort(byBarycentre);
   byLane.get('tool').sort((a,b)=>{
+    const af=Number(execweaveAttrs(a).viewer_flow_first_sequence),bf=Number(execweaveAttrs(b).viewer_flow_first_sequence);
+    if(Number.isFinite(af)&&Number.isFinite(bf)&&af!==bf)return af-bf;
     const ac=/spawn|send|wait|agent/i.test(String(a?.name||execweaveAttrs(a).tool_name||'')),bc=/spawn|send|wait|agent/i.test(String(b?.name||execweaveAttrs(b).tool_name||''));
     if(ac!==bc)return ac?-1:1;
     const ab=effectiveAgentBarycenter(a),bb=effectiveAgentBarycenter(b);if(ab!==bb)return ab-bb;
@@ -205,7 +207,7 @@ function execweaveBuildTopology(){
   widthByLane.set('endpoint',Math.max(widthByLane.get('endpoint')||EXECWEAVE_NODE_W,widthByLane.get('other')||EXECWEAVE_NODE_W));
   const laneX=execweaveLaneX(widthByLane,occupied);
   const spec=new Map();
-  const put=(node,lane,order,y)=>spec.set(node.id,{lane,rank:EXECWEAVE_LANES[lane],order,x:laneX[lane],y});
+  const put=(node,lane,order,y)=>{const declared=Number(execweaveAttrs(node).viewer_flow_rank),rank=Number.isFinite(declared)?declared:EXECWEAVE_LANES[lane];spec.set(node.id,{lane,rank,order,x:laneX[lane],y})};
   roots.forEach((node,index)=>put(node,'root',index,rootY+index*EXECWEAVE_ROW_GAP));
   children.forEach((node,index)=>put(node,'agent',index,100+index*EXECWEAVE_ROW_GAP));
   byLane.get('runtime').forEach((node,index)=>put(node,'runtime',index,rootY+(index-Math.floor(byLane.get('runtime').length/2))*86));

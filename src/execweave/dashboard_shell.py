@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from . import _dashboard_shell_base as _base
 from . import viewer_projection_base as _viewer_projection_base
-from .viewer_semantic_projection import project_provider_neutral_viewer_graph
+from .viewer_orchestration_projection import project_model_orchestration_viewer_graph
 
 
 def _route_bundle_edges_on_ordered_rails(html: str) -> str:
@@ -194,11 +194,17 @@ function execweaveFileClusterHistory(a){
   }else if(kind==='file_cluster'){
     add('Files / directories',`${Number(a.member_count||0)} collapsed entries`);
     add('Observed',execweaveFileClusterHistory(a));
-  }else if(kind==='model'){
+  }else if(kind==='model'||kind==='model_context'){
     add('Model',node?.name);
     add('Provider',a.provider||a.provider_name);
+    if(kind==='model_context'){add('Owner agent',a.owner_agent_id);add('Semantic model IDs',Array.isArray(a.semantic_model_ids)?a.semantic_model_ids.join(', '):a.semantic_model_ids)}
     add('Inference calls',a.viewer_inference_count);
     add('Inference history',execweaveInferenceHistory(a));
+  }else if(kind==='tool_action'){
+    add('Action',a.action_kind||node?.name);
+    add('Model context',a.model_name);
+    add('Owner agent',a.owner_agent_id);
+    add('Calls',a.call_count);
   }else if(kind==='tool_call'){"""
     if html.count(branch_seam) != 1:
         raise RuntimeError("agent panel file/model branch seam changed")
@@ -249,7 +255,7 @@ def _stop_conversation_polling_after_finish(html: str) -> str:
     return html
 
 
-_viewer_projection_base.project_viewer_graph = project_provider_neutral_viewer_graph
+_viewer_projection_base.project_viewer_graph = project_model_orchestration_viewer_graph
 
 _base.DASHBOARD_HTML = _stop_conversation_polling_after_finish(
     _surface_provider_neutral_clusters(

@@ -831,27 +831,36 @@ def _project_flow(projected: dict[str, Any]) -> dict[str, Any]:
             }
         )
 
-    kept_nodes = [
-        node
-        for node in nodes
-        if node.get("id") not in represented_model_ids
-        and node.get("id") not in orchestration_tool_ids
-    ]
-    kept_node_ids = {
-        str(node["id"]) for node in kept_nodes if isinstance(node.get("id"), str)
-    }
+    kept_nodes: list[dict[str, Any]] = []
+    for node in nodes:
+        node_id = node.get("id")
+        replacement_kind = None
+        if node_id in represented_model_ids:
+            replacement_kind = "model_context"
+        elif node_id in orchestration_tool_ids:
+            replacement_kind = "orchestration_action"
+        if replacement_kind:
+            node["attributes"] = {
+                **_attrs(node),
+                "viewer_flow_superseded": True,
+                "viewer_flow_replaced_by": replacement_kind,
+            }
+        kept_nodes.append(node)
 
     kept_edges: list[dict[str, Any]] = []
     for edge in edges:
         edge_id = str(edge.get("id") or "")
         source, target = edge.get("source"), edge.get("target")
+        superseded_reason = None
         if edge_id in represented_spawn_edge_ids:
-            continue
-        if source in represented_model_ids or target in represented_model_ids:
-            continue
-        if source in orchestration_tool_ids or target in orchestration_tool_ids:
-            continue
-        if source in kept_node_ids and target in kept_node_ids:
+            superseded_reason = "orchestration_spawn_reanchor"
+        elif source in represented_model_ids or target in represented_model_ids:
+            superseded_reason = "model_context"
+        elif source in orchestration_tool_ids or target in orchestration_tool_ids:
+            superseded_reason = "orchestration_action"
+        if superseded_reason:
+            kept_edges.append({**edge, "viewer_flow_superseded": True, "viewer_flow_superseded_reason": superseded_reason})
+        else:
             kept_edges.append(edge)
 
     result = deepcopy(projected)

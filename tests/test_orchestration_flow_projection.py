@@ -151,9 +151,13 @@ def test_model_context_and_orchestration_flow_reuses_agent_identity(tmp_path: Pa
     assert {(edge["relation"], edge["target"]) for edge in edges if edge["source"] == send} == {("SENT_INPUT_TO", A1), ("SENT_INPUT_TO", A2)}
     assert {(edge["relation"], edge["target"]) for edge in edges if edge["source"] == wait} == {("WAITED_FOR", A1), ("WAITED_FOR", A2)}
 
-    assert not any(edge["source"] == ROOT and edge["relation"] == "SPAWNED_AGENT" and edge["target"] in {A1, A2, A3} for edge in edges)
-    assert not {"model:55", "model:luna", "tool:spawn", "tool:send", "tool:wait"} & set(by_id)
-    flow_edges = [edge for edge in edges if edge.get("relation") in {"MODEL_CONTEXT", "ORCHESTRATED_ACTION", "SPAWNED_AGENT", "SENT_INPUT_TO", "WAITED_FOR"}]
+    raw_spawn = [edge for edge in edges if edge["source"] == ROOT and edge["relation"] == "SPAWNED_AGENT" and edge["target"] in {A1, A2, A3}]
+    assert len(raw_spawn) == 3
+    assert all(edge.get("viewer_flow_superseded") is True for edge in raw_spawn)
+    for node_id in ("model:55", "model:luna", "tool:spawn", "tool:send", "tool:wait"):
+        assert node_id in by_id
+        assert by_id[node_id]["attributes"]["viewer_flow_superseded"] is True
+    flow_edges = [edge for edge in edges if edge.get("viewer_only") is True and edge.get("relation") in {"MODEL_CONTEXT", "ORCHESTRATED_ACTION", "SPAWNED_AGENT", "SENT_INPUT_TO", "WAITED_FOR"}]
     assert flow_edges
     assert all(edge.get("viewer_only") is True for edge in flow_edges)
 
