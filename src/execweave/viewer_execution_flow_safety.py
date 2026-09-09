@@ -6,7 +6,8 @@ _DIRECT_SUBTASK = "    ['REQUESTED_SUBTASK','assign_agent_task'],\n"
 _ASSIGN_TARGET = "    ['assign_agent_task','ASSIGNED_AGENT_TASK'],"
 _SAFE_ASSIGN_TARGET = "    ['assign_agent_task','TARGETED_AGENT'],"
 _ACTION_NAME = """  const actionName=value=>{
-    const text=String(value||'').trim().toLowerCase().replace(/[\\s-]+/g,'_');
+    const raw=value&&typeof value==='object'&&typeof value.type==='string'?value.type:value;
+    const text=String(raw||'').trim().toLowerCase().replace(/[\\s-]+/g,'_');
     return ACTION_ALIASES.get(text)||null;
   };"""
 _SAFE_ACTION_NAME = """  const actionName=value=>{
@@ -26,9 +27,16 @@ _TARGETED_ACTIVATION = """    const resolvedOccurrences=occurrences.filter(occur
     if(!resolvedOccurrences.length)return display;"""
 _WAIT_AWARE_ACTIVATION = """    const providerObservedEdge=edge=>{
       const evidence=attrsOf(edge);
+      const eventTypes=Array.isArray(edge?.event_types)?edge.event_types:[];
+      const backends=Array.isArray(edge?.backends)?edge.backends:[];
+      const attributions=Array.isArray(edge?.attributions)?edge.attributions:[];
+      const lifecycle=Array.isArray(edge?.provider_lifecycle)?edge.provider_lifecycle:[];
       return edge?.viewer_only===true||Boolean(
         evidence.provider||evidence.evidence_source||evidence.attribution||
-        evidence.provider_event||evidence.provider_event_type
+        evidence.provider_event||evidence.provider_event_type||
+        lifecycle.length||attributions.length||
+        backends.some(value=>String(value).toLowerCase()==='semantic')||
+        eventTypes.some(value=>String(value).toLowerCase().startsWith('semantic.'))
       );
     };
     const spawnEdges=rawEdges.filter(edge=>
@@ -92,9 +100,16 @@ _SAFE_DIRECT_ACTION_LOOP = """    for(const edge of rawEdges){
       const kind=DIRECT_ACTION_RELATIONS.get(relation(edge));
       if(!kind)continue;
       const evidence=attrsOf(edge);
+      const eventTypes=Array.isArray(edge?.event_types)?edge.event_types:[];
+      const backends=Array.isArray(edge?.backends)?edge.backends:[];
+      const attributions=Array.isArray(edge?.attributions)?edge.attributions:[];
+      const lifecycle=Array.isArray(edge?.provider_lifecycle)?edge.provider_lifecycle:[];
       const providerObserved=edge.viewer_only===true||Boolean(
         evidence.provider||evidence.evidence_source||evidence.attribution||
-        evidence.provider_event||evidence.provider_event_type
+        evidence.provider_event||evidence.provider_event_type||
+        lifecycle.length||attributions.length||
+        backends.some(value=>String(value).toLowerCase()==='semantic')||
+        eventTypes.some(value=>String(value).toLowerCase().startsWith('semantic.'))
       );
       if(!providerObserved)continue;
       const owner=agentForAnchor(edge.source),target=agentForAnchor(edge.target);
