@@ -65,6 +65,20 @@ def _edge(
     return payload
 
 
+def _observed_content(node_id: str, content_kind: str) -> dict[str, object]:
+    return {
+        "id": node_id,
+        "type": "observed_content",
+        "name": content_kind,
+        "attributes": {
+            "content_kind": content_kind,
+            "media_type": "text/plain; charset=utf-8",
+            "representation": "raw_utf8",
+            "complete_from_source": True,
+        },
+    }
+
+
 def _positions(page) -> dict[str, dict[str, float]]:
     return page.evaluate(
         """() => Object.fromEntries([...document.querySelectorAll('.node')].map(g => {
@@ -88,17 +102,27 @@ def _assert_hard_geometry(metrics: dict[str, object]) -> None:
     assert metrics["EDGE_NODE_INTERSECTIONS"] == 0
 
 
+def _assert_closed_display_graph(display: dict[str, object]) -> None:
+    visible_ids = {node["id"] for node in display["nodes"]}
+    assert all(
+        edge["source"] in visible_ids and edge["target"] in visible_ids
+        for edge in display["edges"]
+    )
+
+
 def test_provider_shape_matrix_covers_every_supported_dashboard_provider() -> None:
     assert AGENT_PROVIDERS | ROOT_ONLY_MODEL_PROVIDERS == set(PROVIDERS)
     assert not (AGENT_PROVIDERS & ROOT_ONLY_MODEL_PROVIDERS)
 
 
-def test_cursor_exact_subtask_chain_projects_model_action_unique_child() -> None:
+def test_cursor_dual_spawn_and_subtask_evidence_becomes_one_model_spawn_child_flow() -> None:
     provider = "cursor"
     root_id = "agent:Cursor"
     child_id = "agent:cursor:subagent:child-1"
     model_id = "model:cursor:cursor-model"
     subtask_id = "subtask:cursor:session-1:subagent:child-1"
+    prompt_id = "observed-content:cursor-prompt"
+    description_id = "observed-content:cursor-description"
     graph = {
         "schema_version": "0.2",
         "session_id": "cursor-production-exact-delegation",
@@ -139,15 +163,27 @@ def test_cursor_exact_subtask_chain_projects_model_action_unique_child() -> None
                     "exact_child_agent_linkage": True,
                 },
             },
+            _observed_content(prompt_id, "cursor.subtask_prompt"),
+            _observed_content(description_id, "cursor.subtask_description"),
         ],
         "edges": [
             _edge("model", root_id, model_id, "USED_MODEL", 1, provider),
+            _edge(
+                "spawn",
+                root_id,
+                child_id,
+                "SPAWNED_SUBAGENT",
+                2,
+                provider,
+                identity_exact=True,
+                event_type="semantic.cursor.subagent.started",
+            ),
             _edge(
                 "request",
                 root_id,
                 subtask_id,
                 "REQUESTED_SUBTASK",
-                2,
+                3,
                 provider,
                 identity_exact=True,
             ),
@@ -156,9 +192,25 @@ def test_cursor_exact_subtask_chain_projects_model_action_unique_child() -> None
                 subtask_id,
                 child_id,
                 "ASSIGNED_AGENT_TASK",
-                3,
+                4,
                 provider,
                 identity_exact=True,
+            ),
+            _edge(
+                "prompt",
+                subtask_id,
+                prompt_id,
+                "HAS_SUBTASK_PROMPT",
+                5,
+                provider,
+            ),
+            _edge(
+                "description",
+                subtask_id,
+                description_id,
+                "HAS_SUBTASK_DESCRIPTION",
+                6,
+                provider,
             ),
         ],
     }
@@ -169,15 +221,18 @@ def test_cursor_exact_subtask_chain_projects_model_action_unique_child() -> None
     with manager as playwright:
         browser = _launch(playwright, executable)
         try:
-            page = browser.new_page(viewport={"width": 1600, "height": 900})
+            page = browser.new_page(viewport={"width": 1800, "height": 1000})
             errors: list[str] = []
             page.on("pageerror", lambda error: errors.append(str(error)))
             page.set_content(render_static_dashboard_html(graph))
             page.wait_for_selector(".node")
             display, raw, positions, metrics = _snapshot(page)
             _assert_hard_geometry(metrics)
+            _assert_closed_display_graph(display)
             page.locator("#arrange").click()
-            _assert_hard_geometry(_snapshot(page)[3])
+            arranged_display, _, _, arranged_metrics = _snapshot(page)
+            _assert_hard_geometry(arranged_metrics)
+            _assert_closed_display_graph(arranged_display)
             assert not errors, errors
         finally:
             browser.close()
@@ -189,22 +244,39 @@ def test_cursor_exact_subtask_chain_projects_model_action_unique_child() -> None
     actions = [
         node for node in display["nodes"]
         if node.get("attributes", {}).get("viewer_orchestration_action")
-        and node["name"] == "assign_agent_task"
     ]
     assert len(contexts) == 1 and contexts[0]["name"] == "cursor-model"
-    assert len(actions) == 1
+    assert len(actions) == 1 and actions[0]["name"] == "spawn_agent"
+    action = actions[0]
+    assert subtask_id in action["attributes"]["evidence_node_ids"]
+    assert {"spawn", "request", "assign"} <= set(action["attributes"]["evidence_edge_ids"])
     assert [node["id"] for node in display["nodes"] if node["type"] == "agent"].count(child_id) == 1
-    assert subtask_id not in {node["id"] for node in display["nodes"]}
+    visible_ids = {node["id"] for node in display["nodes"]}
+    assert subtask_id not in visible_ids
+    assert {prompt_id, description_id} <= visible_ids
+    assert any(edge["relation"] == "SPAWNED_SUBAGENT" for edge in raw["edges"])
     assert any(edge["relation"] == "ASSIGNED_AGENT_TASK" for edge in raw["edges"])
     assert any(
-        edge["source"] == actions[0]["id"]
+        edge["source"] == action["id"]
         and edge["target"] == child_id
-        and edge["relation"] == "TARGETED_AGENT"
+        and edge["relation"] == "SPAWNED_AGENT"
+        for edge in display["edges"]
+    )
+    assert any(
+        edge["source"] == action["id"]
+        and edge["target"] == prompt_id
+        and edge["relation"] == "HAS_SUBTASK_PROMPT"
+        for edge in display["edges"]
+    )
+    assert any(
+        edge["source"] == action["id"]
+        and edge["target"] == description_id
+        and edge["relation"] == "HAS_SUBTASK_DESCRIPTION"
         for edge in display["edges"]
     )
     assert positions[root_id]["x"] < positions[contexts[0]["id"]]["x"]
-    assert positions[contexts[0]["id"]]["x"] < positions[actions[0]["id"]]["x"]
-    assert positions[actions[0]["id"]]["x"] < positions[child_id]["x"]
+    assert positions[contexts[0]["id"]]["x"] < positions[action["id"]]["x"]
+    assert positions[action["id"]]["x"] < positions[child_id]["x"]
 
 
 def test_opencode_exact_task_session_assignment_projects_without_duplicate_task_tool() -> None:
@@ -294,8 +366,11 @@ def test_opencode_exact_task_session_assignment_projects_without_duplicate_task_
             page.wait_for_selector(".node")
             display, raw, positions, metrics = _snapshot(page)
             _assert_hard_geometry(metrics)
+            _assert_closed_display_graph(display)
             page.locator("#arrange").click()
-            _assert_hard_geometry(_snapshot(page)[3])
+            arranged_display, _, _, arranged_metrics = _snapshot(page)
+            _assert_hard_geometry(arranged_metrics)
+            _assert_closed_display_graph(arranged_display)
             assert not errors, errors
         finally:
             browser.close()
@@ -373,6 +448,7 @@ def test_root_only_model_provider_shapes_do_not_invent_agent_orchestration() -> 
                 page.wait_for_selector(".node")
                 display, raw, _, metrics = _snapshot(page)
                 _assert_hard_geometry(metrics)
+                _assert_closed_display_graph(display)
                 assert not errors, (provider, errors)
                 assert not any(
                     node.get("attributes", {}).get("viewer_orchestration_action")
