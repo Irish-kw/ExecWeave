@@ -161,12 +161,6 @@ def opencode_task_session_events(
         "attribution": "opencode_task_tool_metadata",
         "causal": False,
         "inferred": False,
-        # GraphEdge deliberately persists identity_exact / identity_method while
-        # provider-specific booleans remain event-level evidence. Mark the provider's
-        # explicit parentSessionId + sessionId join in the generic fidelity contract so
-        # downstream viewers can safely distinguish it from heuristic task linkage.
-        "identity_exact": True,
-        "identity_method": "opencode_task_tool_parent_and_child_session_ids",
         "opencode_event_type": event_type,
         "provider_task_session_id_exact": True,
         "provider_parent_session_id_exact": True,
@@ -178,6 +172,15 @@ def opencode_task_session_events(
     if isinstance(background, bool):
         attributes["background_requested"] = background
 
+    # GraphEdge deliberately persists identity_exact / identity_method while the
+    # provider-specific booleans above remain event-level evidence. Scope those
+    # generic identity claims to the task -> child assignment itself; task content
+    # edges should not inherit an unrelated identity method.
+    assignment_attributes = {
+        **attributes,
+        "identity_exact": True,
+        "identity_method": "opencode_task_tool_parent_and_child_session_ids",
+    }
     child = _agent(child_session, agent_name=agent_name, parent_session_id=parent_session)
     events: list[dict[str, Any]] = [
         {
@@ -186,7 +189,7 @@ def opencode_task_session_events(
             "relation": "ASSIGNED_AGENT_TASK",
             "source": _tool_call(current_session, call_id),
             "target": child,
-            "attributes": attributes,
+            "attributes": assignment_attributes,
         }
     ]
 
