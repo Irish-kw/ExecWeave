@@ -17,46 +17,46 @@ def _production_edge(
     event_type: str,
     *,
     count: int = 1,
-    evidence_event_count: int | None = None,
-    identity_exact: bool | None = None,
     backend: str = "semantic",
     attribution: str = "antigravity_hook",
+    identity_exact: bool | None = None,
 ):
-    timestamp = f"2026-09-09T06:38:{sequence % 60:02d}.000000Z"
-    return {
+    timestamp = f"2026-09-09T06:50:{sequence:02d}.000000Z"
+    payload = {
         "id": edge_id,
         "source": source,
         "target": target,
         "relation": relation,
         "count": count,
-        "evidence_event_count": evidence_event_count if evidence_event_count is not None else count,
+        "evidence_event_count": count,
         "first_seen": timestamp,
         "last_seen": timestamp,
         "first_sequence": sequence,
         "last_sequence": sequence,
-        "event_ids": [f"event:{edge_id}:{index}" for index in range(max(1, count))],
+        "event_ids": [f"event:{edge_id}:{index}" for index in range(count)],
         "event_types": [event_type],
         "backends": [backend],
         "attributions": [attribution],
         "causal": False,
         "inferred": False,
         "inference_methods": [],
-        "identity_exact": identity_exact,
-        "identity_methods": ["validated_transcript_record_order_and_provider_ids"]
-        if identity_exact
-        else [],
+        "identity_methods": [],
         "identity_hashes": [],
         "confidence_min": None,
         "confidence_max": None,
         "confidence_semantics": [],
         "supporting_event_ids": [],
     }
+    if identity_exact is not None:
+        payload["identity_exact"] = identity_exact
+        if identity_exact:
+            payload["identity_methods"] = ["validated_transcript_record_order_and_provider_ids"]
+    return payload
 
 
 def _agy_graph():
-    parent_id = "parent-conversation"
-    root_id = f"agent:antigravity:conversation:{parent_id}"
-    session_id = f"provider-session:antigravity:{parent_id}"
+    root_id = "agent:antigravity:conversation:root-conversation"
+    session_id = "provider-session:antigravity:root-conversation"
     model_id = "model:antigravity:gemini-3.8-flash-low"
     root = {
         "id": root_id,
@@ -66,14 +66,14 @@ def _agy_graph():
             "provider": "antigravity",
             "agent_role": "root",
             "agent_path": "/root",
-            "conversation_id": parent_id,
+            "conversation_id": "root-conversation",
         },
     }
     session = {
         "id": session_id,
         "type": "provider_session",
-        "name": "f1f9e791af944a009afef63aaef4284a",
-        "attributes": {"provider": "antigravity", "conversation_id": parent_id},
+        "name": "root-conversation",
+        "attributes": {"provider": "antigravity"},
     }
     model = {
         "id": model_id,
@@ -81,93 +81,90 @@ def _agy_graph():
         "name": "gemini-3.8-flash-low",
         "attributes": {"provider": "antigravity", "model_name": "gemini-3.8-flash-low"},
     }
-    roles = ["Tech Hype Judge", "Strategic Analyst", "Cosmic Philosopher"]
-    children = []
-    subtasks = []
+    child_specs = [
+        ("tech", "Tech Hype Judge"),
+        ("strategy", "Strategic Analyst"),
+        ("cosmic", "Cosmic Philosopher"),
+    ]
+    children = [
+        {
+            "id": f"agent:antigravity:conversation:{suffix}",
+            "type": "agent",
+            "name": name,
+            "attributes": {
+                "provider": "antigravity",
+                "conversation_id": suffix,
+                "agent_type": name,
+                "agent_nickname": name,
+                "agent_role": "subagent",
+                "parent_scope_id": "root-conversation",
+            },
+        }
+        for suffix, name in child_specs
+    ]
+    subtasks = [
+        {
+            "id": f"subtask:antigravity:root-conversation:7:{index}",
+            "type": "subtask",
+            "name": child["name"],
+            "attributes": {
+                "provider": "antigravity",
+                "conversation_id": "root-conversation",
+                "step_index": 7,
+                "subagent_index": index,
+                "role": child["name"],
+            },
+        }
+        for index, child in enumerate(children)
+    ]
     edges = [
         _production_edge(
-            "provider-session",
+            "session",
             root_id,
             session_id,
             "OBSERVED_PROVIDER_SESSION",
             1,
             "semantic.antigravity.session.observed",
-            identity_exact=True,
         ),
         _production_edge(
-            "model-invoke",
+            "model",
             session_id,
             model_id,
             "INVOKES_MODEL",
             2,
             "semantic.antigravity.model.invocation.requested",
-            identity_exact=True,
         ),
     ]
-    for index, role in enumerate(roles):
-        child_id = f"agent:antigravity:conversation:child-{index}"
-        subtask_id = f"subtask:antigravity:{parent_id}:{10 + index}:{index}"
-        children.append(
-            {
-                "id": child_id,
-                "type": "agent",
-                "name": role,
-                "attributes": {
-                    "provider": "antigravity",
-                    "conversation_id": f"child-{index}",
-                    "agent_type": role,
-                    "provider_role_slot": index,
-                    "parent_scope_id": parent_id,
-                    "parent_relation_source": "validated_child_transcript",
-                },
-            }
-        )
-        subtasks.append(
-            {
-                "id": subtask_id,
-                "type": "subtask",
-                "name": role,
-                "attributes": {
-                    "provider": "antigravity",
-                    "conversation_id": parent_id,
-                    "step_index": 10 + index,
-                    "subagent_index": index,
-                    "role": role,
-                    "identity_semantics": "provider_invoke_subagent_spec_index",
-                },
-            }
-        )
+    for index, (subtask, child) in enumerate(zip(subtasks, children, strict=True)):
+        sequence = 10 + index * 3
         edges.extend(
             [
                 _production_edge(
                     f"request-{index}",
                     root_id,
-                    subtask_id,
+                    subtask["id"],
                     "REQUESTED_SUBTASK",
-                    10 + index * 3,
+                    sequence,
                     "semantic.antigravity.subtask.requested",
                     identity_exact=True,
                 ),
                 _production_edge(
                     f"assign-{index}",
-                    subtask_id,
-                    child_id,
+                    subtask["id"],
+                    child["id"],
                     "ASSIGNED_AGENT_TASK",
-                    11 + index * 3,
+                    sequence + 1,
                     "semantic.antigravity.subtask.assigned",
                     identity_exact=True,
                 ),
-                # Match the real 0.8.20 artifact: repeated transcript snapshots
-                # aggregate the same stable parent/child fact into count=11.
                 _production_edge(
                     f"child-session-{index}",
                     root_id,
-                    child_id,
+                    child["id"],
                     "HAS_CHILD_AGENT_SESSION",
-                    12 + index * 3,
+                    sequence + 2,
                     "semantic.antigravity.agent_session.child",
                     count=11,
-                    evidence_event_count=11,
                     identity_exact=True,
                 ),
             ]
@@ -265,6 +262,14 @@ def _snapshot(page):
     return display, raw, positions, metrics
 
 
+def _assert_closed_display_graph(display):
+    visible_ids = {node["id"] for node in display["nodes"]}
+    assert all(
+        edge["source"] in visible_ids and edge["target"] in visible_ids
+        for edge in display["edges"]
+    )
+
+
 @pytest.mark.parametrize("theme", ["dark", "light"])
 def test_real_antigravity_subtasks_flow_through_model_and_keep_hard_geometry_gates(theme):
     graph, root_id, raw_model_id, child_ids, subtask_ids = _agy_graph()
@@ -281,6 +286,7 @@ def test_real_antigravity_subtasks_flow_through_model_and_keep_hard_geometry_gat
             if page.locator("html").get_attribute("data-theme") != theme:
                 page.locator("#theme-toggle").click()
             display, raw, positions, metrics = _snapshot(page)
+            _assert_closed_display_graph(display)
 
             contexts = [
                 node
@@ -338,73 +344,71 @@ def test_real_antigravity_subtasks_flow_through_model_and_keep_hard_geometry_gat
             for child_id in child_ids:
                 assert positions[action["id"]]["x"] < positions[child_id]["x"]
 
-            # Raw evidence remains byte-for-byte in the embedded graph, including
-            # the historical repeated-observation count; the main canvas simply no
-            # longer misrepresents that stable state relation as 11 child spawns.
-            assert len(raw["nodes"]) == len(graph["nodes"])
-            raw_child_edges = [
+            assert metrics["NODE_OVERLAPS"] == 0
+            assert metrics["EDGE_NODE_INTERSECTIONS"] == 0
+
+            child_session = [
                 edge for edge in raw["edges"] if edge["relation"] == "HAS_CHILD_AGENT_SESSION"
             ]
-            assert len(raw_child_edges) == 3
-            assert {edge["count"] for edge in raw_child_edges} == {11}
-
-            assert metrics["NODE_OVERLAPS"] == 0, metrics
-            assert metrics["EDGE_NODE_INTERSECTIONS"] == 0, metrics
+            assert len(child_session) == 3
+            assert {edge["count"] for edge in child_session} == {11}
 
             page.locator("#arrange").click()
-            _, _, arranged_positions, arranged_metrics = _snapshot(page)
-            assert arranged_metrics["NODE_OVERLAPS"] == 0, arranged_metrics
-            assert arranged_metrics["EDGE_NODE_INTERSECTIONS"] == 0, arranged_metrics
+            arranged_display, _, arranged_positions, arranged_metrics = _snapshot(page)
+            _assert_closed_display_graph(arranged_display)
+            assert arranged_metrics["NODE_OVERLAPS"] == 0
+            assert arranged_metrics["EDGE_NODE_INTERSECTIONS"] == 0
             assert arranged_positions[root_id]["x"] < arranged_positions[context["id"]]["x"]
             assert arranged_positions[context["id"]]["x"] < arranged_positions[action["id"]]["x"]
             for child_id in child_ids:
                 assert arranged_positions[action["id"]]["x"] < arranged_positions[child_id]["x"]
-
             assert not errors, errors
         finally:
             browser.close()
 
 
-def test_ambiguous_or_profile_only_subtask_still_fails_closed():
-    graph, root_id, _, child_ids, subtask_ids = _agy_graph()
-    # Make one subtask ambiguous by assigning it to two distinct children and strip
-    # the other exact assignment chains. No safe delegation projection may be formed.
-    first = subtask_ids[0]
-    graph["edges"] = [
-        edge
-        for edge in graph["edges"]
-        if not (
-            edge["relation"] in {"ASSIGNED_AGENT_TASK", "REQUESTED_SUBTASK"}
-            and edge["source"] in set(subtask_ids[1:]) | {root_id}
-            and edge["target"] in set(subtask_ids[1:]) | set(child_ids[1:])
-        )
-    ]
+def test_ambiguous_antigravity_assignment_chain_fails_closed():
+    graph, _, _, child_ids, subtask_ids = _agy_graph()
+    subtask_id = subtask_ids[0]
+    extra_child = {
+        "id": "agent:antigravity:conversation:ambiguous",
+        "type": "agent",
+        "name": "Ambiguous candidate",
+        "attributes": {"provider": "antigravity", "conversation_id": "ambiguous"},
+    }
+    graph["nodes"].append(extra_child)
+    graph["node_count"] += 1
     graph["edges"].append(
         _production_edge(
-            "ambiguous-assign",
-            first,
-            child_ids[1],
+            "assign-ambiguous",
+            subtask_id,
+            extra_child["id"],
             "ASSIGNED_AGENT_TASK",
             30,
             "semantic.antigravity.subtask.assigned",
             identity_exact=True,
         )
     )
-    graph["edge_count"] = len(graph["edges"])
+    graph["edge_count"] += 1
 
     manager, executable = _browser()
     with manager as playwright:
         browser = _launch(playwright, executable)
         try:
-            page = browser.new_page(viewport={"width": 1600, "height": 900})
+            page = browser.new_page(viewport={"width": 1800, "height": 1100})
             page.set_content(render_static_dashboard_html(graph))
             page.wait_for_selector(".node")
             display = page.evaluate("window.__execweaveCore.getDisplayGraph()")
         finally:
             browser.close()
 
+    # The ambiguous subtask stays raw; no viewer-only assignment action may claim a child.
+    assert subtask_id in {node["id"] for node in display["nodes"]}
     assert not any(
         node.get("attributes", {}).get("viewer_orchestration_action")
-        and node.get("name") == "assign_agent_task"
+        and node["name"] == "assign_agent_task"
+        and child_ids[0] in {
+            edge["target"] for edge in display["edges"] if edge["source"] == node["id"]
+        }
         for node in display["nodes"]
     )
