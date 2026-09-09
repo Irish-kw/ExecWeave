@@ -164,7 +164,13 @@ def _invoke_subagent_events(
                 relation="REQUESTED_SUBTASK",
                 source=parent,
                 target=subtask,
-                attributes={"child_identity_exposed": False},
+                attributes={
+                    "child_identity_exposed": False,
+                    # Exact requester -> provider conversation/step/subagent-index spec.
+                    # Validated ASSIGNED_AGENT_TASK still required before inventing a child.
+                    "identity_exact": True,
+                    "identity_method": "antigravity_provider_conversation_step_subagent_index",
+                },
             )
         )
         if type_name:

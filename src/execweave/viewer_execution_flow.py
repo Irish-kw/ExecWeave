@@ -43,17 +43,33 @@ EXECUTION_FLOW_SCRIPT = r"""
     return ACTION_ALIASES.get(text)||null;
   };
   const moment=item=>{
-    if(Number.isInteger(item?.first_sequence))return{kind:0,value:item.first_sequence};
     const attrs=attrsOf(item);
-    if(Number.isInteger(attrs.first_sequence))return{kind:0,value:attrs.first_sequence};
-    const stamp=item?.first_seen||attrs.first_seen||attrs.timestamp;
-    if(stamp)return{kind:1,value:String(stamp)};
-    return{kind:2,value:String(item?.id||'')};
+    const sequence=Number.isInteger(item?.first_sequence)?item.first_sequence
+      :(Number.isInteger(attrs.first_sequence)?attrs.first_sequence:null);
+    const stamp=item?.first_seen||attrs.first_seen||attrs.timestamp||null;
+    return{
+      sequence:sequence,
+      stamp:stamp?String(stamp):null,
+      id:String(item?.id||''),
+    };
+  };
+  const momentComparable=(left,right)=>{
+    if(!left||!right)return false;
+    if(left.sequence!==null&&right.sequence!==null)return true;
+    if(left.stamp&&right.stamp)return true;
+    return false;
   };
   const momentLE=(left,right)=>{
-    if(!left||!right)return false;
-    if(left.kind!==right.kind)return left.kind<right.kind;
-    return left.value<=right.value;
+    // Only compare when both ends share a sequence or a timestamp. Mixing kinds
+    // (or comparing id fallbacks) falsely orders early actions against future switches.
+    if(!momentComparable(left,right))return false;
+    if(left.sequence!==null&&right.sequence!==null)return left.sequence<=right.sequence;
+    return String(left.stamp)<=String(right.stamp);
+  };
+  const momentEqual=(left,right)=>{
+    if(!momentComparable(left,right))return false;
+    if(left.sequence!==null&&right.sequence!==null)return left.sequence===right.sequence;
+    return String(left.stamp)===String(right.stamp);
   };
   const provider=node=>String(attrsOf(node).provider||'unknown').toLowerCase();
 
@@ -73,30 +89,58 @@ EXECUTION_FLOW_SCRIPT = r"""
       incoming.get(edge.target).push(edge);outgoing.get(edge.source).push(edge);
     }
     const aliasToAgent=new Map();
+    const rememberAlias=(alias,id)=>{
+      if(alias===undefined||alias===null)return;
+      const text=String(alias).trim();
+      if(!text)return;
+      let bucket=aliasToAgent.get(text);
+      if(!bucket){bucket=new Set();aliasToAgent.set(text,bucket)}
+      bucket.add(id);
+    };
     for(const [id,node] of agents){
       const attrs=attrsOf(node);
-      const aliases=[id,node.name,attrs.agent_id,attrs.thread_id,attrs.agent_path,attrs.child_agent_path,attrs.nickname];
-      for(const value of aliases)if(value!==undefined&&value!==null&&String(value).trim())aliasToAgent.set(String(value),id);
+      rememberAlias(id,id);
+      for(const value of [node.name,attrs.agent_id,attrs.thread_id,attrs.agent_path,attrs.child_agent_path,attrs.nickname]){
+        rememberAlias(value,id);
+      }
     }
     const resolveAgent=value=>{
       if(value===undefined||value===null)return null;
       const text=String(value);
+      // Exact canonical id always wins over alias lookup.
       if(agents.has(text))return text;
-      return aliasToAgent.get(text)||null;
+      const bucket=aliasToAgent.get(text);
+      if(!bucket||!bucket.size)return null;
+      if(bucket.size===1)return [...bucket][0];
+      // Non-unique alias: abstain rather than last-writer-wins.
+      return null;
+    };
+    const uniqueOwner=candidates=>{
+      const ids=[...new Set((candidates||[]).filter(Boolean))];
+      return ids.length===1?ids[0]:null;
     };
     const ownerForNode=node=>{
       if(!node?.id)return null;
-      for(const edge of incoming.get(node.id)||[])if(agents.has(edge.source))return edge.source;
+      const direct=[];
+      for(const edge of incoming.get(node.id)||[])if(agents.has(edge.source))direct.push(edge.source);
+      const directOwner=uniqueOwner(direct);
+      if(directOwner)return directOwner;
+      if(direct.length)return null; // ambiguous direct owners
+      const viaTurn=[];
       for(const edge of incoming.get(node.id)||[]){
         const parent=rawById.get(edge.source);
         if(parent?.type!=='agent_turn')continue;
-        for(const grand of incoming.get(parent.id)||[])if(agents.has(grand.source))return grand.source;
+        for(const grand of incoming.get(parent.id)||[])if(agents.has(grand.source))viaTurn.push(grand.source);
       }
+      const turnOwner=uniqueOwner(viaTurn);
+      if(turnOwner)return turnOwner;
+      if(viaTurn.length)return null;
       const attrs=attrsOf(node);
+      const attrOwners=[];
       for(const key of ['owner_agent_id','agent_id','source_agent_id','thread_id','agent_path']){
-        const found=resolveAgent(attrs[key]);if(found)return found;
+        const found=resolveAgent(attrs[key]);if(found)attrOwners.push(found);
       }
-      return null;
+      return uniqueOwner(attrOwners);
     };
     const agentForAnchor=id=>{
       if(agents.has(id))return id;
@@ -106,13 +150,23 @@ EXECUTION_FLOW_SCRIPT = r"""
     };
 
     const modelNameIndex=new Map();
+    const rememberModelAlias=(alias,id)=>{
+      if(alias===undefined||alias===null)return;
+      const text=String(alias).trim().toLowerCase();
+      if(!text)return;
+      let bucket=modelNameIndex.get(text);
+      if(!bucket){bucket=new Set();modelNameIndex.set(text,bucket)}
+      bucket.add(id);
+    };
     for(const [id,node] of models){
       const attrs=attrsOf(node);
-      for(const value of [id,node.name,attrs.model,attrs.model_name,attrs.native_name]){
-        if(value!==undefined&&value!==null&&String(value).trim())modelNameIndex.set(String(value).toLowerCase(),id);
+      rememberModelAlias(id,id);
+      for(const value of [node.name,attrs.model,attrs.model_name,attrs.native_name]){
+        rememberModelAlias(value,id);
       }
     }
     const modelHintFor=node=>{
+      if(!node)return null;
       const attrs=attrsOf(node);
       for(const key of ['model','model_name','codex_model','default_model','provider_model']){
         const value=attrs[key];
@@ -123,8 +177,13 @@ EXECUTION_FLOW_SCRIPT = r"""
     const modelIdFromHint=hint=>{
       if(!hint)return null;
       const lower=String(hint).toLowerCase();
-      if(modelNameIndex.has(lower))return modelNameIndex.get(lower);
-      for(const [key,id] of modelNameIndex)if(key.endsWith(lower)||lower.endsWith(key))return id;
+      // Exact canonical id first.
+      if(models.has(hint))return hint;
+      if(models.has(lower))return lower;
+      const bucket=modelNameIndex.get(lower);
+      if(!bucket||!bucket.size)return null;
+      if(bucket.size===1)return [...bucket][0];
+      // Ambiguous model name across resources: abstain (no suffix fuzzy match).
       return null;
     };
 
@@ -147,20 +206,43 @@ EXECUTION_FLOW_SCRIPT = r"""
       if(modelId)addModelEvent(owner,modelId,node);
     }
     for(const list of modelEventsByAgent.values())list.sort((a,b)=>{
-      if(a.moment.kind!==b.moment.kind)return a.moment.kind-b.moment.kind;
-      return a.moment.value<b.moment.value?-1:a.moment.value>b.moment.value?1:0;
+      // Prefer sequence when both have it; otherwise timestamp; never cross-rank kinds.
+      if(a.moment.sequence!==null&&b.moment.sequence!==null){
+        return a.moment.sequence-b.moment.sequence;
+      }
+      if(a.moment.stamp&&b.moment.stamp){
+        return String(a.moment.stamp)<String(b.moment.stamp)?-1:String(a.moment.stamp)>String(b.moment.stamp)?1:0;
+      }
+      if(a.moment.sequence!==null&&b.moment.sequence===null)return -1;
+      if(a.moment.sequence===null&&b.moment.sequence!==null)return 1;
+      return String(a.moment.id).localeCompare(String(b.moment.id));
     });
 
     const resolveModel=(owner,item)=>{
-      const hinted=modelIdFromHint(modelHintFor(item));
+      // Item hint is only for the owner/actor side. Callers that resolve a child
+      // must pass null as item so an actor tool-call model cannot pollute lookup.
+      const hinted=item?modelIdFromHint(modelHintFor(item)):null;
       if(hinted)return hinted;
       const list=modelEventsByAgent.get(owner)||[];
       if(!list.length)return null;
-      const at=moment(item);
-      let chosen=null;
-      for(const event of list)if(momentLE(event.moment,at))chosen=event.modelId;
-      if(chosen)return chosen;
-      const unique=[...new Set(list.map(event=>event.modelId))];
+      const at=moment(item||{});
+      const eligible=[];
+      for(const event of list){
+        if(!momentComparable(event.moment,at))continue;
+        if(momentLE(event.moment,at))eligible.push(event);
+      }
+      if(!eligible.length){
+        const unique=[...new Set(list.map(event=>event.modelId))];
+        return unique.length===1?unique[0]:null;
+      }
+      // Prefer the latest comparable event; if several tie at the same moment with
+      // conflicting models, abstain instead of taking array order.
+      let bestMoment=eligible[0].moment;
+      for(const event of eligible){
+        if(momentLE(bestMoment,event.moment)&&!momentEqual(bestMoment,event.moment))bestMoment=event.moment;
+      }
+      const tied=eligible.filter(event=>momentEqual(event.moment,bestMoment));
+      const unique=[...new Set(tied.map(event=>event.modelId))];
       return unique.length===1?unique[0]:null;
     };
 
@@ -180,18 +262,36 @@ EXECUTION_FLOW_SCRIPT = r"""
       if(!kind)continue;
       const sources=(incoming.get(node.id)||[]).filter(edge=>relation(edge)==='STARTED_AGENT_INTERACTION');
       const targets=(outgoing.get(node.id)||[]).filter(edge=>relation(edge)==='TARGETED_BY_AGENT_INTERACTION');
-      const owner=sources.map(edge=>agentForAnchor(edge.source)).find(Boolean);
-      const peerIds=targets.map(edge=>agentForAnchor(edge.target)).filter(Boolean);
-      if(owner)pushOccurrence(kind,owner,peerIds,node,[node.id],[...sources,...targets].map(edge=>edge.id).filter(Boolean));
+      const ownerCandidates=sources.map(edge=>agentForAnchor(edge.source));
+      const owner=uniqueOwner(ownerCandidates);
+      if(!owner)continue;
+      // Unknown endpoints keep the occurrence target-less rather than inventing uniqueness.
+      const peerIds=[];
+      let peersComplete=true;
+      for(const edge of targets){
+        const peer=agentForAnchor(edge.target);
+        if(!peer){peersComplete=false;continue}
+        peerIds.push(peer);
+      }
+      if(targets.length&&!peersComplete&&!peerIds.length)continue;
+      pushOccurrence(kind,owner,peerIds,node,[node.id],[...sources,...targets].map(edge=>edge.id).filter(Boolean));
     }
 
     for(const node of rawNodes){
       if(node?.type!=='agent_message'||!node.id)continue;
       const sent=(incoming.get(node.id)||[]).filter(edge=>relation(edge)==='SENT_AGENT_MESSAGE');
       const delivered=(outgoing.get(node.id)||[]).filter(edge=>relation(edge)==='DELIVERED_AGENT_MESSAGE');
-      const owner=sent.map(edge=>agentForAnchor(edge.source)).find(Boolean);
-      const peerIds=delivered.map(edge=>agentForAnchor(edge.target)).filter(Boolean);
-      if(owner)pushOccurrence('send_input',owner,peerIds,node,[node.id],[...sent,...delivered].map(edge=>edge.id).filter(Boolean));
+      const owner=uniqueOwner(sent.map(edge=>agentForAnchor(edge.source)));
+      if(!owner)continue;
+      const peerIds=[];
+      let peersComplete=true;
+      for(const edge of delivered){
+        const peer=agentForAnchor(edge.target);
+        if(!peer){peersComplete=false;continue}
+        peerIds.push(peer);
+      }
+      if(delivered.length&&!peersComplete&&!peerIds.length)continue;
+      pushOccurrence('send_input',owner,peerIds,node,[node.id],[...sent,...delivered].map(edge=>edge.id).filter(Boolean));
     }
 
     for(const edge of rawEdges){
@@ -293,13 +393,70 @@ EXECUTION_FLOW_SCRIPT = r"""
       for(const modelId of new Set(list.map(item=>item.modelId)))ensureContext(owner,modelId);
     }
 
-    const consumedRawNodes=new Set(),consumedRawEdges=new Set(),actionToolIds=new Set();
+    const consumedRawNodes=new Set(),consumedRawEdges=new Set(),consumedCallIds=new Set();
+    const contentRefFromNode=(contentNode,edge,direction)=>{
+      const attrs=attrsOf(contentNode);
+      const viewer=attrs.viewer_content&&typeof attrs.viewer_content==='object'?attrs.viewer_content:{};
+      return{
+        content_node_id:contentNode.id,
+        raw_node_id:contentNode.id,
+        raw_edge_id:edge?.id||null,
+        relation:edge?.relation||null,
+        direction:direction||null,
+        sha256:viewer.sha256||attrs.sha256||attrs.content_sha256||null,
+        path:viewer.safe_relative_path||attrs.path||attrs.content_path||null,
+        size_bytes:viewer.size_bytes??attrs.size_bytes??attrs.content_size_bytes??null,
+        media_type:viewer.media_type||attrs.media_type||attrs.content_media_type||null,
+        content_kind:viewer.content_kind||attrs.content_kind||contentNode.name||null,
+      };
+    };
     for(const group of groups.values()){
       const context=group.modelId?ensureContext(group.owner,group.modelId):null;
       const source=context||group.owner;
       const baseRank=agentRank.get(group.owner)||0;
       const actionRank=baseRank+(context?2:1);
       const id=`viewer:orchestration:${encodeURIComponent(group.owner)}:${encodeURIComponent(group.modelId||'unresolved')}:${group.kind}`;
+      const contentRefs=[];
+      const toolCallOccurrences=[];
+      for(const rawId of group.rawNodeIds){
+        const rawNode=rawById.get(rawId);
+        if(!rawNode)continue;
+        if(String(rawNode.type||'')==='observed_content'){
+          contentRefs.push(contentRefFromNode(rawNode,null,'node'));
+          continue;
+        }
+        for(const edge of [...(outgoing.get(rawId)||[]),...(incoming.get(rawId)||[])]){
+          const peerId=edge.source===rawId?edge.target:edge.source;
+          const peer=rawById.get(peerId);
+          if(peer?.type!=='observed_content')continue;
+          const direction=edge.source===rawId?'outgoing':'incoming';
+          const ref=contentRefFromNode(peer,edge,direction);
+          if(!contentRefs.some(item=>item.content_node_id===ref.content_node_id&&item.raw_edge_id===ref.raw_edge_id)){
+            contentRefs.push(ref);
+          }
+        }
+        if(['tool_call','tool_call_observation'].includes(String(rawNode?.type||''))){
+          consumedCallIds.add(rawId);
+          const attrs=attrsOf(rawNode);
+          let toolId=null;
+          for(const edge of outgoing.get(rawId)||[]){
+            if(relation(edge)==='USES_TOOL'||relation(edge)==='RESOLVED_TOOL'){toolId=edge.target;break}
+          }
+          toolCallOccurrences.push({
+            invocation_id:rawId,
+            owner_id:group.owner,
+            tool_id:toolId,
+            call_ids:[rawId],
+            first_sequence:Number.isInteger(rawNode.first_sequence)?rawNode.first_sequence:null,
+            last_sequence:Number.isInteger(rawNode.last_sequence)?rawNode.last_sequence:null,
+            first_seen:rawNode.first_seen||null,
+            last_seen:rawNode.last_seen||null,
+            input:attrs.arguments??attrs.args??attrs.tool_input??attrs.input??attrs.parameters??attrs.request??null,
+            output:attrs.output??attrs.result??attrs.tool_output??attrs.response??null,
+            content_references:contentRefs.filter(ref=>ref.raw_edge_id&&[...(outgoing.get(rawId)||[]),...(incoming.get(rawId)||[])].some(edge=>edge.id===ref.raw_edge_id)),
+          });
+        }
+      }
       addedNodes.push({
         id,type:'tool',name:group.kind,
         attributes:{
@@ -309,6 +466,8 @@ EXECUTION_FLOW_SCRIPT = r"""
           evidence_node_ids:[...group.rawNodeIds].sort(),evidence_edge_ids:[...group.rawEdgeIds].sort(),
           viewer_occurrence_count:group.occurrences.length,
           viewer_model_context_unresolved:!context||undefined,
+          viewer_content_references:contentRefs,
+          viewer_tool_call_occurrences:toolCallOccurrences,
         }
       });
       addedEdges.push({
@@ -326,13 +485,21 @@ EXECUTION_FLOW_SCRIPT = r"""
       }
       for(const rawId of group.rawNodeIds)consumedRawNodes.add(rawId);
       for(const rawId of group.rawEdgeIds)consumedRawEdges.add(rawId);
-      for(const rawId of group.rawNodeIds){
-        const rawNode=rawById.get(rawId);
-        if(!['tool_call','tool_call_observation'].includes(String(rawNode?.type||'')))continue;
-        for(const edge of outgoing.get(rawId)||[]){
-          if(relation(edge)==='USES_TOOL')actionToolIds.add(edge.target);
-        }
-      }
+    }
+
+    // Shared tool definitions / model resources stay unless every remaining USES_TOOL
+    // into them came from consumed calls. Consuming one owner's call must not wipe the
+    // shared definition for other owners or unresolved calls.
+    const hideToolDefs=new Set();
+    for(const [toolId,node] of [...rawById].filter(([,n])=>n?.type==='tool')){
+      const uses=(incoming.get(toolId)||[]).filter(edge=>['USES_TOOL','RESOLVED_TOOL'].includes(relation(edge)));
+      if(!uses.length)continue;
+      const fromCalls=uses.filter(edge=>{
+        const src=rawById.get(edge.source);
+        return ['tool_call','tool_call_observation'].includes(String(src?.type||''));
+      });
+      if(!fromCalls.length)continue;
+      if(fromCalls.every(edge=>consumedCallIds.has(edge.source)))hideToolDefs.add(toolId);
     }
 
     const flowNodes=display.nodes.map(node=>{
@@ -342,11 +509,15 @@ EXECUTION_FLOW_SCRIPT = r"""
 
     const modelRelation=edge=>MODEL_RELATIONS.has(relation(edge))||relation(edge)==='MODEL_CONTEXT';
     const orchestrationRelation=edge=>DIRECT_ACTION_RELATIONS.has(relation(edge));
-    let nodes=flowNodes.filter(node=>!consumedRawNodes.has(node.id)&&!actionToolIds.has(node.id));
+    let nodes=flowNodes.filter(node=>!consumedRawNodes.has(node.id)&&!hideToolDefs.has(node.id));
     let edges=display.edges.filter(edge=>{
       if(consumedRawEdges.has(edge.id))return false;
-      if(orchestrationRelation(edge)&&agents.has(edge.source)&&agents.has(edge.target))return false;
-      if(actionToolIds.has(edge.source)||actionToolIds.has(edge.target))return false;
+      // Keep unconsumed inferred / provider orchestration evidence. Only hide edges
+      // that were actually folded into an occurrence (tracked via consumedRawEdges).
+      if(orchestrationRelation(edge)&&agents.has(edge.source)&&agents.has(edge.target)){
+        return !consumedRawEdges.has(edge.id);
+      }
+      if(hideToolDefs.has(edge.source)||hideToolDefs.has(edge.target))return false;
       if(contextifiedModels.has(edge.target)&&agents.has(edge.source)&&modelRelation(edge))return false;
       return true;
     });

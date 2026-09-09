@@ -30,21 +30,38 @@ _SAFE_PROVIDER_HELPER = """  const provider=node=>String(attrsOf(node).provider|
       eventTypes.some(value=>String(value).toLowerCase().startsWith('semantic.'))
     );
   };"""
-_OWNER_FOR_NODE = """    const ownerForNode=node=>{
+_OWNER_FOR_NODE = """    const uniqueOwner=candidates=>{
+      const ids=[...new Set((candidates||[]).filter(Boolean))];
+      return ids.length===1?ids[0]:null;
+    };
+    const ownerForNode=node=>{
       if(!node?.id)return null;
-      for(const edge of incoming.get(node.id)||[])if(agents.has(edge.source))return edge.source;
+      const direct=[];
+      for(const edge of incoming.get(node.id)||[])if(agents.has(edge.source))direct.push(edge.source);
+      const directOwner=uniqueOwner(direct);
+      if(directOwner)return directOwner;
+      if(direct.length)return null; // ambiguous direct owners
+      const viaTurn=[];
       for(const edge of incoming.get(node.id)||[]){
         const parent=rawById.get(edge.source);
         if(parent?.type!=='agent_turn')continue;
-        for(const grand of incoming.get(parent.id)||[])if(agents.has(grand.source))return grand.source;
+        for(const grand of incoming.get(parent.id)||[])if(agents.has(grand.source))viaTurn.push(grand.source);
       }
+      const turnOwner=uniqueOwner(viaTurn);
+      if(turnOwner)return turnOwner;
+      if(viaTurn.length)return null;
       const attrs=attrsOf(node);
+      const attrOwners=[];
       for(const key of ['owner_agent_id','agent_id','source_agent_id','thread_id','agent_path']){
-        const found=resolveAgent(attrs[key]);if(found)return found;
+        const found=resolveAgent(attrs[key]);if(found)attrOwners.push(found);
       }
-      return null;
+      return uniqueOwner(attrOwners);
     };"""
-_SAFE_OWNER_FOR_NODE = """    const ownerForNode=node=>{
+_SAFE_OWNER_FOR_NODE = """    const uniqueOwner=candidates=>{
+      const ids=[...new Set((candidates||[]).filter(Boolean))];
+      return ids.length===1?ids[0]:null;
+    };
+    const ownerForNode=node=>{
       if(!node?.id)return null;
       const candidates=new Set();
       for(const edge of incoming.get(node.id)||[])if(agents.has(edge.source))candidates.add(edge.source);
@@ -72,8 +89,8 @@ _MODEL_FILTER = "      if(contextifiedModels.has(edge.target)&&agents.has(edge.s
 _SAFE_MODEL_FILTER = "      if(contextifiedModels.has(edge.target)&&agentForAnchor(edge.source)&&modelRelation(edge))return false;"
 _TOOL_RESOLVE = "        if(relation(edge)!=='USES_TOOL')continue;"
 _SAFE_TOOL_RESOLVE = "        if(!['USES_TOOL','RESOLVED_TOOL'].includes(relation(edge)))continue;"
-_TOOL_CONSUME = "          if(relation(edge)==='USES_TOOL')actionToolIds.add(edge.target);"
-_SAFE_TOOL_CONSUME = "          if(['USES_TOOL','RESOLVED_TOOL'].includes(relation(edge)))actionToolIds.add(edge.target);"
+_TOOL_CONSUME = "      const uses=(incoming.get(toolId)||[]).filter(edge=>['USES_TOOL','RESOLVED_TOOL'].includes(relation(edge)));"
+_SAFE_TOOL_CONSUME = "      const uses=(incoming.get(toolId)||[]).filter(edge=>['USES_TOOL','RESOLVED_TOOL'].includes(relation(edge)));"
 _MODEL_ONLY_ACTIVATION = (
     "    if(!occurrences.length&&![...modelEventsByAgent.values()].some(list=>list.length))return display;"
 )
@@ -106,10 +123,17 @@ _WAIT_AWARE_ACTIVATION = """    const spawnEdges=rawEdges.filter(edge=>
     // This keeps old children under gpt-5.5 even if /root later switches to Luna.
     for(const occurrence of occurrences){
       if(!occurrence.targets.size)continue;
-      const targetModels=new Set(
-        [...occurrence.targets].map(target=>resolveModel(target,occurrence.item)).filter(Boolean)
-      );
-      if(targetModels.size===1)occurrence.modelId=[...targetModels][0];
+      // Child model lookup ignores the actor tool-call/item hint. Only the child's
+      // own model evidence may win, and every target must share one known model.
+      const targetModels=[];
+      let allKnown=true;
+      for(const target of occurrence.targets){
+        const modelId=resolveModel(target,null);
+        if(!modelId){allKnown=false;break}
+        targetModels.push(modelId);
+      }
+      const unique=new Set(targetModels);
+      if(allKnown&&unique.size===1)occurrence.modelId=[...unique][0];
     }
     const resolvedOccurrences=occurrences.filter(occurrence=>occurrence.targets.size>0);
     if(!resolvedOccurrences.length)return display;
@@ -162,16 +186,23 @@ _SAFE_DIRECT_ACTION_LOOP = """    for(const edge of rawEdges){
       const assignments=(outgoing.get(subtask.id)||[]).filter(edge=>
         relation(edge)===exactAssignmentRelation&&providerObservedEdge(edge)
       );
-      const assignmentTargets=new Set(assignments.map(edge=>agentForAnchor(edge.target)).filter(Boolean));
+      const assignmentTargetList=assignments.map(edge=>agentForAnchor(edge.target));
+      // Unknown endpoints must fail closed: filter(Boolean) would invent uniqueness.
+      if(assignmentTargetList.some(value=>!value))continue;
+      const assignmentTargets=new Set(assignmentTargetList);
       if(assignmentTargets.size!==1)continue;
       const target=[...assignmentTargets][0];
       const requests=(incoming.get(subtask.id)||[]).filter(edge=>
         relation(edge)==='REQUESTED_SUBTASK'&&providerObservedEdge(edge)
       );
-      const requestOwners=new Set(requests.map(edge=>agentForAnchor(edge.source)).filter(Boolean));
+      const requestOwnerList=requests.map(edge=>agentForAnchor(edge.source));
+      if(requestOwnerList.some(value=>!value))continue;
+      const requestOwners=new Set(requestOwnerList);
       if(requestOwners.size!==1)continue;
       const owner=[...requestOwners][0];
       if(!owner||!target||owner===target)continue;
+      // Explicit identity_exact=false on any request/assignment rejects the chain.
+      if([...requests,...assignments].some(edge=>edge?.identity_exact===false||attrsOf(edge).identity_exact===false))continue;
       const subtaskExact=attrsOf(subtask).exact_child_agent_linkage===true;
       if(!subtaskExact&&!(requests.length&&assignments.length&&requests.every(exactDelegationEdge)&&assignments.every(exactDelegationEdge)))continue;
       const scopedProviders=[provider(agents.get(owner)),provider(agents.get(target)),provider(subtask)]
@@ -236,8 +267,12 @@ _FLOW_SAFE_EARLY_RETURN = """    const finalizeFlowGeometry=()=>{
     };
     if(ranked.length<2)return finalizeFlowGeometry();"""
 _FLOW_END = """    if(typeof execweaveRecomputePorts==='function')execweaveRecomputePorts(topo);
-    return topo;"""
-_FLOW_SAFE_END = """    return finalizeFlowGeometry();"""
+    return topo;
+  }
+  window.execweaveApplyExecutionFlowColumns=execweaveApplyExecutionFlowColumns;"""
+_FLOW_SAFE_END = """    return finalizeFlowGeometry();
+  }
+  window.execweaveApplyExecutionFlowColumns=execweaveApplyExecutionFlowColumns;"""
 
 
 def harden_execution_flow_projection(html: str) -> str:
@@ -318,7 +353,7 @@ def harden_execution_flow_projection(html: str) -> str:
     html = html.replace(_HIERARCHY_PARENT_ONLY, _HIERARCHY_PARENT_SAFE, 1)
     html = html.replace(_HIERARCHY_RANK_ONLY, _HIERARCHY_RANK_SAFE, 1)
 
-    if _FLOW_EARLY_RETURN not in html or _FLOW_END not in html:
+    if html.count(_FLOW_EARLY_RETURN) != 1 or html.count(_FLOW_END) != 1:
         raise RuntimeError("execution-flow final geometry seam changed")
     html = html.replace(_FLOW_EARLY_RETURN, _FLOW_SAFE_EARLY_RETURN, 1)
     return html.replace(_FLOW_END, _FLOW_SAFE_END, 1)

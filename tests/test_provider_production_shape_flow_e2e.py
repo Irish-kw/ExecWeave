@@ -253,7 +253,12 @@ def test_cursor_dual_spawn_and_subtask_evidence_becomes_one_model_spawn_child_fl
     assert [node["id"] for node in display["nodes"] if node["type"] == "agent"].count(child_id) == 1
     visible_ids = {node["id"] for node in display["nodes"]}
     assert subtask_id not in visible_ids
-    assert {prompt_id, description_id} <= visible_ids
+    # observed_content stays hidden on the shared Dashboard canvas by design.
+    assert prompt_id not in visible_ids
+    assert description_id not in visible_ids
+    refs = action["attributes"].get("viewer_content_references") or []
+    ref_ids = {ref.get("content_node_id") for ref in refs}
+    assert {prompt_id, description_id} <= ref_ids
     assert any(edge["relation"] == "SPAWNED_SUBAGENT" for edge in raw["edges"])
     assert any(edge["relation"] == "ASSIGNED_AGENT_TASK" for edge in raw["edges"])
     assert any(
@@ -262,16 +267,9 @@ def test_cursor_dual_spawn_and_subtask_evidence_becomes_one_model_spawn_child_fl
         and edge["relation"] == "SPAWNED_AGENT"
         for edge in display["edges"]
     )
-    assert any(
-        edge["source"] == action["id"]
-        and edge["target"] == prompt_id
-        and edge["relation"] == "HAS_SUBTASK_PROMPT"
-        for edge in display["edges"]
-    )
-    assert any(
-        edge["source"] == action["id"]
-        and edge["target"] == description_id
-        and edge["relation"] == "HAS_SUBTASK_DESCRIPTION"
+    # Canvas must not re-paint raw content nodes; inspector refs carry provenance.
+    assert not any(
+        edge["source"] == action["id"] and edge["target"] in {prompt_id, description_id}
         for edge in display["edges"]
     )
     assert positions[root_id]["x"] < positions[contexts[0]["id"]]["x"]
