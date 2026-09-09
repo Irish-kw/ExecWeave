@@ -49,9 +49,19 @@ _WAIT_AWARE_ACTIVATION = """    const providerObservedEdge=edge=>{
       }
     }
     const resolvedOccurrences=occurrences.filter(occurrence=>occurrence.targets.size>0);
-    if(!resolvedOccurrences.length)return display;"""
+    if(!resolvedOccurrences.length)return display;
+    const flowKey=occurrence=>`${occurrence.owner}\\u0000${occurrence.kind}\\u0000${occurrence.modelId||''}`;
+    const resolvedKeys=new Set(resolvedOccurrences.map(flowKey));
+    // Once a group is justified by at least one resolved target, retain target-less
+    // provider call occurrences from that same owner/model/action group as evidence.
+    // This lets the projected action consume the original tool-call/tool definition
+    // instead of drawing a second visual spawn/send/wait node beside it.
+    const groupedOccurrences=occurrences.filter(occurrence=>
+      occurrence.targets.size>0||resolvedKeys.has(flowKey(occurrence))
+    );"""
 _GROUP_LOOP = "    for(const occurrence of occurrences){"
 _TARGETED_GROUP_LOOP = "    for(const occurrence of resolvedOccurrences){"
+_EVIDENCE_GROUP_LOOP = "    for(const occurrence of groupedOccurrences){"
 _EAGER_CONTEXTS = """    for(const [owner,list] of modelEventsByAgent){
       for(const modelId of new Set(list.map(item=>item.modelId)))ensureContext(owner,modelId);
     }
@@ -81,10 +91,13 @@ def harden_execution_flow_projection(html: str) -> str:
     """Fail closed on ambiguous or evidence-poor execution-flow projection.
 
     A model context is shown only for orchestration that resolves to real target agents.
-    Explicit targets are preferred.  Target-less ``wait_agent`` calls may use the
+    Explicit targets are preferred. Target-less ``wait_agent`` calls may use the
     provider-evidenced active-child set: children spawned before the wait and without
-    stop/close evidence before that wait. Bare tool names and ambiguous provider
-    subtask/profile evidence never rewrite the main hierarchy.
+    stop/close evidence before that wait. Once an action group has real targets,
+    target-less call evidence from the same owner/model/action is folded into that
+    single viewer action so the raw collaboration tool is not rendered as a duplicate.
+    Bare tool names and ambiguous provider subtask/profile evidence never rewrite the
+    main hierarchy.
     """
 
     for unsafe in (_DIRECT_ASSIGN, _DIRECT_SUBTASK):
@@ -112,6 +125,9 @@ def harden_execution_flow_projection(html: str) -> str:
     if _GROUP_LOOP not in html:
         raise RuntimeError("execution-flow resolved occurrence seam changed")
     html = html.replace(_GROUP_LOOP, _TARGETED_GROUP_LOOP, 1)
+    if _TARGETED_GROUP_LOOP not in html:
+        raise RuntimeError("execution-flow evidence merge seam changed")
+    html = html.replace(_TARGETED_GROUP_LOOP, _EVIDENCE_GROUP_LOOP, 1)
 
     if _EAGER_CONTEXTS not in html:
         raise RuntimeError("execution-flow eager model-context seam changed")
