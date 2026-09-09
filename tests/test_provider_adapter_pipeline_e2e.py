@@ -15,7 +15,6 @@ from execweave.antigravity_full_fidelity import antigravity_hook_to_content_even
 from execweave.claude_adapter import claude_hook_to_semantic_events
 from execweave.codex_rollout_trace import import_codex_rollout_traces
 from execweave.content_store import FullFidelityContentStore
-from execweave.conversation_records import conversation_record_entries
 from execweave.cursor_adapter import cursor_hook_to_semantic_events
 from execweave.cursor_delegation import cursor_delegation_events
 from execweave.dashboard_shell import render_static_dashboard_html
