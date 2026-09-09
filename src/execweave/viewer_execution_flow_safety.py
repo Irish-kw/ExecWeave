@@ -5,6 +5,15 @@ _DIRECT_ASSIGN = "    ['ASSIGNED_AGENT_TASK','assign_agent_task'],\n"
 _DIRECT_SUBTASK = "    ['REQUESTED_SUBTASK','assign_agent_task'],\n"
 _ASSIGN_TARGET = "    ['assign_agent_task','ASSIGNED_AGENT_TASK'],"
 _SAFE_ASSIGN_TARGET = "    ['assign_agent_task','TARGETED_AGENT'],"
+_ACTION_NAME = """  const actionName=value=>{
+    const text=String(value||'').trim().toLowerCase().replace(/[\\s-]+/g,'_');
+    return ACTION_ALIASES.get(text)||null;
+  };"""
+_SAFE_ACTION_NAME = """  const actionName=value=>{
+    const raw=value&&typeof value==='object'&&typeof value.type==='string'?value.type:value;
+    const text=String(raw||'').trim().toLowerCase().replace(/[\\s-]+/g,'_');
+    return ACTION_ALIASES.get(text)||null;
+  };"""
 _MODEL_ONLY_ACTIVATION = (
     "    if(!occurrences.length&&![...modelEventsByAgent.values()].some(list=>list.length))return display;"
 )
@@ -42,9 +51,10 @@ def harden_execution_flow_projection(html: str) -> str:
     """Fail closed on ambiguous or evidence-poor execution-flow projection.
 
     A model context is shown only for a real orchestration occurrence with at least one
-    resolved target agent.  Bare tool names, bare topology fixtures, and ambiguous
+    resolved target agent. Bare tool names, bare topology fixtures, and ambiguous
     subtask/profile evidence remain available in raw/inspector evidence but cannot
-    rewrite the main execution hierarchy.
+    rewrite the main execution hierarchy. Tagged provider enums are normalized before
+    action matching so Codex-style ``{"type": ...}`` kinds are handled losslessly.
     """
 
     for unsafe in (_DIRECT_ASSIGN, _DIRECT_SUBTASK):
@@ -54,6 +64,10 @@ def harden_execution_flow_projection(html: str) -> str:
     if _ASSIGN_TARGET not in html:
         raise RuntimeError("execution-flow assignment target seam changed")
     html = html.replace(_ASSIGN_TARGET, _SAFE_ASSIGN_TARGET, 1)
+
+    if _ACTION_NAME not in html:
+        raise RuntimeError("execution-flow tagged action-name seam changed")
+    html = html.replace(_ACTION_NAME, _SAFE_ACTION_NAME, 1)
 
     if _MODEL_ONLY_ACTIVATION not in html:
         raise RuntimeError("execution-flow activation seam changed")
