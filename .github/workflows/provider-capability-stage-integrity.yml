@@ -235,6 +235,9 @@ jobs:
               esac
             done < <(git diff --name-only "$BASELINE_REF...HEAD" -- tests)
           fi
+          if [[ "$HEAD_REF" == "layout-v2/authority-and-quality" ]]; then
+            args+=(--allow-test-change "tests/test_layout_pipeline_geometry_e2e.py=Layout V2 deliberately retires the tautological Arrange-equals-initial assertion: Arrange now owns a stronger deterministic geometry search while the historical hard gates, camera isolation, live selection preservation, and test node IDs remain intact")
+          fi
           if [[ "$HEAD_REF" == "fix/gif-dashboard-parity" || "$HEAD_REF" == "fix/dashboard-projection-decrosing" ]]; then
             args+=(--allow-test-change "tests/test_auto_specialized.py=Bot #30 confirmed that positive managed-launch fixtures used a pre-existing parent server. The child now actually starts that catalog; all historical test IDs and assertions are unchanged. Separate delayed-failure tests forbid claiming existing runtimes.")
             args+=(--allow-test-change "tests/test_provider_conversation_history_integrity.py=Bot #30 forbids runtime/root identity collapse from cardinality alone. The positive contextual-compression fixture now supplies an explicit OBSERVED_MODEL_RUNTIME edge; every historical assertion and test ID is retained, with additional viewer-only/inferred/noncausal supporting-evidence assertions. Negative ownership cases are independently browser-tested.")
