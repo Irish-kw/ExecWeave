@@ -576,12 +576,11 @@ def _project_flow(projected: dict[str, Any]) -> dict[str, Any]:
         if len(orchestration_calls) >= _MAX_ORCHESTRATION_CALLS:
             break
 
+    if not orchestration_calls:
+        return projected
     model_observations = _model_observations(
         nodes, edges, orchestration_calls=orchestration_calls
     )
-    if not orchestration_calls and not model_observations:
-        return projected
-
     spawn_edges = [
         edge
         for edge in edges
@@ -599,15 +598,24 @@ def _project_flow(projected: dict[str, Any]) -> dict[str, Any]:
         for call_id, rows in paired.items():
             spawn_assignments[call_id].extend(rows)
 
+    flow_agent_ids = {str(row["owner"]) for row in orchestration_calls}
+    for row in orchestration_calls:
+        flow_agent_ids.update(
+            str(target) for target in row["targets"] if target in agent_ids
+        )
+    for pairs in spawn_assignments.values():
+        flow_agent_ids.update(
+            str(target) for target, _edge in pairs if target in agent_ids
+        )
+
     for node in nodes:
         node_id = node.get("id")
-        if node_id in depths and node.get("type") == "agent":
+        if node_id in flow_agent_ids and node.get("type") == "agent":
             node["attributes"] = {
                 **_attrs(node),
                 "viewer_flow_rank": depths[str(node_id)] * 3,
                 "viewer_execution_flow_identity": True,
             }
-
     model_context_ids: dict[tuple[str, str], str] = {}
     new_nodes: list[dict[str, Any]] = []
     new_edges: list[dict[str, Any]] = []
