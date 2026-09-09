@@ -19,7 +19,7 @@ pytestmark = pytest.mark.viewer_e2e
 
 NODE = shutil.which("node")
 if NODE is None:
-    pytest.skip("node is required for execution-flow integrity", allow_module_level=True)
+    raise RuntimeError("node is required for execution-flow integrity tests")
 
 
 def _hardened_script() -> str:
