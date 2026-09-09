@@ -40,6 +40,7 @@ jobs:
           tests/test_provider_conversation_history_integrity.py
           tests/test_external_endpoints_all_providers.py
           tests/test_provider_neutral_viewer_semantics.py
+          tests/test_exact_delegation_graph_identity.py
           tests/test_graph.py
           tests/test_antigravity_field_run_regressions.py
           tests/test_antigravity_subagent_transcript_linkage.py
@@ -84,6 +85,7 @@ jobs:
               tests/test_cursor_full_fidelity.py
               tests/test_cursor_task_linkage.py
               tests/test_cursor_delegation.py
+              tests/test_exact_delegation_graph_identity.py
               tests/test_provider_conversation_evidence.py
           - provider: opencode
             tests: >-
@@ -91,6 +93,7 @@ jobs:
               tests/test_opencode_task_session_linkage.py
               tests/test_opencode_event_lifecycle.py
               tests/test_opencode_identity_unification.py
+              tests/test_exact_delegation_graph_identity.py
               tests/test_provider_conversation_evidence.py
           - provider: ollama
             tests: >-
