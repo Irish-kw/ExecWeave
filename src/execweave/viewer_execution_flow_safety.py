@@ -14,6 +14,10 @@ _SAFE_ACTION_NAME = """  const actionName=value=>{
     const text=String(raw||'').trim().toLowerCase().replace(/[\\s-]+/g,'_');
     return ACTION_ALIASES.get(text)||null;
   };"""
+_TOOL_RESOLVE = "        if(relation(edge)!=='USES_TOOL')continue;"
+_SAFE_TOOL_RESOLVE = "        if(!['USES_TOOL','RESOLVED_TOOL'].includes(relation(edge)))continue;"
+_TOOL_CONSUME = "          if(relation(edge)==='USES_TOOL')actionToolIds.add(edge.target);"
+_SAFE_TOOL_CONSUME = "          if(['USES_TOOL','RESOLVED_TOOL'].includes(relation(edge)))actionToolIds.add(edge.target);"
 _MODEL_ONLY_ACTIVATION = (
     "    if(!occurrences.length&&![...modelEventsByAgent.values()].some(list=>list.length))return display;"
 )
@@ -96,6 +100,8 @@ def harden_execution_flow_projection(html: str) -> str:
     stop/close evidence before that wait. Once an action group has real targets,
     target-less call evidence from the same owner/model/action is folded into that
     single viewer action so the raw collaboration tool is not rendered as a duplicate.
+    Provider tool-call vocabularies ``USES_TOOL`` and ``RESOLVED_TOOL`` are treated as
+    equivalent call-to-tool support for this presentation-only consumption step.
     Bare tool names and ambiguous provider subtask/profile evidence never rewrite the
     main hierarchy.
     """
@@ -111,6 +117,10 @@ def harden_execution_flow_projection(html: str) -> str:
     if _ACTION_NAME not in html:
         raise RuntimeError("execution-flow tagged action-name seam changed")
     html = html.replace(_ACTION_NAME, _SAFE_ACTION_NAME, 1)
+    if _TOOL_RESOLVE not in html or _TOOL_CONSUME not in html:
+        raise RuntimeError("execution-flow tool-resolution seam changed")
+    html = html.replace(_TOOL_RESOLVE, _SAFE_TOOL_RESOLVE, 1)
+    html = html.replace(_TOOL_CONSUME, _SAFE_TOOL_CONSUME, 1)
 
     if _MODEL_ONLY_ACTIVATION not in html:
         raise RuntimeError("execution-flow activation seam changed")
