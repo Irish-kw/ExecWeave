@@ -13,8 +13,7 @@ from execweave.viewer_layout_geometry import LAYOUT_GEOMETRY_SCRIPT
 
 def _node() -> str:
     executable = shutil.which("node")
-    if executable is None:
-        pytest.skip("Node.js is unavailable")
+    assert executable is not None
     return executable
 
 
@@ -23,6 +22,7 @@ def test_shared_dashboard_installs_edge_decrossover() -> None:
     assert "protectedNetworkCrossingsAvoided" in DASHBOARD_HTML
 
 
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is required")
 def test_non_network_edge_detours_while_network_route_stays_fixed() -> None:
     script = r"""
 global.window={};
