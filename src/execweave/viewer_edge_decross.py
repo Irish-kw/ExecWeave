@@ -62,19 +62,48 @@ EDGE_DECROSS_SCRIPT = r"""
   if(typeof updateEdgeElement==='function'){
     const updateBase=updateEdgeElement;
     updateEdgeElement=function(edge){
+      // The existing PR70 wrapper already computes label placement and then clears
+      // it from rendered node boxes. Do not overwrite that cleared label position.
       updateBase(edge);
+      const route=execweaveRoute(edge);
+      if(route?.geometryKind!=='edge-decrossover'||!route.d)return;
       const els=edgeElements.get(edgeId(edge));if(!els)return;
-      const route=execweaveRoute(edge);if(!route?.d)return;
+      // The base renderer normally sees the dynamically replaced execweaveRoute.
+      // Reapply only the path as a final authority guard; leave the label untouched.
       els.visible.setAttribute('d',route.d);els.hit.setAttribute('d',route.d);
-      if(Number.isFinite(route.labelX))els.label.setAttribute('x',route.labelX);
-      if(Number.isFinite(route.labelY))els.label.setAttribute('y',route.labelY);
-      els.visible.dataset.geometryKind=route.geometryKind||route.kind||'';
-      els.hit.dataset.geometryKind=route.geometryKind||route.kind||'';
+      els.visible.dataset.geometryKind=route.geometryKind;
+      els.hit.dataset.geometryKind=route.geometryKind;
     };
   }
+
+  const renderedMetrics=()=>{
+    if(typeof positions==='undefined'||typeof edgeById==='undefined'||typeof nodeById==='undefined')return null;
+    const nodes=[...positions]
+      .filter(([id])=>nodeById.has(id))
+      .map(([id,p])=>({
+        id,x:p.x,y:p.y,
+        w:execweaveTopology?.width?.get(id)||execweaveWidthOf(id),
+        h:execweaveTopology?.height?.get(id)||execweaveHeightOf(id),
+      }));
+    const edges=[...edgeById.values()]
+      .filter(edge=>positions.has(edge.source)&&positions.has(edge.target))
+      .map(edge=>({...edge,d:execweaveRoute(edge).d}));
+    return execweaveGeometry.measure(nodes,edges);
+  };
+
+  // PR70's optimizer deliberately keeps its own pre-decrossover route family, but
+  // public metrics are a rendered-SVG diagnostic contract. Report the final paths
+  // users actually see so metric parity cannot drift after this local routing pass.
+  if(window.__execweavePr70&&typeof window.__execweavePr70.metrics==='function'){
+    const metricsBase=window.__execweavePr70.metrics.bind(window.__execweavePr70);
+    window.__execweavePr70.metrics=()=>renderedMetrics()||metricsBase();
+    window.__execweavePr70.crossingCount=()=>window.__execweavePr70.metrics().EDGE_CROSSINGS;
+  }
+
   window.__execweaveEdgeDecross={
-    version:1,
+    version:2,
     routeFor:id=>{const edge=typeof edgeById!=='undefined'?edgeById.get(id):null;return edge?execweaveRoute(edge):null},
+    metrics:renderedMetrics,
   };
 })();
 """.strip()
