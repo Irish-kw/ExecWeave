@@ -1,9 +1,15 @@
-"""Draw the canvas the projection described, instead of a table keyed on node type.
+"""Solve the canvas layout over the graph the canvas actually draws.
 
-``viewer_flow_layout`` decides, server side, which nodes a canvas draws and which column
-and row each one takes. This installs the browser half: the display graph is narrowed to
-that set, and a node's position is read from its own ``viewer_layer`` / ``viewer_order``
-rather than looked up in the fixed lane table.
+``viewer_flow_layout`` lays out the projected graph, server side. The canvas draws a
+different graph: it withholds whole node types for its own reasons, and it synthesises
+nodes of its own -- a model context, an orchestration step -- that the projection never
+saw. Columns solved on one graph and edges drawn on the other is what put a node behind
+something that leads to it, so the edge folded back into its right-hand side.
+
+So the projection's layers and rows arrive here as the preferred answer, not the final
+one, and the column each node takes is solved again over exactly the set being drawn.
+Every edge of that set that is not part of a cycle then runs strictly left to right, and
+the rows the projection solved are kept wherever they do not collide.
 
 Both seams fall back to the previous behaviour when a payload carries no ``viewer_flow``,
 so an older run artifact, a compact payload, or a graph the layout declined to describe
@@ -17,13 +23,12 @@ FLOW_CANVAS_SCRIPT = r"""
 // gap, so a long path pushes only the columns after it instead of overlapping its
 // neighbour. Mirrors what the lane table did, keyed on layer instead of type.
 const EXECWEAVE_FLOW_COL_GAP=120,EXECWEAVE_FLOW_ROW_GAP=104,EXECWEAVE_FLOW_TOP=100;
-let execweaveFlowSpec=null,execweaveFlowColumnX=null,execweaveFlowExtra=new Map();
+let execweaveFlowSpec=null,execweaveFlowColumnX=null,execweaveFlowSolved=null;
 function execweaveFlowPayload(){return execweaveFlowSpec}
+function execweaveFlowInvalidate(){execweaveFlowColumnX=null;execweaveFlowSolved=null}
 function execweaveRememberFlow(data){
   const flow=data&&typeof data==='object'?data.viewer_flow:null;
-  if(flow&&Array.isArray(flow.nodes)){
-    execweaveFlowSpec=flow;execweaveFlowColumnX=null;execweaveFlowExtra=new Map();
-  }
+  if(flow&&Array.isArray(flow.nodes)){execweaveFlowSpec=flow;execweaveFlowInvalidate()}
   return execweaveFlowSpec;
 }
 function execweaveFlowNodeIds(){
@@ -47,91 +52,158 @@ function execweaveFlowDisplay(data,display){
   const edges=(display.edges||[]).filter(edge=>edge&&kept.has(String(edge.source))&&kept.has(String(edge.target)));
   return{...display,nodes,edges,node_count:nodes.length,edge_count:edges.length};
 }
-function execweaveFlowCoords(id){
-  const extra=execweaveFlowExtra.get(id);if(extra)return extra;
-  // Membership in the projection's own list, not the presence of the attributes. A node
-  // the browser synthesises from another one inherits that node's layer and row, so an
-  // attribute test calls it placed and it lands exactly on top of its original.
+// What the projection would like this node's column and row to be. Membership in its own
+// node list, not the presence of the attributes: a node the browser synthesises from
+// another one inherits that node's layer and row, and reading those back places it
+// exactly on top of the node it was copied from.
+function execweaveFlowPreference(id){
   const owned=execweaveFlowNodeIds();
   if(owned&&!owned.has(String(id)))return null;
   const node=nodeById.get(id);if(!node)return null;
   const a=node.attributes||{};
-  const layer=a.viewer_layer;
-  if(!Number.isInteger(layer))return null;
+  if(!Number.isInteger(a.viewer_layer))return null;
   // viewer_row is a solved coordinate and may be fractional; viewer_order is the ordinal
   // it was derived from, and stands in for older payloads that carry no row.
   const row=Number.isFinite(a.viewer_row)?a.viewer_row:a.viewer_order;
-  if(!Number.isFinite(row))return null;
-  return{layer,row};
+  return{layer:a.viewer_layer,row:Number.isFinite(row)?row:null};
 }
-// Some nodes are synthesised in the browser and never reach the projection: a model
-// context, an orchestration step, a cluster stand-in. The projection cannot place what
-// it never saw, so they keep whatever the previous authority chose -- which is how one
-// of them came to sit exactly on top of the model node it describes, and another landed
-// alone in the bottom-right corner. Place them from the company they keep instead: one
-// column after the latest predecessor that does have a column, at the average row of
-// every neighbour already placed, then separated from anything sharing that column.
-function execweaveFlowPlaceUnknown(){
-  execweaveFlowExtra=new Map();
-  if(typeof edgeById==='undefined')return;
-  const inbound=new Map(),outbound=new Map();
+// The edges between the nodes on the canvas, as one entry per ordered pair. Two nodes
+// joined by several relations are one constraint on the layout, not several.
+function execweaveFlowEdgePairs(){
+  const pairs=new Map();
+  if(typeof edgeById==='undefined')return pairs;
   for(const edge of edgeById.values()){
-    const s=String(edge.source),t=String(edge.target);
-    if(!nodeById.has(s)||!nodeById.has(t))continue;
-    if(!inbound.has(t))inbound.set(t,[]);inbound.get(t).push(s);
-    if(!outbound.has(s))outbound.set(s,[]);outbound.get(s).push(t);
+    const source=String(edge.source),target=String(edge.target);
+    if(source===target||!nodeById.has(source)||!nodeById.has(target))continue;
+    const key=source+'|'+target;
+    if(!pairs.has(key))pairs.set(key,{source,target});
   }
-  const unknown=[...nodeById.keys()].filter(id=>!execweaveFlowCoords(id));
-  if(!unknown.length)return;
-  // Repeat so a chain of unknown nodes settles: each pass places whatever now has a
-  // placed neighbour, and the pass after it can build on that.
-  for(let pass=0;pass<unknown.length&&unknown.some(id=>!execweaveFlowExtra.has(id));pass++){
-    for(const id of unknown){
-      if(execweaveFlowExtra.has(id))continue;
-      const before=(inbound.get(id)||[]).map(execweaveFlowCoords).filter(Boolean);
-      const after=(outbound.get(id)||[]).map(execweaveFlowCoords).filter(Boolean);
-      if(!before.length&&!after.length)continue;
-      // Prefer the column straight after everything that leads here. Where that column
-      // is at or past a successor, the node sits on a cycle and no column satisfies
-      // both sides, so take the column before the successors instead: an edge between
-      // two nodes of one column is drawn as a right-angled rail, and this leaves one
-      // such edge behind rather than one per successor.
-      const lower=before.length?Math.max(...before.map(at=>at.layer))+1:0;
-      const upper=after.length?Math.min(...after.map(at=>at.layer))-1:lower;
-      const layer=Math.max(0,lower<=upper?lower:upper);
-      const rows=[...before,...after].map(at=>at.row);
-      execweaveFlowExtra.set(id,{layer,row:rows.reduce((a,b)=>a+b,0)/rows.length});
+  return pairs;
+}
+// Solve every drawn node's column and row together, over the drawn graph.
+//
+// A cycle has no left-to-right order, so one edge of each has to fold back whatever we
+// do. Ranking the nodes first, and calling an edge that runs against that rank the
+// feedback edge, picks which one: the projection's own layering is the rank wherever it
+// has an opinion, so its decisions about direction survive, and a node it never saw takes
+// a rank from the company it keeps. Longest path over what is left then puts every other
+// edge on a strictly increasing column, which is the property that was missing.
+function execweaveFlowSolve(){
+  const solved=new Map();
+  execweaveFlowSolved=solved;
+  if(typeof nodeById==='undefined'||!nodeById.size)return solved;
+  const ids=[...nodeById.keys()].map(String);
+  const pairs=[...execweaveFlowEdgePairs().values()];
+  const before=new Map(ids.map(id=>[id,[]])),after=new Map(ids.map(id=>[id,[]]));
+  for(const pair of pairs){after.get(pair.source).push(pair.target);before.get(pair.target).push(pair.source)}
+
+  const preference=new Map(ids.map(id=>[id,execweaveFlowPreference(id)]));
+  const rank=new Map(ids.map(id=>[id,preference.get(id)?preference.get(id).layer:null]));
+  // A node with no preference of its own settles just after whatever leads to it, or
+  // just before whatever it leads to. Repeat so a chain of them settles end to end.
+  for(let pass=0;pass<ids.length&&ids.some(id=>rank.get(id)===null);pass++){
+    let moved=false;
+    for(const id of ids){
+      if(rank.get(id)!==null)continue;
+      const back=before.get(id).map(peer=>rank.get(peer)).filter(value=>value!==null);
+      const fore=after.get(id).map(peer=>rank.get(peer)).filter(value=>value!==null);
+      if(!back.length&&!fore.length)continue;
+      rank.set(id,back.length?Math.max(...back)+1:Math.min(...fore)-1);moved=true;
+    }
+    if(!moved)break;
+  }
+  for(const id of ids)if(rank.get(id)===null)rank.set(id,0);
+
+  const order=new Map();
+  [...ids].sort((a,b)=>rank.get(a)-rank.get(b)||a.localeCompare(b)).forEach((id,index)=>order.set(id,index));
+
+  // Which edges fold back is decided by finding the cycles, not by comparing ranks: two
+  // nodes of equal rank would otherwise have their edge pointed by whichever id sorts
+  // first, and an orchestration step landed in the same column as the agents it targets
+  // because of it. An edge is feedback only when its target is already open on the search
+  // stack, which is to say only when it closes a cycle. Every other edge is kept, so a
+  // node always takes a column after the nodes that lead to it.
+  const feedback=new Set(),state=new Map(ids.map(id=>[id,0]));
+  const roots=[...ids].sort((a,b)=>order.get(a)-order.get(b));
+  for(const root of roots){
+    if(state.get(root))continue;
+    const stack=[{id:root,next:0}];
+    state.set(root,1);
+    while(stack.length){
+      const frame=stack[stack.length-1];
+      const peers=after.get(frame.id);
+      if(frame.next>=peers.length){state.set(frame.id,2);stack.pop();continue}
+      const peer=peers[frame.next++];
+      const seen=state.get(peer);
+      if(seen===1)feedback.add(frame.id+'|'+peer);
+      else if(seen===0){state.set(peer,1);stack.push({id:peer,next:0})}
     }
   }
-  // Two nodes solved to the same row of the same column overlap exactly, which is the
-  // defect this is here to remove. Only a node this pass invented may move: one the
-  // projection placed is an anchor, or a stand-in would drag the solved layout around it.
-  const anchors=new Map();
-  for(const id of nodeById.keys()){
-    if(execweaveFlowExtra.has(id))continue;
-    const at=execweaveFlowCoords(id);if(!at)continue;
-    if(!anchors.has(at.layer))anchors.set(at.layer,[]);
-    anchors.get(at.layer).push(at.row);
+  const parents=new Map(ids.map(id=>[id,[]])),pending=new Map(ids.map(id=>[id,0]));
+  for(const pair of pairs){
+    if(feedback.has(pair.source+'|'+pair.target))continue;
+    parents.get(pair.target).push(pair.source);
+    pending.set(pair.target,pending.get(pair.target)+1);
   }
-  for(const id of [...execweaveFlowExtra.keys()].sort()){
-    const at=execweaveFlowExtra.get(id);
-    const taken=anchors.get(at.layer)||[];
-    // Search outward from the row its neighbours imply, not downward from it. Pushing
-    // only down walks a node past every occupied row in the column and strands it at the
-    // bottom, far from everything it connects to; the nearest free row in either
-    // direction keeps it beside its own edges.
-    const clear=candidate=>!taken.some(other=>Math.abs(other-candidate)<1);
-    let row=at.row;
-    for(let step=0;step<=2*(taken.length+4)&&!clear(row);step++){
-      const delta=(Math.floor(step/2)+1)*0.5;
-      row=step%2?at.row-delta:at.row+delta;
+  // The projection's own layer is a floor, not a starting point to be recomputed away: it
+  // counts depth through nodes the canvas hides, and rebuilding depth from the drawn edges
+  // alone collapses a run into three columns. Longest path only ever pushes a node further
+  // right, so every kept edge gains a column and the structure the projection found holds.
+  const layer=new Map(ids.map(id=>{
+    const want=preference.get(id);
+    return[id,want?want.layer:0];
+  }));
+  const ready=ids.filter(id=>!pending.get(id)).sort((a,b)=>order.get(a)-order.get(b));
+  for(let head=0;head<ready.length;head++){
+    const id=ready[head];
+    const depths=parents.get(id).map(peer=>layer.get(peer)+1);
+    if(depths.length)layer.set(id,Math.max(layer.get(id),...depths));
+    for(const peer of after.get(id)){
+      if(feedback.has(id+'|'+peer))continue;
+      pending.set(peer,pending.get(peer)-1);
+      if(!pending.get(peer))ready.push(peer);
     }
-    execweaveFlowExtra.set(id,{layer:at.layer,row});
-    // An invented node becomes an anchor for the next one, so two of them in the same
-    // column separate from each other as well as from the solved rows.
-    if(!anchors.has(at.layer))anchors.set(at.layer,[]);
-    anchors.get(at.layer).push(row);
   }
+
+  // Rows: keep the row the projection solved, and give a node it never saw the average of
+  // the neighbours that do have one, so it lands beside its own edges.
+  const desired=new Map(ids.map(id=>{
+    const want=preference.get(id);
+    return[id,want&&want.row!==null?want.row:null];
+  }));
+  for(let pass=0;pass<ids.length&&ids.some(id=>desired.get(id)===null);pass++){
+    let moved=false;
+    for(const id of ids){
+      if(desired.get(id)!==null)continue;
+      const rows=[...before.get(id),...after.get(id)].map(peer=>desired.get(peer)).filter(value=>value!==null);
+      if(!rows.length)continue;
+      desired.set(id,rows.reduce((a,b)=>a+b,0)/rows.length);moved=true;
+    }
+    if(!moved)break;
+  }
+  ids.forEach((id,index)=>{if(desired.get(id)===null)desired.set(id,index)});
+
+  // Separate within a column, in the order the desired rows already imply, so a node only
+  // ever moves far enough to clear the one above it.
+  const columns=new Map();
+  for(const id of ids){
+    const value=layer.get(id);
+    if(!columns.has(value))columns.set(value,[]);
+    columns.get(value).push(id);
+  }
+  for(const [value,members] of columns){
+    members.sort((a,b)=>desired.get(a)-desired.get(b)||a.localeCompare(b));
+    let floor=-Infinity;
+    for(const id of members){
+      const row=Math.max(desired.get(id),floor+1);
+      solved.set(id,{layer:value,row});floor=row;
+    }
+  }
+  return solved;
+}
+function execweaveFlowCoords(id){
+  if(!execweaveFlowSolved)execweaveFlowSolve();
+  return execweaveFlowSolved.get(String(id))||null;
 }
 // A column must clear its widest box. The renderer's own measurement is the authority
 // where it is available; where it is not, estimate from the label rather than assuming
@@ -152,15 +224,11 @@ function execweaveFlowColumns(){
     if(!widest.has(at.layer)||widest.get(at.layer)<width)widest.set(at.layer,width);
   }
   const x={};let cursor=0;
-  for(const layer of [...widest.keys()].sort((a,b)=>a-b)){
-    x[layer]=cursor;cursor+=widest.get(layer)+EXECWEAVE_FLOW_COL_GAP;
+  for(const value of [...widest.keys()].sort((a,b)=>a-b)){
+    x[value]=cursor;cursor+=widest.get(value)+EXECWEAVE_FLOW_COL_GAP;
   }
   execweaveFlowColumnX=x;return x;
 }
-// The dagre engine, layout v2 and the lane table all write `positions`, and whichever
-// runs last wins. Rather than compete with them, take the positions they produced and
-// overwrite the ones the projection has an opinion about. A node the projection said
-// nothing about keeps whatever the previous authority chose for it.
 // Every corner on a drawn edge comes from a route that was solved against positions the
 // flow layout has since replaced. Dagre's polyline is the origin: `routePoints` holds it,
 // `rawDagreRoutePoints` holds the pristine copy, and the retarget step re-seeds the first
@@ -175,10 +243,30 @@ function execweaveFlowScrubGeometry(topo){
   // A bundle draws its own H/V rail, which is a corner the flow columns do not need.
   if(topo.bundleByEdge)topo.bundleByEdge=new Map();
 }
+// A router picks which side of a box an edge leaves and enters by comparing the two
+// nodes' ranks in the topology, not by comparing where they were actually drawn. Left as
+// it was, an edge whose column the flow layout changed keeps the old answer and arrives
+// at the right-hand side of a node that sits to the right of its source. The rank is the
+// column, so say so.
+function execweaveFlowSyncSpec(topo){
+  if(!topo||!topo.spec||!topo.spec.get)return;
+  for(const id of nodeById.keys()){
+    const at=execweaveFlowCoords(id),spec=topo.spec.get(id);
+    if(!at||!spec)continue;
+    spec.rank=at.layer;spec.order=at.row;
+    const p=positions.get(id);
+    if(p){spec.x=p.x;spec.y=p.y}
+  }
+}
+// The dagre engine, layout v2 and the lane table all write `positions`, and whichever
+// runs last wins. Rather than compete with them, take the positions they produced and
+// overwrite the ones the flow layout has an opinion about. A node it says nothing about
+// keeps whatever the previous authority chose for it.
 function execweaveApplyFlowPositions(){
   if(typeof positions==='undefined'||!positions||!positions.set)return 0;
-  try{execweaveFlowPlaceUnknown()}catch(_){execweaveFlowExtra=new Map()}
-  execweaveFlowColumnX=null;
+  // The drawn set changes as nodes arrive, so the solve belongs to the paint, not to the
+  // payload that happened to introduce them.
+  execweaveFlowInvalidate();
   const x=execweaveFlowColumns();let applied=0;
   for(const id of nodeById.keys()){
     const at=execweaveFlowCoords(id);if(!at)continue;
@@ -187,13 +275,14 @@ function execweaveApplyFlowPositions(){
     applied++;
   }
   if(!applied)return 0;
+  try{execweaveFlowSyncSpec(execweaveTopology)}catch(_){}
   try{execweaveFlowScrubGeometry(execweaveTopology)}catch(_){}
   try{if(typeof execweaveRecomputePorts==='function')execweaveRecomputePorts(execweaveTopology)}catch(_){}
   try{for(const id of nodeById.keys()){const node=nodeById.get(id);if(node)updateNodeElement(node)}}catch(_){}
   try{for(const edge of edgeById.values())updateEdgeElement(edge)}catch(_){}
   return applied;
 }
-try{window.__execweaveFlow={payload:execweaveFlowPayload,columns:execweaveFlowColumns,apply:execweaveApplyFlowPositions}}catch(_){}
+try{window.__execweaveFlow={payload:execweaveFlowPayload,columns:execweaveFlowColumns,solve:execweaveFlowSolve,apply:execweaveApplyFlowPositions}}catch(_){}
 """.strip()
 
 _FINAL_LAYOUT_SEAM = "function execweaveInstallFinalLayout(priorY){"
@@ -216,7 +305,7 @@ _DESIRED_REPLACEMENT = (
     "  const at=execweaveFlowCoords(id);\n"
     "  if(at){const x=execweaveFlowColumns();\n"
     "    if(Number.isFinite(x[at.layer]))"
-    "return{x:x[at.layer],y:EXECWEAVE_FLOW_TOP+at.order*EXECWEAVE_FLOW_ROW_GAP}}\n"
+    "return{x:x[at.layer],y:EXECWEAVE_FLOW_TOP+at.row*EXECWEAVE_FLOW_ROW_GAP}}\n"
     "  const value=execweaveTopology.spec.get(id);return value?{x:value.x,y:value.y}:{x:0,y:0}\n"
     "}"
 )

@@ -199,14 +199,18 @@ def test_baseline_ordinary_edges_lightened_compared_to_active_paths() -> None:
     """Baseline ordinary edges must have lower visual weight so active paths pop."""
     base_edge_rule = _extract_css_rule(LIVE_STYLE, ".edge")
     base_width_match = re.search(r"stroke-width:\s*([0-9.]+)", base_edge_rule)
-    assert base_width_match and float(base_width_match.group(1)) <= 1.35
+    # A cap, not a fixed value: every stroke on the canvas was doubled so a dashed edge
+    # stays legible on the dark ground, and the property this guards is that an ordinary
+    # edge is still the lightest of them, which the checks below assert directly.
+    assert base_width_match and float(base_width_match.group(1)) <= 2.7
     base_opacity_match = re.search(r"opacity:\s*([0-9.]+)", base_edge_rule)
     assert base_opacity_match and float(base_opacity_match.group(1)) <= 0.60
 
     # Active / selected edge must have heavier weight
     selected_edge_rule = _extract_css_rule(LIVE_STYLE, ".edge.selected")
     selected_width_match = re.search(r"stroke-width:\s*([0-9.]+)", selected_edge_rule)
-    assert selected_width_match and float(selected_width_match.group(1)) >= 2.0
+    assert selected_width_match and float(selected_width_match.group(1)) >= 4.0
+    assert float(selected_width_match.group(1)) > float(base_width_match.group(1))
 
 
 def test_mark_latest_runtime_triggers_fresh_glow_decay() -> None:
