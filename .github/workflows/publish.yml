@@ -146,8 +146,48 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  minimum-python:
+    name: verify minimum Python 3.10 (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Install minimum-version verification dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Provision Linux collector
+        if: runner.os == 'Linux'
+        run: command -v strace >/dev/null || (sudo apt-get update && sudo apt-get install -y strace)
+      - name: Capture exact source before minimum-version verification
+        run: python scripts/acceptance_source_provenance.py --output artifacts/min-python/source-before.json
+      - name: Ruff and complete pytest on Python 3.10
+        run: |
+          python -m ruff check .
+          python -m pytest -q --junitxml=artifacts/min-python/pytest.xml
+      - name: Verify minimum-version acceptance did not mutate source
+        if: always()
+        run: python scripts/acceptance_source_provenance.py --output artifacts/min-python/source-after.json --compare artifacts/min-python/source-before.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: minimum-python-3.10-${{ matrix.os }}
+          path: artifacts/min-python/
+          if-no-files-found: error
+          retention-days: 14
+
   compare-distributions:
-    needs: verify
+    needs: [verify, minimum-python]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
