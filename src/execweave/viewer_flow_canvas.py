@@ -33,8 +33,10 @@ function execweaveFlowNodeIds(){
   for(const entry of flow.nodes)if(entry&&entry.id)ids.add(String(entry.id));
   return ids.size?ids:null;
 }
-// Narrow whatever the existing display filter produced to the set the projection says is
-// drawn. Anything it withholds stays in `graph`, so panels and lookups still find it.
+// Narrow whatever the existing display filter produced to the set the projection says
+// is drawn. Deliberately an intersection and not a replacement: the browser withholds
+// types for its own reasons, and overriding that puts back nodes it meant to hide.
+// Anything withheld stays in `graph`, so panels and lookups still find it.
 function execweaveFlowDisplay(data,display){
   execweaveRememberFlow(data);
   const ids=execweaveFlowNodeIds();

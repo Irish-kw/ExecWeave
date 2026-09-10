@@ -86,6 +86,27 @@ ACTOR_TYPES = frozenset({
 
 PATH_TYPES = frozenset({"file", "directory", "file_cluster"})
 
+# Types the dashboard withholds from its canvas. Anything left here after folding is
+# still a node of the graph and still reachable from every panel, but it takes no column,
+# and edges route through it, so the ordering is solved against the set that is really
+# drawn. Keeping the list here rather than only in the browser is what stops the two
+# from disagreeing about which nodes exist to be ordered.
+NOT_DRAWN_TYPES = frozenset({
+    "agent_execution",
+    "agent_turn",
+    "agent_turn_stop",
+    "compaction",
+    "compaction_request",
+    "context_compaction",
+    "conversation_item",
+    "observed_content",
+    "permission_request",
+    "provider_session",
+    "terminal_operation",
+    "tool_call",
+    "tool_call_observation",
+})
+
 # Only these can stand in for an occurrence. A file, endpoint or content node is a thing
 # the occurrence acted on, never the thing that defines it.
 DEFINER_TYPES = frozenset({
@@ -476,6 +497,45 @@ def _rule_structural_twins(folder: _Folder, protected: set[str]) -> None:
         node["attributes"] = attributes
 
 
+def _rule_bypass_undrawn(folder: _Folder) -> None:
+    """Route edges through the types a canvas withholds, so they take no column.
+
+    These are not folded into anything: no single node stands in for them, and each keeps
+    its own entry in the graph and its own panel. They simply stop being an obstacle the
+    ordering has to place, and their neighbours are joined directly so the flow through
+    them survives. Solving the order against any other set is what leaves a drawn edge
+    crossing another for no reason a reader can see.
+    """
+    for _ in range(len(NOT_DRAWN_TYPES) + 1):
+        out, inc = folder.outgoing(), folder.incoming()
+        victims = [
+            node_id for node_id, node in folder.nodes.items()
+            if node.get("type") in NOT_DRAWN_TYPES
+        ]
+        if not victims:
+            return
+        bridged: list[dict[str, Any]] = []
+        for node_id in victims:
+            for before in inc[node_id]:
+                for after in out[node_id]:
+                    source, target = before["source"], after["target"]
+                    if source == node_id or target == node_id or source == target:
+                        continue
+                    bridged.append({
+                        "source": source,
+                        "target": target,
+                        "relation": before.get("relation"),
+                        "first_seen": _min_stamp(before.get("first_seen"), after.get("first_seen")),
+                        "last_seen": _max_stamp(before.get("last_seen"), after.get("last_seen")),
+                        "viewer_bridged_through": node_id,
+                    })
+        for node_id in victims:
+            folder.nodes.pop(node_id, None)
+        folder.edges.extend(bridged)
+        folder._rewrite({})
+        folder.removed["not_drawn"] += len(victims)
+
+
 # -------------------------------------------------------------------------- layering
 
 
@@ -582,29 +642,85 @@ def _count_crossings(
     return total
 
 
+def _with_virtual_chain(
+    edges: list[dict[str, Any]],
+    layer: dict[str, int],
+) -> tuple[list[tuple[str, str]], dict[str, int]]:
+    """Break every edge into single-column steps, inventing a node for each one crossed.
+
+    An edge spanning three columns occupies a row in the two columns between its ends,
+    but with nothing standing in those columns the ordering cannot see it and places
+    other nodes straight through its path. Giving it a placeholder per column is what
+    lets a barycentre sweep route around it; the placeholders are discarded afterwards
+    and never reach the canvas.
+    """
+    steps: list[tuple[str, str]] = []
+    virtual: dict[str, int] = {}
+    for edge in edges:
+        source, target = edge.get("source"), edge.get("target")
+        if source not in layer or target not in layer or source == target:
+            continue
+        start, end = layer[source], layer[target]
+        if end <= start:
+            continue
+        if end == start + 1:
+            steps.append((source, target))
+            continue
+        previous = source
+        for column in range(start + 1, end):
+            placeholder = f"\0virtual\0{source}\0{target}\0{column}"
+            virtual[placeholder] = column
+            steps.append((previous, placeholder))
+            previous = placeholder
+        steps.append((previous, target))
+    return steps, virtual
+
+
 def assign_order(
     nodes: dict[str, dict[str, Any]],
     edges: list[dict[str, Any]],
     layer: dict[str, int],
     sweeps: int = DEFAULT_ORDER_SWEEPS,
 ) -> dict[str, int]:
-    """Barycentre sweeps, keeping whichever pass crossed least."""
+    """Barycentre sweeps over the real nodes plus a placeholder per column an edge crosses."""
+    steps, virtual = _with_virtual_chain(edges, layer)
+    placed = dict(layer)
+    placed.update(virtual)
+
     columns: dict[int, list[str]] = defaultdict(list)
     for node_id in nodes:
         columns[layer[node_id]].append(node_id)
+    for node_id, column in virtual.items():
+        columns[column].append(node_id)
     for column in columns.values():
-        column.sort(key=lambda n: (str(nodes[n].get("type") or ""), str(nodes[n].get("name") or ""), n))
+        column.sort(key=lambda n: (
+            str((nodes.get(n) or {}).get("type") or "~"),
+            str((nodes.get(n) or {}).get("name") or "~"),
+            n,
+        ))
     order = {n: i for column in columns.values() for i, n in enumerate(column)}
 
     predecessors: dict[str, list[str]] = defaultdict(list)
     successors: dict[str, list[str]] = defaultdict(list)
-    for edge in edges:
-        source, target = edge.get("source"), edge.get("target")
-        if source in layer and target in layer and layer[target] == layer[source] + 1:
-            predecessors[target].append(source)
-            successors[source].append(target)
+    for source, target in steps:
+        predecessors[target].append(source)
+        successors[source].append(target)
 
-    best_score = _count_crossings(edges, layer, order)
+    def crossings(current: dict[str, int]) -> int:
+        by_layer: dict[int, list[tuple[int, int]]] = defaultdict(list)
+        for source, target in steps:
+            by_layer[placed[source]].append((current[source], current[target]))
+        total = 0
+        for pairs in by_layer.values():
+            for i in range(len(pairs)):
+                a = pairs[i]
+                for j in range(i + 1, len(pairs)):
+                    b = pairs[j]
+                    if (a[0] - b[0]) * (a[1] - b[1]) < 0:
+                        total += 1
+        return total
+
+    best_score = crossings(order)
     best_order = dict(order)
     for sweep in range(sweeps):
         downward = sweep % 2 == 0
@@ -619,11 +735,18 @@ def assign_order(
             column.sort(key=lambda n: (barycentre(n), n))
             for position, node_id in enumerate(column):
                 order[node_id] = position
-        score = _count_crossings(edges, layer, order)
+        score = crossings(order)
         if score < best_score:
             best_score = score
             best_order = dict(order)
-    return best_order
+
+    # discard the placeholders and close the gaps they left in each column
+    final: dict[str, int] = {}
+    for index, column in columns.items():
+        real = sorted((n for n in column if n in nodes), key=lambda n: best_order[n])
+        for position, node_id in enumerate(real):
+            final[node_id] = position
+    return final
 
 
 # ------------------------------------------------------------------------ entry point
@@ -662,6 +785,7 @@ def flow_layout_graph(
     _rule_occurrences(folder, protected)
     _rule_mirror_identity(folder, protected)
     _rule_structural_twins(folder, protected)
+    _rule_bypass_undrawn(folder)
 
     drawn_ids = sorted(folder.nodes)
     layer = assign_layers(drawn_ids, folder.edges, previous_layers)
