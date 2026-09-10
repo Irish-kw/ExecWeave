@@ -1,0 +1,49 @@
+\section{Repository-Backed Preliminary Characterization}
+This section intentionally reports only measurements for which a frozen repository artifact exists. It is not presented as the final performance evaluation of the current implementation.
+
+\subsection{Reference microbenchmark}
+The repository contains a v0.6.0 reference microbenchmark captured on GitHub Actions using a 4-logical-CPU Intel Xeon Platinum 8573C environment with 15.99~GB memory and Python~3.12.14. The deterministic workload performs file read/write/hash operations and short-lived Python subprocesses. Seven iterations were recorded per profile. Table~\ref{tab:prelim} reproduces the values statically from that artifact.
+
+\begin{table}[t]
+\centering
+\caption{Repository reference microbenchmark from ExecWeave v0.6.0 (seven iterations). These are historical preliminary measurements, not claimed performance of v0.8.22.}
+\label{tab:prelim}
+\footnotesize
+\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{lrrrr}
+\toprule
+Profile & Median ms & Overhead & $\Delta$RSS MB & Artifact KB \\
+\midrule
+Off & 236.221 & 0.000\% & 0.000 & 0.000 \\
+Portable & 391.580 & 65.768\% & 27.852 & 741.355 \\
+Strace & 1226.076 & 419.038\% & 37.653 & 572.838 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+These numbers should not be generalized to long-running agent sessions. The workload is intentionally short, so fixed startup and instrumentation costs dominate the percentage. They are nonetheless scientifically useful for two reasons. First, they show that observation is not free and that the stronger syscall-oriented backend can impose substantially larger costs on this workload. Second, they prevent a future paper from reporting only favorable long-duration workloads. The final evaluation should rerun the benchmark on the submission artifact, add realistic multi-minute agent workloads, and report both absolute and relative overhead.
+
+\subsection{Executable fidelity contracts}
+The repository also encodes several observability limits as deterministic regression tests rather than documentation alone. The threat-model contract covers short-lived processes, short-lived sockets, surviving descendants, non-causal portable filesystem events, and a corresponding stronger syscall-trace case. This is methodologically important: limitations are part of the executable specification. The final paper should report the complete frozen test matrix and continuous-integration environments, but it should not substitute unit-test pass counts for empirical fidelity experiments against independent ground truth.
+
+\subsection{What remains before a submission-quality evaluation}
+Three result sets are intentionally absent from this first manuscript. First, contemporary competitor tools have not yet been run under one frozen workload harness, so Table~\ref{tab:systems} is positioning based on published interfaces rather than a performance ranking. Second, the current 0.8.22 implementation requires a fresh cross-OS/provider quantitative campaign rather than reusing acceptance-test summaries collected during development. Third, human debugging utility has not yet been measured in a controlled study. These are the highest-priority empirical tasks for a submission-ready revision.
+
+\section{Discussion}
+\subsection{The graph is a claim surface, not merely a view}
+An execution graph is persuasive because edges visually imply relationships. That makes graph construction a claim boundary. If a system draws a tool directly to a process, users naturally interpret the line as evidence that the tool caused or at least executed through that process. \system therefore treats every cross-layer edge as something that must be explainable through support metadata. This stance is stricter than treating the graph as an approximate navigation aid, but it is appropriate for debugging and security use where misattribution has operational consequences.
+
+\subsection{Why abstention is a feature}
+Machine-learning interfaces often reward completeness, whereas provenance requires epistemic discipline. Equation~\ref{eq:phi} makes $\bot$ a normal output. An unattributed process is less visually satisfying than a connected graph, but it communicates a real limitation: the available evidence cannot distinguish candidates. Future instrumentation can resolve the ambiguity without invalidating the earlier record. By contrast, a fabricated edge can contaminate downstream root-cause analysis and analyst trust.
+
+\subsection{Compatibility with OpenTelemetry}
+The proposed model is not an argument against OpenTelemetry. OpenTelemetry is a natural transport and semantic source for instrumented agent and service operations~\cite{otel2026}. The key design question is whether the evidence was emitted by the application, independently observed at runtime, or derived by correlation. A future interoperability layer could ingest OTel spans as $C_{sem}$ or $C_{gw}$ events while preserving independent $C_{os}$ observations. Cross-layer links could then use propagated trace/span context as strong identity support when available and fall back to conservative runtime evidence otherwise.
+
+\subsection{Cross-platform fidelity is necessarily asymmetric}
+A portable collector cannot truthfully promise kernel-equivalent fidelity across Windows, macOS, and Linux using only common user-space APIs. \system therefore favors a common canonical schema with backend-specific evidence strength over pretending that all platforms expose identical telemetry. The scientific comparison should ask whether the graph correctly represents what each backend can support, not whether every backend emits the same number of edges.
+
+\subsection{Remote execution boundaries}
+Local OS observation stops at the local machine. A call to a remote hosted model can expose local client/network evidence and provider-supplied semantic content, but it cannot reveal the provider's remote process tree unless the provider supplies additional telemetry. Similarly, an OpenRouter or gateway identity can link logical request stages without making the remote service process locally observable. These boundaries must remain explicit in any accountability claim.
+
+\subsection{Security analysis versus maliciousness inference}
+The execution graph can support rule-based analysis---for example, identifying a process that accesses an unexpected path and later opens a network connection. Such a pattern is a finding supported by evidence; it is not proof of exfiltration or malicious intent. File and network co-occurrence does not establish byte-level flow. Evidence grade and behavioral severity should therefore remain orthogonal.
