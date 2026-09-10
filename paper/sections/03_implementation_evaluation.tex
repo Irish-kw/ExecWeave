@@ -1,0 +1,155 @@
+\section{Implementation}
+\system is implemented as a Python 3.10+ local command-line and web-viewer system. The current repository release at the time of this draft is 0.8.22. The package can wrap an arbitrary local command for OS observation or activate provider-specific recorders when stronger semantic integration is available. A run directory can retain raw runtime events, semantic events, correlated events, materialized graphs, conversation views, content-addressed payloads, and a local integrity manifest.
+
+\subsection{Provider-neutral event boundary}
+Provider adapters are intentionally upstream of the canonical graph. Their responsibility is to translate exposed lifecycle events and content into a stable event vocabulary while preserving provider identifiers as attributes. This allows downstream graph logic to remain independent of whether the source is a hook, rollout transcript, IDE plugin, gateway event, model-runtime event, or local process collector. It also makes missing semantic coverage explicit: unsupported provider internals remain absent rather than reconstructed from the final answer.
+
+\subsection{Failure and cleanup semantics}
+Observability software changes the system it observes and must therefore define failure ownership. The portable collector distinguishes terminal states such as available, degraded, unavailable, not sampled, and not requested for network collection. If a managed collector fails after launching a workload it owns, cleanup is responsible for terminating that owned workload instead of leaving an accidental child behind. Conversely, a descendant that legitimately outlives the root command is not assigned a fabricated exit event merely to close the graph. These distinctions are relevant to both runtime correctness and evaluation under interruption.
+
+\subsection{Privacy and integrity boundary}
+Local-first storage reduces default disclosure but does not make captured data harmless. Full-fidelity provider payloads can contain prompts, source code, secrets, tool outputs, file contents, and model responses. The content store is therefore part of the sensitive run artifact. A local integrity manifest can detect changes relative to a recorded manifest, but if both evidence and manifest remain in the same writable trust boundary, this is not an adversary-resistant trusted logging mechanism. The system is an observability tool, not a sandbox or trusted execution environment.
+
+\section{Evaluation Methodology}
+A journal evaluation must establish more than feature coverage. We separate \emph{descriptive comparison}, which asks what each system documents and exposes, from \emph{controlled comparative experiments}, which run equivalent workloads and measure the resulting evidence. Table~\ref{tab:rqs} defines seven research questions.
+
+\begin{table*}[t]
+\centering
+\caption{Research questions and primary metrics for the controlled evaluation.}
+\label{tab:rqs}
+\footnotesize
+\begin{tabular}{p{0.7cm} p{4.8cm} p{8.8cm}}
+\toprule
+RQ & Question & Primary measurements \\
+\midrule
+RQ1 & How faithfully does \system reconstruct execution structure? & Typed node/edge precision and recall, semantic coverage, runtime-evidence recall, graph edit distance to ground truth. \\
+RQ2 & How accurately does cross-layer attribution connect semantic actions to runtime effects? & Attribution precision/recall/F1, abstention rate, ambiguity rate, and false-attribution rate under concurrency. \\
+RQ3 & What evidence does \system add over representative agent-observability systems? & Common-workload coverage for agent/tool/model/process/file/network entities and ability to answer causal-attribution tasks. \\
+RQ4 & Is the canonical graph stable across providers and operating systems for logically equivalent workloads? & Typed graph agreement, relation agreement, unmatched-node/edge rate, provider/OS interaction effects. \\
+RQ5 & What runtime, memory, storage, and visualization overhead does observation impose? & Wall-clock overhead, peak RSS delta, artifact bytes, event throughput, live-update latency, rendering latency versus graph size. \\
+RQ6 & How robust is reconstruction under adverse execution conditions? & Fidelity under short-lived processes/sockets, interrupts, exceptions, surviving descendants, missing hooks, shared resources, and degraded collectors. \\
+RQ7 & Does cross-layer visualization improve human debugging and accountability tasks? & Task accuracy, time-to-root-cause, inspected events, confidence calibration, and subjective workload/usability. \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\subsection{Baselines}
+We propose two baseline families.
+
+\textbf{Product/system baselines.} The competitive set should include at least Langfuse, Phoenix, W\&B Weave, and one of LangSmith or AgentOps, using the latest publicly documented instrumentation paths at experiment freeze time. AgentGraph and AgentSeer should be included where their artifacts can ingest the same traces without semantic distortion. The purpose is not to force every product to solve the same problem; it is to quantify which questions can be answered from each resulting trace representation.
+
+\textbf{Scientific ablations.} To isolate the value of cross-layer reconstruction, the most important baselines are: (B0) semantic instrumentation only; (B1) OS-runtime observation only; (B2) naive fusion by temporal window and process ancestry without the conservative uniqueness/evidence policy; and (B3) full \system. B2 is essential because the paper's hypothesis is not merely that ``more telemetry is better.'' It is that evidence-aware fusion reduces unsupported attribution compared with a plausible but naive join.
+
+\subsection{Fair competitor instrumentation tiers}
+A direct product comparison can be misleading if one system is evaluated with extensive custom instrumentation while another is evaluated only with its default integration. We therefore separate three instrumentation tiers and report them independently.
+
+\textbf{Tier 0---native/default.} Each product is configured using its documented agent or framework integration and its standard local or hosted collector, without adding experiment-specific OS spans. This tier measures what an ordinary user obtains from the system's intended observability path.
+
+\textbf{Tier 1---documented extensibility.} We permit official manual-instrumentation and OpenTelemetry interfaces when they are part of the product documentation. The experiment may add spans around the deterministic workload, but the added span must be produced at an application boundary that the system documents. This tier tests whether a platform's extensible trace model can answer additional questions without an independent machine observer.
+
+\textbf{Tier 2---common external evidence.} Where technically possible, the same independently generated OS observations are exported to a competitor as custom spans or events. This is not a comparison of native collection; it is an isolation test for representation, query, and attribution logic. If a platform can store an externally supplied process/file/network event but still requires the experimenter to decide which agent span owns it, that distinction is reported explicitly. Conversely, if a competitor provides a documented mechanism that performs the association itself, it is credited as cross-layer attribution.
+
+These tiers prevent two symmetrical errors. Evaluating only Tier~0 can understate the expressive power of a general telemetry platform. Evaluating only Tier~2 can overstate native observability by supplying the competitor with precisely the cross-layer evidence that the experiment is intended to measure. Product cost, account tier, sampling policy, retention, and exporter configuration are frozen in the artifact manifest because they may influence the available trace.
+
+\subsection{Diagnostic question benchmark}
+Beyond node and edge counts, each reconstructed run is evaluated by a fixed set of questions whose answers are derived from an independent workload manifest. This makes the comparison task-oriented: a system receives credit only when its recorded evidence supports the answer, not merely because its UI contains visually similar entities. Table~\ref{tab:questions} defines the initial question set.
+
+\begin{table*}[t]
+\centering
+\caption{Diagnostic questions used to compare semantic tracing, OS tracing, naive fusion, competitor systems, and \system. Each answer is scored against an independently generated workload manifest.}
+\label{tab:questions}
+\footnotesize
+\setlength{\tabcolsep}{4.5pt}
+\begin{tabular}{p{0.75cm} p{4.5cm} p{4.4cm} p{5.2cm}}
+\toprule
+ID & Diagnostic question & Required evidence & Principal failure being exposed \\
+\midrule
+Q1 & Which agent or sub-agent invoked a given tool action? & Semantic agent/tool identity and parentage & Missing or flattened agent hierarchy \\
+Q2 & Which OS process realized a declared tool execution? & Semantic declaration plus independently observed process identity & Unsupported timestamp/process-name association \\
+Q3 & Which logical action is supported as the source of a file mutation? & File evidence, process evidence where causal, and justified cross-layer bridge & Treating session-correlated filesystem activity as process-causal \\
+Q4 & Which logical action is supported as the source of a network connection? & Endpoint/socket evidence, process identity, and justified cross-layer bridge & Attributing a shared or concurrent network effect to the wrong agent \\
+Q5 & Which runtime effects cannot be uniquely attributed? & Candidate/support metadata and an explicit unknown/abstention state & Hiding ambiguity by forcing graph connectivity \\
+Q6 & Does the finalized run preserve the evidence visible at live completion? & Canonical event and graph identities from both materializations & UI/viewer divergence mistaken for provenance consistency \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+For Q2--Q5, an answer is categorized as \emph{correct}, \emph{incorrect}, \emph{explicitly unknown}, or \emph{not represented}. This four-way outcome is more informative than binary answerability. ``Explicitly unknown'' indicates that a system represented the relevant evidence but declined an unsupported association; ``not represented'' indicates that the necessary entity or relation was absent. For accountability tasks these outcomes have different consequences and should not be collapsed.
+
+\subsection{Ablations and negative controls}
+The evaluation includes controlled ablations that target the mechanism of the paper rather than generic software components. The \emph{semantic-only} ablation removes independent OS evidence; the \emph{runtime-only} ablation removes provider semantics. A \emph{timestamp-only} fusion associates every semantic action with the closest compatible runtime event within the same window. A \emph{no-abstention} variant chooses the highest-scoring process even when several candidates remain. An \emph{exact-ID-only} variant disables heuristic correlation and therefore measures how much coverage can be obtained without inferred bridges. Additional feature ablations remove canonical executable paths, command-line-head evidence, and argument-tail evidence from the correlator.
+
+These ablations separate three possible explanations for good results. If semantic-only tracing answers the cross-layer questions, independent OS evidence is unnecessary for that workload. If timestamp-only fusion performs as well as \system under concurrency, the conservative attribution mechanism adds little. If disabling abstention increases recall without increasing false attribution, the uniqueness rule is too conservative. The expected contribution is therefore a \emph{precision--coverage frontier}, not a claim that one configuration dominates on every metric.
+
+Negative controls are equally important. We include unrelated background processes with similar executable names, a semantically declared command that intentionally never executes, shell constructs rejected by the parser, and concurrent commands with intentionally indistinguishable observable features. In these cases the correct output may be no edge. A method that maximizes graph density will fail these controls even if it appears strong on positive-only workloads.
+
+Sampling is evaluated as an explicit treatment variable for the portable backend. Observation intervals are swept across a predeclared range while workload lifetimes are controlled independently. The resulting detection curve quantifies where short-lived process and network events become unreliable. The syscall-oriented Linux backend serves as a stronger lineage-scoped reference condition, not as universal OS ground truth.
+
+\subsection{Primary hypotheses and statistical analysis}
+The empirical study tests four primary hypotheses. \textbf{H1} states that combining semantic and independent runtime evidence increases correct answerability of cross-layer diagnostic questions relative to either evidence plane alone. \textbf{H2} states that conservative attribution reduces false-attribution rate relative to naive temporal fusion under concurrent and ambiguous execution, with an explicit trade-off in abstention or recall. \textbf{H3} states that, for logically equivalent workloads and evidence classes available on each platform, the canonical semantic relation structure is substantially more stable across providers and operating systems than raw integration-specific telemetry. \textbf{H4} states that observation cost depends strongly on backend fidelity and workload duration; fixed-cost microbenchmarks and realistic sessions should therefore be reported separately.
+
+For proportion metrics such as attribution precision, recall, false attribution, and diagnostic-answer accuracy, the study reports point estimates with confidence intervals and the underlying counts rather than percentages alone. Paired or clustered bootstrap intervals are used when repeated runs share a workload fixture. Runtime and memory distributions are summarized with medians and tail quantiles in addition to means; paired differences are preferred when an observed and unobserved run use the same deterministic fixture. Provider and OS effects are analyzed with workload as a blocking factor rather than pooling all events into one pseudo-independent sample.
+
+For the human study, participant and task are modeled as repeated factors. Binary correctness can be analyzed with a mixed-effects logistic model, while completion time can use a log-transformed mixed-effects model or a robust nonparametric paired analysis if model assumptions fail. The analysis plan, exclusion rules, and primary endpoints should be fixed before examining the final study results. Secondary visualization measures---for example edge-crossing count or layout compactness---remain secondary unless they predict analyst task performance.
+
+The study should also report effect sizes that have an operational interpretation. For attribution, a reduction in false edges per run is easier to interpret than a significance test alone. For debugging, median seconds saved per correctly solved task and the change in confidence calibration are more informative than a standalone usability score. Statistical significance is therefore treated as support for a practically meaningful effect, not as the definition of usefulness.
+
+\subsection{Version freezing and reproducibility of comparisons}
+Every comparison row is bound to a versioned experiment manifest containing the system version or commit, integration package versions, account/service tier when relevant, exporter configuration, sampling policy, OS build, Python/runtime versions, model endpoint, and workload revision. Documentation-based capability tables are frozen on a stated access date, while empirical claims are tied to the exact executable configuration used in the experiment. If a competitor changes materially during the study, the primary table remains on the frozen version and a sensitivity rerun may be reported separately.
+
+This discipline is especially important in the agent-observability ecosystem, where product interfaces and instrumentation conventions change quickly. It also prevents a subtle reproducibility failure in which a future rerun silently uses a more capable competitor release or a different provider integration and is then compared against old numbers.
+
+\subsection{Ground-truth workloads}
+The evaluation should use a workload generator whose intended process/file/network effects are externally recorded, not inferred from \system output. Each scenario emits a ground-truth manifest before execution and uses deterministic markers or controlled helper programs to make expected identities auditable. Workloads should include:
+\begin{enumerate}
+  \item single-agent single-tool execution;
+  \item nested process trees with file reads and writes;
+  \item local and remote network connections;
+  \item root-agent to sub-agent delegation;
+  \item two concurrent agents invoking the same executable;
+  \item concurrent tool calls with overlapping temporal windows;
+  \item shared model/runtime or shared tool resources;
+  \item short-lived processes and sockets near the portable sampling boundary;
+  \item exception, SIGINT/Ctrl+C, and abnormal collector termination;
+  \item a descendant that outlives the observed root;
+  \item semantic-hook denial or partial provider coverage; and
+  \item unsupported shell constructs that should force attribution abstention.
+\end{enumerate}
+
+The concurrency cases are especially important. If Agent A and Agent B both launch the same executable at nearly the same time, a timestamp-only fusion can create a plausible but wrong edge. A correct conservative system should prefer $\bot$ until stronger identity evidence disambiguates the candidates.
+
+\subsection{Cross-provider and cross-OS matrix}
+The full matrix has four factors:
+\begin{equation}
+\textit{System}\times\textit{Provider}\times\textit{OS}\times\textit{Workload}.
+\end{equation}
+The provider set should use integrations that can be exercised reproducibly on the evaluation hosts; candidate families include supported coding agents and local model paths. The OS set is Windows, Linux, and macOS for the portable collector, with Linux additionally evaluated using the stronger syscall-oriented backend. Equivalent workload manifests, not identical UI screenshots, define the cross-platform unit of comparison.
+
+For two canonical graphs $G_i$ and $G_j$ generated from the same logical workload, we report typed node agreement and typed relation agreement after matching platform-specific runtime identities through the ground-truth manifest. Raw PIDs and filesystem syntax are therefore not expected to match literally. What should match is the logical relation pattern that the platform can support at the same evidence grade.
+
+\subsection{Attribution metrics}
+Let $A^*$ be the set of ground-truth semantic-to-runtime relations and $\hat A$ be the emitted attributed relations. We report
+\begin{align}
+P_A &= \frac{|\hat A\cap A^*|}{|\hat A|},\\
+R_A &= \frac{|\hat A\cap A^*|}{|A^*|},\\
+FAR &= \frac{|\hat A\setminus A^*|}{|\hat A|}.
+\end{align}
+$FAR$ is the false-attribution rate. Because abstention is intentional, we also report
+\begin{equation}
+AR=\frac{|\{s:\phi(s)=\bot\}|}{|S_{eligible}|}.
+\end{equation}
+A system that never attributes anything can trivially obtain zero false attribution, so precision must be interpreted jointly with recall and abstention. Conversely, a system that connects every temporally nearby process may obtain high recall while producing unacceptable false attribution under concurrency.
+
+\subsection{Graph fidelity}
+Node and edge metrics are reported by type. This avoids a large number of easy process nodes masking poor recall for rarer but semantically important sub-agent or network relations. We additionally report a normalized typed graph-edit distance against the manifest-derived ground-truth graph and analyze errors by evidence channel.
+
+For runtime evidence, negative claims are scoped to the backend. A portable sampling miss is counted against recall for the experiment but is not interpreted as proof that the event did not occur. The Linux syscall backend provides a useful stronger-reference condition for quantifying portable blind windows.
+
+\subsection{Performance and scalability}
+Performance experiments use paired runs of the same deterministic workload with observation disabled and enabled. Primary measures are wall-clock time, peak process-tree resident memory, artifact size, and event throughput. Viewer experiments separately vary graph nodes, edges, high-degree shared resources, and update frequency, measuring materialization time, layout time, DOM size, interaction latency, and dropped/late updates. This separation prevents an expensive graph layout from being incorrectly attributed to the collector and prevents collector overhead from being hidden by a long model call.
+
+\subsection{Robustness experiments}
+Robustness evaluation is fault-oriented rather than anecdotal. We inject or deterministically model: a short-lived child between portable process samples; a short-lived socket between network samples; a surviving/reparented child; portable filesystem activity without process-causal support; hook unavailability; malformed or incomplete semantic input; root interruption; collector failure after child launch; and ambiguous command/process matches. For each case, the expected outcome includes not only what should be observed but what \emph{must not} be claimed.
+
+\subsection{Human-subject study}
+RQ7 compares at least two interfaces: a conventional agent trace/log view and the \system cross-layer graph with evidence details. Participants perform controlled tasks such as identifying which agent caused an unexpected file change, determining which sub-agent contacted an endpoint, locating the process responsible for a tool failure, and distinguishing direct from inferred evidence. We measure correctness, completion time, number of inspected records, and confidence calibration. A within-subject counterbalanced design reduces between-participant variability. Because dynamic-graph literature shows task-dependent effects of layout stability~\cite{archambault2011dynamic,archambault2013mentalmap}, visualization claims should be tied to concrete navigation and attribution tasks rather than subjective aesthetics alone.
