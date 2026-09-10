@@ -1,11 +1,7 @@
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
-
-try:
-    import tomllib
-except ModuleNotFoundError:  # Python 3.10
-    import tomli as tomllib
 
 
 def workflow() -> str:
@@ -16,20 +12,12 @@ def test_publish_has_no_pull_request_trigger_and_requires_three_os_verification(
     text = workflow()
     assert 'pull_request:' not in text
     assert 'os: [ubuntu-latest, windows-latest, macos-latest]' in text
-    assert 'minimum-python:' in text
-    assert 'python-version: "3.10"' in text
-    assert 'needs: [verify, minimum-python]' in text
+    assert 'needs: verify' in text
     assert 'git merge-base --is-ancestor HEAD origin/main' in text
     assert 'python scripts/check_installed_dashboard.py' in text
     assert 'python scripts/check_sdist_install.py' in text
     assert 'python scripts/check_distribution_contents.py' in text
     assert 'python scripts/canonicalize_wheel.py dist dist-repro' in text
-
-
-def test_cross_platform_pr_ci_includes_minimum_supported_python() -> None:
-    text = Path('.github/workflows/ci.yml').read_text(encoding='utf-8')
-    assert 'versions = ["3.10", "3.12"] if cross_platform else ["3.12"]' in text
-    assert 'systems = ["ubuntu-latest", "macos-latest", "windows-latest"]' in text
 
 
 def test_pypi_job_uses_only_the_verified_ubuntu_distribution_artifact() -> None:
