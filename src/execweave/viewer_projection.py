@@ -10,6 +10,7 @@ from .conversation_records import (
     write_conversation_records,
 )
 from .dashboard_shell import render_static_dashboard_html
+from .viewer_flow_layout import flow_layout_graph
 from .viewer_external_endpoints import (
     EXTERNAL_NODE_ID,
     collapse_external_endpoints,
@@ -342,8 +343,16 @@ def _viewer_child_session_edges(graph: dict[str, Any]) -> list[dict[str, Any]]:
     return edges
 
 
-def project_viewer_graph(graph: dict[str, Any]) -> dict[str, Any]:
-    """Keep loopback clustering, then fold outbound IPs into one External node."""
+def project_viewer_graph(
+    graph: dict[str, Any],
+    previous_layers: dict[str, int] | None = None,
+) -> dict[str, Any]:
+    """Keep loopback clustering, fold outbound IPs into one External node, then lay out flow.
+
+    ``previous_layers`` carries the column each node held on the previous tick. A live
+    caller threads it through so a node already on screen can only move further right;
+    a one-shot render leaves it unset.
+    """
     projected = _base_project_viewer_graph(graph)
     nodes = [node for node in projected.get("nodes", []) if isinstance(node, dict)]
     edges = [edge for edge in projected.get("edges", []) if isinstance(edge, dict)]
@@ -380,7 +389,7 @@ def project_viewer_graph(graph: dict[str, Any]) -> dict[str, Any]:
 
     nodes, edges, collapse_counts = _collapse_repeated_viewer_nodes(nodes, edges)
     if expansion is None and not any(collapse_counts.values()):
-        return projected
+        return flow_layout_graph(projected, previous_layers)
     result["nodes"] = nodes
     result["edges"] = edges
     result["node_count"] = len(nodes)
@@ -389,7 +398,7 @@ def project_viewer_graph(graph: dict[str, Any]) -> dict[str, Any]:
         metadata.update(collapse_counts)
         metadata["kind"] = "combined"
     result["viewer_projection"] = metadata
-    return result
+    return flow_layout_graph(result, previous_layers)
 
 
 def _run_root_from_graph(graph: dict[str, Any]) -> Path | None:

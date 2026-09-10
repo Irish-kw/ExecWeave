@@ -10,6 +10,7 @@ from .conversation_records import conversation_index_payload
 from .dashboard_shell import DASHBOARD_HTML
 from .graph import logical_event_key
 from .viewer_limits import resolve_viewer_limits
+from .viewer_flow_layout import layers_of
 from .viewer_projection import (
     internal_hook_process_ids_in_event,
     project_viewer_graph,
@@ -327,7 +328,12 @@ class _LiveState(_BaseLiveState):
         )
 
     def _projected_graph_locked(self) -> dict[str, object]:
-        projected = project_viewer_graph(self._raw_graph_locked())
+        # The columns from the previous tick are a floor, not a cache: new evidence may
+        # push a node further right, but a node already on screen never travels back to
+        # the left while the operator is reading it.
+        previous = getattr(self, "_flow_layers", None)
+        projected = project_viewer_graph(self._raw_graph_locked(), previous)
+        self._flow_layers = layers_of(projected)
         if isinstance(projected.get("viewer_projection"), dict):
             self._viewer_projection_ever_active = True
         return projected
@@ -410,6 +416,12 @@ class _LiveState(_BaseLiveState):
                     payload.update(counts)
             if payload.get("kind") == "snapshot":
                 payload["raw_events"] = self._raw_event_snapshot_locked()
+            # The canvas description rides along with every update that carries state.
+            # A delta names the entities that changed; this names what to draw, so a
+            # newly folded node does not appear on screen until the next full snapshot.
+            flow = projected.get("viewer_flow")
+            if isinstance(flow, dict) and payload.get("kind") in {"snapshot", "delta"}:
+                payload["viewer_flow"] = flow
         return payload
 
 
