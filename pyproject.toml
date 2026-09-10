@@ -44,13 +44,16 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "pytest>=8.0",
+  "PyYAML>=6.0",
   "pillow>=10.0",
   "ruff>=0.16,<0.17",
+  "tomli>=2.0; python_version < '3.11'",
   "pywinpty>=3.0.5,<4; platform_system == 'Windows'",
 ]
 release = [
   "build>=1.2",
   "twine>=6.0",
+  "tomli>=2.0; python_version < '3.11'",
 ]
 # Drives the shipped viewers in a real browser. Kept out of dev so an ordinary
 # development install stays small; CI installs it and requires the checks to run.
