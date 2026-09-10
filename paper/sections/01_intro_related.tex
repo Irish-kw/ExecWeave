@@ -1,0 +1,126 @@
+\section{Introduction}
+\IEEEPARstart{A}{gentic} software is changing the unit of execution that developers must understand. A conventional application may call functions and services according to code paths that are known before execution. An agentic application can instead select tools dynamically, delegate work to other agents, issue shell commands, start language runtimes, call local model servers, edit repositories, and contact external endpoints as part of a single user request. The externally visible answer is therefore only the end of a longer execution chain whose intermediate effects may matter for debugging, security, reproducibility, and accountability.
+
+The observability ecosystem has responded rapidly. LangSmith records traces composed of runs and integrates with agent frameworks and OpenTelemetry~\cite{langsmith2026observability,langsmith2026otel}. Langfuse records observations and now renders agent graphs inferred from typed observations and nesting~\cite{langfuse2026agentgraphs,langfuse2026tracing}. Phoenix uses OpenTelemetry and OpenInference to trace model calls, tools, retrieval, and custom application logic~\cite{phoenix2026tracing,phoenix2026otel}. AgentOps organizes agents, language-model calls, actions, and tools into sessions and hierarchical spans~\cite{agentops2026,agentops2026core}, while W\&B Weave records operations and calls, provides trace and graph views, and includes agent-oriented span types~\cite{wandb2026tracing,wandb2026traceview}. Academic systems similarly convert agent execution into analyzable graph structure. AgentGraph transforms traces into knowledge graphs with agents, tasks, tools, data, and human interventions~\cite{wu2026agentgraph}; AgentSeer separates temporal action and component graphs~\cite{wicaksono2026agentseer}; Graph of Trace visualizes fine-grained tool and code-execution events as an incrementally updated directed graph~\cite{gao2026graphtrace}; and AgentTrace proposes structured operational, cognitive, and contextual telemetry for agent systems~\cite{alsayyad2026agenttrace}.
+
+These advances make one claim untenable: an execution graph by itself is no longer novel. More importantly, they expose a different research problem. Agent-level instrumentation describes what an integration point \emph{reported}: an agent emitted a tool call, a framework entered a function, or a model returned a response. Operating-system observation describes what a machine \emph{observed}: a process was created, a file changed, or a socket appeared. The two descriptions are related but not equivalent. A declared shell command does not prove that the corresponding process executed; a file body supplied by a provider hook does not prove an operating-system read; and a process connecting to a network endpoint does not by itself identify which logical agent action requested that connection.
+
+We call this separation the \emph{semantic--runtime observability gap}. It has two consequences. First, semantic-only traces can omit effects below the instrumentation boundary. Second, OS-only telemetry can preserve effects while losing the logical principal or tool invocation that motivated them. Naively joining the two streams by timestamp is unsafe under concurrency, process reuse, wrappers, shell indirection, shared runtimes, or overlapping sub-agent activity. For accountability-oriented observability, a false attribution can be more damaging than an explicit unknown: it can blame Agent A for an effect caused by Agent B.
+
+\system addresses this problem by treating observations as evidence and the graph as a materialized, queryable view of that evidence. Provider/framework semantics, inference-gateway observations, model-runtime observations, and OS-runtime evidence remain distinguishable after graph construction. Derived cross-layer bridges are marked as inferred and non-causal unless stronger telemetry supports a stronger claim. Ambiguous cases produce no bridge rather than a visually convenient but unsupported edge. This design follows a lineage of provenance systems that emphasize faithful derivation histories~\cite{muniswamy2006pass,pohly2012hifi,bates2015lpm,pasquier2017camflow}, while adapting the problem to modern agent runtimes whose relevant identities include agents, sub-agents, tool calls, model requests, provider sessions, processes, files, and network endpoints.
+
+Figure~\ref{fig:gap} illustrates the central distinction. The semantic plane can say that a root agent delegated to a sub-agent and that the sub-agent invoked a tool. The runtime plane can say that a process spawned a child that modified a file and contacted a service. The research problem is not to draw both planes; it is to determine which cross-plane relations are justified, with what evidence, and what should remain unknown.
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[
+  node distance=5mm and 6mm,
+  box/.style={draw, rounded corners=1pt, align=center, minimum height=5.5mm, inner sep=2.5pt, font=\scriptsize},
+  sem/.style={box, fill=gray!10},
+  run/.style={box, fill=gray!3},
+  arr/.style={-{Latex[length=1.6mm]}, thin},
+  bridge/.style={-{Latex[length=1.6mm]}, dashed, thin}
+]
+\node[sem] (root) {Root agent};
+\node[sem, right=of root] (sub) {Sub-agent};
+\node[sem, right=of sub] (tool) {Tool call};
+\draw[arr] (root) -- node[above,font=\tiny]{delegates} (sub);
+\draw[arr] (sub) -- node[above,font=\tiny]{invokes} (tool);
+
+\node[run, below=12mm of root] (p1) {Process $p_1$};
+\node[run, right=of p1] (p2) {Process $p_2$};
+\node[run, right=of p2, yshift=4mm] (file) {File $f$};
+\node[run, right=of p2, yshift=-4mm] (net) {Endpoint $n$};
+\draw[arr] (p1) -- node[above,font=\tiny]{spawns} (p2);
+\draw[arr] (p2) -- (file);
+\draw[arr] (p2) -- (net);
+\draw[bridge] (tool.south) to[bend left=13] node[right,font=\tiny,align=left]{cross-layer\\attribution} (p2.north);
+\node[font=\scriptsize, anchor=east] at ($(root.west)+(-1mm,5mm)$) {semantic plane};
+\node[font=\scriptsize, anchor=east] at ($(p1.west)+(-1mm,5mm)$) {runtime plane};
+\end{tikzpicture}
+\caption{The semantic--runtime observability gap. Solid edges are observed within one evidence plane. A cross-layer bridge is a separate claim and requires explicit support; coincidence in time is insufficient.}
+\label{fig:gap}
+\end{figure}
+
+This paper makes four contributions.
+\begin{itemize}
+  \item \textbf{A cross-layer execution-provenance model for agentic software.} We define a typed graph that preserves agent, tool, model, process, file, network, and runtime identities together with evidence source, causality, attribution method, and temporal support.
+  \item \textbf{Conservative semantic-to-runtime attribution.} We formulate cross-layer linking as a partial mapping in which ambiguity is a first-class outcome. The current implementation uses bounded temporal search and executable/command evidence, creates a bridge only for a unique supported runtime candidate, and never turns an inferred bridge into causal proof.
+  \item \textbf{Evidence-preserving live materialization across heterogeneous integrations.} \system separates raw runtime, semantic, and correlated artifacts; normalizes provider-specific events into a canonical model; supports portable observation on Windows, macOS, and Linux together with a stronger Linux syscall-oriented reference backend; and uses the same graph contract for live and finished inspection.
+  \item \textbf{A comparative evaluation methodology.} We define experiments that distinguish feature comparison from scientific comparison and measure semantic coverage, runtime-evidence recall, attribution precision/recall, false-attribution rate, cross-platform consistency, robustness, overhead, scalability, and analyst task performance against agent-observability, OS-only, and naive-fusion baselines.
+\end{itemize}
+
+The remainder of the paper first motivates the problem and separates it from adjacent tracing and provenance work, then formalizes the evidence model, describes \system's design and implementation, and presents the evaluation protocol and repository-backed preliminary characterization. We close with limitations, threats to validity, and implications for future agent observability standards.
+
+\section{Background and Motivation}
+\subsection{Three views of one agent execution}
+Consider a coding agent that receives a request to modify a repository. The root agent delegates test diagnosis to a sub-agent. The sub-agent invokes a shell tool, which starts a command interpreter and then a language runtime. The runtime reads several source files, writes a report, and contacts a local or remote model endpoint. Three observers can produce three different records of this run.
+
+An \emph{agent-semantic observer} can record the user prompt, agent identity, delegation, model request, tool name, tool arguments, tool result, and final response. This record is close to the logical workflow and is invaluable for understanding model decisions. Its boundary, however, is the provider or framework integration point. If the tool internally launches another process, touches an undeclared file, or uses a library that performs a network request, these effects need not appear as first-class semantic events.
+
+A \emph{runtime observer} can instead record the process tree, file accesses, filesystem mutations, and network connections. Kernel-level provenance systems have long shown the value of such dependency histories for forensics and information-flow analysis~\cite{pohly2012hifi,bates2015lpm,pasquier2018runtime}. Runtime evidence is closer to machine effects but can lack application semantics. A process identifier does not reveal whether it corresponds to a root agent, a sub-agent, a tool, a model runtime, or unrelated work that happens to overlap in time.
+
+A \emph{cross-layer observer} attempts to preserve both views and the evidence that justifies relations between them. This creates a qualitatively different requirement: the system must avoid collapsing ``reported by the agent'' and ``observed by the machine'' into the same truth category. It must also represent uncertainty explicitly. \system is designed around this third view.
+
+\subsection{Why distributed tracing is necessary but insufficient}
+Distributed tracing established the practical value of propagating request context across software boundaries. Dapper showed that low-overhead tracing can reconstruct request paths through large distributed services~\cite{sigelman2010dapper}, while X-Trace pursued cross-layer diagnosis by propagating metadata across protocols and components~\cite{fonseca2007xtrace}. OpenTelemetry now provides widely adopted APIs, semantic conventions, context propagation, and a span-based trace model~\cite{otel2026}.
+
+Agent platforms appropriately build on this ecosystem. OpenTelemetry-compatible spans are a strong representation for instrumented operations and can carry arbitrary attributes. The limitation is not expressive power: a sufficiently instrumented application can place almost any fact in a span. The limitation is \emph{observation independence}. If a tool or process is not instrumented, or if the semantic trace records a declaration rather than an OS effect, application spans do not independently establish that the effect occurred. Conversely, an OS observer can see an effect without a propagated span context. \system therefore treats OpenTelemetry-style application tracing as complementary semantic evidence rather than a substitute for independent runtime observation.
+
+\subsection{Why provenance alone is also insufficient}
+Data and whole-system provenance systems model derivation and causality as graphs. PASS integrated provenance with storage~\cite{muniswamy2006pass}; Hi-Fi captured high-fidelity whole-system provenance in the Linux kernel~\cite{pohly2012hifi}; SPADE separated provenance collection, storage, and querying~\cite{gehani2012spade}; Linux Provenance Modules emphasized trustworthy whole-system provenance~\cite{bates2015lpm}; CamFlow provided practical, configurable whole-system provenance capture~\cite{pasquier2017camflow}; and later work used streaming provenance for runtime security analysis~\cite{pasquier2018runtime}. ProTracer and RAIN further explored the trade-off between collection overhead and causal precision~\cite{ma2016protracer,ji2017rain}.
+
+These systems motivate \system's evidence discipline, but agentic software introduces semantic entities that are not reducible to OS objects. A sub-agent may share a process with its parent. A tool call may execute through a provider-managed runtime. Two logical agents may issue commands through the same executable. A remote model invocation may be semantically visible while the remote process is, correctly, outside local OS visibility. Therefore, a useful agent execution graph must represent both logical and runtime identities without pretending that one uniquely determines the other.
+
+\subsection{Design objectives}
+From these observations we derive five objectives.
+
+\textbf{O1: Evidence separation.} Direct runtime observations, provider-supplied semantics, exact shared identities, and heuristic correlations must remain distinguishable after normalization and graph materialization.
+
+\textbf{O2: Conservative attribution.} If several runtime entities are consistent with a semantic action, the system should preserve the ambiguity rather than select the visually nearest candidate.
+
+\textbf{O3: Provider and OS neutrality at the graph boundary.} Integration-specific telemetry should map into a stable graph vocabulary so that downstream analysis does not require one visualization implementation per provider or operating system.
+
+\textbf{O4: Incremental consistency.} Live updates and the finalized run should materialize the same canonical evidence once the same event prefix has been incorporated; presentation state must not silently change evidence semantics.
+
+\textbf{O5: Explicit fidelity limits.} Sampling blind windows, unsupported provider internals, remote execution boundaries, and non-causal filesystem observations must be represented as limitations rather than converted into negative evidence.
+
+\section{Related Work}
+\subsection{Agent observability and trace visualization}
+Contemporary agent observability products focus on instrumented application behavior. LangSmith structures a trace as runs and supports framework integrations, manual instrumentation, and OpenTelemetry ingestion~\cite{langsmith2026observability,langsmith2026otel}. Langfuse records typed observations and can render agent graphs either from agentic observation types and nesting or from LangGraph integrations~\cite{langfuse2026agentgraphs}. Phoenix is built around OpenTelemetry/OpenInference instrumentation and traces model calls, retrieval, tools, and custom application logic~\cite{phoenix2026tracing}. AgentOps uses OpenTelemetry-based hierarchical spans and session views for LLM calls, actions, tools, errors, timing, and cost~\cite{agentops2026core}. W\&B Weave records operations and calls with parent--child relationships and exposes trace-tree, flame, composition, and graph-oriented views~\cite{wandb2026tracing,wandb2026traceview}. Its MCP integration illustrates a relevant limitation of application-level tracing: client- and server-side operations can be separately observable without providing end-to-end visibility unless context is propagated~\cite{wandb2026mcp}.
+
+Academic systems increasingly add explicit graph representations. AgentGraph converts execution logs to knowledge graphs whose nodes include agents, tasks, tools, data inputs/outputs, and humans, with typed edges linked to source trace spans; it additionally supports robustness and causal analyses~\cite{wu2026agentgraph}. AgentSeer constructs a temporal action graph and a component graph to expose action sequences and architectural relations~\cite{wicaksono2026agentseer}. Graph of Trace records scientific-agent tool calls and code execution and incrementally renders a directed workflow graph~\cite{gao2026graphtrace}. AgentTrace proposes a structured telemetry framework spanning operational, cognitive, and contextual surfaces~\cite{alsayyad2026agenttrace}.
+
+\system differs in emphasis. It does not claim novelty from displaying agent traces as graphs. Instead, its primary object is a graph whose nodes may originate from \emph{different observation planes}: provider semantics, gateway/runtime integrations, and independently observed local OS activity. The central operation is evidence-aware cross-layer attribution between those planes.
+
+\begin{table*}[t]
+\centering
+\caption{Positioning against representative agent-observability systems as documented in September 2026. ``Not native'' means that the cited official documentation or paper does not describe independent OS process/file/network collection and agent-to-OS attribution as a first-class mechanism; it does \emph{not} mean that a general tracing platform could never ingest custom OS-derived spans.}
+\label{tab:systems}
+\scriptsize
+\setlength{\tabcolsep}{4.2pt}
+\begin{tabular}{p{1.75cm} p{2.55cm} p{2.35cm} p{2.55cm} p{2.8cm} p{3.6cm}}
+\toprule
+System & Agent-level structure & Independent OS observation & Process/file/network evidence & Semantic$\rightarrow$runtime attribution & Primary documented focus \\
+\midrule
+LangSmith~\cite{langsmith2026observability,langsmith2026otel} & Nested runs and traces & \notnative & Custom-span dependent & User-instrumented & Application tracing, evaluation, and monitoring \\
+Langfuse~\cite{langfuse2026agentgraphs,langfuse2026tracing} & Typed observations and agent graph & \notnative & Custom-span dependent & User-instrumented & LLM/agent observability and workflow visualization \\
+Phoenix~\cite{phoenix2026tracing,phoenix2026otel} & OpenInference/OTel trace hierarchy & \notnative & Custom-span dependent & User-instrumented & AI tracing, evaluation, and experimentation \\
+AgentOps~\cite{agentops2026,agentops2026core} & Session and hierarchical spans & \notnative & Custom-span dependent & User-instrumented & Agent session analytics and monitoring \\
+W\&B Weave~\cite{wandb2026tracing,wandb2026traceview} & Ops/calls, tree and graph views & \notnative & Custom-span dependent & User-instrumented & Trace analysis integrated with evaluation \\
+AgentGraph~\cite{wu2026agentgraph} & Trace-derived knowledge graph & \notnative & Input-trace dependent & Trace-derived & Interactive graph analysis and robustness testing \\
+AgentSeer~\cite{wicaksono2026agentseer} & Temporal and component graphs & \notnative & Input-trace dependent & Trace-derived & Temporal action and architecture analysis \\
+Graph of Trace~\cite{gao2026graphtrace} & Incremental directed execution graph & \notnative & Tool/code-event dependent & Event-derived & Scientific-agent workflow interpretation \\
+\system & Unified typed execution graph & Portable OS collector; stronger Linux backend & Native, backend-dependent & Explicit, conservative, evidence-graded & Cross-layer execution provenance \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\subsection{Distributed tracing and context propagation}
+Dapper~\cite{sigelman2010dapper}, X-Trace~\cite{fonseca2007xtrace}, and OpenTelemetry~\cite{otel2026} motivate end-to-end identifiers and parent--child operation structure. \system borrows the principle that identities should be propagated when available, but does not assume that propagation is universal. Exact shared request identifiers can establish identity across integration points; in their absence, runtime correlation is explicitly weaker. This distinction is particularly important when a provider session ID, tool-call ID, or model request ID is a logical identifier rather than an operating-system PID.
+
+\subsection{Whole-system provenance and attack investigation}
+Whole-system provenance captures dependencies among processes and resources at a level below typical agent instrumentation. The W3C PROV model provides a general vocabulary of entities, activities, agents, and derivations~\cite{prov2013}; PASS, Hi-Fi, SPADE, LPM, and CamFlow demonstrate system-level provenance capture and querying~\cite{muniswamy2006pass,pohly2012hifi,gehani2012spade,bates2015lpm,pasquier2017camflow}. Runtime analysis over provenance graphs and attack-investigation systems such as ProTracer and RAIN show how causal reconstruction supports security tasks~\cite{pasquier2018runtime,ma2016protracer,ji2017rain}. \system is narrower than a complete kernel provenance monitor on portable platforms but broader semantically: it introduces agent, tool, model, conversation, provider, and runtime identities and explicitly relates their evidence to OS entities.
+
+\subsection{Execution-graph visualization}
+Layered graph drawing has a long history. Sugiyama \etal~\cite{sugiyama1981hierarchical} formalized layered representations that reduce crossings and improve hierarchy readability; Gansner \etal~\cite{gansner1993directed} developed a practical multi-pass directed-graph drawing technique; and Brandes and K{\"o}pf~\cite{brandes2002horizontal} proposed efficient horizontal coordinate assignment. Dynamic visualization adds the problem of stability across graph updates. Human-subject studies show that mental-map preservation is task dependent rather than universally beneficial~\cite{archambault2011dynamic,archambault2013mentalmap}. Accordingly, \system treats layout as a presentation optimization constrained by evidence topology. Layout may route, bundle, compact, fold, or de-emphasize visual elements, but it must not invent, remove, or reverse evidence edges.
