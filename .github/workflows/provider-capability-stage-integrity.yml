@@ -246,4 +246,7 @@ jobs:
             args+=(--allow-test-change "tests/test_release_publish_safety.py=PR #82: locally import the TOML backport on Python 3.10 and require both verify and minimum-python before distribution comparison; retain all historical test IDs and all other assertions")
             args+=(--allow-test-change "tests/test_codex_hook_global_fail_open.py=PR #82: replace the Python 3.11-only TOML import with the real Python 3.10 backport fallback; all historical test IDs and every hook assertion remain unchanged")
           fi
+          if [[ "$HEAD_REF" == "feat/flow-layout" ]]; then
+            args+=(--allow-test-change "tests/test_visual_ux_readability.py=PR #84: every stroke on the canvas is doubled because a dashed edge was hard to see against the dark ground, so the baseline cap moves with it from 1.35 to 2.7 and the selected floor from 2.0 to 4.0. The property the test guards is unchanged and is now asserted outright: an ordinary edge stays lighter than a selected one. Every historical test ID and every other assertion is retained")
+          fi
           python scripts/check_release_stage_integrity.py "${args[@]}"
