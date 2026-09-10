@@ -524,7 +524,10 @@ def _rule_bypass_undrawn(folder: _Folder) -> None:
                     bridged.append({
                         "source": source,
                         "target": target,
-                        "relation": before.get("relation"),
+                        # the bridged edge describes what the bypassed node did next, so
+                        # it carries the outgoing relation. Taking the incoming one made an
+                        # agent's INVOKES_MODEL edge read as OBSERVED_PROVIDER_SESSION.
+                        "relation": after.get("relation") or before.get("relation"),
                         "first_seen": _min_stamp(before.get("first_seen"), after.get("first_seen")),
                         "last_seen": _max_stamp(before.get("last_seen"), after.get("last_seen")),
                         "viewer_bridged_through": node_id,
