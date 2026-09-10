@@ -23,6 +23,8 @@ FLOW_CANVAS_SCRIPT = r"""
 // gap, so a long path pushes only the columns after it instead of overlapping its
 // neighbour. Mirrors what the lane table did, keyed on layer instead of type.
 const EXECWEAVE_FLOW_COL_GAP=120,EXECWEAVE_FLOW_ROW_GAP=104,EXECWEAVE_FLOW_TOP=100;
+// the clear space kept between two boxes stacked in the same column
+const EXECWEAVE_FLOW_ROW_PAD=28;
 let execweaveFlowSpec=null,execweaveFlowColumnX=null,execweaveFlowSolved=null;
 function execweaveFlowPayload(){return execweaveFlowSpec}
 function execweaveFlowInvalidate(){execweaveFlowColumnX=null;execweaveFlowSolved=null}
@@ -38,6 +40,14 @@ function execweaveFlowNodeIds(){
   for(const entry of flow.nodes)if(entry&&entry.id)ids.add(String(entry.id));
   return ids.size?ids:null;
 }
+// Every node the layout says it folded into another, so a node that is in neither list
+// can be told apart from one that was deliberately hidden.
+function execweaveFlowCollapsed(){
+  const flow=execweaveFlowSpec,ids=new Set();
+  const map=flow&&flow.collapsed;
+  if(map)for(const key of Object.keys(map))ids.add(String(key));
+  return ids;
+}
 // Narrow whatever the existing display filter produced to the set the projection says
 // is drawn. Deliberately an intersection and not a replacement: the browser withholds
 // types for its own reasons, and overriding that puts back nodes it meant to hide.
@@ -46,7 +56,31 @@ function execweaveFlowDisplay(data,display){
   execweaveRememberFlow(data);
   const ids=execweaveFlowNodeIds();
   if(!ids)return display;
-  const nodes=(display.nodes||[]).filter(node=>node&&ids.has(String(node.id)));
+  const all=display.nodes||[];
+  // The display step ahead of this one owns the fold budget. It keeps the most recent
+  // members of a crowded type and adds one `viewer:folded:` node listing the rest, which
+  // the reader opens to reach them; the number it keeps is a setting the run chooses.
+  // The flow layout folds as well, and where the two disagree this one stands, because
+  // it is the one the reader asked for and the only one with a way back to what it hid.
+  const foldedTypes=new Set();
+  for(const node of all){
+    const members=node&&node.attributes&&node.attributes.viewer_folded_members;
+    if(!Array.isArray(members))continue;
+    foldedTypes.add(String(node.type||''));
+    for(const member of members)if(member&&member.type)foldedTypes.add(String(member.type));
+  }
+  const budgeted=node=>{
+    if(!node)return false;
+    if(node.attributes&&node.attributes.viewer_folded)return true;
+    return foldedTypes.has(String(node.type||''));
+  };
+  // A node the projection never saw -- one that arrived after the layout was worked out,
+  // or that the browser built for itself -- is not something this layout chose to hide.
+  // It has no entry saying it was folded into anything either, so dropping it would lose
+  // it outright. Keep it; the solver settles a column for it from what it connects to.
+  const folded=execweaveFlowCollapsed();
+  const known=node=>ids.has(String(node.id))||folded.has(String(node.id));
+  const nodes=all.filter(node=>node&&(ids.has(String(node.id))||budgeted(node)||!known(node)));
   if(!nodes.length)return display;
   const kept=new Set(nodes.map(node=>String(node.id)));
   const edges=(display.edges||[]).filter(edge=>edge&&kept.has(String(edge.source))&&kept.has(String(edge.target)));
@@ -58,7 +92,11 @@ function execweaveFlowDisplay(data,display){
 // exactly on top of the node it was copied from.
 function execweaveFlowPreference(id){
   const owned=execweaveFlowNodeIds();
-  if(owned&&!owned.has(String(id)))return null;
+  // A folded member is still drawn when the browser's file/type budget keeps it. Its
+  // annotation carries the survivor's solved layer and row, so keep that preference;
+  // treating it as a brand-new node makes the member drift away from the group the flow
+  // layout deliberately folded it into and raises crossings in a fully unfolded view.
+  if(owned&&!owned.has(String(id))&&!execweaveFlowCollapsed().has(String(id)))return null;
   const node=nodeById.get(id);if(!node)return null;
   const a=node.attributes||{};
   if(!Number.isInteger(a.viewer_layer))return null;
@@ -98,6 +136,7 @@ function execweaveFlowSolve(){
   for(const pair of pairs){after.get(pair.source).push(pair.target);before.get(pair.target).push(pair.source)}
 
   const preference=new Map(ids.map(id=>[id,execweaveFlowPreference(id)]));
+  const hasPreference=[...preference.values()].some(value=>value!==null);
   const rank=new Map(ids.map(id=>[id,preference.get(id)?preference.get(id).layer:null]));
   // A node with no preference of its own settles just after whatever leads to it, or
   // just before whatever it leads to. Repeat so a chain of them settles end to end.
@@ -124,7 +163,14 @@ function execweaveFlowSolve(){
   // stack, which is to say only when it closes a cycle. Every other edge is kept, so a
   // node always takes a column after the nodes that lead to it.
   const feedback=new Set(),state=new Map(ids.map(id=>[id,0]));
-  const roots=[...ids].sort((a,b)=>order.get(a)-order.get(b));
+  // With a viewer_flow payload, prefer the projection's layer order when choosing the
+  // DFS roots. Without one (the dashboard shell also accepts a raw static graph), keep
+  // the graph's insertion order: sorting IDs would visit `agent:child:*` before
+  // `agent:root` and incorrectly reverse SPAWNED_AGENT instead of SUBAGENT_STOPPED.
+  const roots=[...ids].sort((a,b)=>{
+    const pa=preference.get(a),pb=preference.get(b);
+    return pa&&pb&&pa.layer!==pb.layer?pa.layer-pb.layer:0;
+  });
   for(const root of roots){
     if(state.get(root))continue;
     const stack=[{id:root,next:0}];
@@ -166,22 +212,38 @@ function execweaveFlowSolve(){
   }
 
   // Rows: keep the row the projection solved, and give a node it never saw the average of
-  // the neighbours that do have one, so it lands beside its own edges.
+  // the neighbours that do have one, so it lands beside its own edges. A raw static graph
+  // has no projection rows at all; seed those by the stable order within each solved
+  // column, rather than by the global node index (which leaves the first real column with
+  // a misleading gap and makes static/live dashboards disagree about child order).
   const desired=new Map(ids.map(id=>{
     const want=preference.get(id);
     return[id,want&&want.row!==null?want.row:null];
   }));
-  for(let pass=0;pass<ids.length&&ids.some(id=>desired.get(id)===null);pass++){
-    let moved=false;
+  if(!hasPreference){
+    const byLayer=new Map();
     for(const id of ids){
-      if(desired.get(id)!==null)continue;
-      const rows=[...before.get(id),...after.get(id)].map(peer=>desired.get(peer)).filter(value=>value!==null);
-      if(!rows.length)continue;
-      desired.set(id,rows.reduce((a,b)=>a+b,0)/rows.length);moved=true;
+      const value=layer.get(id);
+      if(!byLayer.has(value))byLayer.set(value,[]);
+      byLayer.get(value).push(id);
     }
-    if(!moved)break;
+    for(const members of byLayer.values()){
+      members.sort((a,b)=>order.get(a)-order.get(b));
+      members.forEach((id,index)=>desired.set(id,index));
+    }
+  }else{
+    for(let pass=0;pass<ids.length&&ids.some(id=>desired.get(id)===null);pass++){
+      let moved=false;
+      for(const id of ids){
+        if(desired.get(id)!==null)continue;
+        const rows=[...before.get(id),...after.get(id)].map(peer=>desired.get(peer)).filter(value=>value!==null);
+        if(!rows.length)continue;
+        desired.set(id,rows.reduce((a,b)=>a+b,0)/rows.length);moved=true;
+      }
+      if(!moved)break;
+    }
+    ids.forEach((id,index)=>{if(desired.get(id)===null)desired.set(id,index)});
   }
-  ids.forEach((id,index)=>{if(desired.get(id)===null)desired.set(id,index)});
 
   // Separate within a column, in the order the desired rows already imply, so a node only
   // ever moves far enough to clear the one above it.
@@ -240,8 +302,6 @@ function execweaveFlowScrubGeometry(topo){
   if(!topo)return;
   if(topo.routePoints)topo.routePoints=new Map();
   if(topo.rawDagreRoutePoints)topo.rawDagreRoutePoints=new Map();
-  // A bundle draws its own H/V rail, which is a corner the flow columns do not need.
-  if(topo.bundleByEdge)topo.bundleByEdge=new Map();
 }
 // A router picks which side of a box an edge leaves and enters by comparing the two
 // nodes' ranks in the topology, not by comparing where they were actually drawn. Left as
@@ -258,6 +318,213 @@ function execweaveFlowSyncSpec(topo){
     if(p){spec.x=p.x;spec.y=p.y}
   }
 }
+// Every edge on the canvas is drawn as a smooth curve. Two other shapes reach this
+// point: a bundle draws its trunk as a horizontal-vertical-horizontal rail, and an
+// ordinary edge arrives from dagre as a run of straight segments. Both put visible
+// corners on the canvas, and both are there for a reason -- the run of segments is what
+// steers an edge around the boxes between its ends. So the corners are rounded off
+// rather than removed: the same points, in the same order, joined by a spline that
+// passes through every one of them. The route still goes where it went, and the
+// grouping a bundle carries is untouched -- the DOM keeps `data-bundle-size` and the
+// panels that count members still read it.
+let execweaveFlowRouteWrapped=false;
+// Where this layout last put each node. Another authority -- Arrange, a drag -- may
+// move a node afterwards, and once it has, the columns are no longer what is on screen
+// and the geometry that belongs to them is no longer the geometry to draw.
+const execweaveFlowPlaced=new Map();
+// Read a path back as the points it visits. Only the commands the routers emit are
+// understood; anything else means the path is not ours to redraw.
+function execweaveFlowPathPoints(d){
+  const tokens=String(d).match(/[A-Za-z]|-?[0-9.]+/g);
+  if(!tokens)return null;
+  const points=[];let x=0,y=0,index=0;
+  while(index<tokens.length){
+    const command=tokens[index++];
+    if(!/[A-Za-z]/.test(command))return null;
+    const number=()=>{const value=Number(tokens[index++]);return Number.isFinite(value)?value:NaN};
+    if(command==='M'||command==='L'){x=number();y=number()}
+    else if(command==='H'){x=number()}
+    else if(command==='V'){y=number()}
+    else return null;
+    if(!Number.isFinite(x)||!Number.isFinite(y))return null;
+    points.push({x,y});
+  }
+  return points.length>=2?points:null;
+}
+// Catmull-Rom through the points, written out as the cubics an SVG path takes. The
+// curve touches every original point, so an edge routed around a box still clears it.
+function execweaveFlowSpline(points){
+  const parts=[`M ${points[0].x} ${points[0].y}`];
+  for(let i=0;i<points.length-1;i++){
+    const p0=points[i>0?i-1:0],p1=points[i],p2=points[i+1],p3=points[i+2<points.length?i+2:points.length-1];
+    // Half the usual control arm. A full Catmull-Rom arm overshoots the corner it is
+    // rounding, and the segments it rounds here are what steer an edge past a box, so
+    // an overshoot puts the curve back through the box the corner existed to avoid.
+    const c1x=Math.max(Math.min(p1.x+(p2.x-p0.x)/12,Math.max(p1.x,p2.x)),Math.min(p1.x,p2.x));
+    const c1y=Math.max(Math.min(p1.y+(p2.y-p0.y)/12,Math.max(p1.y,p2.y)),Math.min(p1.y,p2.y));
+    const c2x=Math.max(Math.min(p2.x-(p3.x-p1.x)/12,Math.max(p1.x,p2.x)),Math.min(p1.x,p2.x));
+    const c2y=Math.max(Math.min(p2.y-(p3.y-p1.y)/12,Math.max(p1.y,p2.y)),Math.min(p1.y,p2.y));
+    parts.push(`C ${c1x} ${c1y}, ${c2x} ${c2y}, ${p2.x} ${p2.y}`);
+  }
+  return parts.join(' ');
+}
+// An edge runs straight from one port to the other, and whatever sits between them is
+// run straight through. The pipeline this layout replaces avoided that with dagre's
+// route points, which were computed for the positions it replaced, so the avoidance has
+// to be done again here. A blocker is any drawn box the run passes through, in any
+// column -- the ones that reach the canvas are usually in the target's own column,
+// stacked above and below it -- and each contributes one waypoint clear of whichever
+// of its horizontal edges the run is nearer.
+const EXECWEAVE_FLOW_CLEARANCE=8;
+// The height of a drawn box, from whichever of the two authorities is in scope here.
+function execweaveFlowBoxHeight(id){
+  if(typeof execweaveHeightOf==='function')return execweaveHeightOf(id);
+  const measured=execweaveTopology&&execweaveTopology.height&&execweaveTopology.height.get(id);
+  return Number.isFinite(measured)?measured:50;
+}
+function execweaveFlowHolds(id){
+  const placed=execweaveFlowPlaced.get(id),now=positions.get(id);
+  return !!placed&&!!now&&Math.abs(placed.x-now.x)<.5&&Math.abs(placed.y-now.y)<.5;
+}
+function execweaveFlowAvoid(edge,base){
+  if(!execweaveFlowHolds(edge.source)||!execweaveFlowHolds(edge.target))return null
+  if(!execweaveFlowCoords(edge.source)||!execweaveFlowCoords(edge.target))return null
+  const sp=positions.get(edge.source),tp=positions.get(edge.target);
+  if(!sp||!tp)return null;
+  const id=edgeId(edge),topo=execweaveTopology;
+  const sx=sp.x+execweaveWidthOf(edge.source),tx=tp.x;
+  // Two nodes in one column have no room between them for a line: drawn from the right
+  // edge of one to the left edge of the other it runs down the column and through every
+  // box on the way, and even a near-vertical curve leans far enough to clip its
+  // neighbour. Take it out into the empty space beside the column and back.
+  const fromAt=execweaveFlowCoords(edge.source),toAt=execweaveFlowCoords(edge.target);
+  if(fromAt&&toAt&&fromAt.layer===toAt.layer){
+    const edgeOf=id=>positions.get(id).x+execweaveWidthOf(id);
+    const sourceEdge=edgeOf(edge.source),targetEdge=edgeOf(edge.target);
+    const side=Math.max(sourceEdge,targetEdge);
+    const centre=id=>positions.get(id).y+execweaveFlowBoxHeight(id)/2;
+    const a=centre(edge.source),z=centre(edge.target);
+    const rail=side+EXECWEAVE_FLOW_COL_GAP*.45;
+    return Object.assign({},base,{d:`M ${sourceEdge} ${a} C ${rail} ${a}, ${rail} ${z}, ${targetEdge} ${z}`,
+      labelX:side+EXECWEAVE_FLOW_COL_GAP*.45,labelY:(a+z)/2-8});
+  }
+  if(!(tx-sx>1))return null
+  const sy=execweavePortY(sp,topo.sourcePort.get(id),edge.source);
+  const ty=execweavePortY(tp,topo.targetPort.get(id),edge.target);
+  const runY=x=>sy+(ty-sy)*(x-sx)/(tx-sx);
+  const waypoints=[];let approach=false;
+  for(const other of nodeById.keys()){
+    if(other===edge.source||other===edge.target)continue;
+    // Any box on the canvas is in the way, whether or not this layout placed it.
+    const box=positions.get(other);if(!box)continue;
+    const pad=EXECWEAVE_FLOW_CLEARANCE;
+    const left=box.x-pad,right=box.x+execweaveWidthOf(other)+pad;
+    const top=box.y-pad,bottom=box.y+execweaveFlowBoxHeight(other)+pad;
+    // the part of the run that lies within the box's columns, if any
+    const lo=Math.max(sx,Math.min(tx,left)),hi=Math.max(sx,Math.min(tx,right));
+    if(!(hi-lo>1))continue;
+    const ya=runY(lo),yb=runY(hi);
+    if(Math.max(ya,yb)<top||Math.min(ya,yb)>bottom)continue;
+    // A blocker standing in the target's own column cannot be stepped over inside that
+    // column: the run has nowhere left to go before the port. What clears it is to reach
+    // the port's height while there is still room, and come in level.
+    if(box.x>=tp.x-1){approach=true;continue}
+    // Clear the box for its whole width, not only at its middle: one waypoint in the
+    // centre lets the curve back in on the way to it. Two, one at each side, carry the
+    // run level past the box.
+    const mid=(lo+hi)/2,here=runY(mid);
+    const clear=Math.abs(here-top)<=Math.abs(here-bottom)?top-10:bottom+10;
+    waypoints.push({x:lo,y:clear},{x:hi,y:clear});
+  }
+  if(approach)waypoints.push({x:tx-Math.min(44,(tx-sx)*.45),y:ty});
+  // A run that falls much further than it travels cannot be stepped past box by box:
+  // clipped to any one box's width it is a sliver, and every box in that column stands
+  // in it, so the stops pile up in a few pixels and read as a scribble. The space between
+  // two columns is empty by construction, so the descent belongs there instead. Enter a
+  // clear horizontal band before the first middle box, cross the full middle span, then
+  // come back to the port level after the last one; stopping at the midpoint would leave
+  // the final horizontal run cutting through that last box.
+  if(waypoints.length>3){
+    const middle=[];
+    for(const other of nodeById.keys()){
+      if(other===edge.source||other===edge.target)continue;
+      const box=positions.get(other);if(!box)continue;
+      if(box.x>sx+1&&box.x+execweaveFlowWidth(other)<tx-1){
+        middle.push({box,width:execweaveFlowWidth(other),height:execweaveFlowBoxHeight(other)});
+      }
+    }
+    const firstLeft=Math.min(...middle.map(item=>item.box.x))-EXECWEAVE_FLOW_CLEARANCE;
+    const middleRight=Math.max(...middle.map(item=>item.box.x+item.width));
+    const middleTop=Math.min(...middle.map(item=>item.box.y-EXECWEAVE_FLOW_CLEARANCE));
+    const middleBottom=Math.max(...middle.map(item=>item.box.y+item.height+EXECWEAVE_FLOW_CLEARANCE));
+    const above=middleTop-10,below=middleBottom+10;
+    const safeY=Math.abs(sy-above)+Math.abs(ty-above)<=Math.abs(sy-below)+Math.abs(ty-below)?above:below;
+    const entry=Math.max(sx+EXECWEAVE_FLOW_CLEARANCE+2,Math.min(firstLeft-10,(sx+firstLeft)/2));
+    const exit=Math.min(tx-EXECWEAVE_FLOW_CLEARANCE-2,Math.max(middleRight+10,(tx+middleRight)/2));
+    if(exit>entry+2){
+      return Object.assign({},base,{d:execweaveFlowSpline([
+        {x:sx,y:sy},{x:entry,y:sy},{x:entry,y:safeY},
+        {x:exit,y:safeY},{x:exit,y:ty},{x:tx,y:ty}]),
+        labelX:(entry+exit)/2,labelY:safeY-8});
+    }
+    const corridor=(sx+tx)/2;
+    return Object.assign({},base,{d:execweaveFlowSpline([
+      {x:sx,y:sy},{x:corridor,y:sy},{x:corridor,y:ty},{x:tx,y:ty}]),
+      labelX:corridor,labelY:(sy+ty)/2-8});
+  }
+  // A waypoint that clears one box can land inside the next one along. Walk each of them
+  // out of whatever it is standing in, in the direction it was already heading.
+  for(const stop of waypoints){
+    for(let attempt=0;attempt<12;attempt++){
+      let moved=false;
+      for(const other of nodeById.keys()){
+        if(other===edge.source||other===edge.target)continue;
+        const box=positions.get(other);if(!box)continue;
+        const pad=EXECWEAVE_FLOW_CLEARANCE;
+        if(stop.x<box.x-pad||stop.x>box.x+execweaveFlowWidth(other)+pad)continue;
+        const top=box.y-pad,bottom=box.y+execweaveFlowBoxHeight(other)+pad;
+        if(stop.y<top||stop.y>bottom)continue;
+        stop.y=stop.y<=(top+bottom)/2?top-10:bottom+10;moved=true;
+      }
+      if(!moved)break;
+    }
+  }
+  // No waypoints means the run is already clear, and it is still the path to draw: the
+  // route the base router offers was computed for the positions this layout replaced,
+  // so following it now walks through boxes that have since moved into its way.
+  waypoints.sort((a,b)=>a.x-b.x);
+  // Two blockers in the same column give one waypoint, not two on top of each other.
+  const stops=[];
+  for(const stop of waypoints){
+    const last=stops[stops.length-1];
+    if(last&&Math.abs(last.x-stop.x)<2){if(Math.abs(stop.y-runY(stop.x))>Math.abs(last.y-runY(last.x)))last.y=stop.y;continue}
+    stops.push(stop);
+  }
+  return Object.assign({},base,{d:execweaveFlowSpline([{x:sx,y:sy},...stops,{x:tx,y:ty}]),
+    labelX:(sx+tx)/2,labelY:(sy+ty)/2-8});
+}
+// The router is reassigned several times as the page builds, so wrap whatever is current
+// at the first paint rather than at load, and wrap it only once.
+function execweaveFlowInstallRoute(){
+  if(execweaveFlowRouteWrapped)return;
+  if(typeof execweaveRoute!=='function')return;
+  execweaveFlowRouteWrapped=true;
+  const execweaveFlowRouteBase=execweaveRoute;
+  execweaveRoute=function(edge){
+    const value=execweaveFlowRouteBase(edge);
+    if(!value||typeof value.d!=='string')return value;
+    // A path already drawn as cubics is what this wants; anything carrying a line, a
+    // horizontal or a vertical segment has a corner in it and gets rounded off.
+    try{
+      const clear=execweaveFlowAvoid(edge,value);
+      if(clear)return clear;
+      if(!/[LHVlhv]/.test(value.d))return value;
+      const points=execweaveFlowPathPoints(value.d);
+      if(!points)return value;
+      return Object.assign({},value,{d:execweaveFlowSpline(points)});
+    }catch(_){return value}
+  };
+}
 // The dagre engine, layout v2 and the lane table all write `positions`, and whichever
 // runs last wins. Rather than compete with them, take the positions they produced and
 // overwrite the ones the flow layout has an opinion about. A node it says nothing about
@@ -267,12 +534,31 @@ function execweaveApplyFlowPositions(){
   // The drawn set changes as nodes arrive, so the solve belongs to the paint, not to the
   // payload that happened to introduce them.
   execweaveFlowInvalidate();
+  execweaveFlowInstallRoute();
   const x=execweaveFlowColumns();let applied=0;
+  // A row is not always a whole number -- it carries the alignment the layout wants
+  // against the columns either side -- so two rows can land closer together than the
+  // boxes they hold are tall. Take the row as the height the node wants to sit at, then
+  // walk each column from the top and push any box that would land on the one above it.
+  const byColumn=new Map();
   for(const id of nodeById.keys()){
     const at=execweaveFlowCoords(id);if(!at)continue;
     if(!Number.isFinite(x[at.layer]))continue;
-    positions.set(id,{x:x[at.layer],y:EXECWEAVE_FLOW_TOP+at.row*EXECWEAVE_FLOW_ROW_GAP});
-    applied++;
+    if(!byColumn.has(at.layer))byColumn.set(at.layer,[]);
+    byColumn.get(at.layer).push({id,y:EXECWEAVE_FLOW_TOP+at.row*EXECWEAVE_FLOW_ROW_GAP});
+  }
+  for(const [layer,column] of byColumn){
+    column.sort((a,b)=>a.y-b.y||String(a.id).localeCompare(String(b.id)));
+    let floor=-Infinity;
+    for(const seat of column){
+      const y=Math.max(seat.y,floor);
+      positions.set(seat.id,{x:x[layer],y});
+      execweaveFlowPlaced.set(seat.id,{x:x[layer],y});
+      const group=nodeElements.get(seat.id);
+      if(group)group.setAttribute('transform',`translate(${x[layer]} ${y})`);
+      floor=y+execweaveFlowBoxHeight(seat.id)+EXECWEAVE_FLOW_ROW_PAD;
+      applied++;
+    }
   }
   if(!applied)return 0;
   try{execweaveFlowSyncSpec(execweaveTopology)}catch(_){}
@@ -324,6 +610,17 @@ _DISPLAY_REPLACEMENT = (
 )
 
 
+_ARRANGE_SEAM = "if(arrangeButton)arrangeButton.onclick=()=>execweaveArrangePositions();"
+_ARRANGE_REPLACEMENT = (
+    # This handler is emitted after the flow script in the final page, so it is the
+    # binding that remains active. Apply the flow contract here; only an empty flow falls
+    # back to the older arrangement implementation.
+    "if(arrangeButton)arrangeButton.onclick=()=>{"
+    "try{if(execweaveApplyFlowPositions())return}catch(_){}"
+    "execweaveArrangePositions();};"
+)
+
+
 def inject_flow_canvas(html: str) -> str:
     """Point the canvas at ``viewer_flow``, leaving every other reader on the full graph."""
     if html.count(_DESIRED_SEAM) != 1:
@@ -334,4 +631,7 @@ def inject_flow_canvas(html: str) -> str:
     html = html.replace(_DISPLAY_SEAM, _DISPLAY_REPLACEMENT, 1)
     if html.count(_FINAL_LAYOUT_SEAM) != 1:
         raise RuntimeError("flow canvas final-layout seam changed")
-    return html.replace(_FINAL_LAYOUT_SEAM, _FINAL_LAYOUT_REPLACEMENT, 1)
+    html = html.replace(_FINAL_LAYOUT_SEAM, _FINAL_LAYOUT_REPLACEMENT, 1)
+    if html.count(_ARRANGE_SEAM) != 1:
+        raise RuntimeError("flow canvas arrange seam changed")
+    return html.replace(_ARRANGE_SEAM, _ARRANGE_REPLACEMENT, 1)

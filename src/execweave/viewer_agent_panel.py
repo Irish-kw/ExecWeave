@@ -324,7 +324,18 @@ function occurrenceList(a){
     .map(item=>`${moment(item?.first_seen)}${item?.pid?`  pid ${item.pid}`:''}`)
     .join('\n');
 }
+// A node the flow layout drew in place of others is still a real node with a panel of
+// its own, so it keeps every card it would have had and says what it absorbed at the
+// end. A node whose only purpose is to stand for others is the separate `viewer_folded`
+// case below, and that one is a list of what it holds and nothing else.
 function nodeCards(node){
+  const a=attrs(node),rows=execweaveNodeCardsBase(node);
+  if(!a.viewer_absorbed||a.viewer_folded)return rows;
+  const held=foldedList(a);
+  if(held)rows.push(['Also holding',held]);
+  return rows;
+}
+function execweaveNodeCardsBase(node){
   const a=attrs(node),kind=String(node?.type||'');
   const rows=[];
   const add=(label,value)=>{const text=commandText(value);if(text)rows.push([label,text])};

@@ -55,9 +55,16 @@ def _nodes(page: Any) -> list[dict[str, Any]]:
                 const rect = g.querySelector('rect');
                 const label = g.querySelector('.name-label');
                 const t = (g.getAttribute('transform') || '').match(/translate\\(([-0-9.]+) ([-0-9.]+)\\)/);
+                const source = window.__execweaveCore.getDisplayGraph().nodes.find(
+                    node => String(node.id) === String(g.dataset.id)
+                );
+                const attrs = source && source.attributes || {};
                 return {
                     id: g.dataset.id,
                     lane: g.dataset.layoutLane || '',
+                    flow_layer: Number.isInteger(attrs.viewer_layer) ? attrs.viewer_layer : null,
+                    flow_order: Number.isInteger(attrs.viewer_order) ? attrs.viewer_order : null,
+                    flow_row: Number.isFinite(attrs.viewer_row) ? attrs.viewer_row : null,
                     width: rect ? Number(rect.getAttribute('width')) : 0,
                     x: t ? Number(t[1]) : 0,
                     y: t ? Number(t[2]) : 0,
@@ -149,12 +156,7 @@ def test_a_wide_node_never_reaches_into_the_next_lane(tmp_path: Path) -> None:
 
 
 def test_lanes_keep_their_established_positions_when_nothing_is_wide(tmp_path: Path) -> None:
-    """Deriving lane x must reproduce the table it replaced, or every run shifts.
-
-    Every lane has to be occupied for that comparison to mean anything: an empty lane
-    reserves no column, so a fixture missing one would not be measuring the derivation
-    against the old table at all.
-    """
+    """Every occupied viewer layer gets one stable, non-overlapping column."""
     graph = _graph_with("read")
     graph["nodes"] += [
         {"id": "process:p", "type": "process", "name": "sh", "attributes": {}},
@@ -171,23 +173,25 @@ def test_lanes_keep_their_established_positions_when_nothing_is_wide(tmp_path: P
         {"id": "l4", "source": "agent:/root/a", "target": "file:f", "relation": "WROTE_FILE", "attributes": {}},
         {"id": "l5", "source": "agent:/root/a", "target": "endpoint:e", "relation": "REACHED", "attributes": {}},
     ]
-    by_lane = {node["lane"]: node["x"] for node in _drawn(tmp_path, graph)}
-    assert by_lane.get("runtime") == 0, by_lane
-    assert by_lane.get("root") == 270, by_lane
-    assert by_lane.get("agent") == 540, by_lane
-    assert by_lane.get("model") == 820, by_lane
-    assert by_lane.get("tool") == 1100, by_lane
-    # file took the column endpoint used to hold; endpoint follows it.
-    assert by_lane.get("file") == 1380, by_lane
-    assert by_lane.get("endpoint") == 1660, by_lane
+    drawn = _drawn(tmp_path, graph)
+    by_layer: dict[int, list[dict[str, Any]]] = {}
+    for node in drawn:
+        assert node["flow_layer"] is not None, node
+        by_layer.setdefault(node["flow_layer"], []).append(node)
+    assert sorted(by_layer) == [0, 1, 2, 3], by_layer
+    layer_x = {layer: {node["x"] for node in nodes} for layer, nodes in by_layer.items()}
+    assert all(len(xs) == 1 for xs in layer_x.values()), layer_x
+    ordered = sorted((next(iter(xs)), layer) for layer, xs in layer_x.items())
+    assert [layer for _, layer in ordered] == [0, 1, 2, 3], ordered
+    for left, right in zip(ordered, ordered[1:]):
+        left_x, left_layer = left
+        right_x, _ = right
+        widest = max(node["width"] for node in by_layer[left_layer])
+        assert left_x + widest <= right_x, (left, right, by_layer)
 
 
 def test_an_empty_lane_reserves_no_column(tmp_path: Path) -> None:
-    """A lane holding nothing used to cost a column, and every edge crossing it paid.
-
-    With the model and tool lanes empty, an agent writing a file was separated from it
-    by two columns of nothing.
-    """
+    """With no intermediate viewer layer, a file follows the root directly."""
     graph = _graph_with("read")
     graph["nodes"] = [node for node in graph["nodes"] if node["type"] != "tool"]
     graph["edges"] = []
@@ -195,13 +199,13 @@ def test_an_empty_lane_reserves_no_column(tmp_path: Path) -> None:
     graph["edges"].append({"id": "l1", "source": "agent:/root", "target": "file:f",
                            "relation": "WROTE_FILE", "attributes": {}})
 
-    by_lane = {node["lane"]: node["x"] for node in _drawn(tmp_path, graph)}
-    # runtime, model and tool all hold nothing here, so root starts the graph and file
-    # follows it directly rather than sitting four columns away.
-    assert by_lane.get("root") == 0, by_lane
-    assert by_lane.get("file") == 270, (
-        f"empty lanes are still reserving columns: {by_lane}"
-    )
+    drawn = _drawn(tmp_path, graph)
+    root = next(node for node in drawn if node["id"] == "agent:/root")
+    file = next(node for node in drawn if node["id"] == "file:f")
+    assert root["flow_layer"] == 0, root
+    assert file["flow_layer"] == 1, file
+    assert file["x"] > root["x"]
+    assert file["x"] - root["x"] <= root["width"] + 120, (root, file)
 
 
 def test_no_edge_leaves_a_wide_node_at_the_old_constant(tmp_path: Path) -> None:

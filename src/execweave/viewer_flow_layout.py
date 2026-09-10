@@ -253,7 +253,11 @@ class _Folder:
             [victim_id, *(victim_attrs.get("viewer_member_ids") or [])],
         )
         attributes["viewer_member_ids"] = member_ids
-        attributes["viewer_folded"] = True
+        # Not ``viewer_folded``: that marks a node whose whole purpose is to stand for
+        # others, and the panel replaces such a node's cards with a list of what it
+        # holds. This survivor is a real node with a panel of its own to keep, so it
+        # says it absorbed members and the panel adds them rather than replacing.
+        attributes["viewer_absorbed"] = True
         attributes["viewer_folded_members"] = members
         attributes["viewer_folded_count"] = len(members)
         attributes["viewer_folded_type"] = victim.get("type")
@@ -866,7 +870,10 @@ def flow_layout_graph(
     _rule_structural_twins(folder, protected)
     _rule_bypass_undrawn(folder)
 
-    drawn_ids = sorted(folder.nodes)
+    # Keep the graph's stable insertion order for cycle breaking. Sorting IDs here can
+    # make a child appear before its parent, so the DFS would choose the forward
+    # SPAWNED_AGENT edge as the feedback edge and put that child in the wrong layer.
+    drawn_ids = list(folder.nodes)
     layer = assign_layers(drawn_ids, folder.edges, previous_layers)
     order = assign_order(folder.nodes, folder.edges, layer)
     row = assign_rows(folder.nodes, folder.edges, layer, order)

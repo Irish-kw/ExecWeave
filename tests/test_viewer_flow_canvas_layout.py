@@ -12,6 +12,8 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import tempfile
+from pathlib import Path
 
 import pytest
 
@@ -25,7 +27,7 @@ pytestmark = pytest.mark.skipif(shutil.which("node") is None, reason="node is un
 # page -- positions, the renderer, the topology -- belongs to applying a solution, not to
 # finding one, so a stub graph is enough to exercise it exactly as the browser does.
 _HARNESS = """
-const payload=JSON.parse(process.argv[1]);
+const payload=JSON.parse(process.argv[2]);
 const nodeById=new Map(payload.nodes.map(node=>[node.id,node]));
 const edgeById=new Map(payload.edges.map((edge,index)=>[String(index),edge]));
 %s
@@ -36,18 +38,24 @@ process.stdout.write(JSON.stringify(Object.fromEntries(solved)));
 
 
 def _solve(graph: dict[str, object]) -> dict[str, dict[str, float]]:
+    # The script goes to a file rather than to ``node -e``: it is long enough that the
+    # whole command line runs past what Windows accepts, and the run fails before node
+    # is even reached.
     script = _HARNESS % FLOW_CANVAS_SCRIPT
     payload = {
         "nodes": graph["nodes"],
         "edges": graph["edges"],
         "viewer_flow": graph["viewer_flow"],
     }
-    finished = subprocess.run(
-        [shutil.which("node"), "-e", script, json.dumps(payload)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    with tempfile.TemporaryDirectory() as room:
+        entry = Path(room) / "solve.js"
+        entry.write_text(script, encoding="utf-8")
+        finished = subprocess.run(
+            [shutil.which("node"), str(entry), json.dumps(payload)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
     assert finished.returncode == 0, finished.stderr
     return json.loads(finished.stdout)
 
