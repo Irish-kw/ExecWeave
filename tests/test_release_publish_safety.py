@@ -12,7 +12,7 @@ def test_publish_has_no_pull_request_trigger_and_requires_three_os_verification(
     text = workflow()
     assert 'pull_request:' not in text
     assert 'os: [ubuntu-latest, windows-latest, macos-latest]' in text
-    assert 'needs: verify' in text
+    assert 'needs: [verify, minimum-python]' in text
     assert 'git merge-base --is-ancestor HEAD origin/main' in text
     assert 'python scripts/check_installed_dashboard.py' in text
     assert 'python scripts/check_sdist_install.py' in text
