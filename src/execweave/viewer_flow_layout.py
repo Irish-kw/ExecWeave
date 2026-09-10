@@ -749,6 +749,82 @@ def assign_order(
     return final
 
 
+def _isotonic(desired: list[float], separation: float = 1.0) -> list[float]:
+    """Closest values to ``desired`` that keep every neighbour ``separation`` apart.
+
+    Substituting ``u_i = y_i - i*separation`` turns the spacing constraint into "u must
+    not decrease", which pool-adjacent-violators solves exactly by averaging each run
+    that breaks the order. So a column lands as near its preferred rows as the spacing
+    allows, rather than being pushed down one slot at a time from the top.
+    """
+    shifted = [value - index * separation for index, value in enumerate(desired)]
+    weights: list[float] = []
+    means: list[float] = []
+    for value in shifted:
+        weights.append(1.0)
+        means.append(value)
+        while len(means) > 1 and means[-2] > means[-1]:
+            weight = weights[-2] + weights[-1]
+            mean = (means[-2] * weights[-2] + means[-1] * weights[-1]) / weight
+            means[-2:] = [mean]
+            weights[-2:] = [weight]
+    flat: list[float] = []
+    for weight, mean in zip(weights, means):
+        flat.extend([mean] * int(round(weight)))
+    return [value + index * separation for index, value in enumerate(flat)]
+
+
+def assign_rows(
+    nodes: dict[str, dict[str, Any]],
+    edges: list[dict[str, Any]],
+    layer: dict[str, int],
+    order: dict[str, int],
+    sweeps: int = 8,
+) -> dict[str, float]:
+    """Turn the column order into actual rows, pulling each node level with its neighbours.
+
+    Ordering decides who is above whom; this decides how far apart they sit. Without it
+    every column starts at the top and counts downwards, which leaves a column holding
+    one node stranded level with the top of a column holding eight, and makes the edges
+    between them long diagonals for no reason in the data.
+    """
+    columns: dict[int, list[str]] = defaultdict(list)
+    for node_id in nodes:
+        columns[layer[node_id]].append(node_id)
+    for column in columns.values():
+        column.sort(key=lambda n: order[n])
+
+    row: dict[str, float] = {n: float(order[n]) for n in nodes}
+    predecessors: dict[str, list[str]] = defaultdict(list)
+    successors: dict[str, list[str]] = defaultdict(list)
+    for edge in edges:
+        source, target = edge.get("source"), edge.get("target")
+        if source in layer and target in layer and layer[target] > layer[source]:
+            predecessors[target].append(source)
+            successors[source].append(target)
+
+    for sweep in range(sweeps):
+        downward = sweep % 2 == 0
+        neighbours = predecessors if downward else successors
+        for index in sorted(columns, reverse=not downward):
+            column = columns[index]
+            desired = []
+            for node_id in column:
+                values = sorted(row[n] for n in neighbours[node_id] if n in row)
+                if values:
+                    middle = len(values) // 2
+                    centre = (values[middle] if len(values) % 2
+                              else (values[middle - 1] + values[middle]) / 2)
+                else:
+                    centre = row[node_id]
+                desired.append(centre)
+            for node_id, value in zip(column, _isotonic(desired)):
+                row[node_id] = value
+
+    lowest = min(row.values(), default=0.0)
+    return {node_id: value - lowest for node_id, value in row.items()}
+
+
 # ------------------------------------------------------------------------ entry point
 
 
@@ -790,6 +866,7 @@ def flow_layout_graph(
     drawn_ids = sorted(folder.nodes)
     layer = assign_layers(drawn_ids, folder.edges, previous_layers)
     order = assign_order(folder.nodes, folder.edges, layer)
+    row = assign_rows(folder.nodes, folder.edges, layer, order)
 
     # where each folded node ended up, so an undrawn node can still be pointed at a box
     stand_in: dict[str, str] = {}
@@ -802,6 +879,7 @@ def flow_layout_graph(
         extra = dict(_attrs(node))
         extra["viewer_layer"] = int(layer[node_id])
         extra["viewer_order"] = int(order[node_id])
+        extra["viewer_row"] = round(float(row[node_id]), 3)
         annotations[node_id] = extra
     for node_id in original_ids:
         if node_id in annotations:
@@ -813,6 +891,7 @@ def flow_layout_graph(
             "viewer_collapsed_into": target,
             "viewer_layer": int(layer.get(target, 0)),
             "viewer_order": int(order.get(target, 0)),
+            "viewer_row": round(float(row.get(target, 0.0)), 3),
         }
 
     nodes: list[dict[str, Any]] = []
@@ -835,7 +914,12 @@ def flow_layout_graph(
         "schema_version": "0.1",
         "layer_count": (max(layer.values()) + 1) if layer else 0,
         "nodes": [
-            {"id": node_id, "layer": int(layer[node_id]), "order": int(order[node_id])}
+            {
+                "id": node_id,
+                "layer": int(layer[node_id]),
+                "order": int(order[node_id]),
+                "row": round(float(row[node_id]), 3),
+            }
             for node_id in drawn_ids
         ],
         "edges": [

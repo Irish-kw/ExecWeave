@@ -50,9 +50,13 @@ function execweaveFlowDisplay(data,display){
 function execweaveFlowCoords(id){
   const node=nodeById.get(id);if(!node)return null;
   const a=node.attributes||{};
-  const layer=a.viewer_layer,order=a.viewer_order;
-  if(!Number.isInteger(layer)||!Number.isInteger(order))return null;
-  return{layer,order};
+  const layer=a.viewer_layer;
+  if(!Number.isInteger(layer))return null;
+  // viewer_row is a solved coordinate and may be fractional; viewer_order is the ordinal
+  // it was derived from, and stands in for older payloads that carry no row.
+  const row=Number.isFinite(a.viewer_row)?a.viewer_row:a.viewer_order;
+  if(!Number.isFinite(row))return null;
+  return{layer,row};
 }
 // A column must clear its widest box. The renderer's own measurement is the authority
 // where it is available; where it is not, estimate from the label rather than assuming
@@ -88,13 +92,18 @@ function execweaveApplyFlowPositions(){
   for(const id of nodeById.keys()){
     const at=execweaveFlowCoords(id);if(!at)continue;
     if(!Number.isFinite(x[at.layer]))continue;
-    positions.set(id,{x:x[at.layer],y:EXECWEAVE_FLOW_TOP+at.order*EXECWEAVE_FLOW_ROW_GAP});
+    positions.set(id,{x:x[at.layer],y:EXECWEAVE_FLOW_TOP+at.row*EXECWEAVE_FLOW_ROW_GAP});
     applied++;
   }
   if(!applied)return 0;
   // Route points were solved against the positions we just replaced, so drop them and
   // let edges fall back to the plain curve between their new endpoints.
-  try{if(execweaveTopology&&execweaveTopology.routePoints)execweaveTopology.routePoints=new Map()}catch(_){}
+  try{
+    if(execweaveTopology){
+      if(execweaveTopology.routePoints)execweaveTopology.routePoints=new Map();
+      if(execweaveTopology.bundleByEdge)execweaveTopology.bundleByEdge=new Map();
+    }
+  }catch(_){}
   try{if(typeof execweaveRecomputePorts==='function')execweaveRecomputePorts(execweaveTopology)}catch(_){}
   try{for(const id of nodeById.keys()){const node=nodeById.get(id);if(node)updateNodeElement(node)}}catch(_){}
   try{for(const edge of edgeById.values())updateEdgeElement(edge)}catch(_){}
