@@ -4,15 +4,22 @@ This directory contains the first Overleaf-ready journal draft for ExecWeave.
 
 ## Files
 
-- `main.tex` — main IEEE journal manuscript.
+- `main.tex` — Overleaf root document and manuscript metadata.
+- `sections/01_intro_related.tex` — introduction, motivation, and related work.
+- `sections/02_formulation_design.tex` — problem formulation and system design.
+- `sections/03_implementation_evaluation.tex` — implementation and controlled evaluation methodology.
+- `sections/04_preliminary_discussion.tex` — repository-backed preliminary characterization and discussion.
+- `sections/05_validity_conclusion.tex` — validity, reproducibility/ethics, future directions, and conclusion.
 - `references.bib` — bibliography used by the manuscript.
 
-## Typesetting target
+## Typesetting target and verified build
 
 - Template: `IEEEtran`, journal, two-column.
-- Working length target: approximately 14 pages including figures, tables, and references. The exact page count should be frozen only after the final venue/template and empirical-result tables are fixed.
 - Overleaf main document: `main.tex`.
 - Compiler: pdfLaTeX + BibTeX (Overleaf's normal automatic build is sufficient).
+- The current branch snapshot was compiled locally with the same root/section/BibTeX structure and produces **14 pages including references**.
+- The 14-page count is a working IEEE-journal target, not a promise that another journal's production template will paginate identically.
+- The verified build has no unresolved citations/references and no overfull horizontal boxes.
 
 ## Reproducibility rule for the paper source
 
@@ -21,7 +28,7 @@ The manuscript is intentionally self-contained at typesetting time:
 - no Python execution from TeX;
 - no CSV loading from TeX;
 - no runtime benchmark-data import from TeX;
-- all reported numeric values are written statically into `main.tex` after evidence verification.
+- all reported numeric values are written statically in the TeX source after evidence verification.
 
 This rule is deliberate: the paper should compile independently of the experiment environment and every submitted number should be auditable in the frozen manuscript diff.
 
@@ -55,11 +62,13 @@ The literature/competitive positioning currently covers:
 - classical whole-system provenance systems including PASS, Hi-Fi, SPADE, Linux Provenance Modules, CamFlow, ProTracer, and RAIN;
 - classical layered and dynamic graph-drawing literature.
 
-Product rows use conservative wording such as **Not native** rather than claiming that a general tracing system can never represent custom OS-derived spans. Final submission claims should be based on frozen versions and controlled runs, not documentation alone.
+Product rows use conservative wording such as **Not native** rather than claiming that a general tracing system can never represent custom OS-derived spans. The empirical methodology further separates native/default instrumentation, documented extensibility, and common externally supplied OS evidence so that competitors are not handicapped or given unfair extra telemetry.
 
 ## What is already evidence-backed
 
 The manuscript uses repository documentation/source contracts for the system design and includes one historical, frozen reference microbenchmark from ExecWeave v0.6.0. That table is clearly labeled preliminary/historical and is **not** presented as v0.8.22 performance.
+
+The evaluation plan already specifies attribution precision/recall, false-attribution and abstention rates, diagnostic-question scoring, cross-provider/cross-OS graph agreement, negative controls, instrumentation tiers, ablations, performance/scalability measures, robustness tests, and statistical analysis.
 
 ## Submission blockers intentionally left open
 
