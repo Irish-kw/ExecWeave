@@ -47,6 +47,14 @@ OCCURRENCE_TYPES = frozenset({
     "context_compaction",
     "conversation_item",
     "inference_request",
+    # the remainder of the set the dashboard display filter already withholds, kept here
+    # so the layout is computed over precisely the nodes a canvas ends up drawing
+    "provider_session",
+    "permission_request",
+    "agent_turn_stop",
+    "compaction",
+    "compaction_request",
+    "terminal_operation",
 })
 
 # The relation an occurrence uses to name the entity that defines it.
@@ -83,7 +91,6 @@ PATH_TYPES = frozenset({"file", "directory", "file_cluster"})
 DEFINER_TYPES = frozenset({
     "agent",
     "model",
-    "provider_session",
     "subtask",
     "tool",
 })
