@@ -211,7 +211,7 @@ jobs:
                   args+=(--allow-test-change "$path=acceptance branch replaces obsolete fixed layout coordinates with semantic lane and ordering assertions while retaining the historical test node IDs")
                   ;;
                 tests/test_external_endpoints_all_providers.py)
-                  args+=(--allow-test-change "$path=loopback endpoint presentation intentionally changed from individual raw nodes to one provider-neutral Local endpoints cluster while External behavior remains; historical test node IDs are retained and raw endpoint evidence is unchanged")
+                  args+=(--allow-test-change "$path=loopback endpoint presentation intentionally changed from individual raw nodes to one provider-neutral Local endpoints cluster while External behavior remains; historical test IDs are retained and raw endpoint evidence is unchanged")
                   ;;
                 tests/test_viewer_projection.py)
                   args+=(--allow-test-change "$path=approved provider-neutral endpoint semantics retire the old four-endpoint threshold and per-process loopback cluster shape: every loopback endpoint now folds into one Local endpoints node while source edges, chronology, expansion evidence, and historical test node IDs are retained")
@@ -241,5 +241,9 @@ jobs:
           if [[ "$HEAD_REF" == "fix/gif-dashboard-parity" || "$HEAD_REF" == "fix/dashboard-projection-decrosing" ]]; then
             args+=(--allow-test-change "tests/test_auto_specialized.py=Bot #30 confirmed that positive managed-launch fixtures used a pre-existing parent server. The child now actually starts that catalog; all historical test IDs and assertions are unchanged. Separate delayed-failure tests forbid claiming existing runtimes.")
             args+=(--allow-test-change "tests/test_provider_conversation_history_integrity.py=Bot #30 forbids runtime/root identity collapse from cardinality alone. The positive contextual-compression fixture now supplies an explicit OBSERVED_MODEL_RUNTIME edge; every historical assertion and test ID is retained, with additional viewer-only/inferred/noncausal supporting-evidence assertions. Negative ownership cases are independently browser-tested.")
+          fi
+          if [[ "$HEAD_REF" == "fix/python310-release-gates" ]]; then
+            args+=(--allow-test-change "tests/test_release_publish_safety.py=PR #82: locally import the TOML backport on Python 3.10 and require both verify and minimum-python before distribution comparison; retain all historical test IDs and all other assertions")
+            args+=(--allow-test-change "tests/test_codex_hook_global_fail_open.py=PR #82: replace the Python 3.11-only TOML import with the real Python 3.10 backport fallback; all historical test IDs and every hook assertion remain unchanged")
           fi
           python scripts/check_release_stage_integrity.py "${args[@]}"
