@@ -3,9 +3,13 @@ from __future__ import annotations
 import hashlib
 import json
 import tarfile
-import tomllib
 import zipfile
 from pathlib import Path, PurePosixPath
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10
+    import tomli as tomllib
 
 
 def digest(data: bytes) -> str:
