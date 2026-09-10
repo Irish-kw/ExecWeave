@@ -26,6 +26,12 @@ def test_publish_has_no_pull_request_trigger_and_requires_three_os_verification(
     assert 'python scripts/canonicalize_wheel.py dist dist-repro' in text
 
 
+def test_cross_platform_pr_ci_includes_minimum_supported_python() -> None:
+    text = Path('.github/workflows/ci.yml').read_text(encoding='utf-8')
+    assert 'versions = ["3.10", "3.12"] if cross_platform else ["3.12"]' in text
+    assert 'systems = ["ubuntu-latest", "macos-latest", "windows-latest"]' in text
+
+
 def test_pypi_job_uses_only_the_verified_ubuntu_distribution_artifact() -> None:
     text = workflow()
     assert 'name: python-package-distributions-${{ matrix.os }}' in text
