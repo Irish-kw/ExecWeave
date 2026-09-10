@@ -1,0 +1,174 @@
+\section{Problem Formulation}
+\subsection{Evidence channels and canonical events}
+Let an execution produce observations from a set of channels
+\begin{equation}
+\mathcal{C}=\{C_{sem},C_{gw},C_{model},C_{os}\},
+\end{equation}
+representing provider/framework semantics, inference gateway/routing evidence, model-runtime evidence, and operating-system evidence, respectively. A channel need not be available for every run. Each observation is normalized into a canonical event
+\begin{equation}
+e=(id,s,t,\tau,r,a,\kappa),
+\end{equation}
+where $id$ is an event identity, $s$ and $t$ are optional source and target entities, $\tau$ is a timestamp, $r$ is a typed relation, $a$ is a set of attributes, and $\kappa$ records provenance metadata such as backend, attribution mode, causal status, inference method, or exact shared identity.
+
+The entity universe is heterogeneous:
+\begin{align}
+V = {} & V_{agent}\cup V_{session}\cup V_{tool}\cup V_{command}\cup V_{model} \nonumber\\
+      & \cup V_{runtime}\cup V_{process}\cup V_{file}\cup V_{net}\cup V_{provider}.
+\end{align}
+Not every deployment uses every type. The purpose of a canonical vocabulary is not to force semantic equivalence between types; it is to permit one graph to retain their relations.
+
+\subsection{Materialized execution graph}
+Given a validated event prefix $E_{1:k}=\langle e_1,\ldots,e_k\rangle$, graph materialization produces
+\begin{equation}
+G_k=M(E_{1:k})=(V_k,A_k),
+\end{equation}
+where node identity is based on canonical entity identity rather than display label. Repeated observations of the same directed tuple $(u,r,v)$ are aggregated into one graph edge while preserving count, first/last observation time, supporting event IDs, source backends, attribution modes, and causality states. Lifecycle events that contain only a source update node metadata rather than manufacturing a dummy target or self-edge.
+
+This representation deliberately distinguishes an \emph{event graph} from an \emph{entity-relation graph}. A process that opens the same file seventeen times need not produce seventeen parallel visual edges; the edge can carry multiplicity and exact support references. This improves inspectability without discarding provenance.
+
+\subsection{Cross-layer attribution as a partial mapping}
+Let $S$ denote semantic execution scopes---for example, tool calls or agent actions---and $R$ denote runtime entities. Cross-layer attribution is a partial mapping
+\begin{equation}
+\phi:S\rightarrow R\cup\{\bot\},
+\end{equation}
+where $\bot$ means that the available evidence does not justify a unique runtime attribution. More generally, an analysis can retain a candidate set, but the materialized graph should not encode one candidate as fact merely to make the graph connected.
+
+For semantic action $s$, let $K(s)$ be the set of runtime candidates that satisfy the configured evidence predicates within a bounded observation interval. A conservative uniqueness rule is
+\begin{equation}
+\phi(s)=
+\begin{cases}
+r, & K(s)=\{r\}\text{ and }Q(s,r)\ge q_{min},\\
+\bot, & \text{otherwise},
+\end{cases}
+\label{eq:phi}
+\end{equation}
+where $Q$ is an evidence score used to rank the \emph{strength of a heuristic match}, not a calibrated probability of correctness. The current implementation further marks such correlations as inferred and non-causal. Exact cross-integration identifiers are handled separately because equality of a shared identity and causal dependence are different propositions.
+
+\subsection{Evidence strength is not behavior severity}
+\system assigns evidence grades to graph-supported findings. Table~\ref{tab:grades} summarizes the current contract. The ordering is conservative: if a finding relies on multiple edges, its evidence grade is the weakest supporting grade. A severe behavior can therefore have weak evidence, and a benign behavior can have strong evidence. Grades are neither probabilities nor maliciousness scores.
+
+\begin{table}[t]
+\centering
+\caption{Evidence-grade contract.}
+\label{tab:grades}
+\footnotesize
+\begin{tabular}{c p{5.7cm}}
+\toprule
+Grade & Meaning \\
+\midrule
+A & Direct causal native attribution, currently represented by recognized syscall-supported causal edges. \\
+B & Direct causal sampled process attribution. \\
+C & Session-correlated or explicitly non-causal evidence. \\
+D & Explicit inference or heuristic-derived support. \\
+U & Unknown, missing, mixed, or insufficiently classified provenance. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Desired invariants}
+We define four invariants that guide implementation and evaluation.
+
+\textbf{I1: No causal promotion.} If every support event for an edge is explicitly non-causal, graph materialization must not label the aggregated edge causal. Mixed support must remain mixed/unknown unless an explicit rule establishes otherwise.
+
+\textbf{I2: Attribution abstention.} If two or more candidates remain observationally indistinguishable under the configured predicates, no single candidate may be emitted as a uniquely attributed edge.
+
+\textbf{I3: Evidence preservation under presentation.} Filtering, folding, layout, and selection can change the rendered view but cannot change the underlying evidence identities or provenance fields.
+
+\textbf{I4: Live--final convergence.} If live and finished materializers consume equivalent canonical event sets, their evidence graphs should be isomorphic with respect to canonical node IDs, typed edges, and provenance metadata, independent of viewport state.
+
+\section{System Design}
+\subsection{Architecture}
+Figure~\ref{fig:arch} shows the data path. \system is local-first: collection, normalized run artifacts, graph materialization, and the interactive viewer operate on the user's machine unless the user explicitly exports artifacts. Provider adapters emit semantic sidecars. Runtime collectors independently emit machine evidence. Correlation consumes validated streams and produces a separate derived stream. The graph builder materializes each stage without rewriting the earlier artifacts.
+
+\begin{figure*}[t]
+\centering
+\resizebox{0.98\textwidth}{!}{%
+\begin{tikzpicture}[
+  node distance=7mm and 9mm,
+  b/.style={draw, rounded corners=1pt, align=center, minimum height=7mm, minimum width=20mm, inner sep=3pt, font=\footnotesize},
+  e/.style={-{Latex[length=1.8mm]}, thin},
+  d/.style={-{Latex[length=1.8mm]}, dashed, thin}
+]
+\node[b, fill=gray!10] (provider) {Agent / IDE / provider\\hooks and transcripts};
+\node[b, below=of provider, fill=gray!10] (gateway) {Inference gateway /\\model runtime integration};
+\node[b, below=of gateway, fill=gray!10] (os) {OS runtime collector\\process / file / network};
+
+\node[b, right=18mm of provider] (sem) {Semantic\\events};
+\node[b, right=18mm of gateway] (mid) {Gateway / model\\events};
+\node[b, right=18mm of os] (raw) {Runtime\\events};
+
+\node[b, right=18mm of mid, minimum width=28mm, fill=gray!5] (norm) {Canonical validation\\and normalization};
+\node[b, right=of norm, minimum width=25mm, fill=gray!5] (corr) {Conservative\\correlation};
+\node[b, right=of corr, minimum width=25mm, fill=gray!5] (graph) {Execution-graph\\materialization};
+\node[b, right=of graph, fill=gray!10] (view) {Live / finished\\viewer and queries};
+
+\draw[e] (provider) -- (sem);
+\draw[e] (gateway) -- (mid);
+\draw[e] (os) -- (raw);
+\draw[e] (sem.east) -| (norm.north west);
+\draw[e] (mid) -- (norm);
+\draw[e] (raw.east) -| (norm.south west);
+\draw[e] (norm) -- (corr);
+\draw[e] (corr) -- (graph);
+\draw[e] (graph) -- (view);
+\draw[d] ($(norm.south)+(0,-2mm)$) -- ++(0,-5mm) -| node[pos=0.25,below,font=\scriptsize]{raw, semantic, and correlated artifacts remain separate} ($(corr.south)+(0,-2mm)$);
+\end{tikzpicture}%
+}
+\caption{\system architecture. Provider semantics and OS evidence enter through separate collection paths. Correlation is a derived layer rather than a rewrite of the original evidence.}
+\label{fig:arch}
+\end{figure*}
+
+\subsection{Semantic collection}
+Provider-level evidence can include prompts, responses, tool declarations and results, model identifiers, conversation/session identifiers, sub-agent routing, and provider-specific lifecycle events. The prototype contains specialized integrations for several coding-agent and IDE environments, including Claude Code, OpenAI Codex, Google Antigravity, Cursor, and OpenCode, as well as model-runtime and gateway integrations for local or proxied inference paths. Coverage is explicitly integration-dependent: a provider identifier such as a tool-call ID or rollout thread ID is not automatically interpreted as an OS process identity.
+
+When an integration explicitly supplies complete content, \system can store that value in a local SHA-256 content-addressed store while placing a content reference in the event stream. ``Complete from source'' means that the value delivered by that integration point was preserved; it does not claim access to hidden model state or remote provider-side data. This distinction is necessary because agent observability often conflates completeness of the received payload with completeness of the underlying execution.
+
+\subsection{Runtime collection}
+The portable backend uses periodic process/network observation and filesystem monitoring so that the same high-level collector can run on Linux, macOS, and Windows. The portability trade-off is explicit. A process or socket whose entire lifetime falls between samples can be missed. Filesystem changes observed through portable monitoring are session-correlated and therefore non-causal with respect to a particular process unless stronger evidence exists. Absence of an event is consequently not proof that the event did not occur.
+
+On Linux, a syscall-oriented \texttt{strace} backend provides a stronger reference path for supported executions. It can follow a traced lineage and attribute selected file and network syscalls to processes, but it is not an OS-wide monitor: activity outside the traced lineage, unsupported syscall patterns, and permission restrictions remain outside its claim. These two backends intentionally expose a fidelity/performance trade-off rather than hiding it behind one boolean ``captured'' field.
+
+\subsection{Conservative tool-to-process correlation}
+The current cross-layer correlator focuses on a common but nontrivial bridge: a semantic tool call declares a command, and runtime telemetry observes candidate processes. The algorithm first rejects command forms for which executable identity cannot be safely extracted, including shell-control constructs that can expand into multiple commands. For an eligible declaration, it searches a bounded interval for process-start or process-exec observations and compares normalized executable identity, canonical executable path when available, process command line, and argument-tail evidence.
+
+Candidate evidence is accumulated per process. A match can be supported by execution identity, process executable metadata, command-line head, or an exact argument tail. The strongest current heuristic categories correspond to combinations of executable and command-line evidence. Importantly, candidate strength does not override ambiguity: if more than one process remains compatible, the correlation is skipped. If exactly one candidate remains, the emitted bridge records its supporting event IDs, inference method, temporal delta, and a heuristic score. It is explicitly marked \texttt{inferred=true} and \texttt{causal=false}; the score is documented as a heuristic score rather than a probability.
+
+Figure~\ref{fig:corr} summarizes the policy.
+
+\begin{figure}[t]
+\centering
+\fbox{\begin{minipage}{0.94\columnwidth}
+\footnotesize
+\textbf{Algorithm 1: Conservative semantic-to-process correlation}
+\begin{enumerate}
+  \item Parse an eligible command declaration for semantic action $s$. If shell control or executable identity is unsupported, abstain.
+  \item Define a bounded observation interval using the declaration time, tool completion time when available, and a maximum window.
+  \item Collect runtime process-start/exec candidates whose executable/path/command-line evidence is compatible with the declaration.
+  \item Aggregate supporting event IDs and evidence predicates per process candidate.
+  \item If the candidate set contains anything other than one process, return $\bot$.
+  \item Emit a derived $s\rightarrow p$ bridge with method and support metadata, marking it inferred and non-causal.
+\end{enumerate}
+\end{minipage}}
+\caption{The key policy is abstention under ambiguity. A stronger visual connection is not preferred to an unsupported claim.}
+\label{fig:corr}
+\end{figure}
+
+This mechanism is deliberately narrower than arbitrary causal inference. It does not claim that temporal proximity proves execution, and it does not infer byte-level flow from the co-occurrence of file and network evidence. Stronger future backends can add stronger bridges without changing the semantics of existing weaker evidence.
+
+\subsection{Exact identity versus causality}
+Some integration points expose a shared request identity across layers. Exact identity is useful, but equality of identifiers does not necessarily prove that one event caused another. \system therefore permits a relation to record exact identity while remaining non-causal. This prevents a common provenance error in which correlation, identity, and causality are collapsed into one confidence score.
+
+\subsection{Graph materialization and querying}
+Each canonical entity ID becomes a graph node and accumulates type, display metadata, observation count, first/last times, and event types. Each source--relation--target tuple becomes an aggregated directed edge with exact occurrence count and references to supporting events. Causality is aggregated conservatively: uniformly causal support yields a causal edge; uniformly non-causal support yields a non-causal edge; and mixed support remains unknown/mixed.
+
+The graph can be queried by node type, relation, backend, or causal status. Directed path queries operate over bounded simple paths, which is important because execution graphs may contain cycles through repeated interactions. Filtering creates a derived view rather than rewriting the source graph.
+
+\subsection{Live and finished views}
+Live execution is an incremental materialization problem. Let $E_t$ be the events incorporated by time $t$. The viewer renders a projection $P(M(E_t))$ together with presentation state such as folds, selection, and viewport transform. When execution finishes and all terminal semantic synchronization completes, the finished viewer should render $P(M(E_T))$ for the final event set $E_T$. The projection may change as nodes are folded or selected, but canonical evidence identity remains stable.
+
+The implementation uses one graph/conversation model for live, completed, and standalone finished views. This architectural choice turns live--finished parity into a testable property rather than a best-effort screenshot comparison. It also prevents post-completion polling state from being mistaken for successful semantic synchronization.
+
+\subsection{Semantics-aware visualization}
+The execution graph is heterogeneous: a root agent, sub-agent, shared model, tool, process tree, files, and external endpoints have different semantic roles even when all are graph nodes. A single unconstrained layered layout can therefore produce high fan-in hubs, interleaved semantic groups, twisted edge bundles, and large whitespace. \system's visualization layer treats graph drawing as a constrained presentation problem informed by classical layered-layout methods~\cite{sugiyama1981hierarchical,gansner1993directed,brandes2002horizontal}. Dynamic stability is applied gently because mental-map preservation can help orientation in some tasks but is not universally beneficial~\cite{archambault2011dynamic,archambault2013mentalmap}.
+
+The key scientific boundary is that layout optimization is downstream of evidence. It may change coordinates, edge routes, ordering, grouping, and folding; it may not create semantic or causal relations that are absent from the canonical graph. We therefore treat layout quality as a secondary human-factors dimension, not as the primary provenance contribution.
