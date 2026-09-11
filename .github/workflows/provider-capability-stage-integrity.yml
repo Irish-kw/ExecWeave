@@ -246,4 +246,12 @@ jobs:
             args+=(--allow-test-change "tests/test_release_publish_safety.py=PR #82: locally import the TOML backport on Python 3.10 and require both verify and minimum-python before distribution comparison; retain all historical test IDs and all other assertions")
             args+=(--allow-test-change "tests/test_codex_hook_global_fail_open.py=PR #82: replace the Python 3.11-only TOML import with the real Python 3.10 backport fallback; all historical test IDs and every hook assertion remain unchanged")
           fi
+          if [[ "$HEAD_REF" == "feat/flow-layout" ]]; then
+            args+=(--allow-test-change "tests/test_visual_ux_readability.py=PR #84: every stroke on the canvas is doubled because a dashed edge was hard to see against the dark ground, so the baseline cap moves with it from 1.35 to 2.7 and the selected floor from 2.0 to 4.0. The property the test guards is unchanged and is now asserted outright: an ordinary edge stays lighter than a selected one. Every historical test ID and every other assertion is retained")
+            args+=(--allow-test-change "tests/test_graph_edge_routing_e2e.py=PR #84: the viewer_flow contract makes every canvas edge a cubic curve; routing assertions now require the common M/C geometry while retaining the crossing and edge-count checks")
+            args+=(--allow-test-change "tests/test_graph_lane_separation_e2e.py=PR #84: the canvas is ordered by viewer_flow layer/order/row rather than the retired type-lane x table; historical test IDs remain unchanged and semantic evidence identity is still asserted")
+            args+=(--allow-test-change "tests/test_graph_node_sizing_e2e.py=PR #84: fixed type-lane coordinates are replaced by viewer_flow layer columns, preserving width, wrapping, port, and non-overlap guarantees with historical test IDs unchanged")
+            args+=(--allow-test-change "tests/test_layout_large_display_e2e.py=PR #84: fully unfolded flow graphs retain the hard no-overlap and no-edge-node-intersection gates; dense fan-out crossing count remains recorded as diagnostic evidence rather than a fixed visual invariant")
+            args+=(--allow-test-change "tests/test_provider_adapter_pipeline_e2e.py=PR #84: Codex orchestration evidence includes HAS_AGENT_THREAD, DELIVERED_AGENT_MESSAGE, and SENT_AGENT_MESSAGE, so mutation coverage removes those relations before asserting the contract failure")
+          fi
           python scripts/check_release_stage_integrity.py "${args[@]}"

@@ -944,6 +944,9 @@ def test_mutation_delete_action_evidence_fails_provider_contract(
         "STARTED_AGENT_INTERACTION",
         "TARGETED_BY_AGENT_INTERACTION",
         "HAS_CHILD_AGENT_SESSION",
+        "HAS_AGENT_THREAD",
+        "DELIVERED_AGENT_MESSAGE",
+        "SENT_AGENT_MESSAGE",
     }
     graph["edges"] = [e for e in graph["edges"] if e.get("relation") not in drop]
     with pytest.raises(AssertionError):

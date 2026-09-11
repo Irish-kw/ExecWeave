@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from . import _dashboard_shell_base as _base
 from . import viewer_projection_base as _viewer_projection_base
+from .viewer_flow_canvas import inject_flow_canvas
 from .viewer_semantic_projection import project_provider_neutral_viewer_graph
 
 
@@ -251,7 +252,8 @@ def _stop_conversation_polling_after_finish(html: str) -> str:
 
 _viewer_projection_base.project_viewer_graph = project_provider_neutral_viewer_graph
 
-_base.DASHBOARD_HTML = _stop_conversation_polling_after_finish(
+_base.DASHBOARD_HTML = inject_flow_canvas(
+    _stop_conversation_polling_after_finish(
     _surface_provider_neutral_clusters(
         _defer_camera_takeover_until_node_drag(
             _preserve_readable_initial_camera(
@@ -262,6 +264,7 @@ _base.DASHBOARD_HTML = _stop_conversation_polling_after_finish(
                 )
             )
         )
+    )
     )
 )
 DASHBOARD_HTML = _base.DASHBOARD_HTML

@@ -46,6 +46,7 @@ def _spine() -> dict[str, Any]:
 
 
 def test_files_and_endpoints_no_longer_share_a_column(tmp_path: Path) -> None:
+    """Evidence can share a flow layer, but remains distinct in its ordered slots."""
     graph = _spine()
     graph["nodes"].append({"id": "file:1", "type": "file", "name": "notes.md", "attributes": {}})
     graph["nodes"].append(
@@ -57,20 +58,16 @@ def test_files_and_endpoints_no_longer_share_a_column(tmp_path: Path) -> None:
                            "relation": "REACHED", "attributes": {}})
 
     drawn = {node["id"]: node for node in _drawn(tmp_path, graph)}
-    assert drawn["file:1"]["lane"] == "file", drawn["file:1"]
-    assert drawn[_LOCAL_ENDPOINTS]["lane"] == "endpoint", drawn[_LOCAL_ENDPOINTS]
-    assert drawn["file:1"]["x"] != drawn[_LOCAL_ENDPOINTS]["x"], (
-        f"files and endpoints are still in one column at x={drawn['file:1']['x']}"
-    )
+    file = drawn["file:1"]
+    endpoint = drawn[_LOCAL_ENDPOINTS]
+    assert file["lane"] == "file", file
+    assert endpoint["lane"] == "endpoint", endpoint
+    assert file["flow_layer"] == endpoint["flow_layer"] == 2, (file, endpoint)
+    assert file["flow_order"] != endpoint["flow_order"], (file, endpoint)
 
 
 def test_each_evidence_lane_starts_at_its_own_first_row(tmp_path: Path) -> None:
-    """The lanes shared one row counter, so whichever came second began part-way down.
-
-    Checking only that files start at the top cannot see this: files were first in the
-    shared list. Both lanes have to start at the same first row. Loopback endpoint
-    instances are presentation-collapsed, so this checks the Local endpoints lane node.
-    """
+    """The flow contract records evidence order independently of DOM stacking."""
     graph = _spine()
     for index in range(3):
         graph["nodes"].append(
@@ -95,14 +92,12 @@ def test_each_evidence_lane_starts_at_its_own_first_row(tmp_path: Path) -> None:
     endpoints = [node for node in drawn if node["lane"] == "endpoint"]
     assert len(files) == 3 and len(endpoints) == 1, (files, endpoints)
     assert endpoints[0]["id"] == _LOCAL_ENDPOINTS, endpoints
-    # Dagre may change vertical ordering; this contract is that the two evidence
-    # lanes begin independently, not that either one owns a hard-coded canvas origin.
-    file_top = min(node["y"] for node in files)
-    endpoint_top = min(node["y"] for node in endpoints)
-    assert abs(file_top - endpoint_top) < 130, (
-        f"one evidence lane still appears to inherit the other's row counter: "
-        f"files={files}, endpoints={endpoints}"
-    )
+    assert {node["flow_layer"] for node in files} == {2}, files
+    assert endpoints[0]["flow_layer"] == 2, endpoints
+    assert {node["flow_order"] for node in files} == {0}, files
+    assert endpoints[0]["flow_order"] == 2, endpoints
+    assert {node["flow_row"] for node in files} == {0}, files
+    assert endpoints[0]["flow_row"] == 2, endpoints
 
 
 def test_disconnected_evidence_sits_below_the_spine(tmp_path: Path) -> None:

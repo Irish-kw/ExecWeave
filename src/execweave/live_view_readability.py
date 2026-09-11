@@ -7,10 +7,10 @@ LIVE_READABILITY_STYLE = r"""
 #svg.execweave-crowded .label.context-visible,
 #svg.execweave-crowded .label.selected{opacity:1}
 .edge.context-dim{opacity:.055!important}
-.edge.context-related:not(.dim){opacity:1;stroke-width:2.2}
-.edge.edge-hover:not(.dim){opacity:1;stroke-width:2.2}
+.edge.context-related:not(.dim){opacity:1;stroke-width:4.4}
+.edge.edge-hover:not(.dim){opacity:1;stroke-width:4.4}
 .edge.bundle-member:not(.context-dim){opacity:.52}
-.edge.bundle-representative:not(.context-dim){opacity:.94;stroke-width:1.8}
+.edge.bundle-representative:not(.context-dim){opacity:.94;stroke-width:3.6}
 .node.context-dim{opacity:.32}
 .label.context-dim{opacity:0!important}
 .label.context-visible{fill:var(--text)}

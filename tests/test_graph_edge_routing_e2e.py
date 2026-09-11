@@ -115,11 +115,13 @@ def test_the_crossing_count_does_not_rise_above_the_recorded_baseline(tmp_path: 
 
 
 def test_every_ordinary_edge_shares_one_geometry(tmp_path: Path) -> None:
-    """Ordinary flow uses one family; bundles and lifecycle returns stay deliberate exceptions.
+    """Every edge on the canvas is one smooth curve, and they all share that family.
 
-    After dagre routing points are wired, ordinary edges are polylines (M/L) snapped to
-    ports. Spawns and tool calls must still share that family so they leave the same
-    node on the same geometry.
+    The property this has always guarded is that spawns and tool calls leave the same
+    node on the same geometry, and that still holds. What changed is the family: the
+    dagre polyline and the bundle's horizontal-vertical trunk each put visible corners
+    on the canvas, so both are now redrawn as the single cubic the rest already used.
+    A bundle keeps its grouping either way; only its geometry moved.
     """
 
     def read(page: Any) -> dict[str, Any]:
@@ -141,12 +143,19 @@ def test_every_ordinary_edge_shares_one_geometry(tmp_path: Path) -> None:
     assert set(shapes) >= {"spawn", "forward", "bundle", "lifecycle-return"}, shapes
     ordinary = [command for kind in ("spawn", "forward") for command in shapes[kind]]
     assert ordinary, "ordinary edges produced no paths"
-    assert all(command.startswith("M") and set(command) <= {"M", "L"} for command in ordinary), (
-        f"ordinary edges are not dagre polylines: {set(ordinary)}"
-    )
-    # The two deliberate exceptions keep their own shapes.
-    assert set(shapes["bundle"]) == {"MHVH"}, shapes["bundle"]
+    assert all(
+        command.startswith("MC") and set(command) <= {"M", "C", ","} for command in ordinary
+    ), f"ordinary edges are not cubics: {set(ordinary)}"
+    # No corner survives anywhere on the canvas, so every kind is the same curve family.
+    assert all(
+        command.startswith("MC") and set(command) <= {"M", "C", ","}
+        for command in shapes["bundle"]
+    ), shapes["bundle"]
     assert set(shapes["lifecycle-return"]) == {"MC,,"}, shapes["lifecycle-return"]
+    for kind, commands in shapes.items():
+        assert not any(set("LHVlhv") & set(command) for command in commands), (
+            f"{kind} still draws a corner: {set(commands)}"
+        )
 
 
 def test_routing_is_deterministic_for_the_same_payload(tmp_path: Path) -> None:
