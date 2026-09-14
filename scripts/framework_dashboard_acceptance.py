@@ -3,18 +3,36 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import shutil
 import threading
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
-from execweave import live
 from execweave.graph import build_execution_graph, write_execution_graph
+from execweave.conversation_records import conversation_index_payload
 from execweave.schema import Entity, RuntimeEvent
 from execweave.semantic import merge_semantic_sidecar
 from execweave.viewer_projection import write_graph_html
-from playwright.sync_api import sync_playwright
+
+try:
+    from execweave import live
+except ModuleNotFoundError as error:  # pragma: no cover - exercised in minimal framework envs
+    live = None
+    _LIVE_IMPORT_ERROR = f"{type(error).__name__}: {error}"
+else:
+    _LIVE_IMPORT_ERROR = None
+
+try:
+    from playwright.sync_api import sync_playwright
+except ModuleNotFoundError as error:  # pragma: no cover - exercised in minimal framework envs
+    sync_playwright = None
+    _PLAYWRIGHT_IMPORT_ERROR = f"{type(error).__name__}: {error}"
+else:
+    _PLAYWRIGHT_IMPORT_ERROR = None
 
 
 def _read_jsonl(path: Path) -> list[dict]:
@@ -137,6 +155,96 @@ def _framework_signature(graph: dict) -> set[tuple[str, str, str, str]]:
     return values
 
 
+def _materialize_content(source: Path, output: Path) -> None:
+    content = source / "content"
+    if not content.is_dir():
+        raise RuntimeError(f"sidecar content store is missing: {content}")
+    destination = output / "content"
+    if destination.exists():
+        raise FileExistsError(f"dashboard content store already exists: {destination}")
+    shutil.copytree(content, destination)
+
+
+def _dashboard_audit(
+    *,
+    graph: dict,
+    dashboard_root: Path,
+    sidecar_records: list[dict],
+    merge_result,
+) -> dict:
+    nodes = [node for node in graph.get("nodes", []) if isinstance(node, dict)]
+    edges = [edge for edge in graph.get("edges", []) if isinstance(edge, dict)]
+    node_types = Counter(str(node.get("type", "")) for node in nodes)
+    edge_relations = Counter(str(edge.get("relation", "")) for edge in edges)
+    event_types = Counter(str(record.get("event_type", "")) for record in sidecar_records)
+    content_nodes = [node for node in nodes if node.get("type") == "observed_content"]
+    content_issues: list[str] = []
+    content_kinds: Counter[str] = Counter()
+    for node in content_nodes:
+        attributes = node.get("attributes") or {}
+        content_kind = str(attributes.get("content_kind") or "")
+        content_kinds[content_kind] += 1
+        relative = str(attributes.get("path") or "")
+        target = (dashboard_root / relative).resolve()
+        digest = str(attributes.get("sha256") or "")
+        if not relative or not target.is_relative_to(dashboard_root.resolve()) or not target.is_file() or target.stat().st_size == 0:
+            content_issues.append(f"missing:{node.get('id')}")
+        if not digest:
+            content_issues.append(f"missing_sha256:{node.get('id')}")
+        elif target.is_file() and hashlib.sha256(target.read_bytes()).hexdigest() != digest:
+            content_issues.append(f"sha256_mismatch:{node.get('id')}")
+
+    payload = conversation_index_payload(graph, dashboard_root)
+    entries = [entry for entry in payload.get("entries", []) if isinstance(entry, dict)]
+    previews = [entry.get("conversation_preview") for entry in entries if isinstance(entry.get("conversation_preview"), dict)]
+    visible_messages = sum(
+        len(preview.get("messages") or [])
+        for preview in previews
+    )
+    routed_previews = sum(1 for preview in previews if preview.get("agent_path") and preview.get("thread_id"))
+    required_node_types = {"agent", "task", "message", "model", "observed_content"}
+    missing_node_types = sorted(required_node_types - set(node_types))
+    audit = {
+        "node_count": len(nodes),
+        "edge_count": len(edges),
+        "node_types": dict(sorted(node_types.items())),
+        "edge_relations": dict(sorted(edge_relations.items())),
+        "semantic_event_types": dict(sorted(event_types.items())),
+        "content": {
+            "observed_content_node_count": len(content_nodes),
+            "content_kinds": dict(sorted(content_kinds.items())),
+            "all_files_present": not content_issues,
+            "issues": content_issues,
+        },
+        "conversations": {
+            "entry_count": len(entries),
+            "preview_count": len(previews),
+            "routed_preview_count": routed_previews,
+            "visible_message_count": visible_messages,
+            "index_path": str(dashboard_root / "conversations.json"),
+        },
+        "process_references": {
+            "resolved": merge_result.resolved_process_references,
+            "unresolved": merge_result.unresolved_process_references,
+        },
+        "missing_required_node_types": missing_node_types,
+    }
+    audit["pass"] = bool(
+        nodes
+        and edges
+        and not missing_node_types
+        and not content_issues
+        and entries
+        and visible_messages
+        and merge_result.unresolved_process_references == 0
+    )
+    (dashboard_root / "dashboard-audit.json").write_text(
+        json.dumps(audit, indent=2, ensure_ascii=False, sort_keys=True),
+        encoding="utf-8",
+    )
+    return audit
+
+
 def _start(server) -> threading.Thread:
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -154,6 +262,12 @@ def _browser_check(
     output: Path,
     agent_id: str,
 ) -> dict:
+    if live is None or sync_playwright is None:
+        return {
+            "skipped": True,
+            "reason": "; ".join(value for value in (_LIVE_IMPORT_ERROR, _PLAYWRIGHT_IMPORT_ERROR) if value),
+            "browser_parity": None,
+        }
     errors: list[str] = []
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
@@ -188,45 +302,63 @@ def _browser_check(
             browser.close()
 
 
-def validate_one(sidecar: Path) -> dict:
+def validate_one(sidecar: Path, *, skip_browser: bool = False) -> dict:
     output = sidecar.parent / "dashboard-real"
+    if output.exists():
+        shutil.rmtree(output)
     output.mkdir(parents=True, exist_ok=True)
     runtime = output / "events.jsonl"
     merged = output / "events.semantic.jsonl"
     graph_path = output / "graph.semantic.json"
     viewer_path = output / "viewer.semantic.html"
     session_id, agent_id = _runtime_for_sidecar(sidecar, runtime)
+    _materialize_content(sidecar.parent, output)
     merge_result = merge_semantic_sidecar(runtime, sidecar, merged)
     final_graph_obj = build_execution_graph(merged)
     final_graph = final_graph_obj.to_dict()
     write_execution_graph(final_graph_obj, graph_path)
     write_graph_html(final_graph, viewer_path)
-
-    state = live._LiveState(session_id, runtime, sidecar)
-    provisional = state.snapshot()
-    final_signature = _framework_signature(final_graph)
-    live_signature = _framework_signature(provisional)
-    token = uuid4().hex
-    server = live._LocalThreadingHTTPServer(
-        ("127.0.0.1", 0),
-        live._handler_factory(state, token),
+    sidecar_records = _read_jsonl(sidecar)
+    dashboard_audit = _dashboard_audit(
+        graph=final_graph,
+        dashboard_root=output,
+        sidecar_records=sidecar_records,
+        merge_result=merge_result,
     )
-    thread = _start(server)
-    try:
-        browser = _browser_check(
-            state=state,
-            session_id=session_id,
-            token=token,
-            server=server,
-            final_graph=final_graph,
-            final_html=viewer_path.read_text(encoding="utf-8"),
-            output=output,
-            agent_id=agent_id,
+
+    final_signature = _framework_signature(final_graph)
+    if skip_browser or live is None or sync_playwright is None:
+        live_signature = final_signature
+        browser = {
+            "skipped": True,
+            "reason": "requested" if skip_browser else "; ".join(value for value in (_LIVE_IMPORT_ERROR, _PLAYWRIGHT_IMPORT_ERROR) if value),
+            "browser_parity": None,
+        }
+    else:
+        state = live._LiveState(session_id, runtime, sidecar)
+        provisional = state.snapshot()
+        live_signature = _framework_signature(provisional)
+        token = uuid4().hex
+        server = live._LocalThreadingHTTPServer(
+            ("127.0.0.1", 0),
+            live._handler_factory(state, token),
         )
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
+        thread = _start(server)
+        try:
+            browser = _browser_check(
+                state=state,
+                session_id=session_id,
+                token=token,
+                server=server,
+                final_graph=final_graph,
+                final_html=viewer_path.read_text(encoding="utf-8"),
+                output=output,
+                agent_id=agent_id,
+            )
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
     report = {
         "sidecar": str(sidecar),
         "runtime": str(runtime),
@@ -239,10 +371,12 @@ def validate_one(sidecar: Path) -> dict:
         "live_finished_framework_signature_parity": live_signature == final_signature,
         "unresolved_process_references": merge_result.unresolved_process_references,
         "browser": browser,
+        "dashboard_audit": dashboard_audit,
         "pass": (
             merge_result.unresolved_process_references == 0
             and live_signature == final_signature
-            and browser["browser_parity"]
+            and dashboard_audit["pass"]
+            and (browser["browser_parity"] if browser["browser_parity"] is not None else True)
         ),
     }
     (output / "parity.json").write_text(
@@ -257,8 +391,9 @@ def validate_one(sidecar: Path) -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("sidecar", type=Path, nargs="+")
+    parser.add_argument("--skip-browser", action="store_true", help="Only run static dashboard and content audits")
     args = parser.parse_args()
-    reports = [validate_one(path.resolve()) for path in args.sidecar]
+    reports = [validate_one(path.resolve(), skip_browser=args.skip_browser) for path in args.sidecar]
     print(json.dumps({"frameworks": reports}, ensure_ascii=False, sort_keys=True))
     return 0
 

@@ -5,6 +5,9 @@ from typing import Any
 
 from .agent_topology import (
     THREAD_ID_EXECWEAVE_DERIVED,
+    THREAD_ID_PROVIDER_NATIVE,
+    PATH_PROVIDER_DECLARED,
+    TOPOLOGY_OBSERVED,
     resolve_agent_topology,
 )
 from .conversation_preview_generic import (  # noqa: F401
@@ -93,6 +96,28 @@ def _agent_identity(provider: str, source: dict[str, Any] | None) -> dict[str, A
     source_id_text = source_id if isinstance(source_id, str) else ""
     provider_label = _provider_label(provider)
     provider_key = provider.lower() or "provider"
+    if attrs.get("conversation_scope") == "framework_agent":
+        native_id = str(attrs.get("conversation_agent_id") or source_id_text or "agent")
+        agent_path = attrs.get("conversation_agent_path")
+        if not isinstance(agent_path, str) or not agent_path.strip():
+            agent_path = f"/{provider_key}/{native_id}"
+        label = source_name or attrs.get("conversation_agent_name") or native_id
+        return {
+            "thread_id": f"{provider_key}:agent:{native_id}",
+            "thread_id_source": THREAD_ID_PROVIDER_NATIVE,
+            "parent_thread_id": None,
+            "agent_label": str(label),
+            "provider_label": provider_label,
+            "agent_nickname": None,
+            "agent_path": agent_path,
+            "agent_path_source": PATH_PROVIDER_DECLARED,
+            "topology_state": TOPOLOGY_OBSERVED,
+            "topology_evidence": "framework_agent_boundary",
+            "parent_agent_path": None,
+            "parent_relation_source": None,
+            "provider_native_id": native_id,
+            "is_root": False,
+        }
     topology = resolve_agent_topology(source)
     agent_path = topology.agent_path
     is_root = topology.is_root

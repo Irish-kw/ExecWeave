@@ -70,8 +70,12 @@ and [agent/runtime guide](https://microsoft.github.io/autogen/dev/user-guide/cor
 CAMEL Workforce officially exposes callback methods for worker and task
 lifecycle, logs, and stream chunks. `CAMELAdapter.workforce_callback()` creates
 a callback object from the installed CAMEL class, so the adapter does not import
-CAMEL when ExecWeave itself is imported. See the [CAMEL Workforce callback
-reference](https://docs.camel-ai.org/reference/camel.societies.workforce.workforce_callback).
+CAMEL when ExecWeave itself is imported. The current CAMEL `LogEvent` surface
+does not carry the emitting worker or recipient; those log messages therefore
+remain explicitly unrouted, while stream chunks and model/message hooks are
+routed when CAMEL exposes the boundary. Missing native message IDs receive a
+unique ExecWeave-derived occurrence ID rather than collapsing into `None`. See
+the [CAMEL Workforce callback reference](https://docs.camel-ai.org/reference/camel.societies.workforce.workforce_callback).
 
 MetaGPT's roles, messages, actions, and provider calls have changed across
 releases. `MetaGPTAdapter` consequently accepts explicit role/task/message/action
@@ -110,3 +114,26 @@ new multi-agent framework. The framework concepts come from the primary papers:
 The adapter's evidence fields say whether a value is metadata, an explicit
 content reference, or a process correlation. They must not be upgraded to
 causal claims merely because two events have nearby timestamps.
+
+## Per-agent conversation routing
+
+Framework adapter conversations are indexed per native agent. When a routed
+message has both a sender and a recipient, the same content reference is
+attached to both agent nodes, preserving the original sender and recipient in
+the conversation message. A model request and response are attached to the
+requesting agent as well, so the agent's visible history includes the context
+it received from other participants.
+
+This routing never invents recipients. CAMEL and AutoGen integrations must pass
+provider-exposed recipient fields when available; MetaGPT uses the native
+Message sender and send-to fields. If a provider omits a route, ExecWeave keeps
+the message on the observed side and does not claim a delivery that was not
+reported. Full prompt/response text requires the prompt_and_response content
+policy (or another content-enabled policy); metadata_only intentionally records
+lifecycle metadata without conversation bodies.
+
+The repeatable full-dashboard acceptance is
+`scripts/framework_dashboard_acceptance.py`. It materializes the merged event
+stream, graph, offline viewer, `conversations.json`, `conversations.md`, and a
+`dashboard-audit.json` that checks node/edge/event coverage, content-store
+paths and hashes, per-agent visible messages, and process-reference resolution.

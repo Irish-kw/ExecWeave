@@ -14,13 +14,14 @@ class CAMELAdapter(FrameworkAdapter):
         events=("AGENT_CREATED", "AGENT_STARTED", "AGENT_STOPPED", "TASK_CREATED", "TASK_ASSIGNED", "TASK_STARTED", "TASK_UPDATED", "TASK_COMPLETED", "TASK_FAILED", "MESSAGE_SENT", "MESSAGE_RECEIVED", "MODEL_REQUEST", "MODEL_RESPONSE", "MODEL_FAILURE"),
         content_modes=("metadata_only", "content_ref_only", "prompt_only", "prompt_and_response"),
         authoritative_surfaces=("camel.societies.workforce.WorkforceCallback", "camel.models.BaseModelBackend.run", "camel.models.BaseModelBackend.arun"),
-        known_limitations=("WorkforceCallback does not expose every message boundary; callers must use an authoritative model/message hook.", "A created worker is not treated as assigned until CAMEL reports a task assignment."),
+        known_limitations=("WorkforceCallback LogEvent does not expose the emitting worker or recipient; those log messages remain explicitly unrouted unless a stream-chunk or model/message hook supplies the boundary.", "A created worker is not treated as assigned until CAMEL reports a task assignment."),
     )
 
     def __init__(self, context: AdapterContext) -> None:
         super().__init__(context)
         self._agents: dict[str, EntityRef] = {}
         self._tasks: dict[str, EntityRef] = {}
+        self._message_counter = 0
 
     @classmethod
     def compatibility(cls) -> FrameworkCompatibility:
@@ -91,19 +92,28 @@ class CAMELAdapter(FrameworkAdapter):
         payload = _payload(args, kwargs)
         if name in {"log_message", "log_stream_chunk"}:
             content = _string(_value(payload, "message", "text"))
-            message_id = _native(payload, "message_id", "id", "task_id", "worker_id")
+            native_message_id = _value(payload, "message_id", "id", "task_id", "worker_id")
+            self._message_counter += 1
+            message_id = (
+                native_message_id
+                if isinstance(native_message_id, (str, int)) and str(native_message_id)
+                else f"{self.framework_name}-message-{self._message_counter}"
+            )
             worker_id = _value(payload, "worker_id", "agent_id")
             source = self._agents.get(str(worker_id)) if worker_id is not None else None
+            target_id = _value(payload, "target_worker_id", "recipient_worker_id", "target_agent_id", "recipient_agent_id", "receiver_id")
+            target = self._agents.get(str(target_id)) if target_id is not None else None
             return self.message(
                 message_id,
                 source,
-                None,
+                target,
                 content=content,
                 role="stream" if name == "log_stream_chunk" else "log",
                 attributes={
                     "callback_name": name,
                     "event_type": _value(payload, "event_type"),
                     "metadata": _value(payload, "metadata"),
+                    "message_id_source": "provider" if native_message_id is not None else "execweave_derived",
                 },
             )
         if name == "log_task_decomposed":

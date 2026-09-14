@@ -92,6 +92,12 @@ def _string(value: Any) -> str | None:
     return text or None
 
 
+def _entity_label(entity: EntityRef | None) -> str | None:
+    if entity is None:
+        return None
+    return entity.name or entity.id
+
+
 @dataclass(frozen=True)
 class EntityRef:
     type: str
@@ -307,6 +313,7 @@ class MessageRecord:
     content_kind: str = "message"
     direction: Literal["sent", "received"] = "sent"
     attributes: Mapping[str, Any] = field(default_factory=dict)
+    content_payload: Any | None = None
 
 
 @dataclass(frozen=True)
@@ -390,28 +397,73 @@ class AdapterContext:
         return record.task
 
     def record_message(self, record: MessageRecord) -> EntityRef:
-        reference = self.content.put_text(record.content, content_kind=record.content_kind) if record.content is not None else None
-        attrs = {"message_id": record.message.id, "role": record.role, "task_id": record.task.id if record.task else None, "parent_message_id": record.parent_message.id if record.parent_message else None, **self.content.reference_attributes(reference), **dict(record.attributes)}
+        content_kind = f"{self.framework}.agent_message"
+        message_payload = record.content_payload if record.content_payload is not None else {
+            "message_id": record.message.id,
+            "text": record.content,
+            "sender": _entity_label(record.source),
+            "recipient": _entity_label(record.target),
+            "role": record.role,
+            "kind": "agent_message",
+            "phase": "received" if record.direction == "received" else "sent",
+            "content_state": "plaintext",
+        }
+        reference = self.content.put_json(message_payload, content_kind=content_kind) if record.content is not None else None
+        attrs = {"message_id": record.message.id, "role": record.role, "task_id": record.task.id if record.task else None, "parent_message_id": record.parent_message.id if record.parent_message else None, "sender_agent_id": record.source.id if record.source and record.source.type == "agent" else None, "recipient_agent_id": record.target.id if record.target and record.target.type == "agent" else None, **self.content.reference_attributes(reference), **dict(record.attributes)}
         event_type = "MESSAGE_SENT" if record.direction == "sent" else "MESSAGE_RECEIVED"
         self.emit(event_type, event_type, source=record.source, target=record.target or record.message, attributes=attrs)
         if reference is not None:
             content = EntityRef("observed_content", f"observed-content:message:sha256:{reference.sha256}", reference.content_kind, reference.to_dict())
-            self.emit("MESSAGE_CONTENT_RECORDED", "HAS_MESSAGE_CONTENT", source=record.message, target=content, attributes={"message_id": record.message.id, **self.content.reference_attributes(reference)})
+            participants: list[tuple[EntityRef, str]] = []
+            for side, participant in (("sender", record.source), ("recipient", record.target)):
+                if participant is None or participant.type != "agent":
+                    continue
+                if any(existing.id == participant.id for existing, _ in participants):
+                    participants = [(existing, "sender_and_recipient" if existing.id == participant.id else existing_side) for existing, existing_side in participants]
+                    continue
+                participants.append((participant, side))
+            if not participants:
+                participants = [(record.message, "message")]
+            for participant, side in participants:
+                self.emit(
+                    "MESSAGE_CONTENT_RECORDED",
+                    "HAS_MESSAGE_CONTENT",
+                    source=participant,
+                    target=content,
+                    attributes={
+                        "message_id": record.message.id,
+                        "conversation_scope": "agent" if participant.type == "agent" else "message",
+                        "conversation_side": side,
+                        "conversation_agent_id": participant.id if participant.type == "agent" else None,
+                        **self.content.reference_attributes(reference),
+                    },
+                )
         return record.message
 
     def record_model_call(self, record: ModelCallRecord) -> EntityRef:
         if record.status == "request":
-            event_type, relation, value, kind = "MODEL_REQUEST", "REQUESTS_MODEL_CALL", record.request, record.content_kind or "model_request"
+            event_type, relation, value, kind = "MODEL_REQUEST", "REQUESTS_MODEL_CALL", record.request, f"{self.framework}.model_request"
         elif record.status == "response":
-            event_type, relation, value, kind = "MODEL_RESPONSE", "MODEL_CALL_RESPONDS", record.response, record.content_kind or "model_response"
+            event_type, relation, value, kind = "MODEL_RESPONSE", "MODEL_CALL_RESPONDS", record.response, f"{self.framework}.model_response"
         else:
-            event_type, relation, value, kind = "MODEL_FAILURE", "MODEL_CALL_FAILED", record.response or record.request, record.content_kind or "model_failure"
+            event_type, relation, value, kind = "MODEL_FAILURE", "MODEL_CALL_FAILED", record.response or record.request, f"{self.framework}.model_failure"
         reference = self.content.put_text(value, content_kind=kind) if isinstance(value, str) else self.content.put_json(value, content_kind=kind) if value is not None else None
         attrs = {"model_call_id": record.model_call.id, "task_id": record.task.id if record.task else None, "requesting_agent_id": record.requesting_agent.id if record.requesting_agent else None, **self.content.reference_attributes(reference), **dict(record.attributes)}
         self.emit(event_type, relation, source=record.requesting_agent, target=record.model, attributes=attrs)
         if reference is not None:
             content = EntityRef("observed_content", f"observed-content:model:sha256:{reference.sha256}", reference.content_kind, reference.to_dict())
-            self.emit("MODEL_CONTENT_RECORDED", "HAS_MODEL_CONTENT", source=record.model_call, target=content, attributes={"model_call_id": record.model_call.id, **self.content.reference_attributes(reference)})
+            self.emit(
+                "MODEL_CONTENT_RECORDED",
+                "HAS_MODEL_CONTENT",
+                source=record.requesting_agent or record.model_call,
+                target=content,
+                attributes={
+                    "model_call_id": record.model_call.id,
+                    "conversation_scope": "agent" if record.requesting_agent is not None else "model_call",
+                    "conversation_agent_id": record.requesting_agent.id if record.requesting_agent else None,
+                    **self.content.reference_attributes(reference),
+                },
+            )
         return record.model_call
 
     def record_tool_call(self, record: ToolCallRecord) -> EntityRef:
@@ -452,7 +504,14 @@ class FrameworkAdapter:
         return self.context.emit(event_type, relation, **kwargs)
 
     def agent(self, native_id: str | int, *, name: str | None = None, **attributes: Any) -> EntityRef:
-        return self.entity("agent", native_id, name=name, attributes=attributes)
+        native = _ID_SAFE.sub("_", str(native_id).strip()) or "agent"
+        values = {
+            "conversation_scope": "framework_agent",
+            "conversation_agent_id": str(native_id),
+            "conversation_agent_path": f"/{self.framework_name}/{native}",
+            **attributes,
+        }
+        return self.entity("agent", native_id, name=name, attributes=values)
 
     def task(self, native_id: str | int, *, name: str | None = None, **attributes: Any) -> EntityRef:
         return self.entity("task", native_id, name=name, attributes=attributes)

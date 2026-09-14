@@ -73,7 +73,7 @@ class ObservedOllamaClient(OllamaChatCompletionClient):
             agent=self._agent_ref,
             model_id=self._model,
             request={
-                "message_count": len(messages),
+                "messages": _jsonable(messages),
                 "message_types": [type(message).__name__ for message in messages],
             },
             status="request",
@@ -95,11 +95,7 @@ class ObservedOllamaClient(OllamaChatCompletionClient):
             call_id,
             agent=self._agent_ref,
             model_id=self._model,
-            response={
-                "result_type": type(result).__name__,
-                "finish_reason": getattr(result, "finish_reason", None),
-                "usage": _jsonable(getattr(result, "usage", None)),
-            },
+            response=_jsonable(result),
             status="response",
             boundary=boundary,
         )
@@ -126,7 +122,7 @@ async def run_acceptance(args: argparse.Namespace) -> dict[str, Any]:
         session_id="autogen-real-ollama-12345",
         sidecar=sidecar,
         content_root=output,
-        capture_policy=ContentCapturePolicy("metadata_only"),
+        capture_policy=ContentCapturePolicy("prompt_and_response"),
         process=process_ref,
     )
     adapter = AutoGenAdapter(context)
@@ -309,7 +305,7 @@ async def run_acceptance(args: argparse.Namespace) -> dict[str, Any]:
             and record["attributes"].get("required_agent_sources_present") is True
             for record in records
         ),
-        "capture_mode": "metadata_only",
+        "capture_mode": "prompt_and_response",
         "process_pid": process.pid,
     }
     (output / "summary.json").write_text(
