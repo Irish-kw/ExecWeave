@@ -47,6 +47,9 @@ _CONVERSATION_TOKENS = (
     "request_prompt",
     "request_input",
     "model_context_messages",
+    "model_request",
+    "model_response",
+    "model_failure",
 )
 
 

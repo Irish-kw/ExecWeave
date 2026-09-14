@@ -77,10 +77,13 @@ class ObservedOllamaLLM(OllamaLLM):
             role=self._role_ref,
             model_id=self.model,
             request={
-                "message_type": type(msg).__name__,
-                "message_count": len(msg) if isinstance(msg, list) else 1,
-                "system_message_count": len(system_msgs or []),
-                "format_message_count": len(format_msgs or []),
+                "messages": (
+                    json.loads(json.dumps(msg, ensure_ascii=False, default=str))
+                    if isinstance(msg, list)
+                    else [{"role": "user", "content": str(msg)}]
+                ),
+                "system_messages": json.loads(json.dumps(system_msgs or [], ensure_ascii=False, default=str)),
+                "format_messages": json.loads(json.dumps(format_msgs or [], ensure_ascii=False, default=str)),
                 "stream": bool(stream) if stream is not None else bool(self.config.stream),
             },
             status="request",
@@ -111,10 +114,7 @@ class ObservedOllamaLLM(OllamaLLM):
             call_id,
             role=self._role_ref,
             model_id=self.model,
-            response={
-                "response_type": type(response).__name__,
-                "response_char_count": len(response) if isinstance(response, str) else None,
-            },
+            response=response,
             status="response",
             boundary=boundary,
         )
@@ -141,7 +141,7 @@ async def run_acceptance(args: argparse.Namespace) -> dict[str, Any]:
         session_id="metagpt-real-ollama-12345",
         sidecar=sidecar,
         content_root=output,
-        capture_policy=ContentCapturePolicy("metadata_only"),
+        capture_policy=ContentCapturePolicy("prompt_and_response"),
         process=process_ref,
     )
     adapter = MetaGPTAdapter(context)
@@ -375,7 +375,7 @@ async def run_acceptance(args: argparse.Namespace) -> dict[str, Any]:
         "parser_failure": parser_failure,
         "retry_count": retry_count,
         "exception": exception_payload,
-        "capture_mode": "metadata_only",
+        "capture_mode": "prompt_and_response",
         "process_pid": process_pid,
     }
     (output / "summary.json").write_text(

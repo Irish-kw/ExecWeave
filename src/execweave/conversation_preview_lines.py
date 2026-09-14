@@ -24,6 +24,13 @@ def _structured_messages(
     if isinstance(value, dict):
         if isinstance(value.get("message"), dict):
             candidates.append(value["message"])
+        if isinstance(value.get("messages"), list):
+            for item in value["messages"]:
+                if isinstance(item, dict):
+                    if isinstance(item.get("message"), dict):
+                        candidates.append(item["message"])
+                    elif any(key in item for key in ("role", "content", "text")):
+                        candidates.append(item)
         elif any(key in value for key in ("role", "content", "text")):
             candidates.append(value)
     elif isinstance(value, list):
@@ -41,10 +48,20 @@ def _structured_messages(
         text = _text_parts(item.get("content")) or _text_parts(item.get("text"))
         if not text:
             continue
+        sender = item.get("source") or item.get("sender")
+        recipient = item.get("recipient") or item.get("target")
+        if recipient is None and isinstance(item.get("recipients"), list):
+            recipient = ", ".join(
+                str(value).strip()
+                for value in item["recipients"]
+                if str(value).strip()
+            ) or None
+        sender = sender.strip() if isinstance(sender, str) and sender.strip() else None
+        recipient = recipient.strip() if isinstance(recipient, str) and recipient.strip() else None
         if role in {"user", "human"}:
-            messages.append(_message(timestamp=timestamp, ordinal=ordinal, kind="user_message", sender="user", recipient=agent_path, text=text))
+            messages.append(_message(timestamp=timestamp, ordinal=ordinal, kind="user_message", sender=sender or "user", recipient=recipient or agent_path, text=text))
         elif role in {"assistant", "model", "agent"}:
-            messages.append(_message(timestamp=timestamp, ordinal=ordinal, kind="assistant_message", sender=agent_path, recipient=None, text=text, phase="response"))
+            messages.append(_message(timestamp=timestamp, ordinal=ordinal, kind="assistant_message", sender=sender or agent_path, recipient=recipient, text=text, phase="response"))
     return messages
 
 

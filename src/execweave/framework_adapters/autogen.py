@@ -185,6 +185,11 @@ class AutoGenAdapter(FrameworkAdapter):
             source = self._agents.get(str(source_name)) or self.observe_agent(
                 str(source_name), name=str(source_name)
             )
+        target_name = getattr(event, "target", None) or getattr(event, "recipient", None)
+        if target is None and target_name is not None:
+            target = self._agents.get(str(target_name)) or self.observe_agent(
+                str(target_name), name=str(target_name)
+            )
         content = getattr(event, "content", None)
         if event_name == "ThoughtEvent":
             return self.observe_message(

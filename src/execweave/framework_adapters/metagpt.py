@@ -121,6 +121,7 @@ class MetaGPTAdapter(FrameworkAdapter):
         role: str | None = None,
         task: EntityRef | None = None,
         received: bool = False,
+        content_payload: Any | None = None,
         **attributes: Any,
     ) -> EntityRef:
         message = self.entity("message", message_id, name="MetaGPT message", attributes={"provider": "metagpt"})
@@ -132,6 +133,7 @@ class MetaGPTAdapter(FrameworkAdapter):
                 role=role,
                 task=task,
                 content=content,
+                content_payload=content_payload,
                 direction="received" if received else "sent",
                 attributes=attributes,
             )
@@ -145,19 +147,62 @@ class MetaGPTAdapter(FrameworkAdapter):
         source_name = getattr(message_object, "sent_from", None)
         target_name = getattr(message_object, "send_to", None)
         source = self._roles.get(str(source_name)) if source_name else None
-        target = self._roles.get(str(target_name)) if isinstance(target_name, str) else None
-        return self.observe_message(
-            message_id,
-            source=source,
-            target=target,
-            content=_text(getattr(message_object, "content", None)),
-            role=_text(getattr(message_object, "role", None)),
-            task=task,
-            cause_by=_text(getattr(message_object, "cause_by", None)),
-            metadata=getattr(message_object, "metadata", None),
-            message_type=type(message_object).__name__,
+        content = _text(getattr(message_object, "content", None))
+        role = _text(getattr(message_object, "role", None))
+        common_attributes = {
+            "cause_by": _text(getattr(message_object, "cause_by", None)),
+            "metadata": getattr(message_object, "metadata", None),
+            "message_type": type(message_object).__name__,
             **attributes,
-        )
+        }
+        target_names = None
+        if isinstance(target_name, (list, tuple, set, frozenset)):
+            target_names = list(target_name)
+            if isinstance(target_name, (set, frozenset)):
+                target_names.sort(key=str)
+            targets = [self._roles.get(str(name)) for name in target_names if name]
+            targets = [target for target in targets if target is not None]
+        else:
+            target = self._roles.get(str(target_name)) if isinstance(target_name, str) else None
+            targets = [target] if target is not None else []
+        shared_content_payload = None
+        if target_names is not None and targets:
+            recipient_labels = [target.name or target.id for target in targets]
+            shared_content_payload = {
+                "message_id": message_id,
+                "text": content,
+                "sender": source.name or source.id if source is not None else None,
+                "recipient": recipient_labels[0] if len(recipient_labels) == 1 else None,
+                "recipients": recipient_labels,
+                "role": role,
+                "kind": "agent_message",
+                "phase": "sent",
+                "content_state": "plaintext",
+            }
+        if not targets:
+            return self.observe_message(
+                message_id,
+                source=source,
+                target=None,
+                content=content,
+                role=role,
+                task=task,
+                content_payload=shared_content_payload,
+                **common_attributes,
+            )
+        message = None
+        for target in targets:
+            message = self.observe_message(
+                message_id,
+                source=source,
+                target=target,
+                content=content,
+                role=role,
+                task=task,
+                content_payload=shared_content_payload,
+                **common_attributes,
+            )
+        return message
 
     def observe_action(
         self,

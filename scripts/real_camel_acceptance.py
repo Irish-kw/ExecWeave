@@ -55,6 +55,7 @@ class ObservedOllamaModel(OllamaModel):
             self._agent_holder.get("ref"),
             str(self.model_type),
             status="request",
+            request=json.loads(json.dumps(messages, ensure_ascii=False, default=_json_default)),
             request_message_count=len(messages),
             endpoint=self._url,
             boundary="camel.BaseModelBackend.run",
@@ -67,6 +68,7 @@ class ObservedOllamaModel(OllamaModel):
             self._agent_holder.get("ref"),
             str(self.model_type),
             status="failure" if failure is not None else "response",
+            response=json.loads(json.dumps(result, ensure_ascii=False, default=_json_default)) if failure is None else None,
             response_observed=failure is None,
             failure_type=type(failure).__name__ if failure is not None else None,
             result_type=type(result).__name__ if result is not None else None,
@@ -120,7 +122,7 @@ def main() -> int:
         session_id="camel-real-ollama-12345",
         sidecar=sidecar,
         content_root=output,
-        capture_policy=ContentCapturePolicy("metadata_only"),
+        capture_policy=ContentCapturePolicy("prompt_and_response"),
         process=process_ref,
     )
     adapter = CAMELAdapter(context)
@@ -227,7 +229,7 @@ def main() -> int:
         "model_response_count": event_types.count("MODEL_RESPONSE"),
         "task_assigned_count": event_types.count("TASK_ASSIGNED"),
         "process_pid": process.pid,
-        "capture_mode": "metadata_only",
+        "capture_mode": "prompt_and_response",
     }
     (output / "summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False, default=_json_default), encoding="utf-8")
     print(json.dumps(summary, ensure_ascii=False, sort_keys=True))
