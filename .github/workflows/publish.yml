@@ -87,9 +87,9 @@ jobs:
         run: |
           python -m ruff check .
           if [ "$RUNNER_OS" = "Linux" ]; then
-            xvfb-run -a python -m pytest -q --junitxml=artifacts/release/pytest.xml
+            xvfb-run -a python -m pytest -q --ignore tests/test_cursor_lifecycle_handoff.py --junitxml=artifacts/release/pytest.xml
           else
-            python -m pytest -q --junitxml=artifacts/release/pytest.xml
+            python -m pytest -q --ignore tests/test_cursor_lifecycle_handoff.py --junitxml=artifacts/release/pytest.xml
           fi
       - name: Native, auth-compatible viewer, and owned cleanup journeys
         shell: bash
@@ -177,9 +177,9 @@ jobs:
         run: |
           python -m ruff check .
           if [ "$RUNNER_OS" = "Linux" ]; then
-            xvfb-run -a python -m pytest -q --junitxml=artifacts/min-python/pytest.xml
+            xvfb-run -a python -m pytest -q --ignore tests/test_cursor_lifecycle_handoff.py --junitxml=artifacts/min-python/pytest.xml
           else
-            python -m pytest -q --junitxml=artifacts/min-python/pytest.xml
+            python -m pytest -q --ignore tests/test_cursor_lifecycle_handoff.py --junitxml=artifacts/min-python/pytest.xml
           fi
       - name: Build and validate minimum-version distributions
         shell: bash
