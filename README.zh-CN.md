@@ -300,3 +300,24 @@ python -m ruff check .
 ## 许可
 
 ExecWeave 使用 **PolyForm Noncommercial License 1.0.0**。完整条款见 [LICENSE](LICENSE)。
+## Framework Adapter SDK
+
+ExecWeave includes an optional authoritative adapter SDK for CAMEL Workforce,
+AutoGen AgentChat/Core, and MetaGPT. Adapters emit canonical agent, task,
+message, model, and tool records; they do not infer logical conversations from
+process names or network traffic. Content capture is opt-in and hidden
+reasoning/private reasoning is never captured by the SDK. Transport credentials
+are removed from semantic metadata.
+
+See [the framework adapter guide](docs/framework-adapters.md) for the public
+API, compatibility matrix, live/final parity contract, and official CAMEL,
+AutoGen, and MetaGPT paper references. Current framework versions still require
+the corresponding optional dependency and an authoritative callback or event
+boundary in the application.
+
+Paper context: Li et al., *CAMEL: Communicative Agents for "Mind" Exploration of Large Language Model Society* ([arXiv:2303.17760](https://arxiv.org/abs/2303.17760), 2023); Wu et al., *AutoGen: Enabling Next-Gen LLM Applications via Multi-Agent Conversation* ([arXiv:2308.08155](https://arxiv.org/abs/2308.08155), 2023); Hong et al., *MetaGPT: Meta Programming for a Multi-Agent Collaborative Framework* ([OpenReview, ICLR 2024](https://openreview.net/forum?id=VtmBAGCN7o)).
+
+```python
+from execweave.framework_adapters import AdapterContext, CAMELAdapter
+adapter = CAMELAdapter(AdapterContext.from_environment("camel"))
+```

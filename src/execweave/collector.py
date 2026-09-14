@@ -20,6 +20,11 @@ from .auto_specialized import (
     run_post_command_specialized_probe,
 )
 from .command import resolve_launch_command
+from .cursor_lifecycle import (
+    is_cursor_invocation,
+    process_baseline,
+    run_cursor_handoff,
+)
 from .filesystem import FileWatcher
 from .schema import Entity, RuntimeEvent
 from .sink import JsonlSink
@@ -137,6 +142,8 @@ class RuntimeCollector:
         self._network_sample_errors = 0
         self._network_access_denied = 0
         self._collector_children_baseline: dict[int, float] | None = None
+        self._preserved_processes: set[tuple[int, float]] = set()
+        self._cursor_handoff_info: dict[str, object] = {}
 
     def _filesystem_excluded_roots(self) -> list[Path]:
         """Return ExecWeave-owned paths that must never become workload evidence.
@@ -165,6 +172,12 @@ class RuntimeCollector:
             raise ValueError("command must not be empty")
 
         launch_command = resolve_launch_command(command)
+        cursor_invocation = os.name == "nt" and is_cursor_invocation(command)
+        cursor_baseline = process_baseline(launch_command[0]) if cursor_invocation else set()
+        self._preserved_processes = set()
+        self._cursor_handoff_info = {
+            "cursor_lifecycle_handoff": "launcher" if cursor_invocation else "not_applicable",
+        }
         agent_name = infer_agent_name(command)
         agent = Entity(type="agent", id=f"agent:{agent_name}", name=agent_name)
         session = Entity(
@@ -206,6 +219,7 @@ class RuntimeCollector:
         process: subprocess.Popen[bytes] | None = None
         owned: list[psutil.Process] = []
         return_code = 1
+        cursor_root_snapshot: ProcessSnapshot | None = None
         interrupted = False
         collector_error_type: str | None = None
         workload_terminated_due_to_collector_error = False
@@ -236,6 +250,7 @@ class RuntimeCollector:
                     snapshot = _safe_process_snapshot(root)
                     if snapshot is not None:
                         self._record_process_start(snapshot, parent=session, relation="LAUNCHED")
+                        cursor_root_snapshot = snapshot if cursor_invocation else None
 
                     with auto_specialized_probe(command, admission=live_probe_admission):
                         while process.poll() is None:
@@ -245,6 +260,14 @@ class RuntimeCollector:
                         self._sample_process_tree(root)
                         self._mark_disappeared_processes(set())
                     return_code = int(process.returncode or 0)
+
+                    if cursor_invocation and cursor_root_snapshot is not None:
+                        run_cursor_handoff(
+                            self,
+                            root_snapshot=cursor_root_snapshot,
+                            executable=launch_command[0],
+                            baseline=cursor_baseline,
+                        )
             except KeyboardInterrupt:
                 interrupted = True
                 return_code = 130
@@ -300,6 +323,7 @@ class RuntimeCollector:
                         "network_sample_errors": self._network_sample_errors,
                         "network_access_denied": self._network_access_denied,
                         "execweave_version": __version__,
+                        **self._cursor_handoff_info,
                     },
                 )
             )
@@ -394,6 +418,8 @@ class RuntimeCollector:
         def add_with_descendants(candidate: psutil.Process) -> None:
             if not self._process_is_live(candidate):
                 return
+            if (candidate.pid, candidate.create_time()) in self._preserved_processes:
+                return
             owned[candidate.pid] = candidate
             try:
                 descendants = candidate.children(recursive=True)
@@ -401,6 +427,8 @@ class RuntimeCollector:
                 descendants = []
             for child in descendants:
                 if self._process_is_live(child):
+                    if (child.pid, child.create_time()) in self._preserved_processes:
+                        continue
                     owned[child.pid] = child
 
         if process.poll() is None:

@@ -69,6 +69,11 @@ Repository = "https://github.com/Irish-kw/ExecWeave"
 Documentation = "https://github.com/Irish-kw/ExecWeave#documentation"
 Issues = "https://github.com/Irish-kw/ExecWeave/issues"
 
+[project.entry-points."execweave.framework_adapters"]
+camel = "execweave.framework_adapters.camel:CAMELAdapter"
+autogen = "execweave.framework_adapters.autogen:AutoGenAdapter"
+metagpt = "execweave.framework_adapters.metagpt:MetaGPTAdapter"
+
 [project.scripts]
 execweave = "execweave.entry:main"
 execweave-top = "execweave.top_cli:main"

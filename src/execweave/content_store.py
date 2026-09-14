@@ -13,6 +13,20 @@ _HASH_ALGORITHM = "sha256"
 _COPY_CHUNK_BYTES = 1024 * 1024
 
 
+def _filesystem_path(path: Path) -> Path:
+    """Use Win32 extended paths for content stores beyond ``MAX_PATH``."""
+    if os.name != "nt":
+        return path
+    value = os.fspath(path)
+    if value.startswith("\\\\?\\"):
+        return path
+    if value.startswith("\\\\"):
+        return Path("\\\\?\\UNC\\" + value[2:])
+    if os.path.isabs(value):
+        return Path("\\\\?\\" + value)
+    return path
+
+
 @dataclass(frozen=True)
 class ContentReference:
     """Reference to one complete locally stored observation.
@@ -118,9 +132,12 @@ class FullFidelityContentStore:
         if not content_kind:
             raise ValueError("content_kind must not be empty")
         source_path = Path(source).expanduser().resolve()
-        if not source_path.is_file():
+        source_fs = _filesystem_path(source_path)
+        if not source_fs.is_file():
             raise FileNotFoundError(source_path)
-        destination_dir = self.run_root / _CONTENT_DIR / _HASH_ALGORITHM
+        destination_dir = _filesystem_path(
+            self.run_root / _CONTENT_DIR / _HASH_ALGORITHM
+        )
         destination_dir.mkdir(parents=True, exist_ok=True)
         if os.name != "nt":
             try:
@@ -128,9 +145,9 @@ class FullFidelityContentStore:
             except OSError:
                 pass
 
-        before = source_path.stat()
+        before = source_fs.stat()
         fd, temp_name = tempfile.mkstemp(prefix=".execweave-content-", dir=destination_dir)
-        temp_path = Path(temp_name)
+        temp_path = _filesystem_path(Path(temp_name))
         digest = hashlib.sha256()
         size = 0
         try:
@@ -139,7 +156,7 @@ class FullFidelityContentStore:
                     os.fchmod(fd, 0o600)
                 except OSError:
                     pass
-            with source_path.open("rb") as source_handle, os.fdopen(
+            with source_fs.open("rb") as source_handle, os.fdopen(
                 fd, "wb", closefd=True
             ) as destination_handle:
                 while True:
@@ -152,7 +169,7 @@ class FullFidelityContentStore:
                 destination_handle.flush()
                 os.fsync(destination_handle.fileno())
 
-            after = source_path.stat()
+            after = source_fs.stat()
             before_signature = (before.st_size, before.st_mtime_ns)
             after_signature = (after.st_size, after.st_mtime_ns)
             if before_signature != after_signature or size != after.st_size:
@@ -162,14 +179,18 @@ class FullFidelityContentStore:
             suffix = _suffix_for_media_type(media_type)
             relative = Path(_CONTENT_DIR) / _HASH_ALGORITHM / f"{digest_hex}{suffix}"
             destination = self.run_root / relative
-            if destination.exists():
-                if destination.stat().st_size != size or self._file_sha256(destination) != digest_hex:
+            destination_fs = _filesystem_path(destination)
+            if destination_fs.exists():
+                if (
+                    destination_fs.stat().st_size != size
+                    or self._file_sha256(destination_fs) != digest_hex
+                ):
                     raise RuntimeError(f"content hash collision at {destination}")
             else:
-                temp_path.replace(destination)
+                temp_path.replace(destination_fs)
             if os.name != "nt":
                 try:
-                    destination.chmod(0o600)
+                    destination_fs.chmod(0o600)
                 except OSError:
                     pass
             return ContentReference(
@@ -195,19 +216,22 @@ class FullFidelityContentStore:
         return digest.hexdigest()
 
     def _write_once(self, destination: Path, payload: bytes) -> None:
-        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination_fs = _filesystem_path(destination)
+        destination_fs.parent.mkdir(parents=True, exist_ok=True)
         if os.name != "nt":
             try:
-                destination.parent.chmod(0o700)
+                destination_fs.parent.chmod(0o700)
             except OSError:
                 pass
-        if destination.exists():
-            if destination.read_bytes() != payload:
+        if destination_fs.exists():
+            if destination_fs.read_bytes() != payload:
                 raise RuntimeError(f"content hash collision at {destination}")
             return
 
-        fd, temp_name = tempfile.mkstemp(prefix=".execweave-content-", dir=destination.parent)
-        temp_path = Path(temp_name)
+        fd, temp_name = tempfile.mkstemp(
+            prefix=".execweave-content-", dir=destination_fs.parent
+        )
+        temp_path = _filesystem_path(Path(temp_name))
         try:
             if os.name != "nt":
                 try:
@@ -219,15 +243,15 @@ class FullFidelityContentStore:
                 handle.flush()
                 os.fsync(handle.fileno())
             try:
-                temp_path.replace(destination)
+                temp_path.replace(destination_fs)
             except OSError:
-                if destination.exists() and destination.read_bytes() == payload:
+                if destination_fs.exists() and destination_fs.read_bytes() == payload:
                     temp_path.unlink(missing_ok=True)
                 else:
                     raise
             if os.name != "nt":
                 try:
-                    destination.chmod(0o600)
+                    destination_fs.chmod(0o600)
                 except OSError:
                     pass
         finally:
