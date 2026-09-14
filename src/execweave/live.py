@@ -8,6 +8,7 @@ from collections import deque
 from . import live_core as _core
 from .conversation_records import conversation_index_payload
 from .dashboard_shell import DASHBOARD_HTML
+from .content_store import _filesystem_path
 from .graph import logical_event_key
 from .viewer_limits import resolve_viewer_limits
 from .viewer_flow_layout import layers_of
@@ -84,6 +85,7 @@ def _build_execution_graph_without_internal_hooks(*args, **kwargs):
 def _handler_factory(state, token: str):
     base_handler = _base_handler_factory(state, token)
     run_root = state.event_path.parent.resolve()
+    run_root_fs = _filesystem_path(run_root)
 
     class Handler(base_handler):
         def _live_conversation_index(self) -> dict[str, object] | None:
@@ -134,9 +136,9 @@ def _handler_factory(state, token: str):
                 self._send(b"Not found", "text/plain; charset=utf-8", 404)
                 return
             relative = request_path.lstrip("/")
-            target = (run_root / relative).resolve(strict=False)
+            target = (run_root_fs / relative).resolve(strict=False)
             try:
-                target.relative_to(run_root)
+                target.relative_to(run_root_fs)
             except ValueError:
                 self._send(b"Not found", "text/plain; charset=utf-8", 404)
                 return

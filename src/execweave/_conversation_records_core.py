@@ -4,6 +4,7 @@ import json
 import re
 from pathlib import Path
 from typing import Any
+from .content_store import _filesystem_path
 
 from .agent_topology import (
     COMPLETENESS_ROUTING_ONLY,
@@ -108,8 +109,9 @@ def _provider(source: dict[str, Any] | None, content_kind: str) -> str:
 
 def _run_local_path(root: Path, relative: str) -> Path | None:
     try:
-        candidate = (root / relative).resolve(strict=False)
-        candidate.relative_to(root)
+        root_fs = _filesystem_path(root)
+        candidate = (root_fs / relative).resolve(strict=False)
+        candidate.relative_to(root_fs)
     except (OSError, RuntimeError, ValueError):
         return None
     return candidate if candidate.is_file() else None

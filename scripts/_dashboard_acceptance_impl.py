@@ -30,6 +30,7 @@ from execweave.http_proxy import ProxyConfig, create_proxy_server
 from execweave.schema import SCHEMA_VERSION
 from execweave.semantic import merge_semantic_sidecar
 from execweave.viewer_projection import write_graph_html
+from execweave.content_store import _filesystem_path
 from playwright.sync_api import sync_playwright
 
 _PROVIDER = "offline-ollama-fixture"
@@ -131,9 +132,10 @@ def _content_value(root: Path, event: dict[str, object]) -> object:
     relative = attrs.get("content_path")
     if not isinstance(relative, str) or not relative:
         return None
-    target = (root / relative).resolve(strict=False)
+    root_fs = _filesystem_path(root)
+    target = (root_fs / relative).resolve(strict=False)
     try:
-        target.relative_to(root.resolve())
+        target.relative_to(root_fs)
     except ValueError:
         return None
     try:
@@ -154,10 +156,11 @@ def _all_content_referenced(root: Path, events: list[dict[str, object]]) -> bool
         attrs = event.get("attributes")
         if isinstance(attrs, dict) and isinstance(attrs.get("content_path"), str):
             referenced.add(str(attrs["content_path"]).replace("\\", "/"))
-    content_root = root / "content"
+    root_fs = _filesystem_path(root)
+    content_root = _filesystem_path(root / "content")
     actual = (
         {
-            path.relative_to(root).as_posix()
+            path.relative_to(root_fs).as_posix()
             for path in content_root.rglob("*")
             if path.is_file()
         }
