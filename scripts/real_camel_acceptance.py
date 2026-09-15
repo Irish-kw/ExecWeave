@@ -57,6 +57,7 @@ class ObservedOllamaModel(OllamaModel):
             status="request",
             request=json.loads(json.dumps(messages, ensure_ascii=False, default=_json_default)),
             request_message_count=len(messages),
+            task=self._adapter.active_task_for(self._agent_holder.get("ref")),
             endpoint=self._url,
             boundary="camel.BaseModelBackend.run",
         )
@@ -72,6 +73,7 @@ class ObservedOllamaModel(OllamaModel):
             response_observed=failure is None,
             failure_type=type(failure).__name__ if failure is not None else None,
             result_type=type(result).__name__ if result is not None else None,
+            task=self._adapter.active_task_for(self._agent_holder.get("ref")),
             boundary="camel.BaseModelBackend.run",
         )
 
@@ -181,11 +183,12 @@ def main() -> int:
         node = workforce._children[-1]
         holder["ref"] = adapter.entity("agent", node.node_id, name=description, attributes={"provider": "camel"})
 
+    pipeline_prompts = [
+        f"Write one concise factual sentence explaining that this acceptance uses the local Ollama endpoint at {args.endpoint}.",
+        f"Write one concise factual sentence explaining that the model under test is {args.model}.",
+    ]
     workforce.add_parallel_pipeline_tasks(
-        [
-            f"Write one concise factual sentence explaining that this acceptance uses the local Ollama endpoint at {args.endpoint}.",
-            f"Write one concise factual sentence explaining that the model under test is {args.model}.",
-        ],
+        pipeline_prompts,
         auto_depend=False,
         task_id_prefix="camel-real",
     ).pipeline_build()
@@ -194,9 +197,18 @@ def main() -> int:
         root.id,
         name=root.content,
         owner=coordinator,
+        content=root.content,
         lifecycle_source="execweave_workforce_entrypoint",
         ownership_basis="configured_coordinator",
     )
+    for index, prompt in enumerate(pipeline_prompts):
+        adapter.task_created(
+            f"camel-real_{index}_0",
+            name=prompt,
+            content=prompt,
+            content_kind="task_prompt",
+            task_source="workforce_pipeline_definition",
+        )
     adapter.task_assigned(
         root_ref,
         coordinator,

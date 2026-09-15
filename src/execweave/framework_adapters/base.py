@@ -33,6 +33,7 @@ CANONICAL_EVENT_TYPES = frozenset(
     {
         "AGENT_CREATED", "AGENT_STARTED", "AGENT_STOPPED",
         "TASK_CREATED", "TASK_ASSIGNED", "TASK_STARTED", "TASK_UPDATED",
+        "TASK_CONTENT_RECORDED",
         "TASK_COMPLETED", "TASK_FAILED",
         "MESSAGE_SENT", "MESSAGE_RECEIVED", "MESSAGE_UNROUTED",
         "MODEL_REQUEST", "MODEL_RESPONSE", "MODEL_FAILURE",
@@ -298,6 +299,8 @@ class TaskRecord:
     task: EntityRef
     owner: EntityRef | None = None
     parent_task: EntityRef | None = None
+    content: str | None = None
+    content_kind: str = "task_prompt"
     attributes: Mapping[str, Any] = field(default_factory=dict)
 
 
@@ -391,9 +394,38 @@ class AdapterContext:
         return record.agent
 
     def record_task(self, record: TaskRecord, *, event_type: str = "TASK_CREATED") -> EntityRef:
-        self.emit(event_type, event_type, source=record.owner, target=record.task, attributes={"parent_task_id": record.parent_task.id if record.parent_task else None, **dict(record.attributes)})
+        content_reference = None
+        if record.content is not None:
+            content_kind = record.content_kind
+            if "." not in content_kind:
+                content_kind = f"{self.framework}.{content_kind}"
+            content_reference = self.content.put_text(record.content, content_kind=content_kind)
+        task_attributes = {
+            "parent_task_id": record.parent_task.id if record.parent_task else None,
+            **self.content.reference_attributes(content_reference),
+            **dict(record.attributes),
+        }
+        self.emit(event_type, event_type, source=record.owner, target=record.task, attributes=task_attributes)
         if record.parent_task is not None:
             self.emit("TASK_CREATED", "PARENT_TASK", source=record.parent_task, target=record.task, attributes={"parent_task_id": record.parent_task.id})
+        if content_reference is not None:
+            content = EntityRef(
+                "observed_content",
+                f"observed-content:task:sha256:{content_reference.sha256}",
+                content_reference.content_kind,
+                content_reference.to_dict(),
+            )
+            self.emit(
+                "TASK_CONTENT_RECORDED",
+                "HAS_TASK_CONTENT",
+                source=record.task,
+                target=content,
+                attributes={
+                    "task_id": record.task.id,
+                    "conversation_scope": "task",
+                    **self.content.reference_attributes(content_reference),
+                },
+            )
         return record.task
 
     def record_message(self, record: MessageRecord) -> EntityRef:

@@ -11,7 +11,7 @@ from .base import AdapterCapabilities, AdapterContext, AgentRecord, EntityRef, F
 class CAMELAdapter(FrameworkAdapter):
     framework_name = "camel"
     capabilities = AdapterCapabilities(
-        events=("AGENT_CREATED", "AGENT_STARTED", "AGENT_STOPPED", "TASK_CREATED", "TASK_ASSIGNED", "TASK_STARTED", "TASK_UPDATED", "TASK_COMPLETED", "TASK_FAILED", "MESSAGE_SENT", "MESSAGE_RECEIVED", "MESSAGE_UNROUTED", "MODEL_REQUEST", "MODEL_RESPONSE", "MODEL_FAILURE"),
+        events=("AGENT_CREATED", "AGENT_STARTED", "AGENT_STOPPED", "TASK_CREATED", "TASK_ASSIGNED", "TASK_STARTED", "TASK_UPDATED", "TASK_COMPLETED", "TASK_FAILED", "TASK_CONTENT_RECORDED", "MESSAGE_SENT", "MESSAGE_RECEIVED", "MESSAGE_UNROUTED", "MODEL_REQUEST", "MODEL_RESPONSE", "MODEL_FAILURE"),
         content_modes=("metadata_only", "content_ref_only", "prompt_only", "prompt_and_response"),
         authoritative_surfaces=("camel.societies.workforce.WorkforceCallback", "camel.models.BaseModelBackend.run", "camel.models.BaseModelBackend.arun"),
         known_limitations=("WorkforceCallback LogEvent does not expose the emitting worker or recipient; those log messages are explicitly marked MESSAGE_UNROUTED and correlated to the observed process instead of being assigned to a guessed agent.", "A created worker is not treated as assigned until CAMEL reports a task assignment."),
@@ -21,6 +21,7 @@ class CAMELAdapter(FrameworkAdapter):
         super().__init__(context)
         self._agents: dict[str, EntityRef] = {}
         self._tasks: dict[str, EntityRef] = {}
+        self._active_tasks_by_agent: dict[str, EntityRef] = {}
         self._message_counter = 0
 
     @classmethod
@@ -44,17 +45,39 @@ class CAMELAdapter(FrameworkAdapter):
     def agent_stopped(self, agent: EntityRef, **attributes: Any) -> None:
         self.emit("AGENT_STOPPED", "AGENT_STOPPED", source=agent, attributes=attributes)
 
-    def task_event(self, event_type: str, native_id: str | int, *, name: str | None = None, owner: EntityRef | None = None, parent: EntityRef | None = None, **attributes: Any) -> EntityRef:
-        task = self.task(native_id, name=name, provider="camel", **attributes)
+    def task_event(self, event_type: str, native_id: str | int, *, name: str | None = None, owner: EntityRef | None = None, parent: EntityRef | None = None, content: str | None = None, content_kind: str = "task_prompt", **attributes: Any) -> EntityRef:
+        existing = self._tasks.get(str(native_id))
+        if existing is not None and name is None and content is None and not attributes:
+            task = existing
+        else:
+            entity_attributes = dict(attributes)
+            if content is not None:
+                entity_attributes.setdefault("task_prompt", content)
+            task = self.task(native_id, name=name, provider="camel", **entity_attributes)
         self._tasks[str(native_id)] = task
-        self.context.record_task(TaskRecord(task, owner=owner, parent_task=parent, attributes=attributes), event_type=event_type)
+        self.context.record_task(
+            TaskRecord(
+                task,
+                owner=owner,
+                parent_task=parent,
+                content=content,
+                content_kind=content_kind,
+                attributes=attributes,
+            ),
+            event_type=event_type,
+        )
         return task
 
     def task_created(self, native_id: str | int, **kwargs: Any) -> EntityRef:
         return self.task_event("TASK_CREATED", native_id, **kwargs)
 
     def task_assigned(self, task: EntityRef, agent: EntityRef, **attributes: Any) -> None:
+        self._active_tasks_by_agent[agent.id] = task
         self.emit("TASK_ASSIGNED", "ASSIGNED_TO", source=task, target=agent, attributes=attributes)
+
+    def active_task_for(self, agent: EntityRef | None) -> EntityRef | None:
+        """Return the latest provider-observed task assigned to an agent."""
+        return self._active_tasks_by_agent.get(agent.id) if agent is not None else None
 
     def task_started(self, task: EntityRef, agent: EntityRef | None = None, **attributes: Any) -> None:
         self.emit("TASK_STARTED", "TASK_STARTED", source=agent or task, target=task, attributes=attributes)
@@ -170,7 +193,11 @@ class CAMELAdapter(FrameworkAdapter):
         if name == "log_worker_created":
             return self.agent_created(_native(payload, "worker_id", "id", "name"), name=_string(_value(payload, "name", "role")), role=_string(_value(payload, "role", "worker_type")))
         if name == "log_task_created":
-            return self.task_created(_native(payload, "task_id", "id", "name"), name=_string(_value(payload, "name", "description")))
+            task_key = _native(payload, "task_id", "id", "name")
+            existing = self._tasks.get(str(task_key))
+            if existing is not None:
+                return existing
+            return self.task_created(task_key, name=_string(_value(payload, "name", "description")))
         if name == "log_task_assigned":
             task_key = _native(payload, "task_id", "id", "name")
             task = self._tasks.get(str(task_key)) or self.task_created(task_key)
