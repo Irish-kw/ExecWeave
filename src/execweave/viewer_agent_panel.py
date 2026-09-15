@@ -372,6 +372,10 @@ function execweaveNodeCardsBase(node){
     add('Command',a.command);
     add('Working directory',a.cwd);
     add('Backend',a.backend);
+  }else if(kind==='task'){
+    add('Task',a.task_prompt||a.prompt||a.description||node?.name);
+    add('Prompt',a.task_prompt||a.prompt||a.description);
+    add('Provider',a.provider);
   }else if(kind==='network_endpoint'){
     const endpoints=Array.isArray(a.endpoints)?a.endpoints:[];
     if(endpoints.length){
