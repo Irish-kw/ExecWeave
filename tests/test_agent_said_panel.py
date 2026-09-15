@@ -69,6 +69,8 @@ def test_framework_agent_falls_back_to_authoritatively_assigned_task() -> None:
     assert "String(edge.relation||'')==='TASK_STARTED'" in source
     assert "direct.at(-1)||owned.at(-1)||started.at(-1)" in source
     assert "execweaveFillAssignedTask" in source
+    assert "attrs(node).conversation_scope==='framework_agent'" in source
+    assert "card('Agent communication',frameworkCommunication)" in source
 
 
 def test_a_run_of_unexposed_turns_collapses_but_still_names_its_recipients(

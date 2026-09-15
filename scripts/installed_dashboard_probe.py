@@ -319,9 +319,9 @@ def framework_probe(browser, cli: Path, out: Path) -> dict:
         for agent_id in agent_ids:
             page.locator(f'.node[data-id="{agent_id}"]').click()
             agent_details = page.locator("#details").inner_text()
-            assert prompt in agent_details
+            assert prompt in agent_details, (framework, agent_id, agent_details)
             assert "TASK\nNot observed." not in agent_details
-            assert message in agent_details
+            assert message in agent_details, (framework, agent_id, agent_details)
         page.screenshot(path=str(run / "framework-dashboard.png"))
         assert not errors, errors
         page.close()

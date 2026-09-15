@@ -458,8 +458,9 @@ function render(node){
   const isRoot=nodeHasRootAuthority(node)||previewUsesRootRenderer(preview);
   const rounds=(isRoot?rootRounds(messages,path||'/root'):childRounds(messages,path)).map(round=>execweaveFillAssignedTask(round,node,isRoot));
   const tools=toolCallsFor(String(node.id||''));
-  const appendTools=()=>{if(tools)details.appendChild(card('Tools',tools))};
-  if(rounds.length<2){const fallback={cards:isRoot?[['Prompt',''],['Final response','']]:[['Task',''],['Thinking',''],['Response','']]};details.appendChild(roundView(rounds[0]||execweaveFillAssignedTask(fallback,node,isRoot)));appendTools();return true}
+  const frameworkCommunication=attrs(node).conversation_scope==='framework_agent'?uniqueTexts(messages.filter(message=>isObserved(message)&&!isInjected(message)&&String(message?.kind||'')==='agent_message')).join('\n\n'):'';
+  const appendExtras=()=>{if(frameworkCommunication)details.appendChild(card('Agent communication',frameworkCommunication));if(tools)details.appendChild(card('Tools',tools))};
+  if(rounds.length<2){const fallback={cards:isRoot?[['Prompt',''],['Final response','']]:[['Task',''],['Thinking',''],['Response','']]};details.appendChild(roundView(rounds[0]||execweaveFillAssignedTask(fallback,node,isRoot)));appendExtras();return true}
   // A subagent borrows the moment and the wording of the unique canonical root round
   // it belongs to. If root identity is ambiguous, the child keeps its own timestamp.
   const runs=isRoot?rounds:runRounds();
@@ -469,7 +470,7 @@ function render(node){
   const ordered=[...rounds].reverse(),state=foldStateFor(node);
   list.appendChild(roundView(ordered[0]));
   for(const round of ordered.slice(1)){const named=naming(round);list.appendChild(foldedRound(round,clock(named.start||round.start,sameDay),named.label||'',state))}
-  details.appendChild(list);appendTools();return true;
+  details.appendChild(list);appendExtras();return true;
 }
 function graphNode(id){const core=window.__execweaveCore;if(!core)return null;const graph=core.getDisplayGraph?.()||core.getGraph?.()||{};return (graph.nodes||[]).find(node=>String(node?.id||'')===String(id||''))||null}
 function syncSelection(){const selected=document.querySelector('.node.selected');if(!selected){selectedNode=null;selectedConversationSignature='';return}const node=graphNode(selected.dataset.id);if(node)render(node);else selectedNode=null;if(!node)selectedConversationSignature=''}
