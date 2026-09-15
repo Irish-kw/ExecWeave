@@ -418,6 +418,26 @@ function toolOccurrenceSection(node){
   });
   return section;
 }
+function execweaveAssignedTaskText(agent){
+  if(!agent||String(agent.type||'')!=='agent')return '';
+  const graph=rawGraph(),nodes=Array.isArray(graph.nodes)?graph.nodes:[],edges=Array.isArray(graph.edges)?graph.edges:[];
+  const nodeMap=new Map(nodes.filter(node=>node&&node.id).map(node=>[String(node.id),node]));
+  const exactAssignment=['ASSIGNED','AGENT','TASK'].join('_');
+  const direct=edges.filter(edge=>edge&&String(edge.target||'')===String(agent.id||'')&&['ASSIGNED_TO',exactAssignment].includes(String(edge.relation||''))).sort((a,b)=>(Number(a.first_sequence)||0)-(Number(b.first_sequence)||0));
+  const owned=edges.filter(edge=>edge&&String(edge.source||'')===String(agent.id||'')&&String(edge.relation||'')==='TASK_CREATED').sort((a,b)=>(Number(a.first_sequence)||0)-(Number(b.first_sequence)||0));
+  const started=edges.filter(edge=>edge&&String(edge.source||'')===String(agent.id||'')&&String(edge.relation||'')==='TASK_STARTED').sort((a,b)=>(Number(a.first_sequence)||0)-(Number(b.first_sequence)||0));
+  const edge=direct.at(-1)||owned.at(-1)||started.at(-1);if(!edge)return '';
+  const taskId=direct.length?edge.source:edge.target,task=nodeMap.get(String(taskId||''));
+  if(!task||String(task.type||'')!=='task')return '';
+  const a=attrs(task);return commandText(a.task_prompt||a.prompt||a.description||task.name);
+}
+function execweaveFillAssignedTask(round,node,isRoot){
+  const task=execweaveAssignedTaskText(node);if(!task)return round;
+  const value=round||{cards:[]},cards=Array.isArray(value.cards)?value.cards.map(card=>[card[0],card[1]]):[];
+  const label=isRoot?'Prompt':'Task',index=cards.findIndex(card=>String(card[0]||'')===label);
+  if(index<0)cards.unshift([label,task]);else if(!commandText(cards[index][1]))cards[index][1]=task;
+  return{...value,cards};
+}
 function renderNode(node){
   const rows=nodeCards(node);
   if(!rows.length)return false;
@@ -436,10 +456,11 @@ function render(node){
   selectedNode=node;selectedConversationSignature=conversationSignature(node);detailsEmpty.hidden=true;details.replaceChildren();
   const record=recordFor(node),preview=record?.conversation_preview||{},path=String(preview.agent_path||nodePath(node)||'').trim(),messages=Array.isArray(preview.messages)?preview.messages:[];
   const isRoot=nodeHasRootAuthority(node)||previewUsesRootRenderer(preview);
-  const rounds=isRoot?rootRounds(messages,path||'/root'):childRounds(messages,path);
+  const rounds=(isRoot?rootRounds(messages,path||'/root'):childRounds(messages,path)).map(round=>execweaveFillAssignedTask(round,node,isRoot));
   const tools=toolCallsFor(String(node.id||''));
-  const appendTools=()=>{if(tools)details.appendChild(card('Tools',tools))};
-  if(rounds.length<2){details.appendChild(roundView(rounds[0]||{cards:isRoot?[['Prompt',''],['Final response','']]:[['Task',''],['Thinking',''],['Response','']]}));appendTools();return true}
+  const frameworkCommunication=attrs(node).conversation_scope==='framework_agent'?uniqueTexts(messages.filter(message=>isObserved(message)&&!isInjected(message)&&String(message?.kind||'')==='agent_message')).join('\n\n'):'';
+  const appendTools=()=>{if(frameworkCommunication)details.appendChild(card('Agent communication',frameworkCommunication));if(tools)details.appendChild(card('Tools',tools))};
+  if(rounds.length<2){const fallback={cards:isRoot?[['Prompt',''],['Final response','']]:[['Task',''],['Thinking',''],['Response','']]};details.appendChild(roundView(rounds[0]||execweaveFillAssignedTask(fallback,node,isRoot)));appendTools();return true}
   // A subagent borrows the moment and the wording of the unique canonical root round
   // it belongs to. If root identity is ambiguous, the child keeps its own timestamp.
   const runs=isRoot?rounds:runRounds();

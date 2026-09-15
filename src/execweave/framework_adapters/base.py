@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import re
+import sys
 import threading
 import time
 from dataclasses import asdict, dataclass, field
@@ -18,6 +19,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, Mapping
 from uuid import uuid4
+
+import psutil
 
 from ..content_store import ContentReference, FullFidelityContentStore
 from ..schema import SCHEMA_VERSION
@@ -135,6 +138,20 @@ class ProcessRef:
             attributes["executable"] = self.executable
         identity = f"{self.pid}:{self.create_time}" if self.create_time is not None else str(self.pid)
         return EntityRef("process_reference", f"process-reference:{identity}", self.executable or f"pid {self.pid}", attributes)
+
+
+def _current_process_ref() -> ProcessRef:
+    """Return the authoritative identity of the adapter's current process."""
+    process = psutil.Process(os.getpid())
+    try:
+        create_time = process.create_time()
+    except (psutil.AccessDenied, psutil.NoSuchProcess, psutil.ZombieProcess):
+        create_time = None
+    try:
+        executable = process.exe()
+    except (psutil.AccessDenied, psutil.NoSuchProcess, psutil.ZombieProcess):
+        executable = sys.executable
+    return ProcessRef(os.getpid(), create_time, executable or sys.executable)
 
 
 @dataclass(frozen=True)
@@ -362,6 +379,12 @@ class AdapterContext:
 
     @classmethod
     def from_environment(cls, framework: str, *, capture_mode: CaptureMode = "metadata_only", content_root: str | Path | None = None, run_id: str | None = None, session_id: str | None = None, conversation_id: str | None = None, process: ProcessRef | None = None) -> "AdapterContext":
+        if (
+            process is None
+            and os.environ.get("EXECWEAVE_SEMANTIC_SIDECAR")
+            and os.environ.get("EXECWEAVE_SESSION_ID")
+        ):
+            process = _current_process_ref()
         return cls(framework=framework, run_id=run_id, session_id=session_id, conversation_id=conversation_id, content_root=content_root, capture_policy=ContentCapturePolicy(capture_mode), process=process)
 
     def entity(self, entity_type: str, native_id: str | int | None, *, name: str | None = None, attributes: Mapping[str, Any] | None = None) -> EntityRef:

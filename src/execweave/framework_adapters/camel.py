@@ -51,7 +51,10 @@ class CAMELAdapter(FrameworkAdapter):
             task = existing
         else:
             entity_attributes = dict(attributes)
-            if content is not None:
+            if content is not None and self.context.capture_policy.mode in {
+                "prompt_only",
+                "prompt_and_response",
+            }:
                 entity_attributes.setdefault("task_prompt", content)
             task = self.task(native_id, name=name, provider="camel", **entity_attributes)
         self._tasks[str(native_id)] = task

@@ -30,6 +30,7 @@ class MetaGPTAdapter(FrameworkAdapter):
             "TASK_COMPLETED",
             "TASK_FAILED",
             "TASK_UPDATED",
+            "TASK_CONTENT_RECORDED",
             "MESSAGE_SENT",
             "MESSAGE_RECEIVED",
             "MODEL_REQUEST",
@@ -96,10 +97,18 @@ class MetaGPTAdapter(FrameworkAdapter):
         *,
         owner: EntityRef | None = None,
         name: str | None = None,
+        content: str | None = None,
+        content_kind: str = "task_prompt",
         status: str = "created",
         **attributes: Any,
     ) -> EntityRef:
-        task = self.task(task_id, name=name, provider="metagpt", **attributes)
+        entity_attributes = dict(attributes)
+        if content is not None and self.context.capture_policy.mode in {
+            "prompt_only",
+            "prompt_and_response",
+        }:
+            entity_attributes.setdefault("task_prompt", content)
+        task = self.task(task_id, name=name, provider="metagpt", **entity_attributes)
         event = {
             "created": "TASK_CREATED",
             "started": "TASK_STARTED",
@@ -108,7 +117,16 @@ class MetaGPTAdapter(FrameworkAdapter):
         }.get(status)
         if event is None:
             raise ValueError(f"unsupported MetaGPT task status: {status}")
-        self.context.record_task(TaskRecord(task, owner=owner, attributes=attributes), event_type=event)
+        self.context.record_task(
+            TaskRecord(
+                task,
+                owner=owner,
+                content=content,
+                content_kind=content_kind,
+                attributes=attributes,
+            ),
+            event_type=event,
+        )
         return task
 
     def observe_message(

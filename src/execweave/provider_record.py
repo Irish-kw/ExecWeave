@@ -183,6 +183,7 @@ def record_provider_to_viewer(
             collect_network=collect_network,
             keep_raw_trace=keep_raw_trace,
             open_browser=False,
+            integrate_semantic=False,
         )
     finally:
         _restore_environment(previous_environment)

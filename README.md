@@ -328,5 +328,13 @@ Paper context: Li et al., *CAMEL: Communicative Agents for "Mind" Exploration of
 
 ```python
 from execweave.framework_adapters import AdapterContext, CAMELAdapter
-adapter = CAMELAdapter(AdapterContext.from_environment("camel"))
+context = AdapterContext.from_environment("camel", capture_mode="prompt_and_response")
+adapter = CAMELAdapter(context)
+task = adapter.task_created("task-1", content="Inspect the endpoint and report completion.")
 ```
+
+When the application is launched by `execweave record` or `execweave live`,
+the adapter automatically joins that run and the finished Dashboard is built
+from the merged runtime plus framework evidence. Task prompts and routed
+messages remain local content references and are visible from their task and
+agent nodes.

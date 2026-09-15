@@ -37,6 +37,8 @@ from .viewer import (
 LIVE_DELTA_HISTORY = 256
 LIVE_DELTA_HISTORY_BYTES = 8 * 1024 * 1024
 _SEMANTIC_ENV = "EXECWEAVE_SEMANTIC_SIDECAR"
+_RUN_ID_ENV = "EXECWEAVE_RUN_ID"
+_SESSION_ID_ENV = "EXECWEAVE_SESSION_ID"
 _LIVE_TOKEN_HEADER = "X-ExecWeave-Token"
 
 _FINAL_THEME_CSS = """
@@ -737,16 +739,24 @@ def run_live(
         webbrowser.open(authenticated_live_url)
 
     return_code = 1
-    previous_semantic_sidecar = os.environ.get(_SEMANTIC_ENV)
-    os.environ[_SEMANTIC_ENV] = str(semantic_path)
+    environment_updates = {
+        _SEMANTIC_ENV: str(semantic_path),
+        _RUN_ID_ENV: session_id,
+        _SESSION_ID_ENV: session_id,
+    }
+    previous_environment = {
+        key: os.environ.get(key) for key in environment_updates
+    }
+    os.environ.update(environment_updates)
     try:
         try:
             return_code = collector.run(command)
         finally:
-            if previous_semantic_sidecar is None:
-                os.environ.pop(_SEMANTIC_ENV, None)
-            else:
-                os.environ[_SEMANTIC_ENV] = previous_semantic_sidecar
+            for key, value in previous_environment.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
 
         validation = validate_event_stream(event_path)
         if not validation.valid:

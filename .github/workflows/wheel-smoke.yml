@@ -64,7 +64,7 @@ jobs:
           python -m pip install --no-index --find-links acceptance-wheelhouse "$wheel[e2e]"
       - name: Provision Chromium and OS libraries
         run: python -m playwright install --with-deps chromium
-      - name: Clean isolated wheel Dashboard and GIF acceptance
+      - name: Clean isolated wheel Dashboard, framework parity, and GIF acceptance
         run: python scripts/check_installed_dashboard.py --wheelhouse acceptance-wheelhouse
       - name: Upload installed-product browser evidence
         if: always()

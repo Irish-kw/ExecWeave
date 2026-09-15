@@ -34,7 +34,7 @@ content reference; review the run directory before sharing it.
 Example:
 
 ```python
-from execweave.framework_adapters import AdapterContext, CAMELAdapter, ContentCapturePolicy
+from execweave.framework_adapters import AdapterContext, CAMELAdapter
 
 context = AdapterContext.from_environment(
     "camel",
@@ -42,7 +42,8 @@ context = AdapterContext.from_environment(
 )
 adapter = CAMELAdapter(context)
 worker = adapter.agent_created("worker-1", name="Builder", role="builder")
-task = adapter.task_created("task-1", name="Build the example")
+prompt = "Build the example and report completion."
+task = adapter.task_created("task-1", name="Build the example", content=prompt)
 adapter.task_assigned(task, worker)
 ```
 
@@ -55,9 +56,9 @@ model provider, credentials, or hidden provider state are observable.
 
 | Framework | Verified version/ref | Agent | Task | Message | Model | Tool | Conversation | Real E2E |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| CAMEL | `camel-ai 0.2.91a7`; `WorkforceCallback` | callback smoke | callback smoke | callback/stream smoke | wrapper boundary | not exposed by callback | run-scoped IDs | PASS: real Workforce + local Ollama at `127.0.0.1:12345`; 2 parallel tasks, 5 model calls, root `TaskState.DONE` |
-| AutoGen | `autogen-agentchat/core 0.7.5`; AgentChat/Core events | event smoke | wrapper-supplied | real message classes | official Ollama client boundary | real tool event classes | run-scoped IDs | PASS: real `RoundRobinGroupChat` + local Ollama; 2 agents, 4 model calls, 5 AgentChat messages, task contract completed |
-| MetaGPT | `metagpt 1.0.0`; `Role`/`Action`/`Message` | real object smoke | action/task smoke | real `Message` object | native `OllamaLLM` `/api/chat` boundary | parser/retry API | run-scoped IDs | PASS: real `Role.run` + `ActionNode.fill`; 1 model call/response, 2 messages, structured parse completed without retry |
+| CAMEL | `camel-ai 0.2.91a7`; `WorkforceCallback` | callback smoke | lifecycle + prompt content | callback/stream smoke | wrapper boundary | not exposed by callback | per-agent routed content | PASS: real Workforce + local Ollama at `127.0.0.1:12345`; 2 parallel tasks, 5 model calls, root `TaskState.DONE` |
+| AutoGen | `autogen-agentchat/core 0.7.5`; AgentChat/Core events | event smoke | lifecycle + prompt content | real message classes | official Ollama client boundary | real tool event classes | per-agent routed content | PASS: real `RoundRobinGroupChat` + local Ollama; 2 agents, 4 model calls, 5 AgentChat messages, task contract completed |
+| MetaGPT | `metagpt 1.0.0`; `Role`/`Action`/`Message` | real object smoke | lifecycle + prompt content | real `Message` object | native `OllamaLLM` `/api/chat` boundary | parser/retry API | per-agent routed content | PASS: real `Role.run` + `ActionNode.fill`; 1 model call/response, 2 messages, structured parse completed without retry |
 
 AutoGen's official documentation separates Core, AgentChat, and Extensions
 layers, and identifies agent messages, internal events, model clients, and tool
@@ -85,12 +86,20 @@ the [MetaGPT repository](https://github.com/FoundationAgents/MetaGPT).
 
 ## Live and finished runs
 
-When `execweave live` is used, set `EXECWEAVE_SEMANTIC_SIDECAR` to the live run's
-`semantic.jsonl` path before the framework starts. The live dashboard tails the
-same semantic stream and the same runtime event stream that are used to produce
-the finished `events.semantic.jsonl`, `graph.semantic.json`, and
-`viewer.semantic.html` artifacts. Live process references are provisional;
-finished merge performs the final exact PID/create-time resolution.
+`execweave record -- <command>` and `execweave live -- <command>` now inject the
+run-specific `EXECWEAVE_SEMANTIC_SIDECAR`, `EXECWEAVE_RUN_ID`, and
+`EXECWEAVE_SESSION_ID` values into the child command automatically. A framework
+integration using `AdapterContext.from_environment(...)` therefore joins the
+same runtime without manual environment setup and receives an exact
+PID/create-time process reference. `record` merges a non-empty framework
+sidecar into `events.semantic.jsonl` and builds `graph.json` and `viewer.html`
+from that merged stream. Provider-specific recorders retain their existing
+layered merge path and do not merge twice. Applications embedding the collector
+without either command must still provide their own run-scoped sidecar.
+
+The live dashboard tails the same semantic stream and runtime event stream used
+for the finished result. Live process references are provisional; the finished
+merge performs the final exact PID/create-time resolution.
 
 An integration is not complete until it checks parity for:
 
@@ -137,3 +146,8 @@ The repeatable full-dashboard acceptance is
 stream, graph, offline viewer, `conversations.json`, `conversations.md`, and a
 `dashboard-audit.json` that checks node/edge/event coverage, content-store
 paths and hashes, per-agent visible messages, and process-reference resolution.
+The cross-platform wheel CI also installs the built wheel into a clean external
+virtual environment and runs all three built-in adapters through the installed
+`execweave record` command. It fails if a framework loses task-prompt content,
+either agent loses the routed conversation, process references remain orphaned,
+or the real Dashboard inspector cannot display the content.

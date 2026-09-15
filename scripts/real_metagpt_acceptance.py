@@ -153,10 +153,15 @@ async def run_acceptance(args: argparse.Namespace) -> dict[str, Any]:
         native_class="metagpt.roles.Role",
     )
     context.emit("AGENT_STARTED", "AGENT_STARTED", source=role_ref)
+    task_prompt = (
+        f"Use the real local Ollama endpoint {args.endpoint} and model {args.model}. "
+        "Return the acceptance result through the ActionNode structured-output contract."
+    )
     task_ref = adapter.observe_task(
         "metagpt-real-task",
         owner=role_ref,
         name="MetaGPT local Ollama structured-output acceptance",
+        content=task_prompt,
         status="created",
         model=args.model,
     )
@@ -223,10 +228,7 @@ async def run_acceptance(args: argparse.Namespace) -> dict[str, Any]:
     )
     requirement = Message(
         id="metagpt-real-input",
-        content=(
-            f"Use the real local Ollama endpoint {args.endpoint} and model {args.model}. "
-            "Return the acceptance result through the ActionNode structured-output contract."
-        ),
+        content=task_prompt,
         role="user",
         cause_by=UserRequirement,
         sent_from="user",

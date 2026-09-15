@@ -10,6 +10,7 @@ import re
 import subprocess
 import sys
 import sysconfig
+import textwrap
 from pathlib import Path
 
 
@@ -160,6 +161,186 @@ def static_probe(browser, manifest: dict, out: Path) -> dict:
     return result
 
 
+FRAMEWORK_FIXTURE = r'''
+import sys
+
+from execweave.framework_adapters import (
+    AdapterContext,
+    AutoGenAdapter,
+    CAMELAdapter,
+    MetaGPTAdapter,
+)
+
+framework = sys.argv[1]
+prompt = f"{framework} installed-wheel task prompt"
+message = f"{framework} planner to worker conversation"
+context = AdapterContext.from_environment(
+    framework,
+    capture_mode="prompt_and_response",
+)
+assert context.process is not None
+
+if framework == "camel":
+    adapter = CAMELAdapter(context)
+    planner = adapter.agent_created("planner", name="Planner", role="planner")
+    worker = adapter.agent_created("worker", name="Worker", role="worker")
+    task = adapter.task_created("task", name="Acceptance task", content=prompt)
+    adapter.task_assigned(task, planner)
+    adapter.task_assigned(task, worker)
+    adapter.message("message", planner, worker, content=message, task=task)
+    adapter.model_call(
+        "call", worker, "llama3.1:8b",
+        request={"messages": [{"role": "user", "content": prompt}]},
+        status="request", task=task,
+    )
+    adapter.model_call(
+        "call", worker, "llama3.1:8b",
+        response={"content": "accepted"}, status="response", task=task,
+    )
+elif framework == "autogen":
+    adapter = AutoGenAdapter(context)
+    planner = adapter.observe_agent("planner", name="Planner", role="planner")
+    worker = adapter.observe_agent("worker", name="Worker", role="worker")
+    task = adapter.observe_task("task", name="Acceptance task", content=prompt)
+    for agent in (planner, worker):
+        context.emit("TASK_ASSIGNED", "ASSIGNED_TO", source=task, target=agent)
+    adapter.observe_message(
+        "message", source=planner, target=worker, content=message, task=task,
+    )
+    adapter.observe_model_call(
+        "call", agent=worker, model_id="llama3.1:8b",
+        request={"messages": [{"role": "user", "content": prompt}]},
+        status="request", task_id=task.id,
+    )
+    adapter.observe_model_call(
+        "call", agent=worker, model_id="llama3.1:8b",
+        response={"content": "accepted"}, status="response", task_id=task.id,
+    )
+elif framework == "metagpt":
+    adapter = MetaGPTAdapter(context)
+    planner = adapter.observe_role("planner", name="Planner", role="planner")
+    worker = adapter.observe_role("worker", name="Worker", role="worker")
+    task = adapter.observe_task("task", name="Acceptance task", content=prompt)
+    for agent in (planner, worker):
+        context.emit("TASK_ASSIGNED", "ASSIGNED_TO", source=task, target=agent)
+    adapter.observe_message(
+        "message", source=planner, target=worker, content=message, task=task,
+    )
+    adapter.observe_model_call(
+        "call", role=worker, model_id="llama3.1:8b",
+        request={"messages": [{"role": "user", "content": prompt}]},
+        status="request", task_id=task.id,
+    )
+    adapter.observe_model_call(
+        "call", role=worker, model_id="llama3.1:8b",
+        response={"content": "accepted"}, status="response", task_id=task.id,
+    )
+else:
+    raise ValueError(framework)
+'''
+
+
+def framework_probe(browser, cli: Path, out: Path) -> dict:
+    """Prove framework parity through the installed wheel and real Dashboard."""
+    fixture = out / "installed-framework-fixture.py"
+    fixture.write_text(textwrap.dedent(FRAMEWORK_FIXTURE), encoding="utf-8")
+    reports = {}
+    for framework in ("camel", "autogen", "metagpt"):
+        run = out / f"framework-{framework}"
+        done = subprocess.run(
+            [
+                str(cli), "record", "--backend", "portable", "--no-files",
+                "--no-network", "--output-dir", str(run), "--",
+                sys.executable, str(fixture), framework,
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=60,
+        )
+        (run / "cli.log").write_text(done.stdout + done.stderr, encoding="utf-8")
+        result = json.loads(done.stdout)
+        assert result["semantic_event_count"] > 0
+        assert Path(result["materialized_event_stream"]).name == "events.semantic.jsonl"
+        for name in ("events.jsonl", "semantic.jsonl", "events.semantic.jsonl", "graph.json", "viewer.html"):
+            assert (run / name).is_file(), (framework, name)
+
+        records = [
+            json.loads(line)
+            for line in (run / "semantic.jsonl").read_text(encoding="utf-8").splitlines()
+            if line
+        ]
+        graph = json.loads((run / "graph.json").read_text(encoding="utf-8"))
+        node_types = {node["type"] for node in graph["nodes"]}
+        relations = {edge["relation"] for edge in graph["edges"]}
+        required_relations = {
+            "ASSIGNED_TO", "CORRELATED_WITH_PROCESS", "HAS_TASK_CONTENT",
+            "HAS_MESSAGE_CONTENT", "HAS_MODEL_CONTENT", "REQUESTS_MODEL_CALL",
+            "MODEL_CALL_RESPONDS",
+        }
+        assert {"agent", "task", "model", "observed_content", "process"} <= node_types
+        assert "process_reference" not in node_types
+        assert required_relations <= relations, (framework, required_relations - relations)
+        assert {record["attributes"]["session_id"] for record in records} == {
+            result["session_id"]
+        }
+
+        task_event = next(record for record in records if record["event_type"] == "TASK_CREATED")
+        task_content = next(
+            record for record in records
+            if record["event_type"] == "TASK_CONTENT_RECORDED"
+        )
+        message_content = [
+            record for record in records
+            if record["event_type"] == "MESSAGE_CONTENT_RECORDED"
+        ]
+        assert len({record["source"]["id"] for record in message_content}) == 2
+        prompt = f"{framework} installed-wheel task prompt"
+        message = f"{framework} planner to worker conversation"
+        task_path = run / task_content["attributes"]["content_ref"]
+        assert task_path.read_text(encoding="utf-8") == prompt
+
+        errors = []
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.on("pageerror", lambda error: errors.append(str(error)))
+        page.on("console", lambda msg: errors.append(msg.text) if msg.type == "error" else None)
+        page.goto((run / "viewer.html").as_uri())
+        page.wait_for_selector(".node")
+        page.locator(f'.node[data-id="{task_event["target"]["id"]}"]').click()
+        task_details = page.locator("#details").inner_text()
+        assert prompt in task_details
+        assert "TASK\nNot observed." not in task_details
+        agent_ids = {
+            record["source"]["id"]
+            for record in records
+            if record["event_type"] == "AGENT_CREATED"
+        }
+        for agent_id in agent_ids:
+            page.locator(f'.node[data-id="{agent_id}"]').click()
+            agent_details = page.locator("#details").inner_text()
+            assert prompt in agent_details, (framework, agent_id, agent_details)
+            assert "TASK\nNot observed." not in agent_details
+            assert message in agent_details, (framework, agent_id, agent_details)
+        page.screenshot(path=str(run / "framework-dashboard.png"))
+        assert not errors, errors
+        page.close()
+        reports[framework] = {
+            "session_id": result["session_id"],
+            "semantic_event_count": result["semantic_event_count"],
+            "node_count": graph["node_count"],
+            "edge_count": graph["edge_count"],
+            "task_prompt_visible": True,
+            "conversation_visible_to_both_agents": True,
+            "process_references_resolved": True,
+            "pass": True,
+        }
+    (out / "INSTALLED_FRAMEWORK_PARITY.json").write_text(
+        json.dumps(reports, indent=2), encoding="utf-8"
+    )
+    return reports
+
+
 
 
 def main() -> int:
@@ -202,6 +383,7 @@ def main() -> int:
             browser = playwright.chromium.launch(**({'executable_path': explicit} if explicit else {}))
             try:
                 result['static'] = static_probe(browser, manifest, out)
+                result['frameworks'] = framework_probe(browser, cli, out)
                 native = runpy.run_path(str(Path(__file__).with_name('live_probe.py')))['native_probe']
                 result['native'] = native(browser, cli, out, export_and_decode)
             finally:

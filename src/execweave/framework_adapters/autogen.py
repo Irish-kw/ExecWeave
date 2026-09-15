@@ -15,6 +15,7 @@ from .base import (
     FrameworkCompatibility,
     MessageRecord,
     ModelCallRecord,
+    TaskRecord,
     ToolCallRecord,
 )
 
@@ -26,6 +27,13 @@ class AutoGenAdapter(FrameworkAdapter):
             "AGENT_CREATED",
             "AGENT_STARTED",
             "AGENT_STOPPED",
+            "TASK_CREATED",
+            "TASK_ASSIGNED",
+            "TASK_STARTED",
+            "TASK_UPDATED",
+            "TASK_COMPLETED",
+            "TASK_FAILED",
+            "TASK_CONTENT_RECORDED",
             "MESSAGE_SENT",
             "MESSAGE_RECEIVED",
             "MODEL_REQUEST",
@@ -85,6 +93,46 @@ class AutoGenAdapter(FrameworkAdapter):
         self._agents[str(native_id)] = agent
         self.context.record_agent(AgentRecord(agent, role=role, process=process, attributes=attributes))
         return agent
+
+    def observe_task(
+        self,
+        task_id: str | int,
+        *,
+        owner: EntityRef | None = None,
+        name: str | None = None,
+        content: str | None = None,
+        content_kind: str = "task_prompt",
+        status: str = "created",
+        **attributes: Any,
+    ) -> EntityRef:
+        """Record an authoritative AutoGen task and its visible task prompt."""
+        entity_attributes = dict(attributes)
+        if content is not None and self.context.capture_policy.mode in {
+            "prompt_only",
+            "prompt_and_response",
+        }:
+            entity_attributes.setdefault("task_prompt", content)
+        task = self.task(task_id, name=name, provider="autogen", **entity_attributes)
+        event = {
+            "created": "TASK_CREATED",
+            "started": "TASK_STARTED",
+            "updated": "TASK_UPDATED",
+            "completed": "TASK_COMPLETED",
+            "failed": "TASK_FAILED",
+        }.get(status)
+        if event is None:
+            raise ValueError(f"unsupported AutoGen task status: {status}")
+        self.context.record_task(
+            TaskRecord(
+                task,
+                owner=owner,
+                content=content,
+                content_kind=content_kind,
+                attributes=attributes,
+            ),
+            event_type=event,
+        )
+        return task
 
     def observe_message(
         self,
