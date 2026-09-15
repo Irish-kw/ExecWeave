@@ -190,12 +190,48 @@ def main() -> int:
         task_id_prefix="camel-real",
     ).pipeline_build()
     root = Task(content="Run the two independent acceptance checks and report completion.", id="camel-real-root")
+    root_ref = adapter.task_created(
+        root.id,
+        name=root.content,
+        owner=coordinator,
+        lifecycle_source="execweave_workforce_entrypoint",
+        ownership_basis="configured_coordinator",
+    )
+    adapter.task_assigned(
+        root_ref,
+        coordinator,
+        assignment_source="execweave_workforce_entrypoint",
+    )
+    adapter.task_started(
+        root_ref,
+        coordinator,
+        lifecycle_source="execweave_workforce_entrypoint",
+    )
 
     try:
         result = workforce.process_task(root)
         result_state = result.state.value if isinstance(result.state, TaskState) else str(result.state)
         result_payload = {"id": result.id, "state": result_state, "result_present": bool(result.result)}
+        if str(result_state).upper() == "DONE":
+            adapter.task_completed(
+                root_ref,
+                coordinator,
+                lifecycle_source="execweave_workforce_entrypoint",
+            )
+        else:
+            adapter.task_failed(
+                root_ref,
+                coordinator,
+                lifecycle_source="execweave_workforce_entrypoint",
+                state=result_state,
+            )
     except BaseException as exc:
+        adapter.task_failed(
+            root_ref,
+            coordinator,
+            lifecycle_source="execweave_workforce_entrypoint",
+            error_type=type(exc).__name__,
+        )
         result_payload = {"state": "EXCEPTION", "exception": type(exc).__name__, "message": str(exc)}
         raise
     finally:
