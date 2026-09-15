@@ -11,10 +11,10 @@ from .base import AdapterCapabilities, AdapterContext, AgentRecord, EntityRef, F
 class CAMELAdapter(FrameworkAdapter):
     framework_name = "camel"
     capabilities = AdapterCapabilities(
-        events=("AGENT_CREATED", "AGENT_STARTED", "AGENT_STOPPED", "TASK_CREATED", "TASK_ASSIGNED", "TASK_STARTED", "TASK_UPDATED", "TASK_COMPLETED", "TASK_FAILED", "MESSAGE_SENT", "MESSAGE_RECEIVED", "MODEL_REQUEST", "MODEL_RESPONSE", "MODEL_FAILURE"),
+        events=("AGENT_CREATED", "AGENT_STARTED", "AGENT_STOPPED", "TASK_CREATED", "TASK_ASSIGNED", "TASK_STARTED", "TASK_UPDATED", "TASK_COMPLETED", "TASK_FAILED", "MESSAGE_SENT", "MESSAGE_RECEIVED", "MESSAGE_UNROUTED", "MODEL_REQUEST", "MODEL_RESPONSE", "MODEL_FAILURE"),
         content_modes=("metadata_only", "content_ref_only", "prompt_only", "prompt_and_response"),
         authoritative_surfaces=("camel.societies.workforce.WorkforceCallback", "camel.models.BaseModelBackend.run", "camel.models.BaseModelBackend.arun"),
-        known_limitations=("WorkforceCallback LogEvent does not expose the emitting worker or recipient; those log messages remain explicitly unrouted unless a stream-chunk or model/message hook supplies the boundary.", "A created worker is not treated as assigned until CAMEL reports a task assignment."),
+        known_limitations=("WorkforceCallback LogEvent does not expose the emitting worker or recipient; those log messages are explicitly marked MESSAGE_UNROUTED and correlated to the observed process instead of being assigned to a guessed agent.", "A created worker is not treated as assigned until CAMEL reports a task assignment."),
     )
 
     def __init__(self, context: AdapterContext) -> None:
@@ -73,6 +73,32 @@ class CAMELAdapter(FrameworkAdapter):
         self.context.record_message(MessageRecord(message, source, target, role=role, task=task, content=content, direction="received" if received else "sent", attributes=attributes))
         return message
 
+    def message_unrouted(self, message: EntityRef, *, callback_name: str, missing_sender: bool, missing_recipient: bool, reason: str = "callback_payload_missing_agent_boundary") -> None:
+        """Keep callback messages visible without inventing an agent route.
+
+        CAMEL's WorkforceCallback log surface can emit a message without a
+        worker or recipient.  The process is the only authoritative boundary
+        available in that case, so record that boundary explicitly rather
+        than leaving the message looking like a dropped graph node.
+        """
+        process = self.context.process
+        if process is None:
+            return
+        self.emit(
+            "MESSAGE_UNROUTED",
+            "OBSERVED_AT_PROCESS",
+            source=message,
+            target=process.to_entity(),
+            attributes={
+                "callback_name": callback_name,
+                "routing_status": "unrouted",
+                "routing_reason": reason,
+                "missing_sender": missing_sender,
+                "missing_recipient": missing_recipient,
+                "routing_basis": "authoritative_process_boundary",
+            },
+        )
+
     def model_call(self, call_id: str | int, agent: EntityRef | None, model_id: str | int, *, model_name: str | None = None, request: Any | None = None, response: Any | None = None, status: str = "request", task: EntityRef | None = None, **attributes: Any) -> EntityRef:
         model = self.model(model_id, name=model_name, provider="camel", **attributes)
         call = self.entity("model_call", call_id, name="CAMEL model call", attributes={"provider": "camel"})
@@ -103,7 +129,7 @@ class CAMELAdapter(FrameworkAdapter):
             source = self._agents.get(str(worker_id)) if worker_id is not None else None
             target_id = _value(payload, "target_worker_id", "recipient_worker_id", "target_agent_id", "recipient_agent_id", "receiver_id")
             target = self._agents.get(str(target_id)) if target_id is not None else None
-            return self.message(
+            message = self.message(
                 message_id,
                 source,
                 target,
@@ -116,6 +142,14 @@ class CAMELAdapter(FrameworkAdapter):
                     "message_id_source": "provider" if native_message_id is not None else "execweave_derived",
                 },
             )
+            if source is None or target is None:
+                self.message_unrouted(
+                    message,
+                    callback_name=name,
+                    missing_sender=source is None,
+                    missing_recipient=target is None,
+                )
+            return message
         if name == "log_task_decomposed":
             parent_key = _native(payload, "parent_task_id", "task_id", "id")
             parent = self._tasks.get(str(parent_key)) or self.task_created(parent_key)

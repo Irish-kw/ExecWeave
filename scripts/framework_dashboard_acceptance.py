@@ -278,9 +278,18 @@ def _browser_check(
             url = f"http://127.0.0.1:{server.server_port}/?t={token}"
             page.goto(url)
             page.wait_for_function("document.querySelectorAll('.node').length > 0", timeout=15000)
+            page.wait_for_function(
+                "(expected) => document.querySelector('#stats')?.innerText.includes(`${expected} events`)" ,
+                arg=int(final_graph.get("event_count") or 0),
+                timeout=15000,
+            )
             selector = f'.node[data-id="{agent_id}"]'
             page.locator(selector).click(timeout=10000)
             page.wait_for_function("document.querySelector('#details') && document.querySelector('#details').innerText.trim().length > 0", timeout=10000)
+            page.wait_for_function(
+                "() => !document.querySelector('#details')?.innerText.includes('RESPONSE\\nNot observed.')",
+                timeout=15000,
+            )
             live_details = page.locator("#details").inner_text()
             page.screenshot(path=str(output / "live.png"))
             state.finish(final_graph, final_html=final_html)

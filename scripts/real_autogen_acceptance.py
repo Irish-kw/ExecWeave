@@ -140,8 +140,6 @@ async def run_acceptance(args: argparse.Namespace) -> dict[str, Any]:
             },
         )
     )
-    context.emit("TASK_STARTED", "TASK_STARTED", source=task)
-
     agent_refs = {
         "evidence_agent": adapter.observe_agent(
             "evidence_agent",
@@ -156,6 +154,27 @@ async def run_acceptance(args: argparse.Namespace) -> dict[str, Any]:
             process=process_ref,
         ),
     }
+    for agent in agent_refs.values():
+        context.emit(
+            "TASK_ASSIGNED",
+            "ASSIGNED_TO",
+            source=task,
+            target=agent,
+            attributes={
+                "assignment_source": "autogen_round_robin_group_chat",
+                "broadcast": True,
+            },
+        )
+        context.emit(
+            "TASK_STARTED",
+            "TASK_STARTED",
+            source=agent,
+            target=task,
+            attributes={
+                "lifecycle_source": "autogen_round_robin_group_chat",
+                "broadcast": True,
+            },
+        )
     for agent in agent_refs.values():
         context.emit("AGENT_STARTED", "AGENT_STARTED", source=agent)
 

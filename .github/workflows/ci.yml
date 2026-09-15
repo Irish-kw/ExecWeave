@@ -141,10 +141,17 @@ jobs:
       - name: Tests
         shell: bash
         run: |
+          pytest_args=(-q --junitxml=pytest-results.xml)
+          if [ "$RUNNER_OS" != "Windows" ]; then
+            # Cursor's launcher-to-GUI handoff is Windows-native. The Windows
+            # matrix exercises it; Unix runners must not execute Windows-path
+            # fixtures and report a false cross-platform failure.
+            pytest_args+=(--ignore tests/test_cursor_lifecycle_handoff.py)
+          fi
           if [ "$RUNNER_OS" = "Linux" ]; then
-            xvfb-run -a python -m pytest -q --junitxml=pytest-results.xml
+            xvfb-run -a python -m pytest "${pytest_args[@]}"
           else
-            python -m pytest -q --junitxml=pytest-results.xml
+            python -m pytest "${pytest_args[@]}"
           fi
       - name: Annotate pytest failures
         if: failure() && hashFiles('pytest-results.xml') != ''

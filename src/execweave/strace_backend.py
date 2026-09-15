@@ -49,6 +49,12 @@ def _iso_timestamp(value: float) -> str:
 
 
 def _decode_quoted(value: str) -> str:
+    # Synthetic Windows traces carry native drive paths with single
+    # backslashes (for example ``C:\\tmp``).  Treating those as Python string
+    # escapes turns ``\\t`` into a tab and corrupts the observed path.  Real
+    # Linux strace paths still use the normal C-style decoding below.
+    if re.match(r"^[A-Za-z]:[\\/]", value):
+        return value.replace(r'\"', '"').replace(r"\\", "\\")
     try:
         return str(ast.literal_eval(f'"{value}"'))
     except (SyntaxError, ValueError):
