@@ -75,7 +75,15 @@ def _safe_process_snapshot(proc: psutil.Process) -> ProcessSnapshot | None:
                 exe=exe,
                 create_time=proc.create_time(),
             )
-    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+    except (
+        psutil.NoSuchProcess,
+        psutil.AccessDenied,
+        psutil.ZombieProcess,
+        # macOS can surface protected-process cmdline denial as a SystemError
+        # from psutil's C extension instead of AccessDenied. Treat that process
+        # as unobservable, just like the other permission-race cases.
+        SystemError,
+    ):
         return None
 
 
