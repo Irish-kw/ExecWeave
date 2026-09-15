@@ -33,7 +33,6 @@ from execweave.framework_adapters import (
     ContentCapturePolicy,
     ProcessRef,
 )
-from execweave.framework_adapters.base import TaskRecord
 
 
 def _jsonable(value: Any) -> Any:
@@ -126,19 +125,17 @@ async def run_acceptance(args: argparse.Namespace) -> dict[str, Any]:
         process=process_ref,
     )
     adapter = AutoGenAdapter(context)
-    task = adapter.task(
+    task_prompt = (
+        f"Collaborate on a factual acceptance run using the local Ollama endpoint "
+        f"at {args.endpoint}. The model under test is {args.model}. "
+        "Both analysts must contribute at least one sentence."
+    )
+    task = adapter.observe_task(
         "autogen-real-task",
         name="AutoGen local Ollama collaboration",
-        attributes={"provider": "autogen", "model": args.model},
-    )
-    context.record_task(
-        TaskRecord(
-            task=task,
-            attributes={
-                "status": "created",
-                "task_contract": "two named analysts exchange factual statements",
-            },
-        )
+        content=task_prompt,
+        model=args.model,
+        task_contract="two named analysts exchange factual statements",
     )
     agent_refs = {
         "evidence_agent": adapter.observe_agent(
@@ -218,11 +215,7 @@ async def run_acceptance(args: argparse.Namespace) -> dict[str, Any]:
     stream_event_types: list[str] = []
     try:
         async for item in team.run_stream(
-            task=(
-                f"Collaborate on a factual acceptance run using the local Ollama "
-                f"endpoint at {args.endpoint}. The model under test is {args.model}. "
-                "Both analysts must contribute at least one sentence."
-            )
+            task=task_prompt
         ):
             event_name = type(item).__name__
             stream_event_types.append(event_name)

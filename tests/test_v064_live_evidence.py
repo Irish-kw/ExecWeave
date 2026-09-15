@@ -160,6 +160,7 @@ import pathlib
 import time
 
 time.sleep(0.1)
+assert os.environ["EXECWEAVE_RUN_ID"] == os.environ["EXECWEAVE_SESSION_ID"]
 path = pathlib.Path(os.environ["EXECWEAVE_SEMANTIC_SIDECAR"])
 record = {
     "event_id": "semantic-child-1",
@@ -202,6 +203,8 @@ def test_run_live_restores_existing_semantic_sidecar_environment(
     tmp_path: Path,
 ) -> None:
     monkeypatch.setenv("EXECWEAVE_SEMANTIC_SIDECAR", "keep-me")
+    monkeypatch.setenv("EXECWEAVE_RUN_ID", "keep-run")
+    monkeypatch.setenv("EXECWEAVE_SESSION_ID", "keep-session")
     result = run_live(
         [sys.executable, "-c", "pass"],
         watch_root=tmp_path,
@@ -216,6 +219,8 @@ def test_run_live_restores_existing_semantic_sidecar_environment(
     assert result.materialized_event_stream == result.event_stream
     assert not result.semantic_sidecar.exists()
     assert __import__("os").environ["EXECWEAVE_SEMANTIC_SIDECAR"] == "keep-me"
+    assert __import__("os").environ["EXECWEAVE_RUN_ID"] == "keep-run"
+    assert __import__("os").environ["EXECWEAVE_SESSION_ID"] == "keep-session"
 
 
 

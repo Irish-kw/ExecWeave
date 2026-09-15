@@ -60,6 +60,17 @@ def test_turns_read_as_who_said_what(tmp_path: Path) -> None:
     assert "recordFor(node)" in source
 
 
+def test_framework_agent_falls_back_to_authoritatively_assigned_task() -> None:
+    source = _AGENT_PANEL_JS
+    assert "function execweaveAssignedTaskText(agent)" in source
+    assert "const exactAssignment=['ASSIGNED','AGENT','TASK'].join('_')" in source
+    assert "['ASSIGNED_TO',exactAssignment]" in source
+    assert "String(edge.relation||'')==='TASK_CREATED'" in source
+    assert "String(edge.relation||'')==='TASK_STARTED'" in source
+    assert "direct.at(-1)||owned.at(-1)||started.at(-1)" in source
+    assert "execweaveFillAssignedTask" in source
+
+
 def test_a_run_of_unexposed_turns_collapses_but_still_names_its_recipients(
     tmp_path: Path,
 ) -> None:

@@ -261,6 +261,8 @@ def _browser_check(
     final_html: str,
     output: Path,
     agent_id: str,
+    task_id: str,
+    task_prompt: str,
 ) -> dict:
     if live is None or sync_playwright is None:
         return {
@@ -285,25 +287,54 @@ def _browser_check(
             )
             selector = f'.node[data-id="{agent_id}"]'
             page.locator(selector).click(timeout=10000)
-            page.wait_for_function("document.querySelector('#details') && document.querySelector('#details').innerText.trim().length > 0", timeout=10000)
+            page.wait_for_timeout(100)
+            if not page.locator("#details").inner_text().strip():
+                raise RuntimeError(
+                    "agent Dashboard inspector stayed empty after selection: "
+                    f"agent_id={agent_id!r}, browser_errors={errors!r}"
+                )
             page.wait_for_function(
                 "() => !document.querySelector('#details')?.innerText.includes('RESPONSE\\nNot observed.')",
                 timeout=15000,
             )
             live_details = page.locator("#details").inner_text()
+            if task_prompt not in live_details or "TASK\nNot observed." in live_details:
+                raise RuntimeError(
+                    "assigned task prompt is missing from agent Dashboard inspector: "
+                    f"agent_id={agent_id!r}, details={live_details!r}"
+                )
+            task_selector = f'.node[data-id="{task_id}"]'
+            page.locator(task_selector).click(timeout=10000)
+            live_task_details = page.locator("#details").inner_text()
+            if task_prompt not in live_task_details or "TASK\nNot observed." in live_task_details:
+                raise RuntimeError(
+                    "task prompt is missing from live Dashboard inspector: "
+                    f"task_id={task_id!r}, details={live_task_details!r}"
+                )
             page.screenshot(path=str(output / "live.png"))
             state.finish(final_graph, final_html=final_html)
             page.goto(f"http://127.0.0.1:{server.server_port}/final?t={token}")
             page.locator(selector).click(timeout=10000)
             page.wait_for_function("document.querySelector('#details') && document.querySelector('#details').innerText.trim().length > 0", timeout=10000)
             finished_details = page.locator("#details").inner_text()
+            page.locator(task_selector).click(timeout=10000)
+            finished_task_details = page.locator("#details").inner_text()
             page.screenshot(path=str(output / "finished.png"))
-            browser_parity = live_details == finished_details and not errors
+            browser_parity = (
+                live_details == finished_details
+                and live_task_details == finished_task_details
+                and task_prompt in finished_task_details
+                and "TASK\nNot observed." not in finished_task_details
+                and not errors
+            )
             return {
                 "live_node_count": int(page.locator(".node").count()),
                 "live_details_nonempty": bool(live_details.strip()),
                 "finished_details_nonempty": bool(finished_details.strip()),
+                "agent_task_prompt_visible": task_prompt in finished_details,
                 "same_details": live_details == finished_details,
+                "task_prompt_visible": task_prompt in finished_task_details,
+                "same_task_details": live_task_details == finished_task_details,
                 "browser_console_errors": errors,
                 "browser_parity": browser_parity,
             }
@@ -328,6 +359,15 @@ def validate_one(sidecar: Path, *, skip_browser: bool = False) -> dict:
     write_execution_graph(final_graph_obj, graph_path)
     write_graph_html(final_graph, viewer_path)
     sidecar_records = _read_jsonl(sidecar)
+    task_content = next(
+        record
+        for record in sidecar_records
+        if record.get("event_type") == "TASK_CONTENT_RECORDED"
+        and record.get("relation") == "HAS_TASK_CONTENT"
+    )
+    task_id = str(task_content["source"]["id"])
+    task_prompt_path = sidecar.parent / task_content["attributes"]["content_ref"]
+    task_prompt = task_prompt_path.read_text(encoding="utf-8")
     dashboard_audit = _dashboard_audit(
         graph=final_graph,
         dashboard_root=output,
@@ -363,6 +403,8 @@ def validate_one(sidecar: Path, *, skip_browser: bool = False) -> dict:
                 final_html=viewer_path.read_text(encoding="utf-8"),
                 output=output,
                 agent_id=agent_id,
+                task_id=task_id,
+                task_prompt=task_prompt,
             )
         finally:
             server.shutdown()
