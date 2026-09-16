@@ -318,6 +318,12 @@ def framework_probe(browser, cli: Path, out: Path) -> dict:
         }
         for agent_id in agent_ids:
             page.locator(f'.node[data-id="{agent_id}"]').click()
+            page.wait_for_function("id=>document.querySelector('#details .execweave-agent-communication')?.dataset.agentId===id", arg=agent_id)
+            histories = page.locator('#details .execweave-message-history')
+            assert histories.count() > 0
+            assert histories.evaluate_all('nodes=>nodes.every(node=>!node.open)'), (framework, 'history must start collapsed')
+            for history in histories.all():
+                history.locator('summary').click()
             agent_details = page.locator("#details").inner_text()
             assert prompt in agent_details, (framework, agent_id, agent_details)
             assert "TASK\nNot observed." not in agent_details
@@ -333,6 +339,7 @@ def framework_probe(browser, cli: Path, out: Path) -> dict:
             "edge_count": graph["edge_count"],
             "task_prompt_visible": True,
             "conversation_visible_to_both_agents": True,
+            "history_collapsed_by_default_and_expandable": True,
             "process_references_resolved": True,
             "framework_task_node_visible": False,
             "pass": True,
