@@ -258,4 +258,7 @@ jobs:
             args+=(--allow-test-change "tests/test_framework_runtime_dashboard_integration.py=the framework Dashboard now has an explicit agent-centric projection contract: task prompt remains in raw evidence while the viewer folds the task node into its assigned agent")
             args+=(--allow-test-change "tests/test_provider_neutral_viewer_semantics.py=the provider regression fixture now proves a provider-owned task is never mistaken for a framework task and remains visible in the provider graph")
           fi
+          if [[ "$HEAD_REF" == "release/0.8.31-windows-pipe-race" ]]; then
+            args+=(--allow-test-change "tests/test_acceptance_visible_pipe.py=the live pipe acceptance test now waits for the complete redacted token before asserting output, removing a Windows scheduling race without changing the redaction contract")
+          fi
           python scripts/check_release_stage_integrity.py "${args[@]}"
