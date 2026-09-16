@@ -355,7 +355,11 @@ def collapse_framework_tasks(
                 task_id
                 for task_id, _ in sorted(
                     candidates.items(),
-                    key=lambda item: (item[1], item[0]),
+                    key=lambda item: (
+                        not bool(_attrs(node_by_id[item[0]]).get("action")),
+                        bool(_attrs(node_by_id[item[0]]).get("task_prompt") or _attrs(node_by_id[item[0]]).get("prompt")),
+                        item[1], item[0],
+                    ),
                     reverse=True,
                 )
             ]

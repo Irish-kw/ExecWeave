@@ -102,4 +102,6 @@ def normalize_provider_execution_flow(html: str) -> str:
         if html.count(needle) != 1:
             raise RuntimeError(f"execution-flow provider normalization seam changed: {label}")
         html = html.replace(needle, replacement, 1)
-    return html
+    from .viewer_session_flow import inject_session_flow
+
+    return inject_session_flow(html)

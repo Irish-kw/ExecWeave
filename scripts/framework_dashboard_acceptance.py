@@ -61,6 +61,14 @@ def _runtime_for_sidecar(sidecar: Path, runtime: Path) -> tuple[str, str]:
     if not records:
         raise RuntimeError(f"sidecar is empty: {sidecar}")
     session_id = str(records[0]["attributes"]["session_id"])
+    native_runtime = sidecar.parent / "events.jsonl"
+    if native_runtime.is_file():
+        native_records = _read_jsonl(native_runtime)
+        if not native_records or any(record.get("session_id") != session_id for record in native_records):
+            raise RuntimeError("native runtime and semantic sidecar have different session identities")
+        shutil.copy2(native_runtime, runtime)
+        agent = next(record["source"]["id"] for record in records if (record.get("source") or {}).get("type") == "agent")
+        return session_id, agent
     timestamps = [_ts(str(record["timestamp"])) for record in records]
     start = min(timestamps) - timedelta(seconds=2)
     finish = max(timestamps) + timedelta(seconds=2)
@@ -272,6 +280,7 @@ def _browser_check(
     agent_id: str,
     task_id: str,
     task_prompt: str,
+    messages_by_agent: dict[str, list[str]],
 ) -> dict:
     if live is None or sync_playwright is None:
         return {
@@ -280,6 +289,34 @@ def _browser_check(
             "browser_parity": None,
         }
     errors: list[str] = []
+
+    def verify_communication(page):
+        graph = page.evaluate("window.__execweaveCore.getDisplayGraph()")
+        framework_agents = {node["id"] for node in final_graph["nodes"] if node.get("attributes", {}).get("conversation_scope") == "framework_agent"}
+        routes = [node for node in graph["nodes"] if node.get("attributes", {}).get("viewer_framework_messages")]
+        for edge in final_graph["edges"]:
+            if edge.get("relation") != "MESSAGE_RECEIVED" or edge["source"] not in framework_agents or edge["target"] not in framework_agents:
+                continue
+            matched = [node for node in routes if node["attributes"].get("sender_agent_id") == edge["source"]
+                       and node["attributes"].get("recipient_agent_id") == edge["target"]]
+            if not matched:
+                raise RuntimeError(f"received message route missing from Dashboard: {edge['source']} -> {edge['target']}")
+        root_nodes = [node for node in graph["nodes"] if node.get("attributes", {}).get("agent_role") == "root"]
+        for root in root_nodes:
+            if not any(edge["source"] == root["id"] and any(node["id"] == edge["target"] and node["type"] == "session" for node in graph["nodes"]) for edge in graph["edges"]):
+                raise RuntimeError("root agent has no recording session in Dashboard")
+        checked = {}
+        for participant, texts in messages_by_agent.items():
+            page.locator(f'.node[data-id="{participant}"]').click(timeout=10000)
+            page.wait_for_function("id=>document.querySelector('#details .execweave-agent-communication')?.dataset.agentId===id", arg=participant, timeout=10000)
+            page.locator(".execweave-message-history").evaluate_all("nodes=>nodes.forEach(node=>node.open=true)")
+            visible = page.locator("#details").inner_text()
+            for text in texts:
+                if text.strip() not in visible:
+                    raise RuntimeError(f"agent communication missing from inspector: {participant}, expected={text[:120]!r}")
+            checked[participant] = len(texts)
+        return {"received_route_count": len(routes), "agent_message_counts": checked}
+
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
         try:
@@ -294,6 +331,8 @@ def _browser_check(
                 arg=int(final_graph.get("event_count") or 0),
                 timeout=15000,
             )
+            page.locator("#fit").click()
+            page.wait_for_timeout(400)
             selector = f'.node[data-id="{agent_id}"]'
             page.locator(selector).click(timeout=10000)
             page.wait_for_timeout(100)
@@ -318,9 +357,14 @@ def _browser_check(
                     "framework task leaked into provider-style Dashboard graph: "
                     f"task_id={task_id!r}"
                 )
+            live_communication = verify_communication(page)
+            page.locator(selector).click(timeout=10000)
+            live_details = page.locator("#details").inner_text()
             page.screenshot(path=str(output / "live.png"))
             state.finish(final_graph, final_html=final_html)
             page.goto(f"http://127.0.0.1:{server.server_port}/final?t={token}")
+            page.locator("#fit").click()
+            page.wait_for_timeout(400)
             page.locator(selector).click(timeout=10000)
             page.wait_for_function("document.querySelector('#details') && document.querySelector('#details').innerText.trim().length > 0", timeout=10000)
             finished_details = page.locator("#details").inner_text()
@@ -329,12 +373,16 @@ def _browser_check(
                     "framework task leaked into finished provider-style Dashboard graph: "
                     f"task_id={task_id!r}"
                 )
+            finished_communication = verify_communication(page)
+            page.locator(selector).click(timeout=10000)
+            finished_details = page.locator("#details").inner_text()
             page.screenshot(path=str(output / "finished.png"))
             browser_parity = (
                 live_details == finished_details
                 and task_prompt in finished_details
                 and "TASK\nNot observed." not in finished_details
                 and not errors
+                and live_communication == finished_communication
             )
             return {
                 "live_node_count": int(page.locator(".node").count()),
@@ -345,12 +393,15 @@ def _browser_check(
                 "framework_task_node_visible": page.locator(task_selector).count() != 0,
                 "browser_console_errors": errors,
                 "browser_parity": browser_parity,
+                "communication": finished_communication,
             }
         finally:
             browser.close()
 
 
 def validate_one(sidecar: Path, *, skip_browser: bool = False) -> dict:
+    if not skip_browser and (live is None or sync_playwright is None):
+        raise RuntimeError("Browser acceptance dependencies are missing; install the e2e extra and Chromium. --skip-browser is static-only, not Dashboard acceptance.")
     output = sidecar.parent / "dashboard-real"
     if output.exists():
         shutil.rmtree(output)
@@ -367,6 +418,17 @@ def validate_one(sidecar: Path, *, skip_browser: bool = False) -> dict:
     write_execution_graph(final_graph_obj, graph_path)
     write_graph_html(final_graph, viewer_path)
     sidecar_records = _read_jsonl(sidecar)
+    messages_by_agent: dict[str, list[str]] = {}
+    for record in sidecar_records:
+        source = record.get("source") or {}
+        ref = (record.get("attributes") or {}).get("content_ref")
+        if record.get("event_type") != "MESSAGE_CONTENT_RECORDED" or source.get("type") != "agent" or not ref:
+            continue
+        payload = json.loads((sidecar.parent / ref).read_text(encoding="utf-8"))
+        if isinstance(payload, dict) and isinstance(payload.get("text"), str) and payload["text"].strip():
+            texts = messages_by_agent.setdefault(str(source["id"]), [])
+            if payload["text"] not in texts:
+                texts.append(payload["text"])
     inspector_agent_id = next(
         (
             str(record["source"]["id"])
@@ -424,12 +486,16 @@ def validate_one(sidecar: Path, *, skip_browser: bool = False) -> dict:
                 agent_id=inspector_agent_id,
                 task_id=task_id,
                 task_prompt=task_prompt,
+                messages_by_agent=messages_by_agent,
             )
         finally:
             server.shutdown()
             server.server_close()
             thread.join(timeout=5)
     report = {
+        "validation_scope": "static_only" if skip_browser else "semantic_live_and_finished_browser",
+        "browser_verified": browser.get("browser_parity") is True,
+        "runtime_source": "native_recording" if (sidecar.parent / "events.jsonl").is_file() else "synthetic_process_anchor",
         "sidecar": str(sidecar),
         "runtime": str(runtime),
         "merged": str(merged),

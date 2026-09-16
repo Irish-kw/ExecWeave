@@ -40,7 +40,9 @@ def test_framework_agent_panel_projects_assigned_task_and_communication() -> Non
     assert "execweaveFillAssignedTask" in source
     assert "viewer_assigned_task_prompt" in source
     assert "attrs(node).conversation_scope==='framework_agent'" in source
-    assert "card('Agent communication',frameworkCommunication)" in source
+    assert "agentCommunicationHistory(node,messages)" in source
+    assert "fold.className='execweave-message-history'" in source
+    assert "fold.open=state.get(key)===true" in source
 
 
 def test_framework_tasks_are_projected_into_agents_like_provider_dashboards() -> None:

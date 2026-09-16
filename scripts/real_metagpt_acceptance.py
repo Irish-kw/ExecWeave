@@ -70,7 +70,7 @@ class ObservedOllamaLLM(OllamaLLM):
     async def aask(self, msg: Any, system_msgs=None, format_msgs=None, images=None, timeout=0, stream=None) -> str:
         self._counter += 1
         self._request_count += 1
-        call_id = f"metagpt-ollama-call-{self._counter}"
+        call_id = f"metagpt-{self._role_ref.id}-ollama-call-{self._counter}"
         boundary = "metagpt.provider.base_llm.BaseLLM.aask"
         self._adapter.observe_model_call(
             call_id,
