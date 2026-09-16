@@ -307,10 +307,10 @@ def framework_probe(browser, cli: Path, out: Path) -> dict:
         page.on("console", lambda msg: errors.append(msg.text) if msg.type == "error" else None)
         page.goto((run / "viewer.html").as_uri())
         page.wait_for_selector(".node")
-        page.locator(f'.node[data-id="{task_event["target"]["id"]}"]').click()
-        task_details = page.locator("#details").inner_text()
-        assert prompt in task_details
-        assert "TASK\nNot observed." not in task_details
+        task_selector = f'.node[data-id="{task_event["target"]["id"]}"]'
+        assert page.locator(task_selector).count() == 0, (
+            framework, "framework task leaked into provider-style Dashboard graph"
+        )
         agent_ids = {
             record["source"]["id"]
             for record in records
@@ -322,6 +322,7 @@ def framework_probe(browser, cli: Path, out: Path) -> dict:
             assert prompt in agent_details, (framework, agent_id, agent_details)
             assert "TASK\nNot observed." not in agent_details
             assert message in agent_details, (framework, agent_id, agent_details)
+            assert page.locator(task_selector).count() == 0
         page.screenshot(path=str(run / "framework-dashboard.png"))
         assert not errors, errors
         page.close()
@@ -333,6 +334,7 @@ def framework_probe(browser, cli: Path, out: Path) -> dict:
             "task_prompt_visible": True,
             "conversation_visible_to_both_agents": True,
             "process_references_resolved": True,
+            "framework_task_node_visible": False,
             "pass": True,
         }
     (out / "INSTALLED_FRAMEWORK_PARITY.json").write_text(
