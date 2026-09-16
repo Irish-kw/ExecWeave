@@ -15,8 +15,8 @@ _AGENT_PANEL_CSS = r"""
 #open-final{display:none!important}
 .execweave-agent-view{display:grid;gap:12px}
 .execweave-agent-card{border:1px solid var(--border);border-radius:10px;background:var(--panel2);overflow:hidden}
-.execweave-agent-label{padding:9px 11px;border-bottom:1px solid var(--border);font-size:10px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:var(--muted)}
-.execweave-agent-body{margin:0;padding:11px 12px;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:var(--text)}
+.execweave-agent-label,.execweave-communication-label{padding:9px 11px;border-bottom:1px solid var(--border);font-size:10px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:var(--muted)}
+.execweave-agent-body,.execweave-message-body{margin:0;padding:11px 12px;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:var(--text)}
 .execweave-agent-empty{color:var(--muted);font-style:italic}
 .execweave-agent-rounds{display:grid;gap:10px}
 .execweave-agent-round{display:grid;gap:12px}
@@ -460,14 +460,14 @@ function agentCommunicationHistory(node,messages){
   const routed=[...byMessage.values()];
   if(!routed.length)return null;
   const section=document.createElement('section');section.className='execweave-agent-communication';
-  const title=document.createElement('div');title.className='execweave-agent-label';title.textContent='Agent communication';section.appendChild(title);
+  const title=document.createElement('div');title.className='execweave-communication-label';title.textContent='Agent communication';section.appendChild(title);
   const state=foldStateFor(node);
   for(const message of [...routed].reverse()){
     const fold=document.createElement('details');fold.className='execweave-message-history';
     const key='message:'+messageKey(message);fold.dataset.foldKey=key;fold.open=state.get(key)===true;
     const summary=document.createElement('summary');
     summary.textContent=[moment(message.timestamp),`${message.sender||'Unknown sender'} → ${message.recipient||'Recipient not recorded'}`].filter(Boolean).join(' · ');
-    const body=document.createElement('pre');body.className='execweave-agent-body';body.textContent=displayText(message);
+    const body=document.createElement('pre');body.className='execweave-message-body';body.textContent=displayText(message);
     fold.append(summary,body);fold.addEventListener('toggle',()=>state.set(key,fold.open));section.appendChild(fold);
   }
   return section;

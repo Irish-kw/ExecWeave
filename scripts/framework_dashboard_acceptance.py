@@ -61,6 +61,14 @@ def _runtime_for_sidecar(sidecar: Path, runtime: Path) -> tuple[str, str]:
     if not records:
         raise RuntimeError(f"sidecar is empty: {sidecar}")
     session_id = str(records[0]["attributes"]["session_id"])
+    native_runtime = sidecar.parent / "events.jsonl"
+    if native_runtime.is_file():
+        native_records = _read_jsonl(native_runtime)
+        if not native_records or any(record.get("session_id") != session_id for record in native_records):
+            raise RuntimeError("native runtime and semantic sidecar have different session identities")
+        shutil.copy2(native_runtime, runtime)
+        agent = next(record["source"]["id"] for record in records if (record.get("source") or {}).get("type") == "agent")
+        return session_id, agent
     timestamps = [_ts(str(record["timestamp"])) for record in records]
     start = min(timestamps) - timedelta(seconds=2)
     finish = max(timestamps) + timedelta(seconds=2)
@@ -487,6 +495,7 @@ def validate_one(sidecar: Path, *, skip_browser: bool = False) -> dict:
     report = {
         "validation_scope": "static_only" if skip_browser else "semantic_live_and_finished_browser",
         "browser_verified": browser.get("browser_parity") is True,
+        "runtime_source": "native_recording" if (sidecar.parent / "events.jsonl").is_file() else "synthetic_process_anchor",
         "sidecar": str(sidecar),
         "runtime": str(runtime),
         "merged": str(merged),

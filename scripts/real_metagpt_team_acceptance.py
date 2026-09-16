@@ -12,6 +12,8 @@ import os
 import sys
 from pathlib import Path
 
+import psutil
+
 # This module establishes an isolated MetaGPT configuration before importing it.
 from real_metagpt_acceptance import (
     Action, AdapterContext, Config, ContentCapturePolicy, Context, Message,
@@ -23,11 +25,13 @@ from metagpt.environment import Environment
 async def run(args):
     output = args.output_dir.resolve()
     output.mkdir(parents=True, exist_ok=False)
+    sidecar = Path(os.environ.get("EXECWEAVE_SEMANTIC_SIDECAR") or output / "semantic.jsonl")
     context = AdapterContext(
-        framework="metagpt", run_id=output.name, session_id=output.name,
-        sidecar=output / "semantic.jsonl", content_root=output,
+        framework="metagpt", run_id=os.environ.get("EXECWEAVE_RUN_ID") or output.name,
+        session_id=os.environ.get("EXECWEAVE_SESSION_ID") or output.name,
+        sidecar=sidecar, content_root=sidecar.parent,
         capture_policy=ContentCapturePolicy("prompt_and_response"),
-        process=ProcessRef(os.getpid(), None, sys.executable),
+        process=ProcessRef(os.getpid(), psutil.Process().create_time(), sys.executable),
     )
     adapter = MetaGPTAdapter(context)
     names = ("coordinator", "endpoint_worker", "model_worker")
@@ -106,7 +110,7 @@ async def run(args):
     context.emit("TASK_COMPLETED" if success else "TASK_FAILED", "TASK_COMPLETED" if success else "TASK_FAILED", source=task)
     for ref in refs.values():
         context.emit("AGENT_STOPPED", "AGENT_STOPPED", source=ref)
-    records = [json.loads(line) for line in (output / "semantic.jsonl").read_text(encoding="utf-8").splitlines()]
+    records = [json.loads(line) for line in sidecar.read_text(encoding="utf-8").splitlines()]
     summary = {"framework": "metagpt", "scenario": "native Environment with three Roles", "task_success": success,
                "agent_count": len(refs), "model_request_count": sum(r["event_type"] == "MODEL_REQUEST" for r in records),
                "message_received_count": sum(r["event_type"] == "MESSAGE_RECEIVED" for r in records), "outcomes": outcomes}

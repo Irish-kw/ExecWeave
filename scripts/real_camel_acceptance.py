@@ -120,15 +120,15 @@ def main() -> int:
 
     output = args.output_dir.resolve()
     output.mkdir(parents=True, exist_ok=True)
-    sidecar = output / "semantic.jsonl"
+    sidecar = Path(os.environ.get("EXECWEAVE_SEMANTIC_SIDECAR") or output / "semantic.jsonl")
     process = psutil.Process(os.getpid())
     process_ref = ProcessRef(process.pid, process.create_time(), sys.executable)
     context = AdapterContext(
         framework="camel",
-        run_id="camel-real-ollama-12345",
-        session_id="camel-real-ollama-12345",
+        run_id=os.environ.get("EXECWEAVE_RUN_ID") or "camel-real-ollama-12345",
+        session_id=os.environ.get("EXECWEAVE_SESSION_ID") or "camel-real-ollama-12345",
         sidecar=sidecar,
-        content_root=output,
+        content_root=sidecar.parent,
         capture_policy=ContentCapturePolicy("prompt_and_response"),
         process=process_ref,
     )
