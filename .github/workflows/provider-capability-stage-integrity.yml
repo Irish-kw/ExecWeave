@@ -254,4 +254,8 @@ jobs:
             args+=(--allow-test-change "tests/test_layout_large_display_e2e.py=PR #84: fully unfolded flow graphs retain the hard no-overlap and no-edge-node-intersection gates; dense fan-out crossing count remains recorded as diagnostic evidence rather than a fixed visual invariant")
             args+=(--allow-test-change "tests/test_provider_adapter_pipeline_e2e.py=PR #84: Codex orchestration evidence includes HAS_AGENT_THREAD, DELIVERED_AGENT_MESSAGE, and SENT_AGENT_MESSAGE, so mutation coverage removes those relations before asserting the contract failure")
           fi
+          if [[ "$HEAD_REF" == "release/0.8.30-agent-centric-framework-dashboard" ]]; then
+            args+=(--allow-test-change "tests/test_framework_runtime_dashboard_integration.py=the framework Dashboard now has an explicit agent-centric projection contract: task prompt remains in raw evidence while the viewer folds the task node into its assigned agent")
+            args+=(--allow-test-change "tests/test_provider_neutral_viewer_semantics.py=the provider regression fixture now proves a provider-owned task is never mistaken for a framework task and remains visible in the provider graph")
+          fi
           python scripts/check_release_stage_integrity.py "${args[@]}"

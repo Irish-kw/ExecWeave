@@ -101,6 +101,15 @@ The live dashboard tails the same semantic stream and runtime event stream used
 for the finished result. Live process references are provisional; the finished
 merge performs the final exact PID/create-time resolution.
 
+The raw graph and the Dashboard presentation intentionally have different
+responsibilities. Framework adapters keep first-class task nodes, task
+lifecycle relations, and task prompt content in the raw graph and evidence
+stream. The provider-style Dashboard projection folds those framework task
+nodes into their owning agent card, exposing the latest task prompt through the
+agent inspector and avoiding a separate `TASK` node. This projection is
+display-only: it does not delete or rewrite raw task evidence, and it does not
+apply to provider graphs such as Codex, Claude, or Antigravity.
+
 An integration is not complete until it checks parity for:
 
 1. agent/task/message/model/tool node identities;
