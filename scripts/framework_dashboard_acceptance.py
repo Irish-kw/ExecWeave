@@ -16,7 +16,7 @@ from execweave.graph import build_execution_graph, write_execution_graph
 from execweave.conversation_records import conversation_index_payload
 from execweave.schema import Entity, RuntimeEvent
 from execweave.semantic import merge_semantic_sidecar
-from execweave.viewer_projection import write_graph_html
+from execweave.viewer_projection import project_viewer_graph, write_graph_html
 
 try:
     from execweave import live
@@ -202,8 +202,15 @@ def _dashboard_audit(
         for preview in previews
     )
     routed_previews = sum(1 for preview in previews if preview.get("agent_path") and preview.get("thread_id"))
-    required_node_types = {"agent", "task", "message", "model", "observed_content"}
+    required_node_types = {"agent", "task", "model", "observed_content"}
     missing_node_types = sorted(required_node_types - set(node_types))
+    message_evidence_present = any(
+        event_type in event_types
+        for event_type in ("MESSAGE_SENT", "MESSAGE_RECEIVED", "MESSAGE_UNROUTED")
+    ) or any(
+        relation in edge_relations
+        for relation in ("MESSAGE_SENT", "MESSAGE_RECEIVED", "MESSAGE_UNROUTED", "HAS_MESSAGE_CONTENT")
+    )
     audit = {
         "node_count": len(nodes),
         "edge_count": len(edges),
@@ -223,6 +230,7 @@ def _dashboard_audit(
             "visible_message_count": visible_messages,
             "index_path": str(dashboard_root / "conversations.json"),
         },
+        "message_evidence_present": message_evidence_present,
         "process_references": {
             "resolved": merge_result.resolved_process_references,
             "unresolved": merge_result.unresolved_process_references,
@@ -236,6 +244,7 @@ def _dashboard_audit(
         and not content_issues
         and entries
         and visible_messages
+        and message_evidence_present
         and merge_result.unresolved_process_references == 0
     )
     (dashboard_root / "dashboard-audit.json").write_text(
@@ -304,12 +313,10 @@ def _browser_check(
                     f"agent_id={agent_id!r}, details={live_details!r}"
                 )
             task_selector = f'.node[data-id="{task_id}"]'
-            page.locator(task_selector).click(timeout=10000)
-            live_task_details = page.locator("#details").inner_text()
-            if task_prompt not in live_task_details or "TASK\nNot observed." in live_task_details:
+            if page.locator(task_selector).count() != 0:
                 raise RuntimeError(
-                    "task prompt is missing from live Dashboard inspector: "
-                    f"task_id={task_id!r}, details={live_task_details!r}"
+                    "framework task leaked into provider-style Dashboard graph: "
+                    f"task_id={task_id!r}"
                 )
             page.screenshot(path=str(output / "live.png"))
             state.finish(final_graph, final_html=final_html)
@@ -317,14 +324,16 @@ def _browser_check(
             page.locator(selector).click(timeout=10000)
             page.wait_for_function("document.querySelector('#details') && document.querySelector('#details').innerText.trim().length > 0", timeout=10000)
             finished_details = page.locator("#details").inner_text()
-            page.locator(task_selector).click(timeout=10000)
-            finished_task_details = page.locator("#details").inner_text()
+            if page.locator(task_selector).count() != 0:
+                raise RuntimeError(
+                    "framework task leaked into finished provider-style Dashboard graph: "
+                    f"task_id={task_id!r}"
+                )
             page.screenshot(path=str(output / "finished.png"))
             browser_parity = (
                 live_details == finished_details
-                and live_task_details == finished_task_details
-                and task_prompt in finished_task_details
-                and "TASK\nNot observed." not in finished_task_details
+                and task_prompt in finished_details
+                and "TASK\nNot observed." not in finished_details
                 and not errors
             )
             return {
@@ -333,8 +342,7 @@ def _browser_check(
                 "finished_details_nonempty": bool(finished_details.strip()),
                 "agent_task_prompt_visible": task_prompt in finished_details,
                 "same_details": live_details == finished_details,
-                "task_prompt_visible": task_prompt in finished_task_details,
-                "same_task_details": live_task_details == finished_task_details,
+                "framework_task_node_visible": page.locator(task_selector).count() != 0,
                 "browser_console_errors": errors,
                 "browser_parity": browser_parity,
             }
@@ -351,7 +359,7 @@ def validate_one(sidecar: Path, *, skip_browser: bool = False) -> dict:
     merged = output / "events.semantic.jsonl"
     graph_path = output / "graph.semantic.json"
     viewer_path = output / "viewer.semantic.html"
-    session_id, agent_id = _runtime_for_sidecar(sidecar, runtime)
+    session_id, runtime_anchor_agent_id = _runtime_for_sidecar(sidecar, runtime)
     _materialize_content(sidecar.parent, output)
     merge_result = merge_semantic_sidecar(runtime, sidecar, merged)
     final_graph_obj = build_execution_graph(merged)
@@ -359,6 +367,17 @@ def validate_one(sidecar: Path, *, skip_browser: bool = False) -> dict:
     write_execution_graph(final_graph_obj, graph_path)
     write_graph_html(final_graph, viewer_path)
     sidecar_records = _read_jsonl(sidecar)
+    inspector_agent_id = next(
+        (
+            str(record["source"]["id"])
+            for record in sidecar_records
+            if record.get("event_type") == "MODEL_RESPONSE"
+            and isinstance(record.get("source"), dict)
+            and record["source"].get("type") == "agent"
+            and record["source"].get("id")
+        ),
+        runtime_anchor_agent_id,
+    )
     task_content = next(
         record
         for record in sidecar_records
@@ -375,7 +394,7 @@ def validate_one(sidecar: Path, *, skip_browser: bool = False) -> dict:
         merge_result=merge_result,
     )
 
-    final_signature = _framework_signature(final_graph)
+    final_signature = _framework_signature(project_viewer_graph(final_graph))
     if skip_browser or live is None or sync_playwright is None:
         live_signature = final_signature
         browser = {
@@ -386,7 +405,7 @@ def validate_one(sidecar: Path, *, skip_browser: bool = False) -> dict:
     else:
         state = live._LiveState(session_id, runtime, sidecar)
         provisional = state.snapshot()
-        live_signature = _framework_signature(provisional)
+        live_signature = _framework_signature(project_viewer_graph(provisional))
         token = uuid4().hex
         server = live._LocalThreadingHTTPServer(
             ("127.0.0.1", 0),
@@ -402,7 +421,7 @@ def validate_one(sidecar: Path, *, skip_browser: bool = False) -> dict:
                 final_graph=final_graph,
                 final_html=viewer_path.read_text(encoding="utf-8"),
                 output=output,
-                agent_id=agent_id,
+                agent_id=inspector_agent_id,
                 task_id=task_id,
                 task_prompt=task_prompt,
             )

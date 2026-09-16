@@ -70,6 +70,39 @@ def test_provider_neutral_projection_has_no_request_or_endpoint_sprawl(provider:
     assert any(edge.get("source") == root_id and edge.get("target") == ORPHAN_FILES_NODE_ID and edge.get("relation") == "OBSERVED_FILES" for edge in projected["edges"])
 
 
+def test_provider_task_nodes_are_not_misclassified_as_framework_tasks() -> None:
+    graph = _graph("codex")
+    agent_id = "agent:codex:root"
+    task_id = "task:codex:native-task"
+    graph["nodes"].append(
+        {
+            "id": task_id,
+            "type": "task",
+            "name": "Provider task remains a task",
+            "attributes": {"provider": "codex", "task_prompt": "native provider task"},
+        }
+    )
+    graph["edges"].append(
+        {
+            "id": "codex-task-assignment",
+            "source": agent_id,
+            "target": task_id,
+            "relation": "ASSIGNED_TO",
+            "count": 1,
+        }
+    )
+
+    projected = project_viewer_graph(graph)
+
+    assert task_id in {node["id"] for node in projected["nodes"]}
+    assert any(
+        edge.get("source") == agent_id
+        and edge.get("target") == task_id
+        and edge.get("relation") == "ASSIGNED_TO"
+        for edge in projected["edges"]
+    )
+
+
 @pytest.mark.parametrize("provider", PROVIDERS)
 def test_model_switches_keep_chronological_inference_occurrences(provider: str) -> None:
     graph = _graph(provider)

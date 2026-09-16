@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import json
 import os
 import sys
@@ -37,8 +38,94 @@ def test_framework_agent_panel_projects_assigned_task_and_communication() -> Non
     assert "String(edge.relation||'')==='TASK_STARTED'" in source
     assert "direct.at(-1)||owned.at(-1)||started.at(-1)" in source
     assert "execweaveFillAssignedTask" in source
+    assert "viewer_assigned_task_prompt" in source
     assert "attrs(node).conversation_scope==='framework_agent'" in source
     assert "card('Agent communication',frameworkCommunication)" in source
+
+
+def test_framework_tasks_are_projected_into_agents_like_provider_dashboards() -> None:
+    from execweave.viewer_projection import project_viewer_graph
+
+    prompt = "Framework task prompt belongs in the assigned agent inspector."
+    task_id = "task:framework:task-1"
+    content_id = "observed-content:framework-task"
+    agent_id = "agent:framework:worker"
+    graph = {
+        "graph_schema_version": "0.2",
+        "event_count": 4,
+        "nodes": [
+            {
+                "id": agent_id,
+                "type": "agent",
+                "name": "Worker",
+                "attributes": {
+                    "provider": "camel",
+                    "conversation_scope": "framework_agent",
+                },
+            },
+            {
+                "id": task_id,
+                "type": "task",
+                "name": "Framework acceptance task",
+                "attributes": {
+                    "provider": "camel",
+                    "task_prompt": prompt,
+                },
+            },
+            {
+                "id": content_id,
+                "type": "observed_content",
+                "name": "camel.task_prompt",
+                "attributes": {"provider": "camel"},
+            },
+        ],
+        "edges": [
+            {
+                "id": "task-created",
+                "source": agent_id,
+                "target": task_id,
+                "relation": "TASK_CREATED",
+                "first_sequence": 1,
+                "last_sequence": 1,
+            },
+            {
+                "id": "task-assigned",
+                "source": task_id,
+                "target": agent_id,
+                "relation": "ASSIGNED_TO",
+                "first_sequence": 2,
+                "last_sequence": 2,
+            },
+            {
+                "id": "task-content",
+                "source": task_id,
+                "target": content_id,
+                "relation": "HAS_TASK_CONTENT",
+                "first_sequence": 3,
+                "last_sequence": 3,
+            },
+        ],
+        "node_count": 3,
+        "edge_count": 3,
+    }
+    original = deepcopy(graph)
+
+    projected = project_viewer_graph(graph)
+    projected_ids = {node["id"] for node in projected["nodes"]}
+    projected_edges = {
+        (edge["source"], edge["relation"], edge["target"])
+        for edge in projected["edges"]
+    }
+    agent = next(node for node in projected["nodes"] if node["id"] == agent_id)
+
+    assert projected_ids == {agent_id}
+    assert not projected_edges
+    assert agent["attributes"]["viewer_assigned_task_id"] == task_id
+    assert agent["attributes"]["viewer_assigned_task_prompt"] == prompt
+    assert agent["attributes"]["viewer_assigned_task_count"] == 1
+    assert projected["viewer_projection"]["framework_task_node_count"] == 1
+    assert projected["viewer_projection"]["framework_task_content_node_count"] == 1
+    assert graph == original
 
 
 def test_environment_context_uses_shared_run_identity_and_current_process(
