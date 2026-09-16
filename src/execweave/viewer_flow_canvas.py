@@ -91,6 +91,10 @@ function execweaveFlowDisplay(data,display){
 // another one inherits that node's layer and row, and reading those back places it
 // exactly on top of the node it was copied from.
 function execweaveFlowPreference(id){
+  const projected=nodeById.get(id)?.attributes||{};
+  // The browser's session projection runs after the Python flow projection. Its
+  // explicit ranks supersede copied resource layers, including synthetic nodes.
+  if(Number.isInteger(projected.viewer_flow_rank)&&[...nodeById.values()].some(n=>n.attributes?.viewer_session_flow))return{layer:projected.viewer_flow_rank,row:0};
   const owned=execweaveFlowNodeIds();
   // A folded member is still drawn when the browser's file/type budget keeps it. Its
   // annotation carries the survivor's solved layer and row, so keep that preference;
@@ -163,6 +167,12 @@ function execweaveFlowSolve(){
   // stack, which is to say only when it closes a cycle. Every other edge is kept, so a
   // node always takes a column after the nodes that lead to it.
   const feedback=new Set(),state=new Map(ids.map(id=>[id,0]));
+  // A recorded reply remains a return even if the dispatch was outside this
+  // recording; do not move the main agent behind its received message history.
+  for(const pair of pairs){
+    const source=nodeById.get(pair.source),target=nodeById.get(pair.target);
+    if(target?.attributes?.viewer_session_flow&&(source?.attributes?.viewer_framework_messages||source?.attributes?.viewer_return_message))feedback.add(pair.source+'|'+pair.target);
+  }
   // With a viewer_flow payload, prefer the projection's layer order when choosing the
   // DFS roots. Without one (the dashboard shell also accepts a raw static graph), keep
   // the graph's insertion order: sorting IDs would visit `agent:child:*` before
@@ -180,6 +190,7 @@ function execweaveFlowSolve(){
       const peers=after.get(frame.id);
       if(frame.next>=peers.length){state.set(frame.id,2);stack.pop();continue}
       const peer=peers[frame.next++];
+      if(feedback.has(frame.id+'|'+peer))continue;
       const seen=state.get(peer);
       if(seen===1)feedback.add(frame.id+'|'+peer);
       else if(seen===0){state.set(peer,1);stack.push({id:peer,next:0})}

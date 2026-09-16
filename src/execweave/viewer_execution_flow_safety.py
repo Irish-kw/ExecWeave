@@ -123,23 +123,8 @@ _WAIT_AWARE_ACTIVATION = """    const spawnEdges=rawEdges.filter(edge=>
         if(!ended)occurrence.targets.add(child);
       }
     }
-    // The branch model answers "which model does this target agent belong to?".
-    // Prefer a unanimous target-agent model context over the actor's current model.
-    // This keeps old children under gpt-5.5 even if /root later switches to Luna.
-    for(const occurrence of occurrences){
-      if(!occurrence.targets.size)continue;
-      // Child model lookup ignores the actor tool-call/item hint. Only the child's
-      // own model evidence may win, and every target must share one known model.
-      const targetModels=[];
-      let allKnown=true;
-      for(const target of occurrence.targets){
-        const modelId=resolveModel(target,null);
-        if(!modelId){allKnown=false;break}
-        targetModels.push(modelId);
-      }
-      const unique=new Set(targetModels);
-      if(allKnown&&unique.size===1)occurrence.modelId=[...unique][0];
-    }
+    // Actions belong to the actor's model at the time of the action. A child's
+    // model never changes the model that issued a delegation, message, or wait.
     const resolvedOccurrences=occurrences.filter(occurrence=>occurrence.targets.size>0);
     if(!resolvedOccurrences.length)return display;
     const flowKey=occurrence=>`${occurrence.owner}\\u0000${occurrence.kind}\\u0000${occurrence.modelId||''}`;
@@ -284,8 +269,8 @@ def harden_execution_flow_projection(html: str) -> str:
     """Fail closed on ambiguous or evidence-poor execution-flow projection.
 
     A model context is shown only for orchestration that resolves to real target agents.
-    The target agents' evidenced model context is authoritative when all resolved targets
-    agree; the actor model is only a fallback. Explicit targets are preferred.
+    The actor's evidenced model context owns the action, independently of the target's
+    model. Explicit targets are preferred.
     Target-less ``wait_agent`` calls may use the provider-evidenced active-child set:
     children spawned before the wait and without stop/close evidence before that wait.
     Exact requester -> subtask -> assigned-child chains and exact owner-bound tool-call

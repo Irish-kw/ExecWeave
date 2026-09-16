@@ -140,6 +140,12 @@ class CAMELAdapter(FrameworkAdapter):
             methods[name] = _callback_method(name, self)
         return type("ExecWeaveCAMELWorkforceCallback", (base,), methods)()
 
+    def observe_task_channel(self, channel: Any, *, publishers: dict[str, EntityRef]) -> Any:
+        """Record actual task dispatch/receipt and result dispatch/receipt."""
+        from .camel_channel import observe_task_channel
+
+        return observe_task_channel(self, channel, publishers)
+
     def _callback_event(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
         payload = _payload(args, kwargs)
         if name in {"log_message", "log_stream_chunk"}:

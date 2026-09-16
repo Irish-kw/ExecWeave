@@ -28,6 +28,8 @@ _AGENT_PANEL_CSS = r"""
 .execweave-agent-older[open]>summary{border-bottom:1px solid var(--border)}
 .execweave-agent-older>.execweave-agent-round{padding:10px 11px 11px}
 .execweave-agent-when{font-variant-numeric:tabular-nums;color:var(--text)}
+.execweave-message-history{border:1px solid var(--border);border-radius:10px;background:var(--panel2);margin:6px 0}
+.execweave-message-history>summary{cursor:pointer;padding:9px 11px;font-size:11px;color:var(--muted);overflow-wrap:anywhere}
 """.strip()
 
 _AGENT_PANEL_JS = r"""
@@ -119,7 +121,7 @@ function foldStateFor(node){
 function rememberVisibleFoldState(){
   if(!selectedNode)return;
   const state=foldStateFor(selectedNode);
-  for(const fold of details.querySelectorAll('.execweave-agent-older[data-fold-key]')){
+  for(const fold of details.querySelectorAll('.execweave-agent-older[data-fold-key],.execweave-message-history[data-fold-key]')){
     const key=String(fold.dataset.foldKey||'');
     if(key)state.set(key,fold.open);
   }
@@ -348,6 +350,7 @@ function execweaveNodeCardsBase(node){
     return rows;
   }
   if(kind==='process'){
+    if(Array.isArray(a.viewer_message_evidence)&&a.viewer_message_evidence.length)add('Unrouted callback messages',`${a.viewer_message_evidence.length} observations; sender/recipient not exposed. Original evidence retained in raw graph.`);
     add('Command',a.cmdline);
     add('Executable',a.exe);
     add('Process',[a.pid&&`pid ${a.pid}`,a.ppid&&`parent ${a.ppid}`].filter(Boolean).join('  \u00b7  '));
@@ -438,7 +441,36 @@ function execweaveFillAssignedTask(round,node,isRoot){
   const value=round||{cards:[]},cards=Array.isArray(value.cards)?value.cards.map(card=>[card[0],card[1]]):[];
   const label=isRoot?'Prompt':'Task',index=cards.findIndex(card=>String(card[0]||'')===label);
   if(index<0)cards.unshift([label,task]);else if(!commandText(cards[index][1]))cards[index][1]=task;
+  else if(attrs(node).conversation_scope==='framework_agent'&&commandText(cards[index][1])!==task)cards.unshift(['Assigned task',task]);
   return{...value,cards};
+}
+function agentCommunicationHistory(node,messages){
+  // Read only this exact agent's conversation record. Never sweep sibling
+  // transcripts into the parent merely because they share a run or a model.
+  const candidates=messages.filter(message=>isObserved(message)&&!isInjected(message)&&(
+    String(message?.kind||'')==='agent_message'||
+    (String(message?.sender||'').startsWith('/')&&String(message?.recipient||'').startsWith('/')&&message.sender!==message.recipient)
+  ));
+  const byMessage=new Map();
+  for(const message of candidates){
+    const key=message.message_id?JSON.stringify([message.message_id,message.sender,message.recipient,message.text]):messageKey(message);
+    const previous=byMessage.get(key);
+    if(!previous||message.phase==='received')byMessage.set(key,message);
+  }
+  const routed=[...byMessage.values()];
+  if(!routed.length)return null;
+  const section=document.createElement('section');section.className='execweave-agent-communication';
+  const title=document.createElement('div');title.className='execweave-agent-label';title.textContent='Agent communication';section.appendChild(title);
+  const state=foldStateFor(node);
+  for(const message of [...routed].reverse()){
+    const fold=document.createElement('details');fold.className='execweave-message-history';
+    const key='message:'+messageKey(message);fold.dataset.foldKey=key;fold.open=state.get(key)===true;
+    const summary=document.createElement('summary');
+    summary.textContent=[moment(message.timestamp),`${message.sender||'Unknown sender'} → ${message.recipient||'Recipient not recorded'}`].filter(Boolean).join(' · ');
+    const body=document.createElement('pre');body.className='execweave-agent-body';body.textContent=displayText(message);
+    fold.append(summary,body);fold.addEventListener('toggle',()=>state.set(key,fold.open));section.appendChild(fold);
+  }
+  return section;
 }
 function renderNode(node){
   const rows=nodeCards(node);
@@ -460,8 +492,8 @@ function render(node){
   const isRoot=nodeHasRootAuthority(node)||previewUsesRootRenderer(preview);
   const rounds=(isRoot?rootRounds(messages,path||'/root'):childRounds(messages,path)).map(round=>execweaveFillAssignedTask(round,node,isRoot));
   const tools=toolCallsFor(String(node.id||''));
-  const frameworkCommunication=attrs(node).conversation_scope==='framework_agent'?uniqueTexts(messages.filter(message=>isObserved(message)&&!isInjected(message)&&String(message?.kind||'')==='agent_message')).join('\n\n'):'';
-  const appendTools=()=>{if(frameworkCommunication)details.appendChild(card('Agent communication',frameworkCommunication));if(tools)details.appendChild(card('Tools',tools))};
+  const communication=agentCommunicationHistory(node,messages);
+  const appendTools=()=>{if(communication)details.appendChild(communication);if(tools)details.appendChild(card('Tools',tools))};
   if(rounds.length<2){const fallback={cards:isRoot?[['Prompt',''],['Final response','']]:[['Task',''],['Thinking',''],['Response','']]};details.appendChild(roundView(rounds[0]||execweaveFillAssignedTask(fallback,node,isRoot)));appendTools();return true}
   // A subagent borrows the moment and the wording of the unique canonical root round
   // it belongs to. If root identity is ambiguous, the child keeps its own timestamp.

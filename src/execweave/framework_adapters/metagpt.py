@@ -165,6 +165,8 @@ class MetaGPTAdapter(FrameworkAdapter):
         source_name = getattr(message_object, "sent_from", None)
         target_name = getattr(message_object, "send_to", None)
         source = self._roles.get(str(source_name)) if source_name else None
+        if source is None and source_name == "user":
+            source = self.entity("user", "user", name="user")
         content = _text(getattr(message_object, "content", None))
         role = _text(getattr(message_object, "role", None))
         common_attributes = {
@@ -221,6 +223,19 @@ class MetaGPTAdapter(FrameworkAdapter):
                 **common_attributes,
             )
         return message
+
+    def observe_message_delivery(self, message_object: Any, *, recipient: EntityRef, task: EntityRef | None = None) -> EntityRef:
+        """Call after the native Role.put_message accepted a message into its queue."""
+        self._message_counter += 1
+        return self.observe_message(
+            getattr(message_object, "id", None) or f"delivery-{self._message_counter}",
+            source=(self.entity("user", "user", name="user") if getattr(message_object, "sent_from", None) == "user"
+                    else self._roles.get(str(getattr(message_object, "sent_from", "")))),
+            target=recipient,
+            content=_text(getattr(message_object, "content", None)),
+            role=_text(getattr(message_object, "role", None)), task=task, received=True,
+            routing_source="metagpt.Role.put_message",
+        )
 
     def observe_action(
         self,

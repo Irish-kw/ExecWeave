@@ -12,17 +12,12 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
-AUTOGEN_SITE = Path(
-    os.environ.get(
-        "EXECWEAVE_AUTOGEN_SITE",
-        r"C:\tmp\execweave-next-release-autogen\Lib\site-packages",
-    )
-)
-sys.path.insert(0, str(AUTOGEN_SITE))
+if os.environ.get("EXECWEAVE_AUTOGEN_SITE"):
+    sys.path.insert(0, os.environ["EXECWEAVE_AUTOGEN_SITE"])
 sys.path.insert(0, str(ROOT / "src"))
 
 import psutil
-from autogen_agentchat.agents import AssistantAgent
+from autogen_agentchat.agents import AssistantAgent, SocietyOfMindAgent
 from autogen_agentchat.teams import RoundRobinGroupChat
 from autogen_ext.models.ollama import OllamaChatCompletionClient
 from autogen_ext.models.ollama._model_info import get_info
@@ -67,6 +62,18 @@ class ObservedOllamaClient(OllamaChatCompletionClient):
         self._counter += 1
         call_id = f"autogen-{self._agent_ref.id}-call-{self._counter}"
         boundary = "autogen_ext.models.ollama.OllamaChatCompletionClient.create"
+        # The coordinator actually consumes these peer messages in its model
+        # context. Record the recipient here; a team output stream alone cannot
+        # establish which agent received a broadcast.
+        if self._agent_ref.attributes.get("agent_role") == "root":
+            for index, message in enumerate(messages):
+                sender = self._adapter._agents.get(str(getattr(message, "source", "")))
+                if sender is not None and sender.id != self._agent_ref.id:
+                    self._adapter.observe_message(
+                        f"{call_id}-input-{index}", source=sender, target=self._agent_ref,
+                        content=str(getattr(message, "content", "")), role="agent", received=True,
+                        routing_source="society_of_mind_model_context",
+                    )
         self._adapter.observe_model_call(
             call_id,
             agent=self._agent_ref,
@@ -125,6 +132,10 @@ async def run_acceptance(args: argparse.Namespace) -> dict[str, Any]:
         process=process_ref,
     )
     adapter = AutoGenAdapter(context)
+    coordinator_ref = adapter.observe_agent(
+        "coordinator", name="coordinator", role="SocietyOfMindAgent", process=process_ref,
+        agent_role="root", agent_path="/root",
+    )
     task_prompt = (
         f"Collaborate on a factual acceptance run using the local Ollama endpoint "
         f"at {args.endpoint}. The model under test is {args.model}. "
@@ -132,6 +143,7 @@ async def run_acceptance(args: argparse.Namespace) -> dict[str, Any]:
     )
     task = adapter.observe_task(
         "autogen-real-task",
+        owner=coordinator_ref,
         name="AutoGen local Ollama collaboration",
         content=task_prompt,
         model=args.model,
@@ -189,7 +201,17 @@ async def run_acceptance(args: argparse.Namespace) -> dict[str, Any]:
             agent_ref=agent_refs["summary_agent"],
         ),
     ]
-    evidence_agent = AssistantAgent(
+    class ObservedAssistantAgent(AssistantAgent):
+        async def on_messages_stream(self, messages, cancellation_token):
+            for message in messages:
+                adapter.observe_agentchat_event(
+                    message, target=agent_refs[self.name], task=task, received=True,
+                    routing_source="AssistantAgent.on_messages_stream",
+                )
+            async for event in super().on_messages_stream(messages, cancellation_token):
+                yield event
+
+    evidence_agent = ObservedAssistantAgent(
         name="evidence_agent",
         model_client=clients[0],
         system_message=(
@@ -197,7 +219,7 @@ async def run_acceptance(args: argparse.Namespace) -> dict[str, Any]:
             "about the requested local Ollama acceptance. Do not mention hidden reasoning."
         ),
     )
-    summary_agent = AssistantAgent(
+    summary_agent = ObservedAssistantAgent(
         name="summary_agent",
         model_client=clients[1],
         system_message=(
@@ -210,11 +232,16 @@ async def run_acceptance(args: argparse.Namespace) -> dict[str, Any]:
         name="execweave-autogen-acceptance",
         max_turns=4,
     )
+    coordinator_client = ObservedOllamaClient(
+        model=args.model, host=args.endpoint.rstrip("/"), adapter=adapter, agent_ref=coordinator_ref,
+    )
+    clients.append(coordinator_client)
+    coordinator = SocietyOfMindAgent("coordinator", team, model_client=coordinator_client)
 
     result = None
     stream_event_types: list[str] = []
     try:
-        async for item in team.run_stream(
+        async for item in coordinator.run_stream(
             task=task_prompt
         ):
             event_name = type(item).__name__

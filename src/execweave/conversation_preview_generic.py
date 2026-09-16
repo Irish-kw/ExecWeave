@@ -74,7 +74,7 @@ def _routed_agent_message(
     phase = value.get("phase")
     task_name = value.get("task_name")
     content_state = value.get("content_state")
-    return [_message(
+    message = _message(
         timestamp=timestamp,
         ordinal=ordinal,
         kind=kind if isinstance(kind, str) and kind else "agent_message",
@@ -84,7 +84,10 @@ def _routed_agent_message(
         phase=phase if isinstance(phase, str) and phase else None,
         task_name=task_name if isinstance(task_name, str) and task_name else None,
         content_state=content_state if isinstance(content_state, str) and content_state else "plaintext",
-    )]
+    )
+    if isinstance(value.get("message_id"), str):
+        message["message_id"] = value["message_id"]
+    return [message]
 
 
 def _generic_content_messages(
@@ -108,6 +111,10 @@ def _generic_content_messages(
         if routed:
             return routed
     if "model_request" in kind or "model_response" in kind or "model_failure" in kind:
+        if "model_response" in kind:
+            response = _response_messages(value, timestamp=timestamp, ordinal=ordinal, agent_path=agent_path)
+            if response:
+                return response
         structured = _structured_messages(value, timestamp=timestamp, ordinal=ordinal, agent_path=agent_path)
         if structured:
             return structured

@@ -28,7 +28,11 @@ from execweave.framework_adapters import (
 from camel.models import OllamaModel
 
 
-def _json_default(value: Any) -> str:
+def _json_default(value: Any) -> Any:
+    if isinstance(value, type) and callable(getattr(value, "model_json_schema", None)):
+        return value.model_json_schema()
+    if callable(getattr(value, "model_dump", None)):
+        return value.model_dump(mode="json")
     return str(value)
 
 
@@ -41,21 +45,22 @@ class ObservedOllamaModel(OllamaModel):
         self._counter = 0
         super().__init__(
             model_type=model_type,
-            model_config_dict={"temperature": 0, "max_tokens": 128, "stream": False},
+            model_config_dict={"temperature": 0, "max_tokens": 256, "stream": False},
             url=url,
             timeout=120,
             max_retries=1,
         )
 
-    def _begin(self, messages: list[Any]) -> str:
+    def _begin(self, messages: list[Any], response_format: Any = None, tools: Any = None) -> str:
         self._counter += 1
-        call_id = f"camel-ollama-call-{self._counter}"
+        owner = self._agent_holder.get("ref")
+        call_id = f"camel-{owner.id if owner else 'unknown'}-call-{self._counter}"
         self._adapter.model_call(
             call_id,
             self._agent_holder.get("ref"),
             str(self.model_type),
             status="request",
-            request=json.loads(json.dumps(messages, ensure_ascii=False, default=_json_default)),
+            request=json.loads(json.dumps({"messages": messages, "response_format": response_format, "tools": tools}, ensure_ascii=False, default=_json_default)),
             request_message_count=len(messages),
             task=self._adapter.active_task_for(self._agent_holder.get("ref")),
             endpoint=self._url,
@@ -78,7 +83,7 @@ class ObservedOllamaModel(OllamaModel):
         )
 
     def run(self, messages: list[Any], response_format: Any = None, tools: Any = None) -> Any:
-        call_id = self._begin(messages)
+        call_id = self._begin(messages, response_format, tools)
         try:
             result = super().run(messages, response_format=response_format, tools=tools)
         except BaseException as exc:
@@ -88,7 +93,7 @@ class ObservedOllamaModel(OllamaModel):
         return result
 
     async def arun(self, messages: list[Any], response_format: Any = None, tools: Any = None) -> Any:
-        call_id = self._begin(messages)
+        call_id = self._begin(messages, response_format, tools)
         try:
             result = await super().arun(messages, response_format=response_format, tools=tools)
         except BaseException as exc:
@@ -133,7 +138,8 @@ def main() -> int:
     coordinator_holder: dict[str, Any] = {}
     planner_holder: dict[str, Any] = {}
     coordinator = adapter.agent_created(
-        "coordinator", name="CAMEL Workforce Coordinator", role="coordinator", process=process_ref
+        "coordinator", name="CAMEL Workforce Coordinator", role="coordinator", process=process_ref,
+        agent_role="root", agent_path="/root",
     )
     planner = adapter.agent_created(
         "task-planner", name="CAMEL Task Planner", role="planner", process=process_ref
@@ -148,7 +154,7 @@ def main() -> int:
         model_type=args.model, url=args.endpoint, adapter=adapter, agent_holder=planner_holder
     )
     coordinator_agent = ChatAgent(
-        system_message="Assign each pipeline task to the best worker. Return only valid structured assignments.",
+        system_message="Assign the endpoint task to the evidence worker and the model-name task to the summary worker. These are independent checks. Return only valid structured assignments.",
         model=coordinator_model,
         max_iteration=1,
     )
@@ -157,7 +163,11 @@ def main() -> int:
         model=planner_model,
         max_iteration=1,
     )
-    workforce = Workforce(
+    class ObservedWorkforce(Workforce):
+        def set_channel(self, channel):
+            super().set_channel(adapter.observe_task_channel(channel, publishers={self.node_id: coordinator}))
+
+    workforce = ObservedWorkforce(
         "CAMEL ExecWeave real acceptance workforce",
         coordinator_agent=coordinator_agent,
         task_agent=planner_agent,

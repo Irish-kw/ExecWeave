@@ -261,4 +261,8 @@ jobs:
           if [[ "$HEAD_REF" == "release/0.8.31-windows-pipe-race" ]]; then
             args+=(--allow-test-change "tests/test_acceptance_visible_pipe.py=the live pipe acceptance test now waits for the complete redacted token before asserting output, removing a Windows scheduling race without changing the redaction contract")
           fi
+          if [[ "$HEAD_REF" == "fix/provider-session-message-flow" ]]; then
+            args+=(--allow-test-change "tests/test_execution_flow_integrity.py=Actor-owned orchestration must retain the actor model, never inherit the target model. Keep every historical test ID and assertion except the incorrect model expectation; use explicit UTF-8 for the Windows Node harness. New session/model and browser geometry tests cover the corrected contract.")
+            args+=(--allow-test-change "tests/test_framework_runtime_dashboard_integration.py=Replace the source-string assertion for the old flat communication card with the new collapsed-history helper and closed-by-default contract. All historical test IDs and task/raw-evidence assertions remain; real browser history and participant routing tests are added separately.")
+          fi
           python scripts/check_release_stage_integrity.py "${args[@]}"

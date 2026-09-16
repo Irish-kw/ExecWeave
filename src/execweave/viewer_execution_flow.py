@@ -571,6 +571,7 @@ EXECUTION_FLOW_SCRIPT = r"""
     const ranks=[...widthByRank.keys()].sort((a,b)=>a-b);
     const minRank=ranks[0],rootItems=ranked.filter(item=>item.rank===minRank);
     let x=Math.min(...rootItems.map(item=>item.spec.x));
+    if(rootItems.some(item=>attrsOf(nodeById.get(item.id)).viewer_session_flow))x=Math.min(...[...topo.spec.values()].map(spec=>spec.x));
     if(!Number.isFinite(x))x=0;
     const xByRank=new Map();
     for(const rank of ranks){

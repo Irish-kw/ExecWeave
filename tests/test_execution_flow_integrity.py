@@ -67,6 +67,7 @@ def _project(raw: dict, display: dict | None = None) -> dict:
             input=json.dumps({"raw": raw, "display": display}),
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
         )
     if proc.returncode != 0:
@@ -232,7 +233,7 @@ def test_actor_tool_call_model_hint_does_not_pollute_child_lookup():
         and n.get("name") == "spawn_agent"
     ]
     assert len(actions) == 1
-    assert actions[0]["attributes"].get("model_resource_id") == "model:child"
+    assert actions[0]["attributes"].get("model_resource_id") == "model:actor"
 
 
 def test_timestamp_only_action_does_not_bind_future_model_switch():
