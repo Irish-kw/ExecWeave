@@ -460,6 +460,7 @@ function agentCommunicationHistory(node,messages){
   const routed=[...byMessage.values()];
   if(!routed.length)return null;
   const section=document.createElement('section');section.className='execweave-agent-communication';
+  section.dataset.agentId=String(node.id);
   const title=document.createElement('div');title.className='execweave-communication-label';title.textContent='Agent communication';section.appendChild(title);
   const state=foldStateFor(node);
   for(const message of [...routed].reverse()){

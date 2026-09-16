@@ -308,7 +308,7 @@ def _browser_check(
         checked = {}
         for participant, texts in messages_by_agent.items():
             page.locator(f'.node[data-id="{participant}"]').click(timeout=10000)
-            page.wait_for_function("document.querySelector('#details .execweave-agent-communication') !== null", timeout=10000)
+            page.wait_for_function("id=>document.querySelector('#details .execweave-agent-communication')?.dataset.agentId===id", arg=participant, timeout=10000)
             page.locator(".execweave-message-history").evaluate_all("nodes=>nodes.forEach(node=>node.open=true)")
             visible = page.locator("#details").inner_text()
             for text in texts:

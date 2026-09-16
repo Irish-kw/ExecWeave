@@ -50,8 +50,9 @@ must not be fabricated to match a desired picture. OWL is not AutoGen.
 
 `framework_dashboard_acceptance.py` independently reads captured message text,
 opens every relevant agent, verifies routes, content hashes, prompts, and live vs
-finished parity. Its three-event runtime anchor verifies semantic merging, not
-complete native OS collection. Missing browser dependencies fail unless static-only
+finished parity. It uses the adjacent native `events.jsonl` when present and
+rejects mismatched session identities. Standalone sidecars instead use an explicitly
+reported three-event synthetic anchor, which is not an OS capture. Missing browser dependencies fail unless static-only
 checking was explicitly requested. Real captures are private local artifacts,
 not checked into the repository.
 

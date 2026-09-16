@@ -142,6 +142,7 @@ def test_browser_session_flow_and_collapsed_incoming_history(provider, tmp_path)
                 assert session_box["x"] < box["x"]
             _click_id(page, "root")
             folds = page.locator(".execweave-message-history")
+            assert page.locator('.execweave-agent-communication').get_attribute('data-agent-id') == 'root'
             assert folds.count() == 2
             assert folds.evaluate_all("xs=>xs.every(x=>!x.open)")
             folds.first.locator("summary").click()
