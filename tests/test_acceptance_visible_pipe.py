@@ -26,7 +26,7 @@ def test_pipe_capture_displays_output_before_child_exit(tmp_path, capsys) -> Non
         assert process.poll() is None
         # Artifact and tee are emitted by one reader; wait briefly for the tee too.
         displayed = ""
-        while time.monotonic() < deadline and "READY" not in displayed:
+        while time.monotonic() < deadline and "[REDACTED]" not in displayed:
             displayed += capsys.readouterr().out
             time.sleep(0.01)
         assert "[OLLAMA] READY" in displayed
