@@ -420,6 +420,8 @@ function toolOccurrenceSection(node){
 }
 function execweaveAssignedTaskText(agent){
   if(!agent||String(agent.type||'')!=='agent')return '';
+  const projected=attrs(agent),attached=projected.viewer_assigned_task_prompt||projected.viewer_assigned_task_name;
+  if(attached)return commandText(attached);
   const graph=rawGraph(),nodes=Array.isArray(graph.nodes)?graph.nodes:[],edges=Array.isArray(graph.edges)?graph.edges:[];
   const nodeMap=new Map(nodes.filter(node=>node&&node.id).map(node=>[String(node.id),node]));
   const exactAssignment=['ASSIGNED','AGENT','TASK'].join('_');

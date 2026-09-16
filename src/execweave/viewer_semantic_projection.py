@@ -258,6 +258,151 @@ def orphan_audit(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> di
     return {"count": sum(item["count"] for item in by_type), "by_type": by_type}
 
 
+_FRAMEWORK_TASK_RELATIONS = frozenset(
+    {"ASSIGNED_TO", "TASK_CREATED", "TASK_STARTED", "TASK_UPDATED", "TASK_COMPLETED", "TASK_FAILED"}
+)
+
+
+def _framework_task_edge_score(edge: dict[str, Any]) -> tuple[int, str, str]:
+    sequence = edge.get("last_sequence")
+    if not isinstance(sequence, int) or isinstance(sequence, bool):
+        sequence = edge.get("first_sequence")
+    if not isinstance(sequence, int) or isinstance(sequence, bool):
+        sequence = -1
+    return (sequence, str(edge.get("last_seen") or edge.get("first_seen") or ""), str(edge.get("id") or ""))
+
+
+def _framework_task_text(task: dict[str, Any]) -> str:
+    attributes = _attrs(task)
+    for value in (
+        attributes.get("task_prompt"),
+        attributes.get("prompt"),
+        attributes.get("description"),
+        task.get("name"),
+    ):
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def collapse_framework_tasks(
+    nodes: list[dict[str, Any]],
+    edges: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, int]]:
+    """Fold framework task presentation into the owning agent, like provider views.
+
+    Framework adapters retain first-class task entities in the raw graph because task
+    lifecycle and prompt evidence must remain auditable.  Provider dashboards expose
+    that same information on the agent card, however, so the viewer projection hides
+    only framework task nodes and copies the latest authoritative task text onto each
+    assigned framework agent.  Provider graphs are untouched because they do not use
+    the framework-agent conversation scope.
+    """
+    node_by_id = {
+        str(node["id"]): node
+        for node in nodes
+        if isinstance(node, dict) and isinstance(node.get("id"), str)
+    }
+    framework_agents = {
+        node_id
+        for node_id, node in node_by_id.items()
+        if node.get("type") == "agent" and _attrs(node).get("conversation_scope") == "framework_agent"
+    }
+    if not framework_agents:
+        return nodes, edges, {
+            "framework_task_node_count": 0,
+            "framework_task_content_node_count": 0,
+            "framework_task_agent_count": 0,
+        }
+
+    task_ids: set[str] = set()
+    tasks_by_agent: dict[str, list[tuple[tuple[int, str, str], str]]] = defaultdict(list)
+    for edge in edges:
+        if not isinstance(edge, dict) or edge.get("relation") not in _FRAMEWORK_TASK_RELATIONS:
+            continue
+        source = str(edge.get("source") or "")
+        target = str(edge.get("target") or "")
+        source_node = node_by_id.get(source)
+        target_node = node_by_id.get(target)
+        task_id = source if source_node and source_node.get("type") == "task" else target if target_node and target_node.get("type") == "task" else None
+        if task_id is None:
+            continue
+        agent_id = source if source in framework_agents else target if target in framework_agents else None
+        if agent_id is None:
+            continue
+        task_ids.add(task_id)
+        tasks_by_agent[agent_id].append((_framework_task_edge_score(edge), task_id))
+
+    if not task_ids:
+        return nodes, edges, {
+            "framework_task_node_count": 0,
+            "framework_task_content_node_count": 0,
+            "framework_task_agent_count": 0,
+        }
+
+    projected_nodes: list[dict[str, Any]] = []
+    for node in nodes:
+        node_id = str(node.get("id") or "")
+        if node_id in task_ids:
+            continue
+        if node.get("type") == "agent" and node_id in framework_agents:
+            candidates: dict[str, tuple[int, str, str]] = {}
+            for score, task_id in tasks_by_agent.get(node_id, []):
+                previous = candidates.get(task_id)
+                if previous is None or score > previous:
+                    candidates[task_id] = score
+            ordered_ids = [
+                task_id
+                for task_id, _ in sorted(
+                    candidates.items(),
+                    key=lambda item: (item[1], item[0]),
+                    reverse=True,
+                )
+            ]
+            latest_task = node_by_id.get(ordered_ids[0]) if ordered_ids else None
+            attributes = dict(_attrs(node))
+            attributes["viewer_assigned_task_ids"] = ordered_ids
+            attributes["viewer_assigned_task_count"] = len(ordered_ids)
+            if latest_task is not None:
+                attributes["viewer_assigned_task_id"] = str(latest_task.get("id") or "")
+                attributes["viewer_assigned_task_name"] = str(latest_task.get("name") or "")
+                task_text = _framework_task_text(latest_task)
+                if task_text:
+                    attributes["viewer_assigned_task_prompt"] = task_text
+            projected_nodes.append({**node, "attributes": attributes})
+            continue
+        projected_nodes.append(node)
+
+    hidden_content_ids: set[str] = set()
+    for node in nodes:
+        node_id = str(node.get("id") or "")
+        if node.get("type") != "observed_content" or not node_id:
+            continue
+        incident = [
+            edge
+            for edge in edges
+            if edge.get("source") == node_id or edge.get("target") == node_id
+        ]
+        if incident and all(
+            (edge.get("source") in task_ids or edge.get("target") in task_ids)
+            for edge in incident
+        ):
+            hidden_content_ids.add(node_id)
+
+    hidden_ids = task_ids | hidden_content_ids
+    projected_nodes = [node for node in projected_nodes if str(node.get("id") or "") not in hidden_content_ids]
+    projected_edges = [
+        edge
+        for edge in edges
+        if edge.get("source") not in hidden_ids and edge.get("target") not in hidden_ids
+    ]
+    return projected_nodes, projected_edges, {
+        "framework_task_node_count": len(task_ids),
+        "framework_task_content_node_count": len(hidden_content_ids),
+        "framework_task_agent_count": len(tasks_by_agent),
+    }
+
+
 def project_provider_neutral_viewer_graph(graph: dict[str, Any]) -> dict[str, Any]:
     """Provider-neutral display projection; raw graph/evidence remains unchanged."""
     from . import viewer_projection_base as base
@@ -268,6 +413,7 @@ def project_provider_neutral_viewer_graph(graph: dict[str, Any]) -> dict[str, An
     nodes = [deepcopy(n) for n in filtered.get("nodes", []) if isinstance(n, dict)]
     edges = [deepcopy(e) for e in filtered.get("edges", []) if isinstance(e, dict)]
     entries = _entries(graph)
+    nodes, edges, framework_tasks = collapse_framework_tasks(nodes, edges)
     nodes, edges, inference = collapse_inference_requests(nodes, edges, entries)
     roots, _ = _roots(nodes, entries)
     nodes, edges, files = collapse_orphan_files(nodes, edges, roots[0] if len(roots) == 1 else None)
@@ -297,6 +443,7 @@ def project_provider_neutral_viewer_graph(graph: dict[str, Any]) -> dict[str, An
         or inference["collapsed_request_count"]
         or local is not None
         or files is not None
+        or framework_tasks["framework_task_node_count"]
     )
     if not topology_changed:
         if audit["count"]:
@@ -313,6 +460,9 @@ def project_provider_neutral_viewer_graph(graph: dict[str, Any]) -> dict[str, An
         "orphan_file_node_count": len(files.get("nodes") or []) if files else 0,
         "inference_request_count": inference["collapsed_request_count"], "logical_inference_count": inference["logical_inference_count"],
         "direct_inference_edge_count": inference["direct_inference_edge_count"], "unresolved_inference_requests": inference["unresolved"],
+        "framework_task_node_count": framework_tasks["framework_task_node_count"],
+        "framework_task_content_node_count": framework_tasks["framework_task_content_node_count"],
+        "framework_task_agent_count": framework_tasks["framework_task_agent_count"],
         "internal_hook_node_count": len(hook_nodes), "internal_hook_edge_count": len(hook_edges),
         "projection_topology_changed": True,
     })
