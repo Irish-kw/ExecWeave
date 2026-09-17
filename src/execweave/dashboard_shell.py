@@ -145,7 +145,7 @@ def _preserve_readable_initial_camera(html: str) -> str:
         raise RuntimeError("initial camera fit seams changed")
     return html.replace(
         initial_fit,
-        "if(!hasFitted&&positions.size){fit(false);hasFitted=true}",
+        "if(!hasFitted&&positions.size){fit(false,.48);hasFitted=true}",
     )
 
 

@@ -195,7 +195,7 @@ function stableRoundKey(round){
   return JSON.stringify([round?.start??null,round?.cards?.[0]?.[0]??null,round?.cards?.[0]?.[1]??null]);
 }
 function foldedRound(round,when,label,state,defaultOpen=false){
-  const fold=document.createElement('details');fold.className=defaultOpen?'execweave-agent-latest':'execweave-agent-older';
+  const fold=document.createElement('details');fold.className=defaultOpen?'execweave-agent-latest execweave-agent-round':'execweave-agent-older';
   const key=stableRoundKey(round);bindFold(fold,state,key,defaultOpen);
   const head=document.createElement('summary');
   const time=document.createElement('span');time.className='execweave-agent-when';time.textContent=when;
@@ -511,7 +511,7 @@ function render(node){
   // it belongs to. If root identity is ambiguous, the child keeps its own timestamp.
   const runs=isRoot?rounds:runRounds();
   const sameDay=sameDayRun(runs.length?runs:rounds);
-  const naming=round=>isRoot?round:(round.label?round:(roundOf(round.start,runs)||{start:round.start,label:''}));
+  const naming=round=>{if(isRoot||round.label)return round;const parentRound=roundOf(round.start,runs);return{start:parentRound?.start||round.start,label:''}};
   const list=document.createElement('div');list.className='execweave-agent-rounds';
   const ordered=[...rounds].reverse(),state=foldStateFor(node);
   const newest=naming(ordered[0]);list.appendChild(foldedRound(ordered[0],clock(newest.start||ordered[0].start,sameDay),'Latest · '+(newest.label||''),state,true));
