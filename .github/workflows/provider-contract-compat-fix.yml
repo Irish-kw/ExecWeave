@@ -1,0 +1,64 @@
+name: Preserve provider dashboard compatibility contracts
+
+on:
+  push:
+    branches:
+      - fix/0.8.32-audit-closure-materialized
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.head_commit.message == 'Bootstrap provider contract compatibility fixer'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply behavior-preserving compatibility patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = "97219d9633b66af4d832db6d5faa3b0ca5c1f863"
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/execweave/viewer_agent_panel.py')
+          text = path.read_text(encoding='utf-8')
+
+          old = "const section=document.createElement('section');section.className='execweave-inference-history execweave-agent-rounds';\n  const state=foldStateFor(node),ordered=rows.slice().sort"
+          new = "const section=document.createElement('section');section.className='execweave-inference-history execweave-agent-rounds';\n  const title=document.createElement('div');title.className='execweave-agent-label';title.textContent='Inference history';section.appendChild(title);\n  const state=foldStateFor(node),ordered=rows.slice().sort"
+          if text.count(old) != 1:
+              raise SystemExit(f'inference compatibility needle count={text.count(old)}')
+          text = text.replace(old, new)
+
+          old = "const key='message:'+messageKey(message);bindFold(fold,state,key);"
+          new = "const key='message:'+messageKey(message);fold.open=state.get(key)===true;bindFold(fold,state,key);"
+          if text.count(old) != 1:
+              raise SystemExit(f'communication compatibility needle count={text.count(old)}')
+          text = text.replace(old, new)
+
+          path.write_text(text, encoding='utf-8')
+          PY
+          git rm .github/workflows/provider-contract-compat-fix.yml
+          git diff --check
+
+      - name: Run focused provider compatibility tests
+        run: |
+          python -m pip install -e ".[dev]"
+          python -m pytest -q \
+            tests/test_provider_neutral_viewer_semantics.py::test_shared_dashboard_surfaces_inference_and_file_clusters \
+            tests/test_framework_runtime_dashboard_integration.py::test_framework_agent_panel_projects_assigned_task_and_communication
+          ruff check src/execweave/viewer_agent_panel.py
+
+      - name: Commit compatibility preservation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'ExecWeave CI compatibility fixer'
+          git config user.email '49675917+Irish-kw@users.noreply.github.com'
+          git add -A
+          git commit -m 'Preserve provider dashboard compatibility contracts'
+          git push origin HEAD:fix/0.8.32-audit-closure-materialized
