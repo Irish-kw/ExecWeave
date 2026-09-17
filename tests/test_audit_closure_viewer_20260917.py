@@ -19,9 +19,7 @@ def browser():
         try:
             instance = manager.chromium.launch(executable_path=executable, headless=True, args=["--no-sandbox"])
         except playwright.Error:
-            if os.environ.get("EXECWEAVE_E2E_REQUIRED") == "1":
-                raise
-            pytest.skip("Chromium is not available")
+            raise
         yield instance
         instance.close()
 
@@ -146,19 +144,16 @@ def test_static_counts_and_workload_failure_are_not_faked(browser):
 
 
 def test_real_storage_survives_reload_and_is_isolated_by_run(browser):
-    # A true origin/reload test, not a mocked localStorage. Restricted sandboxes
-    # can still run the in-memory interaction tests above, but cannot claim this
-    # one. CI requires Chromium and does not skip an unexpected browser failure.
+    # A true origin/reload test, not a mocked localStorage. CI requires Chromium
+    # and fails closed if the browser or navigation is unavailable.
     playwright = pytest.importorskip("playwright.sync_api")
     page = browser.new_page(viewport={"width": 1600, "height": 1000})
     document = [html(4)]
     page.route("http://127.0.0.1:8941/**", lambda route: route.fulfill(content_type="text/html", body=document[0]))
     try:
         page.goto("http://127.0.0.1:8941/")
-    except playwright.Error as error:
+    except playwright.Error:
         page.close()
-        if "ERR_BLOCKED_BY_ADMINISTRATOR" in str(error) and os.environ.get("EXECWEAVE_E2E_REQUIRED") != "1":
-            pytest.skip("Sandbox blocks navigations; real-origin persistence is not verified here")
         raise
     render_root(page)
     chosen = page.locator("#details .execweave-agent-older").nth(1)
