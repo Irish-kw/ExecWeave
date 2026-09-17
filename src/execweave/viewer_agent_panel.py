@@ -391,6 +391,7 @@ function contentAvailability(occurrence,relation){
 function inferenceOccurrenceSection(node){
   const rows=attrs(node).viewer_inference_occurrences;if(!Array.isArray(rows)||!rows.length)return null;
   const section=document.createElement('section');section.className='execweave-inference-history execweave-agent-rounds';
+  const title=document.createElement('div');title.className='execweave-agent-label';title.textContent='Inference history';section.appendChild(title);
   const state=foldStateFor(node),ordered=rows.slice().sort((a,b)=>String(a?.first_seen||'').localeCompare(String(b?.first_seen||''))||(Number(a?.first_sequence)||0)-(Number(b?.first_sequence)||0));
   ordered.reverse().forEach((item,index)=>{
     const fold=document.createElement('details');fold.className='execweave-agent-older execweave-inference-occurrence';
@@ -474,7 +475,7 @@ function agentCommunicationHistory(node,messages){
   const state=foldStateFor(node);
   for(const message of [...routed].reverse()){
     const fold=document.createElement('details');fold.className='execweave-message-history';
-    const key='message:'+messageKey(message);bindFold(fold,state,key);
+    const key='message:'+messageKey(message);fold.open=state.get(key)===true;bindFold(fold,state,key);
     const summary=document.createElement('summary');
     summary.textContent=[moment(message.timestamp),`${message.sender||'Unknown sender'} → ${message.recipient||'Recipient not recorded'}`].filter(Boolean).join(' · ');
     const body=document.createElement('pre');body.className='execweave-message-body';body.textContent=displayText(message);
