@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from .agent_topology import EVIDENCE_SUBAGENT_LIFECYCLE_HOOK, subagent_topology
+from .hook_input import read_hook_text
 
 _MAX_COMMAND_CHARS = 4096
 _MAX_LABEL_CHARS = 160
@@ -443,7 +444,7 @@ def append_semantic_records(path: str | Path, records: list[dict[str, Any]]) -> 
 
 def read_hook_payload(stream: Any = None) -> dict[str, Any]:
     source = stream if stream is not None else sys.stdin
-    raw = source.read()
+    raw = read_hook_text(source)
     if not isinstance(raw, str) or not raw.strip():
         raise ValueError("Codex hook stdin is empty")
     try:

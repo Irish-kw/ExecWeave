@@ -210,6 +210,9 @@ class RuntimeCollector:
                     "collector_pid": os.getpid(),
                     "backend": self.backend_name,
                     "execweave_version": __version__,
+                    "python_executable": sys.executable,
+                    "python_version": sys.version.split()[0],
+                    "package_path": str(Path(__file__).resolve().parent),
                 },
             )
         )

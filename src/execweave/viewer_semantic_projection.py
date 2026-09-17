@@ -5,6 +5,8 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from .viewer_background_files import CACHE_FILES_NODE_ID, collapse_python_cache_files
+
 ORPHAN_FILES_NODE_ID = "viewer-cluster:orphan-files"
 MODEL_RELATIONS = {"USED_MODEL": 0, "INVOKED_MODEL": 1, "REQUESTED_MODEL": 2}
 
@@ -420,6 +422,7 @@ def project_provider_neutral_viewer_graph(graph: dict[str, Any]) -> dict[str, An
     nodes, edges, framework_tasks = collapse_framework_tasks(nodes, edges)
     nodes, edges, inference = collapse_inference_requests(nodes, edges, entries)
     roots, _ = _roots(nodes, entries)
+    nodes, edges, cache = collapse_python_cache_files(nodes, edges, roots[0] if len(roots) == 1 else None)
     nodes, edges, files = collapse_orphan_files(nodes, edges, roots[0] if len(roots) == 1 else None)
     nodes, edges, local = collapse_local_endpoints(nodes, edges)
 
@@ -447,6 +450,7 @@ def project_provider_neutral_viewer_graph(graph: dict[str, Any]) -> dict[str, An
         or inference["collapsed_request_count"]
         or local is not None
         or files is not None
+        or cache is not None
         or framework_tasks["framework_task_node_count"]
     )
     if not topology_changed:
@@ -455,12 +459,13 @@ def project_provider_neutral_viewer_graph(graph: dict[str, Any]) -> dict[str, An
         return result
 
     meta = dict(result.get("viewer_projection") or {"schema_version": "0.1", "viewer_only": True})
-    semantic_projection = bool(inference["collapsed_request_count"] or local is not None or files is not None)
+    semantic_projection = bool(inference["collapsed_request_count"] or local is not None or files is not None or cache is not None)
     meta.update({
         "kind": "provider_neutral_semantics" if semantic_projection else "internal_hook_processes",
         "local_endpoint_policy": "all_loopback",
         "local_endpoint_count": len(local.get("nodes") or []) if local else 0,
-        "cluster_count": (1 if local else 0) + (1 if files else 0),
+        "cluster_count": (1 if local else 0) + (1 if files else 0) + (1 if cache else 0),
+        "python_cache_file_node_count": len(cache["nodes"]) if cache else 0,
         "orphan_file_node_count": len(files.get("nodes") or []) if files else 0,
         "inference_request_count": inference["collapsed_request_count"], "logical_inference_count": inference["logical_inference_count"],
         "direct_inference_edge_count": inference["direct_inference_edge_count"], "unresolved_inference_requests": inference["unresolved"],
@@ -476,6 +481,8 @@ def project_provider_neutral_viewer_graph(graph: dict[str, Any]) -> dict[str, An
         clusters[LOCAL_NODE_ID] = local
     if files:
         clusters[ORPHAN_FILES_NODE_ID] = files
+    if cache:
+        clusters[CACHE_FILES_NODE_ID] = cache
     if clusters:
         payload.setdefault("schema_version", "0.1")
         payload["clusters"] = clusters

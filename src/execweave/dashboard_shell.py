@@ -117,13 +117,10 @@ def _defer_camera_takeover_until_node_drag(html: str) -> str:
 
 
 def _preserve_readable_initial_camera(html: str) -> str:
-    """Keep first paint readable without changing the explicit whole-graph Fit action.
+    """Use the same whole-graph Fit semantics for initial and explicit fitting.
 
-    The initial snapshot historically called the same whole-graph ``fit`` routine as
-    the user-facing Fit button. Dense graphs can therefore arrive below readable
-    screen-space size even though the camera is otherwise in manual mode. Give only
-    the automatic first fit a 0.5 scale floor; an explicit Fit still defaults to the
-    established 0.07 floor so the full graph remains available as an overview.
+    Readability is addressed by evidence-preserving display clusters, not by
+    silently clipping nodes while the toolbar claims the entire graph fits.
     """
     signature = "function fit(animate=true){"
     if html.count(signature) != 1:
@@ -148,7 +145,7 @@ def _preserve_readable_initial_camera(html: str) -> str:
         raise RuntimeError("initial camera fit seams changed")
     return html.replace(
         initial_fit,
-        "if(!hasFitted&&positions.size){fit(false,.5);hasFitted=true}",
+        "if(!hasFitted&&positions.size){fit(false,.48);hasFitted=true}",
     )
 
 
@@ -199,7 +196,8 @@ function execweaveFileClusterHistory(a){
     add('Model',node?.name);
     add('Provider',a.provider||a.provider_name);
     add('Inference calls',a.viewer_inference_count);
-    add('Inference history',execweaveInferenceHistory(a));
+    if(a.model_resource_id)add('Shared model resource',a.model_resource_id);
+    // Chronology is rendered below as persistent per-invocation accordions.
   }else if(kind==='tool_call'){"""
     if html.count(branch_seam) != 1:
         raise RuntimeError("agent panel file/model branch seam changed")
@@ -224,7 +222,7 @@ def _stop_conversation_polling_after_finish(html: str) -> str:
         ),
         (
             "async function refresh(){if(window.__execweaveStaticMode||refreshing)return;refreshing=true;try{const headers={};if(window.__execweaveToken)headers['X-ExecWeave-Token']=window.__execweaveToken;const response=await fetch('/conversations.json',{cache:'no-store',headers});if(response.ok){const payload=await response.json();setEntries(payload?.entries)}}catch(_){}finally{refreshing=false}}",
-            "async function refresh({allowDuringFinish=false}={}){if(window.__execweaveStaticMode||conversationPollingFinished||(conversationFinishing&&!allowDuringFinish))return false;if(refreshing)return conversationRefreshPromise;refreshing=true;const controller=new AbortController();conversationRefreshController=controller;const task=(async()=>{try{const headers={};if(window.__execweaveToken)headers['X-ExecWeave-Token']=window.__execweaveToken;const response=await fetch('/conversations.json',{cache:'no-store',headers,signal:controller.signal});if(!response.ok)return false;const payload=await response.json();setEntries(payload?.entries);return true}catch(_){return false}finally{if(conversationRefreshController===controller)conversationRefreshController=null;refreshing=false}})();conversationRefreshPromise=task;return await task}",
+            "async function refresh({allowDuringFinish=false}={}){if(window.__execweaveStaticMode||(conversationPollingFinished&&!allowDuringFinish)||(conversationFinishing&&!allowDuringFinish))return false;if(refreshing)return conversationRefreshPromise;refreshing=true;const controller=new AbortController();conversationRefreshController=controller;const timeout=setTimeout(()=>controller.abort(),5000);const task=(async()=>{try{const headers={};if(window.__execweaveToken)headers['X-ExecWeave-Token']=window.__execweaveToken;const response=await fetch('/conversations.json',{cache:'no-store',headers,signal:controller.signal});if(!response.ok)return false;const payload=await response.json();if(!Array.isArray(payload?.entries))return false;setEntries(payload.entries);return true}catch(_){return false}finally{clearTimeout(timeout);if(conversationRefreshController===controller)conversationRefreshController=null;refreshing=false}})();conversationRefreshPromise=task;return await task}",
             "agent conversation refresh seam changed",
         ),
         (
@@ -234,7 +232,7 @@ def _stop_conversation_polling_after_finish(html: str) -> str:
         ),
         (
             "const previous=window.__execweaveDashboard||{};window.__execweaveDashboard={...previous,onPayload(data){previous.onPayload?.(data);if(selectedNode)refresh()},onFinished(){previous.onFinished?.();if(selectedNode)refresh()}};",
-            "async function finishConversationPolling(){if(conversationPollingFinished)return conversationFinishSynchronized;if(conversationFinishing)return conversationFinishPromise;conversationFinishing=true;if(conversationRefreshTimer!==null){clearInterval(conversationRefreshTimer);conversationRefreshTimer=null}conversationFinishPromise=(async()=>{await conversationRefreshPromise;if(!selectedNode||window.__execweaveStaticMode)return true;return await refresh({allowDuringFinish:true})})().then(synchronized=>{conversationFinishSynchronized=Boolean(synchronized);return conversationFinishSynchronized}).finally(()=>{conversationPollingFinished=true;conversationFinishing=false;if(conversationRefreshController!==null){conversationRefreshController.abort();conversationRefreshController=null}});return await conversationFinishPromise}\nconst stopConversationPolling=finishConversationPolling;\nconst previous=window.__execweaveDashboard||{};window.__execweaveDashboard={...previous,onPayload(data){previous.onPayload?.(data);if(selectedNode&&!data?.live_finished&&!conversationFinishing&&!conversationPollingFinished)refresh()},onFinished(){previous.onFinished?.();void finishConversationPolling()}};",
+            "function reportFinalConversationSync(ok){let notice=document.getElementById('conversation-sync-status');if(ok){notice?.remove();return}if(notice)return;notice=document.createElement('div');notice.id='conversation-sync-status';notice.setAttribute('role','status');notice.style.cssText='position:fixed;right:18px;bottom:18px;z-index:100;max-width:360px;padding:12px;background:#2b2118;color:#fff;border:1px solid #e5ad63;border-radius:8px';notice.append(document.createTextNode('Conversation history may be incomplete. Final synchronization failed. '));const retry=document.createElement('button');retry.type='button';retry.textContent='Retry sync';retry.onclick=async()=>{retry.disabled=true;try{await finishConversationPolling()}finally{retry.disabled=false}};notice.append(retry);document.body.append(notice)}\nasync function finishConversationPolling(){if(conversationPollingFinished&&conversationFinishSynchronized)return true;if(conversationFinishing)return conversationFinishPromise;conversationFinishing=true;if(conversationRefreshTimer!==null){clearInterval(conversationRefreshTimer);conversationRefreshTimer=null}conversationFinishPromise=(async()=>{await conversationRefreshPromise;if(window.__execweaveStaticMode)return true;return await refresh({allowDuringFinish:true})})().then(synchronized=>{conversationFinishSynchronized=Boolean(synchronized);reportFinalConversationSync(conversationFinishSynchronized);return conversationFinishSynchronized}).finally(()=>{conversationPollingFinished=true;conversationFinishing=false;if(conversationRefreshController!==null){conversationRefreshController.abort();conversationRefreshController=null}});return await conversationFinishPromise}\nconst stopConversationPolling=finishConversationPolling;\nconst previous=window.__execweaveDashboard||{};window.__execweaveDashboard={...previous,onPayload(data){previous.onPayload?.(data);if(selectedNode&&!data?.live_finished&&!conversationFinishing&&!conversationPollingFinished)refresh()},onFinished(){previous.onFinished?.();void finishConversationPolling()}};",
             "agent conversation lifecycle seam changed",
         ),
         (

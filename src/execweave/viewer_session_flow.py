@@ -36,7 +36,7 @@ SESSION_FLOW_SCRIPT = r"""
         relation:'RECORDED_IN_SESSION',count:1,viewer_only:true,causal:false,inferred:false,
         attributes:{evidence_node_ids:[root.id,sid],recording_session_id:raw.session_id}
       });
-      const sessionNode=nodes.find(n=>n.id===sid);sessionNode.attributes.viewer_flow_rank=1;
+      const sessionNode=nodes.find(n=>n.id===sid);sessionNode.name='Session';sessionNode.attributes.viewer_flow_rank=1;
       sessionNode.attributes.viewer_owner_agent_id=root.id;
       const rootNode=nodes.find(n=>n.id===root.id);if(rootNode){rootNode.attributes.viewer_flow_rank=0;rootNode.attributes.viewer_session_flow=true}
     }

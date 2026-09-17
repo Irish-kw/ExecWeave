@@ -246,23 +246,32 @@ def main(argv: list[str] | None = None) -> int:
             failures=failures,
         )
 
-    try:
-        content_records = codex_hook_to_content_events(
-            payload,
-            store=content_store,
-            timestamp=observed_at,
-            include_metadata=False,
-        )
-    except _CAPTURE_ERRORS as exc:
-        failures.append("content_capture")
-        _capture_warning("content_capture", exc)
-    else:
-        _append_stage(
-            sidecar,
-            content_records,
-            stage="content_append",
-            failures=failures,
-        )
+    # Content fields are independent evidence. A malformed input string must not
+    # prevent a valid tool result (or transcript archive) from being stored.
+    content_fields = {"prompt", "tool_input", "tool_response", "last_assistant_message"}
+    for field in sorted(content_fields & payload.keys()):
+        isolated = {key: value for key, value in payload.items()
+                    if key not in content_fields or key == field}
+        try:
+            content_records = codex_hook_to_content_events(
+                isolated, store=content_store, timestamp=observed_at, include_metadata=False,
+            )
+        except _CAPTURE_ERRORS as exc:
+            failures.append("content_capture")
+            _capture_warning("content_capture:" + field, exc)
+            diagnostic = {
+                "timestamp": observed_at, "event_type": "semantic.codex.content.capture_failed",
+                "relation": "CONTENT_CAPTURE_FAILED",
+                "source": {"id": "agent:OpenAI Codex", "type": "agent", "name": "OpenAI Codex"},
+                "target": None,
+                "attributes": {"provider": "codex", "observed_field": field,
+                               "error_type": type(exc).__name__, "tool_use_id": payload.get("tool_use_id"),
+                               "codex_hook_event_name": payload.get("hook_event_name"),
+                               "causal": False, "inferred": False},
+            }
+            _append_stage(sidecar, [diagnostic], stage="content_diagnostic_append", failures=failures)
+        else:
+            _append_stage(sidecar, content_records, stage="content_append", failures=failures)
 
     try:
         archive_records = codex_conversation_archive_events(

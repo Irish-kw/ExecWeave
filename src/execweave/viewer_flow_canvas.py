@@ -22,7 +22,7 @@ FLOW_CANVAS_SCRIPT = r"""
 // Column pitch is measured, not assumed: a column is as wide as its widest label plus a
 // gap, so a long path pushes only the columns after it instead of overlapping its
 // neighbour. Mirrors what the lane table did, keyed on layer instead of type.
-const EXECWEAVE_FLOW_COL_GAP=120,EXECWEAVE_FLOW_ROW_GAP=104,EXECWEAVE_FLOW_TOP=100;
+const EXECWEAVE_FLOW_COL_GAP=72,EXECWEAVE_FLOW_ROW_GAP=104,EXECWEAVE_FLOW_TOP=100;
 // the clear space kept between two boxes stacked in the same column
 const EXECWEAVE_FLOW_ROW_PAD=28;
 let execweaveFlowSpec=null,execweaveFlowColumnX=null,execweaveFlowSolved=null;
@@ -270,6 +270,25 @@ function execweaveFlowSolve(){
     for(const id of members){
       const row=Math.max(desired.get(id),floor+1);
       solved.set(id,{layer:value,row});floor=row;
+    }
+  }
+  // Communication is not a temporal dependency between agents. For a framework
+  // conversation, a longest-path chain through every routed message makes a
+  // shallow team several screens wide. Keep the root/session/context spine and
+  // place peer actors, messages and resources in adjacent columns instead. All
+  // original nodes, directed edges and evidence remain; return/cross-peer edges
+  // are routed against these actual coordinates by execweaveFlowSyncSpec.
+  const framework=ids.some(id=>nodeById.get(id)?.attributes?.viewer_framework_messages);
+  if(framework&&ids.length<=200){
+    const compact=new Map();
+    for(const id of ids){
+      const n=nodeById.get(id),a=n.attributes||{};
+      const column=a.viewer_session_flow?0:n.type==='session'?1:a.viewer_model_context?2:n.type==='agent'?3:n.type==='message'||a.viewer_framework_messages||n.type==='process'?4:5;
+      if(!compact.has(column))compact.set(column,[]);compact.get(column).push(id);
+    }
+    for(const [column,members] of compact){
+      members.sort((a,b)=>(solved.get(a)?.row||0)-(solved.get(b)?.row||0)||a.localeCompare(b));
+      members.forEach((id,row)=>solved.set(id,{layer:column,row}));
     }
   }
   return solved;

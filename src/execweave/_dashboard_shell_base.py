@@ -118,6 +118,7 @@ def render_static_dashboard_html(
     static_start = (
         "applyTheme(initialTheme());applyTransform();"
         "setSnapshot(window.__execweaveStaticGraph||{});"
+        "updateEvidence(window.__execweaveStaticGraph||{});"
         "setStatus('FINISHED','finished');"
         "window.__execweaveDashboard?.onFinished?.();"
     )

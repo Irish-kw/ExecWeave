@@ -14,6 +14,8 @@ from pathlib import Path
 
 import psutil
 
+from execweave.acceptance_output import prepare_acceptance_output
+
 # This module establishes an isolated MetaGPT configuration before importing it.
 from real_metagpt_acceptance import (
     Action, AdapterContext, Config, ContentCapturePolicy, Context, Message,
@@ -23,8 +25,7 @@ from metagpt.environment import Environment
 
 
 async def run(args):
-    output = args.output_dir.resolve()
-    output.mkdir(parents=True, exist_ok=False)
+    output = prepare_acceptance_output(args.output_dir)
     sidecar = Path(os.environ.get("EXECWEAVE_SEMANTIC_SIDECAR") or output / "semantic.jsonl")
     context = AdapterContext(
         framework="metagpt", run_id=os.environ.get("EXECWEAVE_RUN_ID") or output.name,

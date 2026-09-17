@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from .viewer_fold_state import FOLD_STATE_JS
 from .viewer_agent_panel_antigravity import ANTIGRAVITY_CHILD_ROUNDS_JS
 from .viewer_agent_panel_claude import CLAUDE_CHILD_ROUNDS_JS
 from .viewer_agent_panel_codex import CODEX_CHILD_ROUNDS_JS
@@ -20,13 +21,13 @@ _AGENT_PANEL_CSS = r"""
 .execweave-agent-empty{color:var(--muted);font-style:italic}
 .execweave-agent-rounds{display:grid;gap:10px}
 .execweave-agent-round{display:grid;gap:12px}
-.execweave-agent-older{border:1px solid var(--border);border-radius:10px;background:var(--panel2)}
-.execweave-agent-older>summary{cursor:pointer;list-style:none;padding:9px 11px;font-size:11px;color:var(--muted);overflow-wrap:anywhere}
-.execweave-agent-older>summary::-webkit-details-marker{display:none}
-.execweave-agent-older>summary::before{content:"\25b8 ";color:var(--muted)}
-.execweave-agent-older[open]>summary::before{content:"\25be "}
-.execweave-agent-older[open]>summary{border-bottom:1px solid var(--border)}
-.execweave-agent-older>.execweave-agent-round{padding:10px 11px 11px}
+:is(.execweave-agent-older,.execweave-agent-latest){border:1px solid var(--border);border-radius:10px;background:var(--panel2)}
+:is(.execweave-agent-older,.execweave-agent-latest)>summary{cursor:pointer;list-style:none;padding:9px 11px;font-size:11px;color:var(--muted);overflow-wrap:anywhere}
+:is(.execweave-agent-older,.execweave-agent-latest)>summary::-webkit-details-marker{display:none}
+:is(.execweave-agent-older,.execweave-agent-latest)>summary::before{content:"\25b8 ";color:var(--muted)}
+:is(.execweave-agent-older,.execweave-agent-latest)[open]>summary::before{content:"\25be "}
+:is(.execweave-agent-older,.execweave-agent-latest)[open]>summary{border-bottom:1px solid var(--border)}
+:is(.execweave-agent-older,.execweave-agent-latest)>.execweave-agent-round{padding:10px 11px 11px}
 .execweave-agent-when{font-variant-numeric:tabular-nums;color:var(--text)}
 .execweave-message-history{border:1px solid var(--border);border-radius:10px;background:var(--panel2);margin:6px 0}
 .execweave-message-history>summary{cursor:pointer;padding:9px 11px;font-size:11px;color:var(--muted);overflow-wrap:anywhere}
@@ -56,7 +57,7 @@ const nodeHasChildAuthority=node=>!!String(attrs(node).parent_agent_path||'').tr
 const legacyRootSignal=(node,path)=>path==='/root'||attrs(node).agent_role==='root'||attrs(node).root_agent_path==='/root';
 const nodeHasRootAuthority=node=>!nodeHasChildAuthority(node)&&(legacyRootSignal(node,nodePath(node))||ROOT_NODE_IDS.has(String(node?.id||'')));
 const entryHasRootAuthority=entry=>ROOT_NODE_IDS.has(String(entry?.source_id||''))||previewHasRootAuthority(entry?.conversation_preview);
-function messageKey(message){return JSON.stringify([message?.timestamp??null,message?.ordinal??null,message?.sender??null,message?.recipient??null,message?.kind??null,message?.phase??null,message?.content_state??null,message?.content_role??null,messageText(message)])}
+function messageKey(message){if(message?.occurrence_id)return JSON.stringify(["occurrence",message.occurrence_id,message.sender??null,message.kind??null,message.phase??null,messageText(message)]);return JSON.stringify([message?.timestamp??null,message?.ordinal??null,message?.sender??null,message?.recipient??null,message?.kind??null,message?.phase??null,message?.content_state??null,message?.content_role??null,messageText(message)])}
 function messageOrder(message,index){const stamp=String(message?.timestamp||''),ordinal=Number.isInteger(message?.ordinal)?message.ordinal:Number.MAX_SAFE_INTEGER;return{message,index,stamp,ordinal}}
 function aggregate(matches){
   if(!matches.length)return null;
@@ -113,19 +114,7 @@ function conversationSignature(node){
   const messages=Array.isArray(preview.messages)?preview.messages:[];
   return JSON.stringify([agentKey(node),messages.map(messageKey)]);
 }
-function foldStateFor(node){
-  const key=agentKey(node);let state=foldStateByAgent.get(key);
-  if(!state){state=new Map();foldStateByAgent.set(key,state)}
-  return state;
-}
-function rememberVisibleFoldState(){
-  if(!selectedNode)return;
-  const state=foldStateFor(selectedNode);
-  for(const fold of details.querySelectorAll('.execweave-agent-older[data-fold-key],.execweave-message-history[data-fold-key]')){
-    const key=String(fold.dataset.foldKey||'');
-    if(key)state.set(key,fold.open);
-  }
-}
+/*EXECWEAVE_FOLD_STATE*/
 function uniqueTexts(messages){const seen=new Set(),out=[];for(const message of messages){const text=displayText(message);if(!text||seen.has(text))continue;seen.add(text);out.push(text)}return out}
 function card(label,text){const box=document.createElement('section');box.className='execweave-agent-card';const head=document.createElement('div');head.className='execweave-agent-label';head.textContent=label;const body=document.createElement('pre');body.className='execweave-agent-body';body.textContent=text||'Not observed.';if(!text)body.classList.add('execweave-agent-empty');box.append(head,body);return box}
 function stampOf(message){return String(message?.timestamp||'')}
@@ -193,6 +182,7 @@ function stableRoundKey(round){
   if(raw){
     try{
       const parts=JSON.parse(raw);
+      if(Array.isArray(parts)&&parts[0]==='occurrence')return JSON.stringify(parts.slice(0,-1));
       // messageKey starts with observation timestamp followed by the provider
       // ordinal. A cumulative provider snapshot can re-observe the same turn at
       // a later timestamp, but its stable ordinal and content remain unchanged.
@@ -204,15 +194,14 @@ function stableRoundKey(round){
   }
   return JSON.stringify([round?.start??null,round?.cards?.[0]?.[0]??null,round?.cards?.[0]?.[1]??null]);
 }
-function foldedRound(round,when,label,state){
-  const fold=document.createElement('details');fold.className='execweave-agent-older';
-  const key=stableRoundKey(round);fold.dataset.foldKey=key;fold.open=state.get(key)===true;
+function foldedRound(round,when,label,state,defaultOpen=false){
+  const fold=document.createElement('details');fold.className=defaultOpen?'execweave-agent-latest execweave-agent-round':'execweave-agent-older';
+  const key=stableRoundKey(round);bindFold(fold,state,key,defaultOpen);
   const head=document.createElement('summary');
   const time=document.createElement('span');time.className='execweave-agent-when';time.textContent=when;
   head.append(time);
   if(label){head.append(document.createTextNode(` \u00b7 ${label}`))}
   fold.append(head,roundView(round));
-  fold.addEventListener('toggle',()=>state.set(key,fold.open));
   return fold;
 }
 // A run graph is mostly not agents, and until now selecting one of those nodes showed
@@ -395,6 +384,26 @@ function execweaveNodeCardsBase(node){
   add('Observed at',span(node));
   return rows;
 }
+function contentAvailability(occurrence,relation){
+  const refs=(occurrence?.content_references||[]).filter(ref=>String(ref?.relation||'')===relation);
+  return refs.length?{state:'archived_reference',note:'Full content is in the referenced run artifact; not an empty tool result.',references:refs}:{state:'not_observed',note:'A returned event does not establish that result content was captured.'};
+}
+function inferenceOccurrenceSection(node){
+  const rows=attrs(node).viewer_inference_occurrences;if(!Array.isArray(rows)||!rows.length)return null;
+  const section=document.createElement('section');section.className='execweave-inference-history execweave-agent-rounds';
+  const title=document.createElement('div');title.className='execweave-agent-label';title.textContent='Inference history';section.appendChild(title);
+  const state=foldStateFor(node),ordered=rows.slice().sort((a,b)=>String(a?.first_seen||'').localeCompare(String(b?.first_seen||''))||(Number(a?.first_sequence)||0)-(Number(b?.first_sequence)||0));
+  ordered.reverse().forEach((item,index)=>{
+    const fold=document.createElement('details');fold.className='execweave-agent-older execweave-inference-occurrence';
+    const identity=item?.request_ids||item?.call_ids||[item?.first_seen,item?.first_sequence,ordered.length-index];
+    bindFold(fold,state,'inference:'+JSON.stringify(identity),index===0);
+    const head=document.createElement('summary');head.textContent=[moment(item?.first_seen||item?.last_seen),`call ${ordered.length-index}`,index===0?'Latest':''].filter(Boolean).join(' · ');fold.appendChild(head);
+    for(const message of item?.messages||[]){fold.appendChild(card([message?.sender,message?.kind].filter(Boolean).join(' · ')||'Observed message',String(message?.text||'')));if(message?.text_truncated)fold.appendChild(card('Preview limit','This message preview is truncated. The complete content is in the references below.'))}
+    if(item?.content_references?.length)fold.appendChild(card('Content references',JSON.stringify(item.content_references,null,2)));
+    if(!item?.messages?.length&&!item?.content_references?.length)fold.appendChild(card('Content','Not observed.'));
+    section.appendChild(fold);
+  });return section;
+}
 function toolOccurrenceSection(node){
   const occurrences=Array.isArray(attrs(node).viewer_tool_call_occurrences)?attrs(node).viewer_tool_call_occurrences:[];
   if(!occurrences.length)return null;
@@ -412,11 +421,12 @@ function toolOccurrenceSection(node){
       last_seen:occurrence?.last_seen||null,
       first_sequence:occurrence?.first_sequence??null,
       last_sequence:occurrence?.last_sequence??null,
-      input:occurrence?.input??null,
-      output:occurrence?.output??null,
+      input:occurrence?.input??contentAvailability(occurrence,'HAS_TOOL_INPUT'),
+      output:occurrence?.output??contentAvailability(occurrence,'HAS_TOOL_OUTPUT'),
       call_ids:occurrence?.call_ids||[],
       content_references:occurrence?.content_references||[]
     },null,2);
+    bindFold(fold,foldStateFor(node),'tool:'+JSON.stringify(occurrence?.call_ids||[occurrence?.first_sequence,index]));
     fold.append(summary,pre);section.appendChild(fold);
   });
   return section;
@@ -465,11 +475,11 @@ function agentCommunicationHistory(node,messages){
   const state=foldStateFor(node);
   for(const message of [...routed].reverse()){
     const fold=document.createElement('details');fold.className='execweave-message-history';
-    const key='message:'+messageKey(message);fold.dataset.foldKey=key;fold.open=state.get(key)===true;
+    const key='message:'+messageKey(message);fold.open=state.get(key)===true;bindFold(fold,state,key);
     const summary=document.createElement('summary');
     summary.textContent=[moment(message.timestamp),`${message.sender||'Unknown sender'} → ${message.recipient||'Recipient not recorded'}`].filter(Boolean).join(' · ');
     const body=document.createElement('pre');body.className='execweave-message-body';body.textContent=displayText(message);
-    fold.append(summary,body);fold.addEventListener('toggle',()=>state.set(key,fold.open));section.appendChild(fold);
+    fold.append(summary,body);section.appendChild(fold);
   }
   return section;
 }
@@ -477,38 +487,39 @@ function renderNode(node){
   const rows=nodeCards(node);
   if(!rows.length)return false;
   rememberVisibleFoldState();
-  selectedNode=null;selectedConversationSignature='';detailsEmpty.hidden=true;details.replaceChildren();
+  selectedNode=null;selectedFoldNode=node;selectedConversationSignature='';detailsEmpty.hidden=true;details.replaceChildren();
   const view=document.createElement('div');view.className='execweave-agent-view';
   for(const[label,text]of rows)view.appendChild(card(label,text));
   details.appendChild(view);
   const occurrences=toolOccurrenceSection(node);if(occurrences)details.appendChild(occurrences);
+  const inferences=inferenceOccurrenceSection(node);if(inferences)details.appendChild(inferences);
   return true;
 }
 function render(node){
   if(!node)return false;
   if(String(node.type||'')!=='agent')return renderNode(node);
   rememberVisibleFoldState();
-  selectedNode=node;selectedConversationSignature=conversationSignature(node);detailsEmpty.hidden=true;details.replaceChildren();
+  selectedNode=node;selectedFoldNode=node;selectedConversationSignature=conversationSignature(node);detailsEmpty.hidden=true;details.replaceChildren();
   const record=recordFor(node),preview=record?.conversation_preview||{},path=String(preview.agent_path||nodePath(node)||'').trim(),messages=Array.isArray(preview.messages)?preview.messages:[];
   const isRoot=nodeHasRootAuthority(node)||previewUsesRootRenderer(preview);
   const rounds=(isRoot?rootRounds(messages,path||'/root'):childRounds(messages,path)).map(round=>execweaveFillAssignedTask(round,node,isRoot));
   const tools=toolCallsFor(String(node.id||''));
   const communication=agentCommunicationHistory(node,messages);
   const appendTools=()=>{if(communication)details.appendChild(communication);if(tools)details.appendChild(card('Tools',tools))};
-  if(rounds.length<2){const fallback={cards:isRoot?[['Prompt',''],['Final response','']]:[['Task',''],['Thinking',''],['Response','']]};details.appendChild(roundView(rounds[0]||execweaveFillAssignedTask(fallback,node,isRoot)));appendTools();return true}
+  if(!rounds.length){const fallback={cards:isRoot?[['Prompt',''],['Final response','']]:[['Task',''],['Thinking',''],['Response','']]};details.appendChild(roundView(rounds[0]||execweaveFillAssignedTask(fallback,node,isRoot)));appendTools();return true}
   // A subagent borrows the moment and the wording of the unique canonical root round
   // it belongs to. If root identity is ambiguous, the child keeps its own timestamp.
   const runs=isRoot?rounds:runRounds();
   const sameDay=sameDayRun(runs.length?runs:rounds);
-  const naming=round=>isRoot?round:(round.label?round:(roundOf(round.start,runs)||{start:round.start,label:''}));
+  const naming=round=>isRoot?round:(round.label?round:(()=>{const parentRound=roundOf(round.start,runs);return{start:parentRound?.start||round.start,label:''}})());
   const list=document.createElement('div');list.className='execweave-agent-rounds';
   const ordered=[...rounds].reverse(),state=foldStateFor(node);
-  list.appendChild(roundView(ordered[0]));
+  const newest=naming(ordered[0]);list.appendChild(foldedRound(ordered[0],clock(newest.start||ordered[0].start,sameDay),'Latest · '+(newest.label||''),state,true));
   for(const round of ordered.slice(1)){const named=naming(round);list.appendChild(foldedRound(round,clock(named.start||round.start,sameDay),named.label||'',state))}
   details.appendChild(list);appendTools();return true;
 }
 function graphNode(id){const core=window.__execweaveCore;if(!core)return null;const graph=core.getDisplayGraph?.()||core.getGraph?.()||{};return (graph.nodes||[]).find(node=>String(node?.id||'')===String(id||''))||null}
-function syncSelection(){const selected=document.querySelector('.node.selected');if(!selected){selectedNode=null;selectedConversationSignature='';return}const node=graphNode(selected.dataset.id);if(node)render(node);else selectedNode=null;if(!node)selectedConversationSignature=''}
+function syncSelection(){const selected=document.querySelector('.node.selected');if(!selected){rememberVisibleFoldState();selectedNode=null;selectedFoldNode=null;selectedConversationSignature='';return}const node=graphNode(selected.dataset.id);if(node)render(node);else selectedNode=null;if(!node)selectedConversationSignature=''}
 function setEntries(next){
   const candidate=Array.isArray(next)?next:[];
   if(!selectedNode){entries=candidate;return}
@@ -522,7 +533,7 @@ if(!window.__execweaveStaticMode)setInterval(()=>{if(selectedNode)refresh()},800
 const previous=window.__execweaveDashboard||{};window.__execweaveDashboard={...previous,onPayload(data){previous.onPayload?.(data);if(selectedNode)refresh()},onFinished(){previous.onFinished?.();if(selectedNode)refresh()}};
 window.__execweaveAgentPanel={render,setEntries,refresh};
 })();
-""".strip().replace(
+""".strip().replace("/*EXECWEAVE_FOLD_STATE*/", FOLD_STATE_JS).replace(
     "/*EXECWEAVE_CHILD_POLICY*/",
     "\n".join(
         (
