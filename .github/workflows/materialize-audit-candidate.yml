@@ -1,0 +1,59 @@
+name: Materialize audited 0.8.32 candidate
+
+on:
+  push:
+    branches:
+      - fix/0.8.32-audit-closure-materialized
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    if: github.event.head_commit.message == 'Bootstrap audited candidate materializer'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify base and reconstruct audited patches
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE_SHA=21bc7ff627750170ca6d31ea6c4220ac62a48861
+          ORIGINAL_SHA=705fc358e4c8867ebab81f7938bcb85dcb4d86873d7f67e43942f6b76ab32610
+          DELTA_SHA=649b8378eda48a73544dee3f53f3bb0018dac2eab3da60f00551319a1114d36c
+
+          test "$(git rev-parse HEAD^)" = "$BASE_SHA"
+
+          git fetch origin \
+            fix/0.8.32-conversation-audit-closure \
+            fix/0.8.32-finalization-primary-error
+
+          git show origin/fix/0.8.32-conversation-audit-closure:docs/audit-patch/000.patch > /tmp/execweave-audit.patch
+          for n in 001 002 003 004 005 006 007 008; do
+            git show origin/fix/0.8.32-conversation-audit-closure:docs/audit-patch/$n.patch >> /tmp/execweave-audit.patch
+          done
+          printf '%s  %s\n' "$ORIGINAL_SHA" /tmp/execweave-audit.patch | sha256sum -c -
+
+          git show origin/fix/0.8.32-finalization-primary-error:docs/audit-patch/009-collector-primary-error.patch > /tmp/execweave-finalization-fix.patch
+          printf '%s  %s\n' "$DELTA_SHA" /tmp/execweave-finalization-fix.patch | sha256sum -c -
+
+          git apply --check /tmp/execweave-audit.patch
+          git apply /tmp/execweave-audit.patch
+          git apply --check /tmp/execweave-finalization-fix.patch
+          git apply /tmp/execweave-finalization-fix.patch
+
+          git rm .github/workflows/materialize-audit-candidate.yml
+          git diff --check
+
+      - name: Commit exact materialized candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'ExecWeave audited candidate materializer'
+          git config user.email '49675917+Irish-kw@users.noreply.github.com'
+          git add -A
+          git commit -m 'Materialize audited 0.8.32 closure candidate'
+          git push origin HEAD:fix/0.8.32-audit-closure-materialized
