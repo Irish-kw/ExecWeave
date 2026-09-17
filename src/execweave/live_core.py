@@ -19,6 +19,8 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 from uuid import uuid4
 
 from .backends import create_collector
+from .conversation_records import write_conversation_records
+from .finalization import record_finalization
 from .graph import GRAPH_SCHEMA_VERSION, GraphAccumulator, build_execution_graph, write_execution_graph
 from .live_view import LIVE_HTML as _LIVE_HTML
 from .semantic import LiveSemanticNormalizer, merge_semantic_sidecar
@@ -152,6 +154,9 @@ def _compact_live_graph(graph: dict[str, object]) -> dict[str, object]:
         "nodes": [],
         "edges": [],
         "live_payload_compact": True,
+        "evidence_counts": graph.get("evidence_counts"),
+        "session_outcome": graph.get("session_outcome"),
+        "runtime_environment": graph.get("runtime_environment"),
     }
 
 
@@ -710,6 +715,7 @@ def run_live(
         if artifact.exists() and artifact.stat().st_size > 0:
             raise FileExistsError(f"ExecWeave live artifact already exists: {artifact}")
 
+    record_finalization(run_dir, state="recording")
     sink = JsonlSink(event_path)
     collector = create_collector(
         backend="portable",
@@ -748,9 +754,15 @@ def run_live(
         key: os.environ.get(key) for key in environment_updates
     }
     os.environ.update(environment_updates)
+    collection_error: Exception | None = None
+    export_complete = False
     try:
         try:
             return_code = collector.run(command)
+        except Exception as exc:
+            # The collector can have written a valid terminal stream before
+            # raising. Export it rather than leaving only raw evidence behind.
+            collection_error = exc
         finally:
             for key, value in previous_environment.items():
                 if value is None:
@@ -758,6 +770,7 @@ def run_live(
                 else:
                     os.environ[key] = value
 
+        record_finalization(run_dir, state="exporting", error=collection_error)
         validation = validate_event_stream(event_path)
         if not validation.valid:
             details = "; ".join(validation.errors)
@@ -771,10 +784,19 @@ def run_live(
         execution_graph = build_execution_graph(materialized_event_path)
         graph_payload = execution_graph.to_dict()
         write_execution_graph(execution_graph, graph_path)
+        # The extracted core must materialize the conversation index itself. The
+        # projected live wrapper also writes it, but direct live_core callers (and
+        # failure-path export) must not depend on that presentation monkeypatch.
+        write_conversation_records(graph_payload, run_dir)
         write_graph_html(graph_payload, viewer_path, open_browser=False)
+        record_finalization(run_dir, state="complete", error=collection_error)
+        export_complete = True
         state.finish(graph_payload, final_html=viewer_path.read_text(encoding="utf-8"))
         if linger_seconds:
             time.sleep(linger_seconds)
+
+        if collection_error is not None:
+            raise collection_error
 
         return LiveResult(
             session_id=session_id,
@@ -787,6 +809,35 @@ def run_live(
             graph=graph_path,
             viewer=viewer_path,
         )
+    except Exception as exc:
+        # Export/finalization diagnostics are secondary to an already observed
+        # collector failure. Preserve the primary exception and attach later
+        # failures as notes rather than replacing the root cause.
+        primary_error = collection_error if collection_error is not None else exc
+        if collection_error is not None and exc is not collection_error:
+            try:
+                collection_error.add_note(
+                    f"secondary export failure: {type(exc).__name__}: {exc}"
+                )
+            except AttributeError:  # pragma: no cover - Python < 3.11 compatibility
+                pass
+        try:
+            record_finalization(
+                run_dir,
+                state="complete" if export_complete else "failed",
+                error=primary_error,
+            )
+        except Exception as finalization_error:
+            try:
+                primary_error.add_note(
+                    "secondary finalization diagnostic failure: "
+                    f"{type(finalization_error).__name__}: {finalization_error}"
+                )
+            except AttributeError:  # pragma: no cover - Python < 3.11 compatibility
+                pass
+        if primary_error is not exc:
+            raise primary_error from exc
+        raise
     finally:
         server.shutdown()
         server.server_close()

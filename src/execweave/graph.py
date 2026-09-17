@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .session_summary import SessionSummary
 from .fidelity import FidelityAccumulator
 from .provider_lifecycle import ProviderLifecycleAnnotation, provider_lifecycle_annotation
 from .validate import validate_event_stream
@@ -346,6 +347,10 @@ class ExecutionGraph:
         default_factory=lambda: datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     )
 
+    evidence_counts: dict[str, int] = field(default_factory=dict)
+    session_outcome: dict[str, Any] = field(default_factory=dict)
+    runtime_environment: dict[str, Any] = field(default_factory=dict)
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "graph_schema_version": GRAPH_SCHEMA_VERSION,
@@ -357,6 +362,9 @@ class ExecutionGraph:
             "edge_count": len(self.edges),
             "built_at": self.built_at,
             "fidelity": self.fidelity,
+            "evidence_counts": dict(self.evidence_counts),
+            "session_outcome": dict(self.session_outcome),
+            "runtime_environment": dict(self.runtime_environment),
             "nodes": [node.to_dict() for node in self.nodes],
             "edges": [edge.to_dict() for edge in self.edges],
         }
@@ -391,6 +399,7 @@ class GraphAccumulator:
         self.nodes: dict[str, GraphNode] = {}
         self.edges: dict[tuple[str, str, str], GraphEdge] = {}
         self._fidelity = FidelityAccumulator()
+        self._session_summary = SessionSummary()
         self._seen_logical_events: set[str] = set()
 
     @property
@@ -415,6 +424,7 @@ class GraphAccumulator:
             self.source_schema_versions.add(schema_version)
         self.event_count += 1
         self._fidelity.observe(event)
+        self._session_summary.observe(event)
         logical_key = logical_event_key(event)
         logical = logical_key not in self._seen_logical_events
         if logical_key is not None:
@@ -473,6 +483,9 @@ class GraphAccumulator:
                 self.edges.values(), key=lambda edge: (edge.source, edge.relation, edge.target)
             ),
             fidelity=self._fidelity.to_dict(),
+            evidence_counts=dict(self._session_summary.counts),
+            session_outcome=dict(self._session_summary.outcome),
+            runtime_environment=dict(self._session_summary.environment),
         )
 
     def to_dict(self) -> dict[str, Any]:

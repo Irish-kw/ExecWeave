@@ -230,7 +230,7 @@ def _merge_conversation_previews(entries: list[dict[str, Any]]) -> None:
             continue
         for message in preview.get("messages") or []:
             if isinstance(message, dict):
-                message["content_role"] = role
+                message.setdefault("content_role", role)
 
     snapshots: list[tuple[dict[str, Any], dict[str, Any]]] = []
     for entry in entries:
@@ -326,6 +326,9 @@ def conversation_record_entries(
         preview["provider_native_id"] = root_id
         original_source_id = entry.get("source_id")
         if isinstance(original_source_id, str) and original_source_id != root_id:
+            for message in preview.get("messages") or []:
+                if isinstance(message, dict):
+                    message["occurrence_id"] = original_source_id
             entry["evidence_source_id"] = original_source_id
             entry["evidence_source_type"] = entry.get("source_type")
         entry["source_id"] = root_id

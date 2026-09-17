@@ -142,7 +142,9 @@ def _append_interrupt_fast(sidecar: Path, payload: dict[str, Any]) -> None:
 
 def _active_auto_payload() -> tuple[str, dict[str, Any] | None]:
     try:
-        raw = sys.stdin.read()
+        from .hook_input import read_hook_text
+
+        raw = read_hook_text(sys.stdin)
     except (OSError, ValueError):
         # The passive entry boundary must remain fail-open even when stdin itself is
         # unavailable. The normal capture path will receive an empty stream and its

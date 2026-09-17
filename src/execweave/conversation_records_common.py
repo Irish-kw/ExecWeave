@@ -5,6 +5,7 @@ from typing import Any
 
 def history_message_key(message: dict[str, Any]) -> tuple[object, ...]:
     return (
+        message.get("occurrence_id"),
         message.get("ordinal"),
         message.get("kind"),
         message.get("sender"),
