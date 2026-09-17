@@ -511,7 +511,7 @@ function render(node){
   // it belongs to. If root identity is ambiguous, the child keeps its own timestamp.
   const runs=isRoot?rounds:runRounds();
   const sameDay=sameDayRun(runs.length?runs:rounds);
-  const naming=round=>{if(isRoot||round.label)return round;const parentRound=roundOf(round.start,runs);return{start:parentRound?.start||round.start,label:''}};
+  const naming=round=>isRoot?round:(round.label?round:(()=>{const parentRound=roundOf(round.start,runs);return{start:parentRound?.start||round.start,label:''}})());
   const list=document.createElement('div');list.className='execweave-agent-rounds';
   const ordered=[...rounds].reverse(),state=foldStateFor(node);
   const newest=naming(ordered[0]);list.appendChild(foldedRound(ordered[0],clock(newest.start||ordered[0].start,sameDay),'Latest · '+(newest.label||''),state,true));
