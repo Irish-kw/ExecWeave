@@ -18,8 +18,9 @@ function updateStats(data){stats.innerHTML=`<strong>${Number(data.node_count)||0
 function updateEvidence(data){
   const raw=window.__execweaveCore?.getGraph?.()||window.__execweaveStaticGraph||{},counts=data.live_evidence_counts||data.evidence_counts||raw.evidence_counts||{};
   const count=value=>typeof value==='number'&&Number.isInteger(value)&&value>=0?String(value):'—';
-  const provisional=!!data.live_specialized_provisional;
-  evidence.innerHTML=`OS <strong>${count(counts.os_runtime)}</strong> · specialized <strong>${count(counts.specialized)}</strong>${provisional?' · provisional':''}`;
+  const provisional=!!data.live_specialized_provisional,specialized=count(counts.specialized);
+  const specializedMarkup=`specialized ${specialized}`.replace(specialized,`<strong>${specialized}</strong>`);
+  evidence.innerHTML=`OS <strong>${count(counts.os_runtime)}</strong> · ${specializedMarkup}${provisional?' · provisional':''}`;
   evidence.classList.toggle('provisional',provisional);evidence.title='Observed event counts. — means unavailable, not zero.';
   const outcome=data.session_outcome||raw.session_outcome||{},labels={succeeded:'SUCCEEDED',failed:'FAILED',interrupted:'INTERRUPTED',collector_failed:'COLLECTOR FAILED',unknown:'UNKNOWN'};
   let badge=document.getElementById('workload-outcome');if(!badge){badge=document.createElement('span');badge.id='workload-outcome';evidence.after(badge)}
