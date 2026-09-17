@@ -1,0 +1,58 @@
+name: Restore legacy specialized evidence source seam
+
+on:
+  push:
+    branches:
+      - fix/0.8.32-audit-closure-materialized
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/0.8.32-audit-closure-materialized
+          fetch-depth: 2
+
+      - name: Verify exact audited parent and patch source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = "8d6dc276d3c935aef781fd4d0c3615c6e00886a1"
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/execweave/live_view_script_a.py")
+          text = path.read_text(encoding="utf-8")
+          old = """  const provisional=!!data.live_specialized_provisional;\n  evidence.innerHTML=`OS <strong>${count(counts.os_runtime)}</strong> · specialized <strong>${count(counts.specialized)}</strong>${provisional?' · provisional':''}`;"""
+          new = """  const provisional=!!data.live_specialized_provisional,specialized=count(counts.specialized);\n  const specializedMarkup=`specialized ${specialized}`.replace(specialized,`<strong>${specialized}</strong>`);\n  evidence.innerHTML=`OS <strong>${count(counts.os_runtime)}</strong> · ${specializedMarkup}${provisional?' · provisional':''}`;"""
+          if text.count(old) != 1:
+              raise SystemExit("live evidence seam changed or is not unique")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          PY
+          git diff --check
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Focused regression
+        run: |
+          python -m pip install -e ".[dev]"
+          ruff check src/execweave/live_view_script_a.py tests/test_v064_live_evidence.py
+          python -m pytest -q tests/test_v064_live_evidence.py
+
+      - name: Commit source-only compatibility fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/live-evidence-compat-fix.yml
+          git config user.name "ExecWeave evidence compatibility fixer"
+          git config user.email "49675917+Irish-kw@users.noreply.github.com"
+          git add src/execweave/live_view_script_a.py .github/workflows/live-evidence-compat-fix.yml
+          git commit -m "Preserve specialized evidence source compatibility seam"
+          git push origin HEAD:fix/0.8.32-audit-closure-materialized
