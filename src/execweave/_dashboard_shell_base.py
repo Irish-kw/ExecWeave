@@ -5,6 +5,7 @@ from typing import Any
 
 from .live_view import LIVE_HTML as _BASE_LIVE_HTML
 from .viewer_agent_panel import inject_agent_panel
+from .viewer_content_browser import inject_content_browser
 from .viewer_dashboard_clean import fold_budget_bootstrap, inject_live_dashboard_clean
 from .viewer_dashboard_focus import inject_live_dashboard_focus
 from .viewer_dashboard_pr70 import inject_pr70_dashboard_repairs
@@ -84,7 +85,8 @@ def _build_dashboard_html() -> str:
     html = normalize_provider_execution_flow(
         harden_execution_flow_projection(inject_execution_flow(html))
     )
-    return _align_agent_panel_topology(inject_agent_panel(_guard_compact_live_snapshot(html)))
+    html = _align_agent_panel_topology(inject_agent_panel(_guard_compact_live_snapshot(html)))
+    return inject_content_browser(html)
 
 
 DASHBOARD_HTML = _build_dashboard_html()
