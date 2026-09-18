@@ -35,6 +35,27 @@ def _reject_link(path: Path) -> None:
         raise ArchiveReadError("unsafe_path")  # Includes Windows reparse points.
 
 
+def _path_descriptor_stat(path: Path) -> os.stat_result:
+    """Compare two open-file snapshots, not Windows stat/fstat timestamps.
+
+    Path-based stat and descriptor-based fstat need not expose the same ctime
+    semantics on supported Windows/Python versions. Reopening the recorded path
+    preserves the identity/size/time comparison without rounding timestamps or
+    ignoring changes. This handle is metadata-only and never reads payload bytes.
+    """
+    _reject_link(path)
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    descriptor = os.open(path, flags)
+    try:
+        value = os.fstat(descriptor)
+        if not stat.S_ISREG(value.st_mode):
+            raise ArchiveReadError("not_regular_file")
+        return value
+    finally:
+        os.close(descriptor)
+
+
 @contextmanager
 def _open_regular(root: Path, relative: str) -> Iterator[Any]:
     if relative not in EXPORTS and CONTENT_PATH.fullmatch(relative) is None:
@@ -72,7 +93,7 @@ def _open_regular(root: Path, relative: str) -> Iterator[Any]:
             for part in parts:
                 path = path / part
                 _reject_link(path)
-            if _signature(before) != _signature(after) or _signature(after) != _signature(path.stat()):
+            if _signature(before) != _signature(after) or _signature(after) != _signature(_path_descriptor_stat(path)):
                 raise ArchiveReadError("changed_during_read")
     except FileNotFoundError as exc:
         raise ArchiveReadError("missing_file") from exc

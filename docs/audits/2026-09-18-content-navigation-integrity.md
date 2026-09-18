@@ -53,3 +53,13 @@ Python compilation：PASS
 內容導覽只新增一個共用元件與閱讀元件的明確 `attach` 接口，沒有改 owner 推論、原始事件、圖布局或 recorder。
 
 封存驗證集中在 `content_integrity.py` 與 `finalization.py`，不改寫來源檔案，也不提升套件版號。若回歸需要回退，可分開回退正文導覽與終止驗證；不能僅刪掉失敗測試或放寬不完整封存的判定。
+
+## 跨平台回歸補正
+
+`b0ccc42` 的 Linux、macOS provider contract 與 13 類來源分項通過，但 Windows 的 Live／top 終止匯出失敗。程式先前把 `os.fstat` 的完整簽章直接與 `Path.stat` 比較，混用了不同的 Windows 檔案中繼資料介面。
+
+我將路徑端改為重新開啟同一個已檢查路徑，再取得 `os.fstat`，以同一介面比對檔案身份、大小與時間。沒有捨棄 ctime、捨入時間、關閉 Windows 驗證，或放寬 hash／大小判斷；任何一個欄位差一個單位仍會失敗。額外的 handle 即使遇到錯誤也會關閉。Windows 原生回歸仍需以新提交的工作流結果確認。
+
+另有一項 Stage Integrity 失敗是成功案例改成有效 JSON 後尚未登錄理由。依既有機制只對本分支的 `tests/test_audit_closure_20260917.py` 加入文件化允許項，並固定完整檔案 blob hash；其他改動或雜湊不符仍拒絕。原測試名稱及全部斷言保留。
+
+補正後的本地針對性測試為 **82 passed、1 deselected**，包括新增 9 項可攜性／handle 生命週期測試。未執行的仍是完整 Dashboard shell 測試，不將本地測試算成 Windows、完整套件或真實 provider 驗收。
