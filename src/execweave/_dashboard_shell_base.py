@@ -4,6 +4,8 @@ import json
 from typing import Any
 
 from .live_view import LIVE_HTML as _BASE_LIVE_HTML
+from .run_assessment import build_run_assessment
+from .viewer_run_assessment import inject_run_assessment
 from .viewer_agent_panel import inject_agent_panel
 from .viewer_content_browser import inject_content_browser
 from .viewer_dashboard_clean import fold_budget_bootstrap, inject_live_dashboard_clean
@@ -86,7 +88,7 @@ def _build_dashboard_html() -> str:
         harden_execution_flow_projection(inject_execution_flow(html))
     )
     html = _align_agent_panel_topology(inject_agent_panel(_guard_compact_live_snapshot(html)))
-    return inject_content_browser(html)
+    return inject_run_assessment(inject_content_browser(html))
 
 
 DASHBOARD_HTML = _build_dashboard_html()
@@ -107,6 +109,9 @@ def render_static_dashboard_html(
     conversation_entries: list[dict[str, Any]] | None = None,
 ) -> str:
     """Render the exact dashboard shell used by live, backed by embedded snapshots."""
+    graph = dict(graph)
+    if "run_assessment" not in graph:
+        graph["run_assessment"] = build_run_assessment(graph)
     bootstrap = (
         "<script>window.__execweaveStaticMode=true;"
         f"{fold_budget_bootstrap()}"

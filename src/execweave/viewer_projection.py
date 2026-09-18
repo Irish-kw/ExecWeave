@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .run_assessment import build_run_assessment
+
 from pathlib import Path
 from typing import Any
 
@@ -353,6 +355,9 @@ def project_viewer_graph(
     caller threads it through so a node already on screen can only move further right;
     a one-shot render leaves it unset.
     """
+    # Derive before display folding; task/content records may disappear from the canvas.
+    graph = dict(graph)
+    graph["run_assessment"] = build_run_assessment(graph)
     projected = _base_project_viewer_graph(graph)
     nodes = [node for node in projected.get("nodes", []) if isinstance(node, dict)]
     edges = [edge for edge in projected.get("edges", []) if isinstance(edge, dict)]

@@ -21,6 +21,7 @@ from uuid import uuid4
 from .backends import create_collector
 from .conversation_records import write_conversation_records
 from .finalization import record_finalization
+from .run_assessment import build_run_assessment
 from .graph import GRAPH_SCHEMA_VERSION, GraphAccumulator, build_execution_graph, write_execution_graph
 from .live_view import LIVE_HTML as _LIVE_HTML
 from .semantic import LiveSemanticNormalizer, merge_semantic_sidecar
@@ -157,6 +158,7 @@ def _compact_live_graph(graph: dict[str, object]) -> dict[str, object]:
         "evidence_counts": graph.get("evidence_counts"),
         "session_outcome": graph.get("session_outcome"),
         "runtime_environment": graph.get("runtime_environment"),
+        "run_assessment": graph.get("run_assessment"),
     }
 
 
@@ -481,7 +483,15 @@ class _LiveState:
         self._append_update_locked(update)
 
     def _evidence_metadata_locked(self) -> dict[str, object]:
+        # Cache metadata work per published sequence, including the terminal switch.
+        # No content files or provider bodies are opened by this assessment.
+        version = (self._update_sequence, self._finished)
+        if getattr(self, "_assessment_version", None) != version:
+            raw = self._final_graph if self._finished and self._final_graph is not None else self._accumulator.to_dict()
+            self._assessment_snapshot = build_run_assessment(raw)
+            self._assessment_version = version
         return {
+            "run_assessment": self._assessment_snapshot,
             "live_evidence_counts": {
                 "os_runtime": self._runtime_event_count,
                 "specialized": self._specialized_event_count,
