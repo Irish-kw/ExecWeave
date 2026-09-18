@@ -109,13 +109,15 @@ def render_static_dashboard_html(
     conversation_entries: list[dict[str, Any]] | None = None,
 ) -> str:
     """Render the exact dashboard shell used by live, backed by embedded snapshots."""
-    graph = dict(graph)
-    if "run_assessment" not in graph:
-        graph["run_assessment"] = build_run_assessment(graph)
+    # Derived presentation metadata belongs beside the raw graph, not in it.
+    assessment = graph.get("run_assessment")
+    if not isinstance(assessment, dict):
+        assessment = build_run_assessment(graph)
     bootstrap = (
         "<script>window.__execweaveStaticMode=true;"
         f"{fold_budget_bootstrap()}"
         f"{viewer_limits_bootstrap(resolve_viewer_limits())}"
+        f"window.__execweaveStaticRunAssessment={_safe_json(assessment)};"
         f"window.__execweaveStaticGraph={_safe_json(graph)};"
         f"window.__execweaveStaticConversations={_safe_json(conversation_entries or [])};"
         "</script>\n"

@@ -830,6 +830,8 @@ def conversation_index_payload(
     return {
         "schema_version": "0.3",
         "scope": "run_local_provider_neutral_conversation_projection",
+        "session_id": graph.get("session_id") if isinstance(graph.get("session_id"), str) else None,
+        "source_path": graph.get("source_path") if isinstance(graph.get("source_path"), str) else None,
         "entry_count": len(entries),
         "visible_message_count": visible_message_count,
         "external_provider_folder_lookup_required": False,

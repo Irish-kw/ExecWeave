@@ -1,6 +1,8 @@
 """One run-level assessment panel shared by Live and static Dashboards."""
 from __future__ import annotations
 
+from .viewer_delivery_status import delivery_scripts
+
 RUN_ASSESSMENT_JS = r"""
 (()=>{
 'use strict';
@@ -54,7 +56,7 @@ function render(value){
   details.append(make('p',`${count(content.unique_declared_files)} unique declared content file(s); `+
     `${count(content.opaque)} opaque record(s); ${count(content.redacted)} explicitly redacted record(s). `+
     'These are metadata counts, not readable-body coverage or end-to-end recall.'));
-  details.append(make('p','Archive verification is not checked by this panel. A readable graph and a FINISHED label do not prove that its exported content is complete. Use the recorded-source reader to verify individual bodies.'));
+  details.append(make('p','The content inventory above does not verify bytes. The separate delivery checks distinguish recorded export verification, current folder verification, and final history synchronization.'));
   const inspection=object(value?.inspection);
   if(!value||inspection.state!=='declared_graph'){
     const warning=make('p','Inventory is partial or unavailable. Hidden, malformed, ambiguous, or uninspected records are not counted as absent.');
@@ -73,9 +75,14 @@ function refresh(packet){
   if(key!==currentKey){currentKey=key;latest=null;lastSignature='';panel.querySelector('details')?.remove()}
   const candidate=object(packet).run_assessment||object(object(packet).graph).run_assessment;
   if(candidate){latest=compatible(candidate,graph)?candidate:null}
-  else if(!latest&&compatible(graph.run_assessment,graph)){latest=graph.run_assessment}
+  else if(!latest){
+    const embedded=graph.run_assessment||window.__execweaveStaticRunAssessment;
+    if(compatible(embedded,graph))latest=embedded;
+  }
   // Never infer success from a legacy label, absent fields, or a completed viewer.
+  window.__execweaveDeliveryStatus?.accept(packet);
   render(latest);
+  window.__execweaveDeliveryStatus?.mount(panel);
 }
 const previous=window.__execweaveDashboard||{};
 window.__execweaveDashboard={...previous,
@@ -88,15 +95,16 @@ window.__execweaveRunAssessment={refresh};refresh();
 
 RUN_ASSESSMENT_CSS = r"""
 #execweave-run-assessment{overflow-wrap:anywhere;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--border,#888)}
+#execweave-delivery-status{overflow-wrap:anywhere;margin:-8px 0 16px}
 #execweave-run-assessment h2{font-size:15px;margin:0 0 10px}
-#execweave-run-assessment h3{font-size:12px;text-transform:uppercase;letter-spacing:.04em;margin:0 0 5px;color:var(--muted)}
-#execweave-run-assessment .run-assessment-card{border:1px solid var(--border,#888);border-radius:8px;padding:8px;margin:6px 0}
-#execweave-run-assessment strong{font-size:14px}
-#execweave-run-assessment p{font-size:12px;line-height:1.5;margin:5px 0}
-#execweave-run-assessment details{font-size:12px;margin-top:8px}
-#execweave-run-assessment summary{cursor:pointer}
-#execweave-run-assessment [data-state="failed"],#execweave-run-assessment [data-state="collector_failed"]{border-left:4px solid var(--danger,#c2414f)}
-#execweave-run-assessment [data-state="declared_gaps"]{border-left:4px solid var(--noncausal,#b56a16)}
+:is(#execweave-run-assessment,#execweave-delivery-status) h3{font-size:12px;text-transform:uppercase;letter-spacing:.04em;margin:0 0 5px;color:var(--muted)}
+:is(#execweave-run-assessment,#execweave-delivery-status) .run-assessment-card{border:1px solid var(--border,#888);border-radius:8px;padding:8px;margin:6px 0}
+:is(#execweave-run-assessment,#execweave-delivery-status) strong{font-size:14px}
+:is(#execweave-run-assessment,#execweave-delivery-status) p{font-size:12px;line-height:1.5;margin:5px 0}
+:is(#execweave-run-assessment,#execweave-delivery-status) details{font-size:12px;margin-top:8px}
+:is(#execweave-run-assessment,#execweave-delivery-status) summary{cursor:pointer}
+:is(#execweave-run-assessment,#execweave-delivery-status) [data-state="failed"],:is(#execweave-run-assessment,#execweave-delivery-status) [data-state="collector_failed"]{border-left:4px solid var(--danger,#c2414f)}
+:is(#execweave-run-assessment,#execweave-delivery-status) [data-state="incomplete"],:is(#execweave-run-assessment,#execweave-delivery-status) [data-state="not_verified"],:is(#execweave-run-assessment,#execweave-delivery-status) [data-state="declared_gaps"]{border-left:4px solid var(--noncausal,#b56a16)}
 """.strip()
 
 
@@ -106,5 +114,5 @@ def inject_run_assessment(html: str) -> str:
     if "</body>" not in html:
         raise RuntimeError("run assessment requires a dashboard body")
     return html.replace("</body>", "<style>" + RUN_ASSESSMENT_CSS + "</style>"
-                        '<script id="execweave-run-assessment-script">' + RUN_ASSESSMENT_JS
+                        + delivery_scripts() + '<script id="execweave-run-assessment-script">' + RUN_ASSESSMENT_JS
                         + "</script>\n</body>", 1)

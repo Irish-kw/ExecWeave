@@ -21,6 +21,7 @@ from uuid import uuid4
 from .backends import create_collector
 from .conversation_records import write_conversation_records
 from .finalization import record_finalization
+from .delivery_status import summarize_finalization
 from .run_assessment import build_run_assessment
 from .graph import GRAPH_SCHEMA_VERSION, GraphAccumulator, build_execution_graph, write_execution_graph
 from .live_view import LIVE_HTML as _LIVE_HTML
@@ -210,6 +211,7 @@ class _LiveState:
         self._finished = False
         self._final_graph: dict[str, object] | None = None
         self._final_html: str | None = None
+        self._finalization_receipt = summarize_finalization(None)
         self._update_sequence = 0
         self._resync_floor = 0
         self._updates: deque[dict[str, object]] = deque()
@@ -482,6 +484,12 @@ class _LiveState:
             ]
         self._append_update_locked(update)
 
+    def publish_finalization(self, report: dict[str, object]) -> None:
+        """Publish a bounded receipt without rereading or rewriting the archive."""
+        receipt = summarize_finalization(report)
+        with self._lock:
+            self._finalization_receipt = receipt
+
     def _evidence_metadata_locked(self) -> dict[str, object]:
         # Cache metadata work per published sequence, including the terminal switch.
         # No content files or provider bodies are opened by this assessment.
@@ -492,6 +500,11 @@ class _LiveState:
             self._assessment_version = version
         return {
             "run_assessment": self._assessment_snapshot,
+            "finalization_assessment": {
+                **self._finalization_receipt,
+                "session_id": self._assessment_snapshot.get("session_id"),
+                "source_path": self._assessment_snapshot.get("source_path"),
+            },
             "live_evidence_counts": {
                 "os_runtime": self._runtime_event_count,
                 "specialized": self._specialized_event_count,
@@ -725,7 +738,7 @@ def run_live(
         if artifact.exists() and artifact.stat().st_size > 0:
             raise FileExistsError(f"ExecWeave live artifact already exists: {artifact}")
 
-    record_finalization(run_dir, state="recording")
+    recording_report = record_finalization(run_dir, state="recording")
     sink = JsonlSink(event_path)
     collector = create_collector(
         backend="portable",
@@ -738,6 +751,7 @@ def run_live(
     )
 
     state = _LiveState(session_id, event_path, semantic_path)
+    state.publish_finalization(recording_report)
     server = _LocalThreadingHTTPServer(("127.0.0.1", port), _handler_factory(state, live_token))
     server.daemon_threads = True
     server_thread = threading.Thread(
@@ -780,7 +794,7 @@ def run_live(
                 else:
                     os.environ[key] = value
 
-        record_finalization(run_dir, state="exporting", error=collection_error)
+        state.publish_finalization(record_finalization(run_dir, state="exporting", error=collection_error))
         validation = validate_event_stream(event_path)
         if not validation.valid:
             details = "; ".join(validation.errors)
@@ -799,7 +813,7 @@ def run_live(
         # failure-path export) must not depend on that presentation monkeypatch.
         write_conversation_records(graph_payload, run_dir)
         write_graph_html(graph_payload, viewer_path, open_browser=False)
-        record_finalization(run_dir, state="complete", error=collection_error)
+        state.publish_finalization(record_finalization(run_dir, state="complete", error=collection_error))
         export_complete = True
         state.finish(graph_payload, final_html=viewer_path.read_text(encoding="utf-8"))
         if linger_seconds:
@@ -832,11 +846,11 @@ def run_live(
             except AttributeError:  # pragma: no cover - Python < 3.11 compatibility
                 pass
         try:
-            record_finalization(
+            state.publish_finalization(record_finalization(
                 run_dir,
                 state="complete" if export_complete else "failed",
                 error=primary_error,
-            )
+            ))
         except Exception as finalization_error:
             try:
                 primary_error.add_note(
