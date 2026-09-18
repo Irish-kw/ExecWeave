@@ -189,23 +189,49 @@ def test_symlinked_content_is_not_followed(tmp_path, target_kind):
     else:
         (root / 'content').rename(outside)
         link = root / 'content'
-    try:
-        link.symlink_to(outside, target_is_directory=target_kind == 'directory')
-    except OSError:
-        pytest.skip('OS account lacks permission to create a symlink')
+    # CI must have symlink capability. A setup failure is not a security pass.
+    link.symlink_to(outside, target_is_directory=target_kind == 'directory')
     report = integrity.audit_content_references(root)
     assert report['state'] == 'incomplete' and report['verified_file_count'] == 0
     assert errors(report) & {'unsafe_path', 'unreadable_or_unsafe_path'}
 
 
-@pytest.mark.skipif(os.name == 'nt', reason='POSIX named pipes only')
-def test_named_pipe_does_not_block_integrity_check(tmp_path):
+def test_non_regular_content_path_is_rejected_without_blocking(tmp_path):
     ref = archive(tmp_path)
     blob = tmp_path / ref['path']
     blob.unlink()
-    os.mkfifo(blob)
+    if os.name == 'nt':
+        # Windows has no mkfifo filesystem entry. Exercise an actual directory;
+        # the native pipe-handle rejection is tested separately on every OS.
+        blob.mkdir()
+        expected = 'unreadable_or_unsafe_path'
+    else:
+        os.mkfifo(blob)
+        expected = 'not_regular_file'
     report = integrity.audit_content_references(tmp_path)
-    assert report['state'] == 'incomplete' and 'not_regular_file' in errors(report)
+    assert report['state'] == 'incomplete' and expected in errors(report)
+
+
+def test_native_pipe_handle_is_rejected_before_any_read(tmp_path, monkeypatch):
+    ref = archive(tmp_path)
+    read_fd, write_fd = os.pipe()
+    original_open = os.open
+
+    def pipe_at_content_path(path, flags, *args, **kwargs):
+        if os.fspath(path) == os.fspath(tmp_path / ref['path']):
+            return os.dup(read_fd)
+        return original_open(path, flags, *args, **kwargs)
+
+    # Substitute only the open boundary. The returned pipe and fstat are native;
+    # leaving its writer open would block an attempted read instead of reaching EOF.
+    monkeypatch.setattr(integrity.os, 'open', pipe_at_content_path)
+    try:
+        report = integrity.audit_content_references(tmp_path)
+        assert report['state'] == 'incomplete' and 'not_regular_file' in errors(report)
+        assert report['verified_file_count'] == 0
+    finally:
+        os.close(read_fd)
+        os.close(write_fd)
 
 
 def test_file_modified_during_read_is_rejected(tmp_path, monkeypatch):
