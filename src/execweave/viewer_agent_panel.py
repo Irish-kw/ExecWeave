@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .viewer_fold_state import FOLD_STATE_JS
+from .viewer_history_browser import HISTORY_BROWSER_CSS, HISTORY_BROWSER_JS
 from .viewer_agent_panel_antigravity import ANTIGRAVITY_CHILD_ROUNDS_JS
 from .viewer_agent_panel_claude import CLAUDE_CHILD_ROUNDS_JS
 from .viewer_agent_panel_codex import CODEX_CHILD_ROUNDS_JS
@@ -40,6 +41,7 @@ if(!details||!detailsEmpty)return;
 let entries=Array.isArray(window.__execweaveStaticConversations)?window.__execweaveStaticConversations:[];
 let selectedNode=null,refreshing=false,selectedConversationSignature='';
 const foldStateByAgent=new Map();
+/*EXECWEAVE_HISTORY_BROWSER*/
 const ROOT_NODE_IDS=new Set(['agent:Claude Code','agent:OpenAI Codex','agent:Codex','agent:Cursor','agent:OpenCode','agent:Antigravity','agent:Ollama','agent:ollama']);
 const ENCRYPTED_NOTICE='Observed — plaintext not exposed by provider.';
 const attrs=node=>node&&typeof node.attributes==='object'&&node.attributes?node.attributes:{};
@@ -484,6 +486,7 @@ function agentCommunicationHistory(node,messages){
   return section;
 }
 function renderNode(node){
+  historyBrowser.nodeChanged(node);
   const rows=nodeCards(node);
   if(!rows.length)return false;
   rememberVisibleFoldState();
@@ -501,6 +504,8 @@ function render(node){
   rememberVisibleFoldState();
   selectedNode=node;selectedFoldNode=node;selectedConversationSignature=conversationSignature(node);detailsEmpty.hidden=true;details.replaceChildren();
   const record=recordFor(node),preview=record?.conversation_preview||{},path=String(preview.agent_path||nodePath(node)||'').trim(),messages=Array.isArray(preview.messages)?preview.messages:[];
+  historyBrowser.nodeChanged(node);
+  details.appendChild(historyBrowser.buttonFor(node));
   const isRoot=nodeHasRootAuthority(node)||previewUsesRootRenderer(preview);
   const rounds=(isRoot?rootRounds(messages,path||'/root'):childRounds(messages,path)).map(round=>execweaveFillAssignedTask(round,node,isRoot));
   const tools=toolCallsFor(String(node.id||''));
@@ -519,11 +524,11 @@ function render(node){
   details.appendChild(list);appendTools();return true;
 }
 function graphNode(id){const core=window.__execweaveCore;if(!core)return null;const graph=core.getDisplayGraph?.()||core.getGraph?.()||{};return (graph.nodes||[]).find(node=>String(node?.id||'')===String(id||''))||null}
-function syncSelection(){const selected=document.querySelector('.node.selected');if(!selected){rememberVisibleFoldState();selectedNode=null;selectedFoldNode=null;selectedConversationSignature='';return}const node=graphNode(selected.dataset.id);if(node)render(node);else selectedNode=null;if(!node)selectedConversationSignature=''}
+function syncSelection(){const selected=document.querySelector('.node.selected');if(!selected){historyBrowser.nodeChanged(null);rememberVisibleFoldState();selectedNode=null;selectedFoldNode=null;selectedConversationSignature='';return}const node=graphNode(selected.dataset.id);if(node)render(node);else selectedNode=null;if(!node)selectedConversationSignature=''}
 function setEntries(next){
   const candidate=Array.isArray(next)?next:[];
-  if(!selectedNode){entries=candidate;return}
-  const previousSignature=selectedConversationSignature;entries=candidate;
+  if(!selectedNode){entries=candidate;historyBrowser.changed();return}
+  const previousSignature=selectedConversationSignature;entries=candidate;historyBrowser.changed();
   if(conversationSignature(selectedNode)!==previousSignature)render(selectedNode);
 }
 async function refresh(){if(window.__execweaveStaticMode||refreshing)return;refreshing=true;try{const headers={};if(window.__execweaveToken)headers['X-ExecWeave-Token']=window.__execweaveToken;const response=await fetch('/conversations.json',{cache:'no-store',headers});if(response.ok){const payload=await response.json();setEntries(payload?.entries)}}catch(_){}finally{refreshing=false}}
@@ -533,7 +538,7 @@ if(!window.__execweaveStaticMode)setInterval(()=>{if(selectedNode)refresh()},800
 const previous=window.__execweaveDashboard||{};window.__execweaveDashboard={...previous,onPayload(data){previous.onPayload?.(data);if(selectedNode)refresh()},onFinished(){previous.onFinished?.();if(selectedNode)refresh()}};
 window.__execweaveAgentPanel={render,setEntries,refresh};
 })();
-""".strip().replace("/*EXECWEAVE_FOLD_STATE*/", FOLD_STATE_JS).replace(
+""".strip().replace("/*EXECWEAVE_HISTORY_BROWSER*/", HISTORY_BROWSER_JS).replace("/*EXECWEAVE_FOLD_STATE*/", FOLD_STATE_JS).replace(
     "/*EXECWEAVE_CHILD_POLICY*/",
     "\n".join(
         (
@@ -553,7 +558,7 @@ window.__execweaveAgentPanel={render,setEntries,refresh};
 def inject_agent_panel(html: str) -> str:
     if "window.__execweaveAgentPanel" in html:
         return html
-    html = html.replace("</style>", _AGENT_PANEL_CSS + "\n</style>", 1)
+    html = html.replace("</style>", _AGENT_PANEL_CSS + "\n" + HISTORY_BROWSER_CSS + "\n</style>", 1)
     marker = html.rfind("</script>")
     if marker < 0:
         raise RuntimeError("dashboard script seam changed")
