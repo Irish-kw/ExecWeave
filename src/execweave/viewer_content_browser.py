@@ -7,6 +7,8 @@ selection of an exported run folder; no content is embedded or silently fetched.
 """
 from __future__ import annotations
 
+from .viewer_recorded_sources import inject_recorded_sources
+
 CONTENT_BROWSER_CSS = r"""
 .execweave-content-actions{display:flex;flex-wrap:wrap;gap:6px;padding:10px}
 .execweave-content-actions button{font:inherit;cursor:pointer;padding:6px 10px}
@@ -228,7 +230,7 @@ function refresh(){
 }
 let scheduled=false;
 new MutationObserver(()=>{if(scheduled)return;scheduled=true;queueMicrotask(()=>{scheduled=false;refresh()})}).observe(inspector,{childList:true,subtree:true});
-window.__execweaveContentBrowser={refresh,close:cancel};refresh();
+window.__execweaveContentBrowser={refresh,close:cancel,attach};refresh();
 })();
 """.strip()
 
@@ -236,7 +238,7 @@ window.__execweaveContentBrowser={refresh,close:cancel};refresh();
 def inject_content_browser(html: str) -> str:
     """Install one additive component without replacing existing renderer code."""
     if 'id="execweave-content-browser"' in html:
-        return html
+        return inject_recorded_sources(html)
     if "</body>" not in html:
         raise RuntimeError("content browser requires a dashboard body")
     component = (
@@ -246,4 +248,4 @@ def inject_content_browser(html: str) -> str:
         + CONTENT_BROWSER_JS
         + "</script>\n"
     )
-    return html.replace("</body>", component + "</body>", 1)
+    return inject_recorded_sources(html.replace("</body>", component + "</body>", 1))
