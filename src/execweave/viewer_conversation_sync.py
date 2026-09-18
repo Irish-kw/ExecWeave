@@ -33,18 +33,30 @@ function ensureConversationScope(){
   }
   notifyConversationSync();
 }
-async function refresh({allowDuringFinish=false}={}){
+function publishConversationIndex(payload){
+  try{setEntries(payload.entries);if(payload.investigation!==undefined)window.__execweaveInvestigation?.setIndex(payload.investigation);return true}catch(_){return false}
+}
+async function refresh({allowDuringFinish=false,includeInvestigation=false}={}){
   ensureConversationScope();
   if(window.__execweaveStaticMode||(conversationPollingFinished&&!allowDuringFinish)||
      (conversationFinishing&&!allowDuringFinish))return false;
-  if(refreshing)return conversationRefreshPromise;
+  if(refreshing){
+    const epoch=conversationSyncGeneration,scope=conversationScopeKey,pending=conversationRefreshPromise;
+    const result=await pending;
+    if(includeInvestigation&&epoch===conversationSyncGeneration&&scope===JSON.stringify(conversationScope()))
+      return refresh({allowDuringFinish,includeInvestigation:true});
+    return result;
+  }
   refreshing=true;const epoch=conversationSyncGeneration,scope=conversationScopeKey;
   const controller=new AbortController();conversationRefreshController=controller;
   const timeout=setTimeout(()=>controller.abort(),5000);
   const task=(async()=>{try{
     const headers={};if(window.__execweaveToken)headers['X-ExecWeave-Token']=window.__execweaveToken;
-    const response=await fetch('/conversations.json',{cache:'no-store',headers,signal:controller.signal});
-    if(!response.ok||(response.status!==undefined&&response.status!==200))return false;
+    const response=includeInvestigation?
+      await fetch('/conversations.json?investigation=1',{cache:'no-store',headers,signal:controller.signal}):
+      await fetch('/conversations.json',{cache:'no-store',headers,signal:controller.signal});
+    if(!response.ok)return false;
+    if(response.status!==undefined&&response.status!==200)return false;
     const payload=await response.json();
     if(controller.signal.aborted||epoch!==conversationSyncGeneration||scope!==JSON.stringify(conversationScope()))return false;
     if(!Array.isArray(payload?.entries)||payload.entries.some(e=>!e||typeof e!=='object'||Array.isArray(e)))return false;
@@ -52,7 +64,7 @@ async function refresh({allowDuringFinish=false}={}){
     if(payload.session_id!==undefined&&payload.session_id!==session)return false;
     if(payload.source_path!==undefined&&(payload.source_path||null)!==conversationScope().source_path)return false;
     conversationResponseScoped=typeof session==='string'&&payload.session_id===session;
-    setEntries(payload.entries);return true;
+    return publishConversationIndex(payload);
   }catch(_){return false}finally{
     clearTimeout(timeout);
     if(conversationRefreshController===controller){conversationRefreshController=null;refreshing=false}
@@ -82,7 +94,7 @@ async function finishConversationPolling(){
     await conversationRefreshPromise;
     if(epoch!==conversationSyncGeneration||scope!==JSON.stringify(conversationScope()))return false;
     if(window.__execweaveStaticMode)return true;
-    return await refresh({allowDuringFinish:true});
+    return await refresh({allowDuringFinish:true,includeInvestigation:true});
   })().catch(()=>false).then(synchronized=>{
     if(epoch!==conversationSyncGeneration||scope!==JSON.stringify(conversationScope()))return false;
     conversationFinishSynchronized=Boolean(synchronized);reportFinalConversationSync(conversationFinishSynchronized);

@@ -810,6 +810,9 @@ def _mark_shared_evidence(entries: list[dict[str, Any]]) -> None:
 def conversation_index_payload(
     graph: dict[str, Any],
     run_root: str | Path,
+    *,
+    investigation_cache=None,
+    include_investigation: bool = True,
 ) -> dict[str, Any]:
     """Build the conversation index exactly as ``conversations.json`` carries it.
 
@@ -818,6 +821,8 @@ def conversation_index_payload(
     free to disagree with the file written at finalization, and the disagreement
     would show up as an agent seeing conversations that are not its own.
     """
+    from .investigation_index import build_investigation_index
+
     root = Path(run_root).expanduser().resolve()
     entries = conversation_record_entries(graph, root)
     _mark_shared_injected_context(entries)
@@ -832,6 +837,8 @@ def conversation_index_payload(
         "scope": "run_local_provider_neutral_conversation_projection",
         "session_id": graph.get("session_id") if isinstance(graph.get("session_id"), str) else None,
         "source_path": graph.get("source_path") if isinstance(graph.get("source_path"), str) else None,
+        **({"investigation": build_investigation_index(graph, root, cache=investigation_cache)}
+           if include_investigation else {}),
         "entry_count": len(entries),
         "visible_message_count": visible_message_count,
         "external_provider_folder_lookup_required": False,

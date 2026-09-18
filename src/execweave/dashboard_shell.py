@@ -237,8 +237,8 @@ def _stop_conversation_polling_after_finish(html: str) -> str:
             "agent conversation lifecycle seam changed",
         ),
         (
-            "window.__execweaveAgentPanel={render,setEntries,refresh};",
-            "window.__execweaveAgentPanel={render,setEntries,refresh,finishConversationPolling,stopConversationPolling,whenFinished:()=>conversationFinishPromise,isFinishedSynchronized:()=>conversationScopeKey===JSON.stringify(conversationScope())&&conversationPollingFinished&&conversationFinishSynchronized,getSynchronizationStatus:synchronizationStatus};",
+            "const agentPanelAPI={render,setEntries,refresh};",
+            "const agentPanelAPI={render,setEntries,refresh,finishConversationPolling,stopConversationPolling,whenFinished:()=>conversationFinishPromise,isFinishedSynchronized:()=>conversationPollingFinished&&conversationFinishSynchronized&&conversationScopeKey===JSON.stringify(conversationScope()),getSynchronizationStatus:synchronizationStatus};",
             "agent conversation export seam changed",
         ),
     )

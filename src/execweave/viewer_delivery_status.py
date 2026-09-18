@@ -47,7 +47,7 @@ const ERRORS={
 };
 function redraw(){
   reconcile();if(!host?.isConnected)return;
-  const status=window.__execweaveAgentPanel?.getSynchronizationStatus?.();
+  const status=window.__execweaveDashboard?.agentPanel?.getSynchronizationStatus?.();
   const valid=status&&matches(status);
   const state=valid?status.state:'unknown';
   const archiveState=offline?.state||receipt?.state||'unavailable';
@@ -64,7 +64,7 @@ function redraw(){
       'This confirms history retrieval, not source completeness or task success.':
     state==='failed'?'The last history response was not accepted. Existing history is retained; stopping polling is not synchronization.':
     'This reports the existing history synchronizer; it does not start a second polling loop.');
-  if(state==='failed')sync.append(button('Retry final synchronization',()=>window.__execweaveAgentPanel?.finishConversationPolling?.()));
+  if(state==='failed')sync.append(button('Retry final synchronization',()=>window.__execweaveDashboard?.agentPanel?.finishConversationPolling?.()));
   let archive;
   if(offline?.state==='verified_now'){
     archive=card('archive','Selected archive verification','verified_now','Selected archive files verified',

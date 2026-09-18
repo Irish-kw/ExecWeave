@@ -434,18 +434,28 @@ def _conversation_entries(
 def _render_unified_dashboard(
     graph: dict[str, Any],
     entries: list[dict[str, Any]],
+    investigation_index: dict[str, Any] | None = None,
 ) -> str:
     """Render exactly one product shell for both live and finalized runs."""
     return render_static_dashboard_html(
         project_viewer_graph(graph),
         conversation_entries=entries,
+        investigation_index=investigation_index,
     )
 
 
 def render_graph_html(graph: dict[str, Any]) -> str:
     """Render the final graph with the exact same shell used by the live dashboard."""
-    entries = _conversation_entries(graph, _run_root_from_graph(graph))
-    return _render_unified_dashboard(graph, entries)
+    root = _run_root_from_graph(graph)
+    payload: dict[str, Any] = {}
+    if root is not None:
+        try:
+            payload = conversation_index_payload(graph, root)
+        except (OSError, RuntimeError, ValueError):
+            pass
+    entries = payload.get("entries")
+    return _render_unified_dashboard(graph, entries if isinstance(entries, list) else [],
+                                     payload.get("investigation"))
 
 
 def write_graph_html(
@@ -462,7 +472,7 @@ def write_graph_html(
     payload = conversation_index_payload(graph, output.parent)
     write_conversation_records(graph, output.parent, payload=payload)
     output.write_text(
-        _render_unified_dashboard(graph, payload["entries"]),
+        _render_unified_dashboard(graph, payload["entries"], payload.get("investigation")),
         encoding="utf-8",
     )
     if open_browser:

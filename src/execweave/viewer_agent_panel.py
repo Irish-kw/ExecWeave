@@ -536,7 +536,10 @@ const nodes=document.getElementById('nodes');if(nodes)new MutationObserver(syncS
 document.addEventListener('click',event=>{if(event.target.closest?.('.node'))setTimeout(()=>{syncSelection();refresh()},0)},true);
 if(!window.__execweaveStaticMode)setInterval(()=>{if(selectedNode)refresh()},800);
 const previous=window.__execweaveDashboard||{};window.__execweaveDashboard={...previous,onPayload(data){previous.onPayload?.(data);if(selectedNode)refresh()},onFinished(){previous.onFinished?.();if(selectedNode)refresh()}};
-window.__execweaveAgentPanel={render,setEntries,refresh};
+const agentPanelAPI={render,setEntries,refresh};
+window.__execweaveAgentPanel=agentPanelAPI;
+// Shared surfaces consume the same inspector instance through the Dashboard host.
+window.__execweaveDashboard={...(window.__execweaveDashboard||{}),agentPanel:agentPanelAPI};
 })();
 """.strip().replace("/*EXECWEAVE_HISTORY_BROWSER*/", HISTORY_BROWSER_JS).replace("/*EXECWEAVE_FOLD_STATE*/", FOLD_STATE_JS).replace(
     "/*EXECWEAVE_CHILD_POLICY*/",
