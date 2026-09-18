@@ -1,65 +1,92 @@
-# 正文來源導覽與封存引用驗證
+# Recorded-source navigation and archive-reference verification
 
-基準：`a9a4333102065b559dd1197fbbad7787c691b94c`，PR #110。
-範圍：W02／W04 的內容入口，以及 W08 的終止匯出驗證；不是整版功能完成。
+Baseline: `a9a4333102065b559dd1197fbbad7787c691b94c`, PR #110.
+Scope: content access for W02/W04 and terminal-export verification for W08, not completion of the whole release.
 
-## 正文入口
+## Recorded-content access
 
-我把既有閱讀元件接到目前選取節點的明確內容來源。agent 面板可以讀取直接關聯的正文，以及有明確指派或呼叫邊的 task、tool call、model call 內容，不再只依賴原本工具／模型摘要卡片剛好露出的引用。
+I connected the existing reader to the selected node's explicit content sources. An agent inspector can open directly linked bodies and content from explicitly assigned tasks, tool calls, and model calls without depending on whether an older summary card happened to expose the reference.
 
-- 原始節點 ID 與明確的 projection member IDs 是查找依據；同名 agent、共用模型、父子關係或相近時間都不是合併依據。
-- 不從模型資源反查所有呼叫者，不把其他角色的內容借到目前角色。
-- 不同 call 使用相同正文 hash，仍保留不同來源項目。列出的數字是來源引用／觀測數，不冒充 delivery、consumption 或成功任務數。
-- 一次顯示 25 筆，可逐批展開；切換角色後保留各自的展開數。原有對話卡片及 fold policy 不改動。
-- 內容仍由上一批的相同閱讀元件處理，包含認證、hash、大小、純文字顯示與離線資料夾選取。
-- 這不是完整對話時間線，也沒有補造缺少的 provider evidence。未存在於目前圖資料中的來源，仍需要後續資料正規化。
+- Lookup uses raw node IDs and explicit projection member IDs. Matching names, shared models, parent/child relationships, and nearby timestamps are not identity joins.
+- Do not traverse a model resource to every caller or borrow another role's content.
+- Distinct calls sharing a body hash retain distinct source entries. Counts describe source references/observations, not delivery, consumption, or successful tasks.
+- Display 25 entries initially, with additional batches on demand. Preserve each node's expanded count when switching roles; existing conversation cards and fold policy are unchanged.
+- Use the same reader for authentication, hashes, sizes, literal text rendering, and explicit offline-folder selection.
+- This is not a complete conversation timeline and does not reconstruct missing provider evidence. Sources absent from the available graph still require further normalization.
 
-## 封存引用驗證
+## Archive-reference verification
 
-原先的必要輸出檢查只能證明三個主要檔案存在。現在終止匯出另外檢查 `graph.json` 中的 `observed_content`（包含 expansion cluster 裡的內容節點），以及 `conversations.json` 的內容引用。
+The original required-export check only established the presence of three top-level files. Terminal export now also checks `observed_content` in `graph.json`, including expansion-cluster content nodes, and references declared by `conversations.json`.
 
-- 逐一驗證合法的 `content/sha256/<hash>.<json|txt|bin>`、實際檔案、完整 bytes hash 與已記錄的大小。
-- 重複引用只讀取一次；相同路徑的大小宣告衝突會失敗，不能被後續有效引用沖掉。
-- 不解析 provider 正文來找其他檔案，不掃描任意 workspace。二進位與空內容也能驗證保存完整性，是否能預覽是另一個問題。
-- JSON 格式錯誤、重複 key、已知 session 不一致、缺檔、符號連結／reparse point、非一般檔案、讀取中變更與驗證上限都有明確診斷。
-- POSIX 使用 directory descriptors 與 `O_NOFOLLOW`。Windows 採讀取前後 reparse-point 與檔案身份檢查；此機制不是對抗同一可寫信任邊界內攻擊者的可信日誌。
-- 預設上限為每個索引 64 MiB、內容讀取預算 1 GiB、100,000 筆引用；碰到限制會標為 incomplete，不能跳過後仍宣稱完整。錯誤細節最多保留 100 筆，總錯誤數與截斷狀態另外保留。
-- 部分來源內容的 bytes 可能完整保存；這項驗證不等於 provider 可見性或 end-to-end recall。
+- Verify canonical `content/sha256/<hash>.<json|txt|bin>` paths, actual files, full-byte hashes, and recorded sizes.
+- Read each duplicate reference once. Conflicting size declarations for one path remain failures even when a later reference is valid.
+- Do not parse provider bodies for further filenames or scan arbitrary workspaces. Empty and binary content can pass preservation checks independently of preview support.
+- Report invalid JSON, duplicate keys, known session mismatches, missing files, symbolic links/reparse points, non-regular files, changes during reading, and verification limits.
+- POSIX uses directory descriptors and `O_NOFOLLOW`. Windows checks reparse points and identity before/after reading. This is not a tamper-proof audit log against an attacker within the same writable trust boundary.
+- Default limits are 64 MiB per index, a 1 GiB content-reading budget, and 100,000 references. Reaching a limit produces incomplete status, not skipped work labeled complete. Preserve up to 100 error details plus the total error count and truncation state.
+- Source-provided content may be partial while its supplied bytes are fully preserved. Verification is not a claim about provider visibility or end-to-end recall.
 
-`finalization.json` 使用 schema 0.2，保留既有欄位，新增 `artifact_errors` 與 `content_integrity`。錄製中是 `not_checked`；終止時未通過引用驗證不能標為 complete。診斷先寫入 manifest，再回報匯出失敗；已有 collector 原始錯誤時，不以新的內容診斷取代它。
+`finalization.json` uses schema 0.2, retaining existing fields and adding `artifact_errors` and `content_integrity`. During recording, integrity is `not_checked`; terminal exports cannot be complete when reference verification fails. Write diagnostics before reporting the export failure, and do not replace an existing collector error with the new integrity diagnostic.
 
-驗證範圍是這兩份索引宣告的內容，不包含所有原始事件完整性的證明、viewer 內嵌資料語義比對或不可竄改承諾。尚未呼叫 `record_finalization` 的其他輸出路徑，沒有因此自動取得這項驗證。既有封存不會被背景改寫。
+The scope is content declared by these two indexes. It does not establish the integrity of every raw event, semantic equivalence with the viewer's embedded data, or resistance to tampering. Other output paths that do not call `record_finalization` do not automatically acquire this verification. Existing archives are not rewritten in the background.
 
-## 測試與回歸
+## Initial tests and regression scope
 
-本地執行：
+Local results for the source-navigation/integrity batch:
 
 ```text
-內容完整性與 finalization：61 項通過
-正文來源元件：12 項通過（含 11 項 Chromium 操作測試）
-合計：73 passed；1 項 full-shell integration test 未在本地執行
-Python compilation：PASS
-組合後 JavaScript syntax：PASS
+Content integrity and finalization: 61 passed
+Source-navigation component: 12 passed (11 Chromium interaction cases)
+Total: 73 passed; 1 full-shell integration case not executed locally
+Python compilation: PASS
+Combined JavaScript syntax: PASS
 ```
 
-內容完整性測試使用實際暫存檔案；來源元件測試執行實際 JavaScript 與既有閱讀元件，驗證選取、隔離、分批展開及錯誤入口。它們使用合成圖，不是真實 provider 錄製；沒有以 HTTP／SHA-256 替身把原生傳輸驗證算成通過。
+Integrity tests use actual temporary files. Navigation tests execute the component JavaScript and the existing reader to check selection, isolation, batch expansion, and error entry points. Their graphs are synthetic, not fresh provider recordings; HTTP or SHA-256 substitutes are not counted as native transport verification.
 
-本地 Chromium 的 loopback 導航被環境政策阻擋。新測試尚不能在本地證明原生 HTTP／auth；完整 Dashboard 組裝、既有全套測試、三 OS 及安裝套件由此提交的 PR 工作流驗證。真實 provider 重錄及獨立使用者操作驗收仍待執行。
+Local Chromium policy blocks loopback navigation. These local results therefore do not establish native HTTP/auth behavior. Full Dashboard assembly, the existing suite, three-OS coverage, and installed-package behavior require the corresponding PR workflows. Fresh recordings and independent user acceptance remain outstanding.
 
-原有 finalization 回歸中，成功案例使用的 `artifact` 純文字 placeholder 改為有效 graph／conversation JSON。原有斷言保留；新增多種無效 JSON 負向案例，不能用任意非空檔案通過新的引用驗證。
+The existing finalization regression's successful plain-text `artifact` placeholders were replaced with valid graph/conversation JSON. All original assertions remain. New malformed-JSON negative cases prevent arbitrary nonempty files from satisfying reference verification.
 
-## 整合與回退
+## Integration and rollback
 
-內容導覽只新增一個共用元件與閱讀元件的明確 `attach` 接口，沒有改 owner 推論、原始事件、圖布局或 recorder。
+Navigation adds one shared component and an explicit reader `attach` interface without changing ownership inference, raw events, graph layout, or recorders.
 
-封存驗證集中在 `content_integrity.py` 與 `finalization.py`，不改寫來源檔案，也不提升套件版號。若回歸需要回退，可分開回退正文導覽與終止驗證；不能僅刪掉失敗測試或放寬不完整封存的判定。
+Archive checks are confined to `content_integrity.py` and `finalization.py`. They do not rewrite source artifacts or bump the version. Navigation and terminal verification can be reverted separately if a regression requires it; deleting failing tests or relaxing incomplete-archive classification is not a rollback strategy.
 
-## 跨平台回歸補正
+## Cross-platform follow-up
 
-`b0ccc42` 的 Linux、macOS provider contract 與 13 類來源分項通過，但 Windows 的 Live／top 終止匯出失敗。程式先前把 `os.fstat` 的完整簽章直接與 `Path.stat` 比較，混用了不同的 Windows 檔案中繼資料介面。
+Linux/macOS provider contracts and the 13 provider-specific contracts passed for `b0ccc42`, but Windows Live/top terminal export failed. The implementation compared the complete `os.fstat` signature directly with `Path.stat`, mixing Windows metadata interfaces.
 
-我將路徑端改為重新開啟同一個已檢查路徑，再取得 `os.fstat`，以同一介面比對檔案身份、大小與時間。沒有捨棄 ctime、捨入時間、關閉 Windows 驗證，或放寬 hash／大小判斷；任何一個欄位差一個單位仍會失敗。額外的 handle 即使遇到錯誤也會關閉。Windows 原生回歸仍需以新提交的工作流結果確認。
+I changed the path-side check to reopen the inspected path and obtain `os.fstat` metadata through the same interface. Identity, size, mtime, and ctime checks remain exact, without timestamp rounding or a Windows bypass. Any one-unit change in a checked field remains a failure. Additional handles close on errors as well. Native confirmation requires the subsequent commit's Windows checks.
 
-另有一項 Stage Integrity 失敗是成功案例改成有效 JSON 後尚未登錄理由。依既有機制只對本分支的 `tests/test_audit_closure_20260917.py` 加入文件化允許項，並固定完整檔案 blob hash；其他改動或雜湊不符仍拒絕。原測試名稱及全部斷言保留。
+Stage Integrity also rejected the undocumented migration of the successful fixture to valid JSON. Its existing exception mechanism now names only `tests/test_audit_closure_20260917.py` on this branch and pins its complete blob hash. Unexpected changes still fail. Historical test names and all assertions remain intact.
 
-補正後的本地針對性測試為 **82 passed、1 deselected**，包括新增 9 項可攜性／handle 生命週期測試。未執行的仍是完整 Dashboard shell 測試，不將本地測試算成 Windows、完整套件或真實 provider 驗收。
+The follow-up targeted local result was **82 passed, 1 deselected**, including nine new portability/handle-lifecycle cases. The unexecuted case was the full Dashboard shell integration test; these local results are not Windows, full installed-package, or fresh-provider acceptance.
+
+## Platform security-test follow-up
+
+`5e81d3a` removes new skip markers. Symlink-fixture setup failures now fail explicitly. POSIX exercises a real FIFO path; Windows exercises a real directory at a content path. An additional native pipe-handle rejection case runs on every platform. Product behavior and Stage Integrity are not relaxed.
+
+The targeted local result at this point was **83 passed, 1 deselected**. These are historical results tied to that batch, not an assertion that all later heads pass the complete suite.
+
+## Framework task-navigation contract follow-up
+
+The full Ubuntu/Python 3.12 suite at `5e81d3a` reported **1 failed, 1,905 passed, 5 skipped**. The failure was the existing OpenCode delegation test: the new shared navigation script contained `ASSIGNED_AGENT_TASK` even when the graph contained no such assignment. That HTML assertion alone does not prove that a runtime edge was fabricated. Inspecting the mapping exposed a separate contract error: the navigator accepted this provider-delegation relation for ordinary framework `task` nodes, although the framework adapter emits `task -> ASSIGNED_TO -> agent`.
+
+I narrowed the reverse task join to that canonical relation and its endpoint types. Inferred and viewer-only assignment edges are not used as raw assignment evidence. Provider subtask/tool-call delegation stays with its existing identity policy; direct source inspection remains available. This removes an unsupported mapping rather than hiding a string or changing the historical assertion.
+
+Validation used the complete production modules from the exact-head CI package artifact, with the existing delegation test fetched separately and verified byte-for-byte against Git blob `56acc16be36d8d3fdd2d6bf4eac687307bb7d3a5`. The artifact's recorded source is the PR merge ref `d68636af32a4af9b2ed6a9e1331b19209ded1d8e`; the checked source tree is `40101b2319cea5b62d997795691e7c244c5d1747`.
+
+```sh
+PYTHONPATH=src EXECWEAVE_E2E_CHROMIUM=/usr/bin/chromium python -m pytest -q \
+  tests/test_delegation_viewer.py tests/test_recorded_source_task_contract.py
+```
+
+- Before the correction: **9 failed, 14 passed** (one historical HTML regression and eight new contract failures).
+- After the correction: **23 passed**, including the three unchanged historical tests and 20 new Chromium contract/interaction cases.
+- A positive test obtains assignment evidence from the real CAMEL adapter API and graph accumulator, without starting CAMEL or a model provider. Negative cases cover unsupported relations, wrong endpoint types/direction, inferred/view-only assignments, same-named agents, and direct inspection of otherwise unassigned task content.
+- Live, Static, and projected-static Dashboard scripts pass `node --check`, and each includes exactly one source navigator and content reader.
+- Ruff passed for the changed production module and new test file. Local execution used Linux/Python 3.13.5 and Chromium; it is not a replacement for the required Python 3.10/3.12 OS matrix.
+
+These browser tests use real component JavaScript and DOM behavior with synthetic data; they do not claim fresh provider capture, native HTTP/auth validation, or a rerun of the full 1,900-plus-test suite. The original delegation tests, recorders, source events, and version metadata remain unchanged. This follow-up also converts the improvement plan and this record to English without rewriting Git history.

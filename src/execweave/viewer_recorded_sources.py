@@ -41,10 +41,12 @@ function rowsFor(raw,display,id){
     }
     if(edge.relation==='TASK_CREATED'&&target?.type==='task')subjects.set(edge.target,edge);
   }
-  // Assignment evidence has the opposite direction. Never walk through a model
-  // resource to all its callers or through a parent to its children.
+  // Framework tasks use the adapter's task -> agent assignment contract.
+  // Provider delegation belongs to its own identity policy, not this task join.
+  // A presentation-only or inferred edge is not observed assignment evidence.
   for(const edge of links)if(edge&&owners.has(edge.target)&&
-    ['ASSIGNED_TO','ASSIGNED_AGENT_TASK'].includes(edge.relation)&&byId.get(edge.source)?.type==='task'){
+    edge.relation==='ASSIGNED_TO'&&byId.get(edge.source)?.type==='task'&&
+    byId.get(edge.target)?.type==='agent'&&edge.inferred!==true&&edge.viewer_only!==true){
     subjects.set(edge.source,edge);
   }
   const rows=[];
