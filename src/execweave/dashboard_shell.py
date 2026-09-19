@@ -4,6 +4,9 @@ from .viewer_conversation_sync import SYNC_STATE_JS, SYNC_REFRESH_JS, SYNC_LIFEC
 from . import _dashboard_shell_base as _base
 from . import viewer_projection_base as _viewer_projection_base
 from .viewer_flow_canvas import inject_flow_canvas
+from .viewer_workflow_mode import inject_workflow_mode
+from .viewer_content_health import inject_content_health
+from .viewer_structure_share import inject_structure_share
 from .viewer_semantic_projection import project_provider_neutral_viewer_graph
 
 
@@ -17,9 +20,11 @@ def _route_bundle_edges_on_ordered_rails(html: str) -> str:
     """
     needle = "trunkX=Math.max(sx+54,tx-82-(bundle.groupIndex%6)*24);"
     replacement = (
-        "sourceRail=Math.max(0,Number(sourceSpec.order)||0),"
+        "sourceRail=(typeof execweaveWorkflowRailOrder==='function'?execweaveWorkflowRailOrder(edge.source):null)"
+        "??Math.max(0,Number(sourceSpec.order)||0),"
         "targetRail=Math.max(0,(Number(targetSpec.rank)||0)-(Number(sourceSpec.rank)||0)-1)"
-        "+Math.max(0,Number(targetSpec.order)||0),"
+        "+((typeof execweaveWorkflowRailOrder==='function'?execweaveWorkflowRailOrder(edge.target):null)"
+        "??Math.max(0,Number(targetSpec.order)||0)),"
         "railDistance=20+sourceRail*25+targetRail*10,"
         "trunkX=tx>=sx?Math.min(tx,sx+railDistance):Math.max(tx,sx-railDistance);"
     )
@@ -266,6 +271,7 @@ _base.DASHBOARD_HTML = inject_flow_canvas(
     )
     )
 )
+_base.DASHBOARD_HTML = inject_structure_share(inject_content_health(inject_workflow_mode(_base.DASHBOARD_HTML)))
 DASHBOARD_HTML = _base.DASHBOARD_HTML
 render_static_dashboard_html = _base.render_static_dashboard_html
 

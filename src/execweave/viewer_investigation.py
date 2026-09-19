@@ -12,7 +12,7 @@ const scope=()=>JSON.stringify([graph().session_id||null,graph().source_path||nu
 const keyOf=x=>JSON.stringify([x?.session_id||null,x?.source_path||null]);
 const PAGE=25,opened=new Set();
 let liveIndex=null,pinned=null,currentScope=scope(),dialog=null,query,kind,status,notice,body,next,prev,refreshButton;
-let page=0,focusId='',activeTab='agents',invoker=null;
+let page=0,focusId='',recordKey='',activeTab='agents',invoker=null,refreshGeneration=0;
 const button=(label,action)=>{const b=make('button',label);b.type='button';b.onclick=action;return b};
 function compatible(value){return typeof value?.session_id==='string'&&value.session_id.length>0&&value.schema_version==='0.1'&&value.scope==='recorded_event_investigation'&&keyOf(value)===scope()&&
   ['agents','messages','calls','artifacts'].every(k=>Array.isArray(value[k])&&value[k].length<=10000&&value[k].every(r=>r&&typeof r==='object'&&!Array.isArray(r)))}
@@ -25,8 +25,9 @@ function fallback(){
   return {session_id:g.session_id,source_path:g.source_path,agents,messages:[],calls:[],artifacts:[],inspection:{state:'unavailable'}};
 }
 function clear(){
+  refreshGeneration++;if(refreshButton)refreshButton.disabled=false;
   if(dialog){dialog.close();body.replaceChildren();query.value='';notice.textContent=''}
-  pinned=null;focusId='';page=0;
+  pinned=null;focusId='';recordKey='';page=0;
 }
 function checkScope(){
   if(scope()===currentScope)return true;
@@ -44,7 +45,7 @@ function ensure(){
   head.append(title,button('Close exploration',()=>{clear();invoker?.focus()}));
   const tabs=make('nav');tabs.setAttribute('aria-label','Investigation category');
   for(const [name,label] of [['agents','Agents'],['messages','Handoffs'],['calls','Model / tool calls'],['artifacts','Files / artifacts']]){
-    const b=button(label,()=>{activeTab=name;page=0;draw()});b.dataset.tab=name;tabs.append(b);
+    const b=button(label,()=>{activeTab=name;recordKey='';page=0;draw()});b.dataset.tab=name;tabs.append(b);
   }
   const form=make('form');query=make('input');query.type='search';query.setAttribute('aria-label','Search investigation');query.placeholder='Search names, exact IDs, events or relations';
   kind=make('select');kind.setAttribute('aria-label','Investigation filter');
@@ -55,17 +56,20 @@ function ensure(){
   prev=button('Previous page',()=>{page--;draw()});next=button('Next page',()=>{page++;draw()});
   refreshButton=button('Refresh index',async()=>{
     if(!checkScope()||refreshButton.disabled)return;
-    refreshButton.disabled=true;
+    const request=++refreshGeneration;refreshButton.disabled=true;
     // Reuse the existing authenticated request and its terminal guard. No timer.
-    try{if(!window.__execweaveStaticMode)await window.__execweaveDashboard?.agentPanel?.refresh?.({includeInvestigation:true})}finally{refreshButton.disabled=false}
-    if(!checkScope()||!dialog.open)return;pinned=current();notice.textContent='';draw();
+    try{if(!window.__execweaveStaticMode)await window.__execweaveDashboard?.agentPanel?.refresh?.({includeInvestigation:true})}
+    catch{if(request===refreshGeneration)notice.textContent='Index refresh failed. The current snapshot is retained.';return}
+    finally{if(request===refreshGeneration)refreshButton.disabled=false}
+    if(request!==refreshGeneration||!checkScope()||!dialog.open)return;pinned=current();notice.textContent='';draw();
   });
   controls.append(prev,next,refreshButton,button('Clear agent filter',()=>{focusId='';page=0;draw()}));
   status=make('p');status.id='execweave-investigation-status';status.setAttribute('role','status');
   notice=make('p');notice.id='execweave-investigation-updates';notice.setAttribute('role','status');
   body=make('div');body.id='execweave-investigation-rows';
   dialog.append(head,tabs,form,controls,status,notice,body);
-  dialog.addEventListener('cancel',e=>{e.preventDefault();clear()});document.body.append(dialog);
+  dialog.addEventListener('keydown',e=>{if(e.key==='Escape')e.stopPropagation()});
+  dialog.addEventListener('cancel',e=>{e.preventDefault();clear();invoker?.focus()});document.body.append(dialog);
 }
 function refs(parent,rows,context){
   for(const item of list(rows)){
@@ -83,6 +87,7 @@ function attention(row){
 function selectedRows(){
   const q=query.value.toLocaleLowerCase();
   return list(pinned?.[activeTab]).filter(row=>{
+    if(recordKey&&(row.key||row.id)!==recordKey)return false;
     if(focusId&&activeTab!=='agents'&&row.owner_id!==focusId&&row.target_id!==focusId&&
       !list(row.relations).some(e=>e.source===focusId||e.target===focusId))return false;
     if(kind.value==='attention'&&!attention(row))return false;
@@ -163,7 +168,8 @@ function draw(){
 function open(){
   checkScope();ensure();invoker=document.activeElement;pinned=current();page=0;notice.textContent='';dialog.showModal();draw();
   if(!window.__execweaveStaticMode&&!liveIndex){
-    void window.__execweaveDashboard?.agentPanel?.refresh?.({includeInvestigation:true}).then(()=>{if(dialog.open&&checkScope())notice.textContent='Index request completed. Use Refresh index to load available records.'});
+    const request=refreshGeneration;
+    void window.__execweaveDashboard?.agentPanel?.refresh?.({includeInvestigation:true})?.then(()=>{if(request===refreshGeneration&&dialog.open&&checkScope())notice.textContent='Index request completed. Use Refresh index to load available records.'}).catch(()=>{if(request===refreshGeneration&&dialog.open)notice.textContent='Index request failed. Existing records remain readable.'});
   }
 }
 const launcher=button('Explore run',open);launcher.id='execweave-explore-run';
@@ -172,7 +178,12 @@ if(anchor?.parentElement)anchor.parentElement.insertBefore(launcher,anchor);else
 const prior=window.__execweaveDashboard||{};
 window.__execweaveDashboard={...prior,onPayload(...args){prior.onPayload?.(...args);checkScope()},onFinished(...args){prior.onFinished?.(...args);checkScope()}};
 window.addEventListener('pagehide',()=>{clear();liveIndex=null;opened.clear()});
-window.__execweaveInvestigation={setIndex,open,close:clear};
+function openRecord(tab,key){
+  if(!['agents','messages','calls','artifacts'].includes(tab)||typeof key!=='string')return false;
+  checkScope();const rows=list(current()[tab]);if(rows.filter(r=>(r.key||r.id)===key).length!==1)return false;
+  activeTab=tab;recordKey=key;open();query.value='';kind.value='all';draw();return true;
+}
+window.__execweaveInvestigation={setIndex,open,close:clear,getIndex:()=>{checkScope();return current()},openRecord};
 })();
 """.strip()
 

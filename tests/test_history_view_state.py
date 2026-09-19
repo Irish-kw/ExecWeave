@@ -100,7 +100,8 @@ def test_unknown_execution_does_not_persist_by_filename_or_label(page):
     assert "Page 1/9" in page.locator("#execweave-history-status").inner_text()
 
 
-@pytest.mark.parametrize("saved", ["not-json", "[]", '{"version":2,"views":[]}', "x" * 131073])
+@pytest.mark.parametrize("saved", ["not-json", "[]", '{"version":2,"views":[]}', "x" * 131073],
+                         ids=["invalid-json", "wrong-shape", "unsupported-version", "oversized"])
 def test_malformed_or_oversized_storage_does_not_break_reading(page, saved):
     storage_double(page)
     page.evaluate("([k,v])=>window.testStore.set(k,v)", [STORE, saved])

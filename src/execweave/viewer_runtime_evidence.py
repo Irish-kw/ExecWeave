@@ -124,6 +124,7 @@ function ensure(){
 }
 function inspect(id){
   if(!checkScope())return;
+  window.__execweaveWorkflow?.reveal(id);
   const core=window.__execweaveCore,display=core?.getDisplayGraph?.()||raw();
   const matches=list(display.nodes).filter(n=>n?.id===id);
   if(matches.length!==1){notice.textContent='This exact node is collapsed or absent in the current canvas. Its recorded identity and relationships remain readable here.';return}
