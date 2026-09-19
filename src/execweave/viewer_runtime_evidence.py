@@ -118,6 +118,8 @@ function ensure(){
   controls.append(previous,next,reset,button('Refresh runtime snapshot',()=>{if(checkScope()){pinned=buildIndex(raw(),anchors);notice.textContent='';draw()}}));
   status=make('p');status.id='execweave-runtime-status';status.setAttribute('role','status');notice=make('p');notice.id='execweave-runtime-updates';notice.setAttribute('role','status');
   body=make('div');body.id='execweave-runtime-rows';dialog.append(head,boundary,form,controls,status,notice,body);
+  // Escape closes this modal, not the underlying canvas selection.
+  dialog.addEventListener('keydown',e=>{if(e.key==='Escape')e.stopPropagation()});
   dialog.addEventListener('cancel',e=>{e.preventDefault();close()});document.body.append(dialog);
 }
 function inspect(id){
@@ -185,7 +187,9 @@ function attachSelection(){
   if(!ids.length)ids.push(id);
   const key=JSON.stringify([scope(),id,ids]);if(selectionPanel?.isConnected&&selectionKey===key)return;
   selectionPanel?.remove();selectionKey=key;selectionPanel=make('section');selectionPanel.id='execweave-runtime-selection';
-  selectionPanel.append(button('Runtime evidence for selection',()=>open(ids)));details.append(selectionPanel);
+  selectionPanel.append(button('Runtime evidence for selection',()=>open(ids)));
+  // Keep navigation outside the evidence body: its label is not agent output.
+  details.before(selectionPanel);
 }
 let scheduled=false;
 function schedule(){if(scheduled)return;scheduled=true;queueMicrotask(()=>{scheduled=false;attachSelection()})}
