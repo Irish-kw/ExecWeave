@@ -1,6 +1,8 @@
 """Searchable investigation workspace without changing graph geometry or evidence."""
 from __future__ import annotations
 
+from .viewer_message_handoffs import MESSAGE_HANDOFFS_JS
+
 INVESTIGATION_JS = r"""
 (()=>{
 'use strict';
@@ -34,7 +36,7 @@ function checkScope(){
   currentScope=scope();liveIndex=null;opened.clear();clear();return false;
 }
 function setIndex(value){
-  checkScope();if(!compatible(value)){if(dialog?.open)notice.textContent='Index not accepted: missing, malformed, or different run identity.';return false}liveIndex=value;
+  checkScope();if(!compatible(value)){if(dialog?.open)notice.textContent='Index not accepted: missing, malformed, or different run identity.';return false}liveIndex=value;scheduleMessagePanel();
   if(dialog?.open)notice.textContent='Index updated. Refresh to inspect the new snapshot; the open page is unchanged.';
 }
 function current(){return liveIndex|| (compatible(window.__execweaveStaticInvestigation)?window.__execweaveStaticInvestigation:null)||fallback()}
@@ -108,8 +110,7 @@ function inspectAgent(row){
   if(matches.length===1){clear();core?.selectNode?.(matches[0].id);window.__execweaveDashboard?.agentPanel?.render?.(matches[0]);return}
   notice.textContent='This agent is not uniquely represented in the current canvas. Its indexed evidence remains available here.';
 }
-function card(row){
-  const tab=activeTab;
+function card(row,tab=activeTab){
   const article=make('details');article.className='investigation-row';article.dataset.recordId=row.key||row.id;
   let summary;
   if(tab==='agents')summary=[row.name,row.role,row.provider].filter(Boolean).join(' · ');
@@ -187,18 +188,24 @@ const launcher=button('Explore run',open);launcher.id='execweave-explore-run';
 const anchor=document.getElementById('theme-toggle');
 if(anchor?.parentElement)anchor.parentElement.insertBefore(launcher,anchor);else document.getElementById('inspector')?.prepend(launcher);
 const prior=window.__execweaveDashboard||{};
-window.__execweaveDashboard={...prior,onPayload(...args){prior.onPayload?.(...args);checkScope()},onFinished(...args){prior.onFinished?.(...args);checkScope()}};
+window.__execweaveDashboard={...prior,onPayload(...args){prior.onPayload?.(...args);checkScope();scheduleMessagePanel()},onFinished(...args){prior.onFinished?.(...args);checkScope();scheduleMessagePanel()}};
 window.addEventListener('pagehide',()=>{clear();liveIndex=null;opened.clear()});
 function openRecord(tab,key){
   if(!['agents','messages','calls','artifacts'].includes(tab)||typeof key!=='string')return false;
   checkScope();const rows=list(current()[tab]);if(rows.filter(r=>(r.key||r.id)===key).length!==1)return false;
   activeTab=tab;recordKey=key;open();query.value='';kind.value='all';draw();return true;
 }
+/*EXECWEAVE_MESSAGE_HANDOFFS*/
 window.__execweaveInvestigation={setIndex,open,close:clear,getIndex:()=>{checkScope();return current()},openRecord};
 })();
-""".strip()
+""".strip().replace("/*EXECWEAVE_MESSAGE_HANDOFFS*/", MESSAGE_HANDOFFS_JS, 1)
 
 INVESTIGATION_CSS = r"""
+#execweave-message-handoffs{padding:10px;margin:10px 0;border:1px solid var(--border);border-radius:8px;overflow-wrap:anywhere}
+#execweave-message-handoffs p{font-size:12px;line-height:1.5}
+#execweave-message-handoffs button{font:inherit;padding:6px;cursor:pointer}
+#execweave-message-handoffs details{margin:8px 0;padding:8px;border:1px solid var(--border);border-radius:6px}
+#execweave-message-handoffs summary{cursor:pointer;font-size:13px}
 #execweave-explore-run{font:inherit;cursor:pointer;padding:6px 10px}
 #execweave-investigation-dialog{width:min(1100px,94vw);max-height:90vh;box-sizing:border-box;background:var(--panel,#fff);color:var(--text,#111);border:1px solid var(--border,#888);border-radius:12px;padding:18px}
 #execweave-investigation-dialog::backdrop{background:rgba(0,0,0,.45)}
