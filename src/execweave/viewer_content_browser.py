@@ -52,13 +52,30 @@ function reference(value){
   if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('invalid_reference');
   const match=typeof value.path==='string'?PATH.exec(value.path):null;
   if(!match||match[0]!==value.path||value.sha256!==match[1])throw new Error('invalid_reference');
-  const nodes=graph().nodes||[];
-  const source=nodes.find(node=>node?.type==='observed_content'&&
-    ((value.id&&node.id===value.id)||(node.attributes?.path===value.path&&node.attributes?.sha256===value.sha256)));
-  const a=source?.attributes||{};
-  const result={...a,...value};
-  if(result.path!==value.path||result.sha256!==value.sha256)throw new Error('invalid_reference');
-  if(result.size_bytes!==undefined&&(!Number.isSafeInteger(result.size_bytes)||result.size_bytes<0))throw new Error('invalid_reference');
+  const nodes=Array.isArray(graph().nodes)?graph().nodes:[];
+  const matches=nodes.filter(node=>node&&(
+    (value.id&&node.id===value.id)||
+    (node.type==='observed_content'&&node.attributes?.path===value.path)
+  ));
+  // A caller cannot overwrite contradictory graph evidence. Check every known
+  // byte declaration, including repeated IDs, before opening any file/request.
+  // Different content kinds may legitimately refer to the same stored bytes.
+  for(const node of matches){
+    const a=node.attributes;
+    if(node.type!=='observed_content'||a?.path!==value.path||a?.sha256!==value.sha256)
+      throw new Error('conflicting_reference');
+  }
+  const sizes=new Set();
+  for(const declaration of [value,...matches.map(node=>node.attributes)]){
+    const size=declaration.size_bytes;
+    if(size===undefined)continue;
+    if(!Number.isSafeInteger(size)||size<0)throw new Error('invalid_reference');
+    sizes.add(size);
+  }
+  if(sizes.size>1)throw new Error('conflicting_reference');
+  const source=matches.find(node=>value.id&&node.id===value.id)||matches[0];
+  const result={...source?.attributes,...value};
+  if(sizes.size)result.size_bytes=sizes.values().next().value;
   return result;
 }
 function ensureDialog(){
@@ -127,6 +144,7 @@ function showPage(){
 const ERRORS={
   run_changed:'The active run changed during content retrieval. Reopen the desired reference in the current run.',
   invalid_reference:'Invalid content reference. Only run-local content/sha256 paths matching their recorded hash are allowed.',
+  conflicting_reference:'Conflicting recorded content identity, path, hash or size declarations. Content was not loaded; resolve the conflicting evidence rather than selecting one declaration.',
   too_large:'Content exceeds the 8 MiB in-browser read limit. No truncated body is being presented as complete; the archived content is unchanged.',
   folder_required:'Offline content is not embedded. Choose the exported run folder to read and verify its captured files.',
   missing_blob:'Recorded content file is missing from this run or selected folder. This is not evidence that the provider never exposed it.',
@@ -209,7 +227,7 @@ function open(value,context){
       ref.complete_from_source===false?'Source capture marked partial.':'Source completeness unknown.'
     ].filter(Boolean).join('\n');
     loadCurrent();
-  }catch(_){report('invalid_reference',ERRORS.invalid_reference)}
+  }catch(error){const state=error?.message==='conflicting_reference'?'conflicting_reference':'invalid_reference';report(state,ERRORS[state])}
 }
 function attach(parent,refs,context){
   if(!Array.isArray(refs)||!refs.length)return;
