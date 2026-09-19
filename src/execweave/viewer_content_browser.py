@@ -107,6 +107,9 @@ function ensureDialog(){
   paging.append(previous,next,search,find,copy);
   body=element('pre','execweave-content-text');
   dialog.append(head,meta,status,actions,paging,body);
+  // Escape belongs to the topmost content dialog, not the canvas or its
+  // underlying investigation. Keep native dialog cancellation and focus return.
+  dialog.addEventListener('keydown',event=>{if(event.key==='Escape')event.stopPropagation()});
   dialog.addEventListener('cancel',event=>{event.preventDefault();cancel()});
   document.body.append(dialog);controls(false);
 }
