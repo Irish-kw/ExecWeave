@@ -58,7 +58,14 @@ function ensure(){
     if(!checkScope()||refreshButton.disabled)return;
     const request=++refreshGeneration;refreshButton.disabled=true;
     // Reuse the existing authenticated request and its terminal guard. No timer.
-    try{if(!window.__execweaveStaticMode)await window.__execweaveDashboard?.agentPanel?.refresh?.({includeInvestigation:true})}
+    try{
+      if(!window.__execweaveStaticMode){
+        const refreshed=await window.__execweaveDashboard?.agentPanel?.refresh?.({includeInvestigation:true});
+        // The shared reader reports HTTP, scope and terminal failures as false,
+        // not rejected promises. Only its explicit success can replace this view.
+        if(refreshed!==true)throw new Error('Index refresh did not complete');
+      }
+    }
     catch{if(request===refreshGeneration)notice.textContent='Index refresh failed. The current snapshot is retained.';return}
     finally{if(request===refreshGeneration)refreshButton.disabled=false}
     if(request!==refreshGeneration||!checkScope()||!dialog.open)return;pinned=current();notice.textContent='';draw();
@@ -169,7 +176,11 @@ function open(){
   checkScope();ensure();invoker=document.activeElement;pinned=current();page=0;notice.textContent='';dialog.showModal();draw();
   if(!window.__execweaveStaticMode&&!liveIndex){
     const request=refreshGeneration;
-    void window.__execweaveDashboard?.agentPanel?.refresh?.({includeInvestigation:true})?.then(()=>{if(request===refreshGeneration&&dialog.open&&checkScope())notice.textContent='Index request completed. Use Refresh index to load available records.'}).catch(()=>{if(request===refreshGeneration&&dialog.open)notice.textContent='Index request failed. Existing records remain readable.'});
+    void Promise.resolve().then(()=>window.__execweaveDashboard?.agentPanel?.refresh?.({includeInvestigation:true})).then(refreshed=>{
+      if(request===refreshGeneration&&dialog.open&&checkScope())notice.textContent=refreshed===true?
+        'Index request completed. Use Refresh index to load available records.':
+        'Index request failed. Existing records remain readable.';
+    }).catch(()=>{if(request===refreshGeneration&&dialog.open&&checkScope())notice.textContent='Index request failed. Existing records remain readable.'});
   }
 }
 const launcher=button('Explore run',open);launcher.id='execweave-explore-run';

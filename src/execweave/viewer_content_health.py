@@ -63,7 +63,14 @@ function ensure(){
   const all=make('option','All categories');all.value='all';filter.append(all);filter.onchange=()=>{page=0;draw()};
   refreshButton=button('Refresh content health',async()=>{
     if(!checkScope()||refreshButton.disabled)return;const request=++generation;refreshButton.disabled=true;
-    try{if(!window.__execweaveStaticMode)await window.__execweaveDashboard?.agentPanel?.refresh?.({includeInvestigation:true})}
+    try{
+      if(!window.__execweaveStaticMode){
+        const refreshed=await window.__execweaveDashboard?.agentPanel?.refresh?.({includeInvestigation:true});
+        // The shared reader reports HTTP, scope and terminal failures as false,
+        // not rejected promises. Only its explicit success can replace this view.
+        if(refreshed!==true)throw new Error('Index refresh did not complete');
+      }
+    }
     catch{if(request===generation)summary.textContent='Index refresh failed. The current snapshot is retained.';return}
     finally{if(request===generation)refreshButton.disabled=false}
     if(request!==generation||!checkScope()||!dialog.open)return;capture();draw();
