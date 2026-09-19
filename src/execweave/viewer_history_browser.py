@@ -30,7 +30,9 @@ HISTORY_BROWSER_JS = r"""
 function execweaveCreateHistoryBrowser(getGraph,getEntries){
   const PAGE=25,TEXT_PAGE=16384,states=new Map();
   let dialog=null,title,search,filter,status,boundary,updates,refreshButton,items,prev,next;
-  let active=null,published=null,currentState=null,runScope=null;
+  let active=null,published=null,currentState=null,runScope=null,viewKey=null;
+  const STORE='execweave.history.view.v1',STORE_LIMIT=131072;
+  const filters=new Set(['all','input','message','marker','encrypted','context']);
   const list=value=>Array.isArray(value)?value:[];
   const str=value=>typeof value==='string'?value:'';
   const scope=()=>{const g=getGraph()||{};return JSON.stringify([g.run_id??null,g.session_id??null,g.source_path??null])};
@@ -50,6 +52,44 @@ function execweaveCreateHistoryBrowser(getGraph,getEntries){
     }
     const ambiguous=new Set([...scopes].filter(([,values])=>values.size>1).map(([id])=>id));
     return {records:candidates.filter(e=>!ambiguous.has(e.source_id)),ambiguous:ambiguous.size};
+  }
+  function persistenceKey(node){
+    const g=getGraph()||{};
+    // A filename or display label alone does not identify an execution.
+    if(![g.run_id,g.session_id].some(v=>typeof v==='string'&&v.length>0&&v.length<=4096))return null;
+    const selected=recordsFor(node);if(selected.ambiguous)return null;
+    const identities=selected.records.map(e=>[e.source_id,str(e.provider),str(e.conversation_preview.thread_id),str(e.conversation_preview.provider_native_id)]);
+    identities.sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)));
+    const key=JSON.stringify([scope(),node.id,identities]);return key.length<=8192?key:null;
+  }
+  function validView(v){
+    return v&&typeof v==='object'&&!Array.isArray(v)&&filters.has(v.filter)&&
+      Number.isSafeInteger(v.page)&&v.page>=0&&v.page<=100000&&Array.isArray(v.open)&&v.open.length<=64&&
+      v.open.every(x=>typeof x==='string'&&x.length<=2048);
+  }
+  function storedViews(){
+    try{
+      const text=window.sessionStorage.getItem(STORE);if(!text||text.length>STORE_LIMIT)return [];
+      const data=JSON.parse(text);if(data?.version!==1||!Array.isArray(data.views)||data.views.length>32)return [];
+      return data.views.filter(v=>Array.isArray(v)&&v.length===2&&typeof v[0]==='string'&&v[0].length<=8192&&validView(v[1])).map(([key,v])=>[key,{filter:v.filter,page:v.page,open:v.open}]);
+    }catch{return []}
+  }
+  function restoreView(key){
+    const saved=key?storedViews().find(v=>v[0]===key)?.[1]:null;
+    return {query:'',filter:saved?.filter||'all',page:saved?.page||0,open:new Set(saved?.open||[])};
+  }
+  function saveView(){
+    if(!viewKey||!currentState)return;
+    // Store presentation state and record identifiers only. Never serialize a
+    // transcript, message body, search term, URL token, or graph attributes.
+    const view={filter:currentState.filter,page:currentState.query?0:currentState.page,
+      open:[...currentState.open].filter(k=>k.length<=2048).slice(-64)};
+    if(!validView(view))return;
+    const views=storedViews().filter(v=>v[0]!==viewKey);views.push([viewKey,view]);
+    while(views.length>32)views.shift();
+    let text=JSON.stringify({version:1,views});
+    while(text.length>STORE_LIMIT&&views.length){views.shift();text=JSON.stringify({version:1,views})}
+    try{window.sessionStorage.setItem(STORE,text)}catch{/* Disabled/quota-limited storage must not break reading. */}
   }
   function category(m){
     if(m.content_state==='provider_encrypted')return 'encrypted';
@@ -80,6 +120,7 @@ function execweaveCreateHistoryBrowser(getGraph,getEntries){
   }
   function equal(a,b){return a&&a.ambiguous===b.ambiguous&&a.partial===b.partial&&a.routing===b.routing&&a.recordCount===b.recordCount&&a.rows.length===b.rows.length&&a.rows.every((r,i)=>Object.keys(r).every(k=>r[k]===b.rows[i][k]))}
   function clear(){
+    saveView();viewKey=null;
     if(dialog){dialog.close();items.replaceChildren();search.value='';status.textContent='';boundary.textContent='';updates.textContent='';title.textContent='Observed history'}
     active=null;published=null;currentState=null;
   }
@@ -116,6 +157,7 @@ function execweaveCreateHistoryBrowser(getGraph,getEntries){
       (published.ambiguous?' Conflicting native execution identities were recorded for the same source ID; their histories are withheld rather than combined.':'')+
       (published.partial?' This published history is truncated or has missing records; it is not a complete transcript.':'')+
       (published.routing?' Routing-only evidence is present; it does not establish the recipient\'s own transcript or consumption.':'');
+    boundary.textContent+=' Page, category, and expanded records can be restored within this tab for the exact run and agent; message text and search terms are never stored. Browser storage may be unavailable.';
     status.textContent=`${rows.length} matching / ${published.rows.length} loaded records. Page ${currentState.page+1}/${pages}.`;
     if(!published.recordCount)status.textContent+=' No exact-source conversation record is available; no root or sibling content was substituted.';
     items.replaceChildren();items.scrollTop=0;
@@ -146,18 +188,21 @@ function execweaveCreateHistoryBrowser(getGraph,getEntries){
       fold.addEventListener('toggle',()=>{
         if(!fold.isConnected||!active||!checkRun())return;
         if(fold.open){currentState.open.add(row.key);if(!ready){showText();ready=true}}else currentState.open.delete(row.key);
+        saveView();
       });
       // Toggle is queued. Preserve the reader's intent even when refresh follows
       // the same click before the queued event has fired.
-      head.addEventListener('click',()=>{if(fold.open)currentState.open.delete(row.key);else{currentState.open.add(row.key);if(!ready){showText();ready=true}while(currentState.open.size>4096)currentState.open.delete(currentState.open.values().next().value)}});
+      head.addEventListener('click',()=>{if(fold.open)currentState.open.delete(row.key);else{currentState.open.add(row.key);if(!ready){showText();ready=true}while(currentState.open.size>4096)currentState.open.delete(currentState.open.values().next().value)}saveView()});
       items.append(fold);
     }
+    saveView();
   }
   function open(node){
     if(node?.type!=='agent'||!str(node.id))return;
-    checkRun();ensure();active={id:node.id,type:'agent',name:node.name,attributes:{viewer_agent_member_ids:[...list(node.attributes?.viewer_agent_member_ids)]}};
-    const key=JSON.stringify([runScope,node.id]);
-    if(!states.has(key))states.set(key,{query:'',filter:'all',page:0,open:new Set()});
+    checkRun();saveView();ensure();active={id:node.id,type:'agent',name:node.name,attributes:{viewer_agent_member_ids:[...list(node.attributes?.viewer_agent_member_ids)]}};
+    viewKey=persistenceKey(active);
+    const key=viewKey||JSON.stringify([runScope,node.id]);
+    if(!states.has(key))states.set(key,restoreView(viewKey));
     currentState=states.get(key);if(states.size>32)states.delete(states.keys().next().value);
     published=snapshot(active);title.textContent=`Observed history · ${node.name||node.id}`;
     search.value=currentState.query;filter.value=currentState.filter;updates.textContent='';draw();

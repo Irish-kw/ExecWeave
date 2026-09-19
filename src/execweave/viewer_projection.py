@@ -450,7 +450,7 @@ def render_graph_html(graph: dict[str, Any]) -> str:
     payload: dict[str, Any] = {}
     if root is not None:
         try:
-            payload = conversation_index_payload(graph, root)
+            payload = conversation_index_payload(graph, root, include_investigation=True)
         except (OSError, RuntimeError, ValueError):
             pass
     entries = payload.get("entries")
@@ -469,7 +469,7 @@ def write_graph_html(
     output.parent.mkdir(parents=True, exist_ok=True)
     if output.exists() and output.stat().st_size > 0:
         raise FileExistsError(f"ExecWeave viewer output already exists: {output}")
-    payload = conversation_index_payload(graph, output.parent)
+    payload = conversation_index_payload(graph, output.parent, include_investigation=True)
     write_conversation_records(graph, output.parent, payload=payload)
     output.write_text(
         _render_unified_dashboard(graph, payload["entries"], payload.get("investigation")),

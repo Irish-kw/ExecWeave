@@ -264,7 +264,7 @@ def test_file_snapshot_keeps_exact_ref_relation_and_version(tmp_path):
 def test_index_published_with_existing_conversation_payload(tmp_path):
     from execweave.conversation_records import conversation_index_payload
     graph, _, _, _, _ = scenario(tmp_path)
-    payload = conversation_index_payload(graph, tmp_path)
+    payload = conversation_index_payload(graph, tmp_path, include_investigation=True)
     assert len(payload["investigation"]["messages"]) == 2
     assert payload["entries"]
 

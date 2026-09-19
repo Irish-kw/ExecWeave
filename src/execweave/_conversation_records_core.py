@@ -812,14 +812,14 @@ def conversation_index_payload(
     run_root: str | Path,
     *,
     investigation_cache=None,
-    include_investigation: bool = True,
+    include_investigation: bool = False,
 ) -> dict[str, Any]:
-    """Build the conversation index exactly as ``conversations.json`` carries it.
+    """Build the shared conversation projection, with opt-in investigation.
 
-    The live dashboard and the finalized viewer both read this. Keeping one
-    builder is the point: a live run that computed its own projection would be
-    free to disagree with the file written at finalization, and the disagreement
-    would show up as an agent seeing conversations that are not its own.
+    The default is the historical, lightweight conversation contract used by
+    ordinary Live polling. Event-stream inspection is requested explicitly by
+    the investigation reader and offline exporters. Both modes publish exactly
+    the same conversation entries; the extended mode only adds an index.
     """
     from .investigation_index import build_investigation_index
 
@@ -861,7 +861,7 @@ def write_conversation_records(
     root = Path(run_root).expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True)
     if payload is None:
-        payload = conversation_index_payload(graph, root)
+        payload = conversation_index_payload(graph, root, include_investigation=True)
     entries = payload["entries"]
     json_path = root / "conversations.json"
     markdown_path = root / "conversations.md"
