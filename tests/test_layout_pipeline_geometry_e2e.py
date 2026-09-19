@@ -18,7 +18,7 @@ from test_dashboard_camera_scheduler_e2e import _CORE_SEAM, _CORE_TEST_SEAM
 pytestmark = pytest.mark.viewer_e2e
 
 
-def _open(browser, graph, theme='dark', view='all'):
+def _open(browser, graph, theme='dark'):
     page = browser.new_page(viewport={'width': 1800, 'height': 1100})
     # These tests measure geometry, not transport/authentication. The unchanged
     # original browser suite separately tests real HTTP/file navigation in CI.
@@ -32,10 +32,6 @@ def _open(browser, graph, theme='dark', view='all'):
     # historical camera tests). Geometry tests must execute the shipped callsite.
     page.set_content(html.replace(_CORE_SEAM, _CORE_TEST_SEAM, 1))
     page.wait_for_selector('.node')
-    # This matrix measures the fully unfolded geometry, not the workflow filter.
-    # Keep every original node/edge/drag assertion by selecting the full view.
-    if view != 'auto':
-        page.get_by_role('combobox', name='Graph view', exact=True).select_option(view)
     if page.locator('html').get_attribute('data-theme') != theme:
         page.locator('#theme-toggle').click()
     return page

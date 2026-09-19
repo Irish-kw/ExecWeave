@@ -13,7 +13,7 @@ const workflowBaseProjection=execweaveDashboardGraph;
 const workflowToolbar=document.createElement('div');workflowToolbar.id='execweave-workflow-controls';
 workflowToolbar.setAttribute('role','group');workflowToolbar.setAttribute('aria-label','Graph view');
 const workflowSelect=document.createElement('select');workflowSelect.setAttribute('aria-label','Graph view');
-for(const [value,label] of [['auto','Automatic view'],['workflow','Workflow overview'],['all','All execution evidence']]){
+for(const [value,label] of [['auto','Default (all evidence)'],['workflow','Workflow overview'],['all','All execution evidence']]){
   const option=document.createElement('option');option.value=value;option.textContent=label;workflowSelect.append(option);
 }
 const workflowSummary=document.createElement('span');workflowSummary.id='execweave-workflow-summary';workflowSummary.setAttribute('role','status');
@@ -30,7 +30,10 @@ function workflowProject(data,display,choice,selected,selectedEdge){
   const seen=new Set();let ambiguous=false;
   for(const node of nodes){if(!node||typeof node.id!=='string'||seen.has(node.id)){ambiguous=true;break}seen.add(node.id)}
   const agentCount=nodes.filter(n=>n?.type==='agent').length;
-  const mode=choice==='auto'?(agentCount>1?'workflow':'all'):choice;
+  // Keep the established display contract until workflow-first presentation
+  // can be enabled without hiding attribution gaps or runtime evidence.
+  // Workflow filtering remains an explicit, reversible reader choice.
+  const mode=choice==='auto'?'all':choice;
   if(mode!=='workflow'||!agentCount||ambiguous||data?.live_payload_compact){
     return {display,mode:'all',total:nodes.length,shown:nodes.length,hidden:0,ambiguous,agentCount};
   }

@@ -35,6 +35,9 @@ def projection(page, value):
 
 def test_workflow_default_and_all_evidence_keep_raw_unchanged(browser_page):
     data = show(browser_page)
+    assert browser_page.evaluate("window.__execweaveWorkflow.status().mode") == "all"
+    assert {"a", "b", "pa", "pb"} <= set(visible(browser_page))
+    browser_page.get_by_role("combobox", name="Graph view", exact=True).select_option("workflow")
     assert browser_page.evaluate("window.__execweaveWorkflow.status().mode") == "workflow"
     assert {"a", "b"} <= set(visible(browser_page))
     assert "pa" not in visible(browser_page)
@@ -46,6 +49,7 @@ def test_workflow_default_and_all_evidence_keep_raw_unchanged(browser_page):
 
 def test_selected_runtime_identity_is_revealed_without_names(browser_page):
     show(browser_page)
+    browser_page.get_by_role("combobox", name="Graph view", exact=True).select_option("workflow")
     browser_page.evaluate("window.__execweaveCore.selectNode('pa')")
     assert "pa" in visible(browser_page)
     assert browser_page.evaluate("window.__execweaveWorkflow.status().mode") == "all"
@@ -57,6 +61,7 @@ def test_selected_runtime_identity_is_revealed_without_names(browser_page):
 
 def test_missing_identity_cannot_reveal_a_similarly_named_node(browser_page):
     show(browser_page)
+    browser_page.get_by_role("combobox", name="Graph view", exact=True).select_option("workflow")
     assert browser_page.evaluate("window.__execweaveWorkflow.reveal('Same name')") is False
     assert browser_page.evaluate("window.__execweaveWorkflow.status().mode") == "workflow"
 
@@ -75,6 +80,7 @@ def test_failures_and_recorded_snapshot_nodes_are_not_hidden(browser_page):
     data['nodes'][5]['attributes']['status'] = 'failed'
     data['edges'].append({'id': 'snapshot', 'source': 'f', 'target': 'content', 'relation': 'OBSERVED_FILE_CONTENT_BEFORE_READ'})
     show(browser_page, data)
+    browser_page.get_by_role('combobox', name='Graph view', exact=True).select_option('workflow')
     assert 'pa' in visible(browser_page)
     # Inspect the filter directly so the previous file-display policy is separate.
     result = browser_page.evaluate("g=>window.__execweaveWorkflow.project(g,g,'workflow',null,null)", data)
@@ -432,6 +438,7 @@ def test_workflow_keeps_retained_rails_or_accepts_strict_improvement(browser_pag
     assert _CORE_SEAM in html
     # Expose the real delta handler, as the unchanged geometry assertions do.
     browser_page.set_content(html.replace(_CORE_SEAM, _CORE_TEST_SEAM, 1))
+    browser_page.get_by_role('combobox', name='Graph view', exact=True).select_option('workflow')
     assert browser_page.evaluate("window.__execweaveWorkflow.status().mode") == 'workflow'
     browser_page.evaluate("()=>{for(const p of window.__execweaveCore.getPositions().values())p.y+=123;window.__execweavePr70.paint()}")
     before = browser_page.evaluate(READ_SVG)
@@ -457,4 +464,30 @@ def test_unresolved_task_evidence_is_retained_in_workflow(browser_page):
     data = graph()
     data['nodes'].append({'id': 'task-unresolved', 'type': 'subtask', 'name': 'Unresolved handoff'})
     show(browser_page, data)
+    browser_page.get_by_role('combobox', name='Graph view', exact=True).select_option('workflow')
     assert 'task-unresolved' in visible(browser_page)
+
+
+def test_returning_to_default_restores_the_existing_display_inventory(browser_page):
+    data = show(browser_page)
+    original = browser_page.evaluate("window.__execweaveCore.getDisplayGraph()")
+    browser_page.get_by_role("combobox", name="Graph view", exact=True).select_option("workflow")
+    assert "pa" not in visible(browser_page)
+    browser_page.get_by_role("combobox", name="Graph view", exact=True).select_option("auto")
+    assert browser_page.evaluate("window.__execweaveWorkflow.status().mode") == "all"
+    assert browser_page.evaluate("window.__execweaveCore.getDisplayGraph()") == original
+    assert browser_page.evaluate("window.__execweaveCore.getGraph()") == data
+
+
+def test_automatic_mode_preserves_every_published_node_and_edge(browser_page):
+    show(browser_page)
+    data = graph()
+    # Automatic presentation must not filter an ambiguous call, an unlinked
+    # process, or evidence added after additional agents become visible.
+    data["nodes"].append({"id": "third-agent", "type": "agent", "name": "Same name"})
+    result = browser_page.evaluate(
+        "g=>window.__execweaveWorkflow.project(g,g,'auto',null,null)", data
+    )
+    assert result["mode"] == "all"
+    assert result["hidden"] == 0
+    assert result["display"] == data
