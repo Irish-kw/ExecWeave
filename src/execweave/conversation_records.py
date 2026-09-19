@@ -287,11 +287,11 @@ def _merge_conversation_previews(entries: list[dict[str, Any]]) -> None:
             observed,
             cross_source=len(source_hashes) > 1,
         )
-        truncated = len(messages) > 80
-        if truncated:
-            messages = messages[:10] + messages[-70:]
+        # Keep every normalized message available to the on-demand history reader.
+        # A rendering budget is not permission to erase the middle of a transcript.
+        # Pre-existing source truncation remains visible; it is not repaired here.
         merged_preview["message_count"] = len(messages)
-        merged_preview["messages_truncated"] = truncated or input_truncated
+        merged_preview["messages_truncated"] = input_truncated
         merged_preview["messages"] = messages
 
     drop_root_user_prompts_from_codex_children(entries)

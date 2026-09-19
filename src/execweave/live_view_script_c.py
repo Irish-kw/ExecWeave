@@ -40,5 +40,20 @@ function focusRawLogEvent(event){const target=event?.target?.id,source=event?.so
   document.addEventListener('keydown',event=>{if(event.key==='Escape')window.__execweaveClearFocus()});
   const button=document.getElementById('clear-focus');if(button)button.onclick=()=>window.__execweaveClearFocus();
 })();
-search.oninput=applySearch;document.getElementById('fit').onclick=()=>fit(true);document.getElementById('zoom-in').onclick=()=>zoomBy(1.2);document.getElementById('zoom-out').onclick=()=>zoomBy(1/1.2);jumpLatest.onclick=()=>{followLatest(true);if(cameraMode==='manual')updateJumpLatest()};document.querySelectorAll('[data-camera]').forEach(button=>button.onclick=()=>setCameraMode(button.dataset.camera));document.querySelectorAll('[data-filter]').forEach(button=>button.onclick=()=>{activityFilter=button.dataset.filter||'all';document.querySelectorAll('[data-filter]').forEach(item=>item.classList.toggle('active',item===button));renderActivities(false)});document.getElementById('raw-rows')?.addEventListener('dblclick',event=>{const row=event.target.closest?.('.raw-row'),raw=row?.querySelector?.('.raw-json')?.textContent;if(!raw)return;try{focusRawLogEvent(JSON.parse(raw))}catch(_){}});themeToggle.onclick=()=>applyTheme(document.documentElement.dataset.theme==='light'?'dark':'light',true);window.onresize=()=>scheduleCamera(true);window.__execweaveCore={getActivities:()=>activities.slice(),getGraph:()=>graph,getPositions:()=>new Map(positions),selectEdge,selectNode,focusNode,markLatest,setCameraMode};applyTheme(initialTheme());applyTransform();poll();
+search.oninput=applySearch;document.getElementById('fit').onclick=()=>fit(true);document.getElementById('zoom-in').onclick=()=>zoomBy(1.2);document.getElementById('zoom-out').onclick=()=>zoomBy(1/1.2);jumpLatest.onclick=()=>{followLatest(true);if(cameraMode==='manual')updateJumpLatest()};document.querySelectorAll('[data-camera]').forEach(button=>button.onclick=()=>setCameraMode(button.dataset.camera));document.querySelectorAll('[data-filter]').forEach(button=>button.onclick=()=>{activityFilter=button.dataset.filter||'all';document.querySelectorAll('[data-filter]').forEach(item=>item.classList.toggle('active',item===button));renderActivities(false)});document.getElementById('raw-rows')?.addEventListener('dblclick',event=>{const row=event.target.closest?.('.raw-row'),raw=row?.querySelector?.('.raw-json')?.textContent;if(!raw)return;try{focusRawLogEvent(JSON.parse(raw))}catch(_){}});themeToggle.onclick=()=>applyTheme(document.documentElement.dataset.theme==='light'?'dark':'light',true);// An initial browser resize notification may arrive after the first graph
+// paint without changing the viewport. Do not start a second Fit animation
+// from that duplicate notification while the reader is already interacting.
+let cameraViewportWidth=window.innerWidth,cameraViewportHeight=window.innerHeight;
+window.onresize=()=>{
+  const width=window.innerWidth,height=window.innerHeight;
+  if(width===cameraViewportWidth&&height===cameraViewportHeight)return;
+  cameraViewportWidth=width;cameraViewportHeight=height;scheduleCamera(true);
+};
+// Arrange owns node geometry, not a new camera target. Cancel older queued
+// and animated camera work before the active arrangement handler executes.
+// Keep the selected mode: a later live delta or real resize may resume it.
+document.getElementById('arrange')?.addEventListener('click',()=>{
+  clearTimeout(cameraTimer);cameraTimer=null;stopAnimation();
+},{capture:true});
+window.__execweaveCore={getActivities:()=>activities.slice(),getGraph:()=>graph,getPositions:()=>new Map(positions),selectEdge,selectNode,focusNode,markLatest,setCameraMode};applyTheme(initialTheme());applyTransform();poll();
 })();"""

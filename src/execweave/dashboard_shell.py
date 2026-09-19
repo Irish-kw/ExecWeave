@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+from .viewer_conversation_sync import SYNC_STATE_JS, SYNC_REFRESH_JS, SYNC_LIFECYCLE_JS
 from . import _dashboard_shell_base as _base
 from . import viewer_projection_base as _viewer_projection_base
 from .viewer_flow_canvas import inject_flow_canvas
+from .viewer_workflow_mode import inject_workflow_mode
+from .viewer_content_health import inject_content_health
+from .viewer_structure_share import inject_structure_share
 from .viewer_semantic_projection import project_provider_neutral_viewer_graph
 
 
@@ -16,9 +20,11 @@ def _route_bundle_edges_on_ordered_rails(html: str) -> str:
     """
     needle = "trunkX=Math.max(sx+54,tx-82-(bundle.groupIndex%6)*24);"
     replacement = (
-        "sourceRail=Math.max(0,Number(sourceSpec.order)||0),"
+        "sourceRail=(typeof execweaveWorkflowRailOrder==='function'?execweaveWorkflowRailOrder(edge.source):null)"
+        "??Math.max(0,Number(sourceSpec.order)||0),"
         "targetRail=Math.max(0,(Number(targetSpec.rank)||0)-(Number(sourceSpec.rank)||0)-1)"
-        "+Math.max(0,Number(targetSpec.order)||0),"
+        "+((typeof execweaveWorkflowRailOrder==='function'?execweaveWorkflowRailOrder(edge.target):null)"
+        "??Math.max(0,Number(targetSpec.order)||0)),"
         "railDistance=20+sourceRail*25+targetRail*10,"
         "trunkX=tx>=sx?Math.min(tx,sx+railDistance):Math.max(tx,sx-railDistance);"
     )
@@ -217,12 +223,12 @@ def _stop_conversation_polling_after_finish(html: str) -> str:
     seams = (
         (
             "let selectedNode=null,refreshing=false,selectedConversationSignature='';",
-            "let selectedNode=null,refreshing=false,conversationPollingFinished=false,conversationFinishSynchronized=false,conversationFinishing=false,conversationRefreshController=null,conversationRefreshTimer=null,conversationRefreshPromise=Promise.resolve(false),conversationFinishPromise=Promise.resolve(false),selectedConversationSignature='';",
+            SYNC_STATE_JS,
             "agent conversation polling state seam changed",
         ),
         (
             "async function refresh(){if(window.__execweaveStaticMode||refreshing)return;refreshing=true;try{const headers={};if(window.__execweaveToken)headers['X-ExecWeave-Token']=window.__execweaveToken;const response=await fetch('/conversations.json',{cache:'no-store',headers});if(response.ok){const payload=await response.json();setEntries(payload?.entries)}}catch(_){}finally{refreshing=false}}",
-            "async function refresh({allowDuringFinish=false}={}){if(window.__execweaveStaticMode||(conversationPollingFinished&&!allowDuringFinish)||(conversationFinishing&&!allowDuringFinish))return false;if(refreshing)return conversationRefreshPromise;refreshing=true;const controller=new AbortController();conversationRefreshController=controller;const timeout=setTimeout(()=>controller.abort(),5000);const task=(async()=>{try{const headers={};if(window.__execweaveToken)headers['X-ExecWeave-Token']=window.__execweaveToken;const response=await fetch('/conversations.json',{cache:'no-store',headers,signal:controller.signal});if(!response.ok)return false;const payload=await response.json();if(!Array.isArray(payload?.entries))return false;setEntries(payload.entries);return true}catch(_){return false}finally{clearTimeout(timeout);if(conversationRefreshController===controller)conversationRefreshController=null;refreshing=false}})();conversationRefreshPromise=task;return await task}",
+            SYNC_REFRESH_JS,
             "agent conversation refresh seam changed",
         ),
         (
@@ -232,12 +238,12 @@ def _stop_conversation_polling_after_finish(html: str) -> str:
         ),
         (
             "const previous=window.__execweaveDashboard||{};window.__execweaveDashboard={...previous,onPayload(data){previous.onPayload?.(data);if(selectedNode)refresh()},onFinished(){previous.onFinished?.();if(selectedNode)refresh()}};",
-            "function reportFinalConversationSync(ok){let notice=document.getElementById('conversation-sync-status');if(ok){notice?.remove();return}if(notice)return;notice=document.createElement('div');notice.id='conversation-sync-status';notice.setAttribute('role','status');notice.style.cssText='position:fixed;right:18px;bottom:18px;z-index:100;max-width:360px;padding:12px;background:#2b2118;color:#fff;border:1px solid #e5ad63;border-radius:8px';notice.append(document.createTextNode('Conversation history may be incomplete. Final synchronization failed. '));const retry=document.createElement('button');retry.type='button';retry.textContent='Retry sync';retry.onclick=async()=>{retry.disabled=true;try{await finishConversationPolling()}finally{retry.disabled=false}};notice.append(retry);document.body.append(notice)}\nasync function finishConversationPolling(){if(conversationPollingFinished&&conversationFinishSynchronized)return true;if(conversationFinishing)return conversationFinishPromise;conversationFinishing=true;if(conversationRefreshTimer!==null){clearInterval(conversationRefreshTimer);conversationRefreshTimer=null}conversationFinishPromise=(async()=>{await conversationRefreshPromise;if(window.__execweaveStaticMode)return true;return await refresh({allowDuringFinish:true})})().then(synchronized=>{conversationFinishSynchronized=Boolean(synchronized);reportFinalConversationSync(conversationFinishSynchronized);return conversationFinishSynchronized}).finally(()=>{conversationPollingFinished=true;conversationFinishing=false;if(conversationRefreshController!==null){conversationRefreshController.abort();conversationRefreshController=null}});return await conversationFinishPromise}\nconst stopConversationPolling=finishConversationPolling;\nconst previous=window.__execweaveDashboard||{};window.__execweaveDashboard={...previous,onPayload(data){previous.onPayload?.(data);if(selectedNode&&!data?.live_finished&&!conversationFinishing&&!conversationPollingFinished)refresh()},onFinished(){previous.onFinished?.();void finishConversationPolling()}};",
+            SYNC_LIFECYCLE_JS,
             "agent conversation lifecycle seam changed",
         ),
         (
-            "window.__execweaveAgentPanel={render,setEntries,refresh};",
-            "window.__execweaveAgentPanel={render,setEntries,refresh,finishConversationPolling,stopConversationPolling,whenFinished:()=>conversationFinishPromise,isFinishedSynchronized:()=>conversationPollingFinished&&conversationFinishSynchronized};",
+            "const agentPanelAPI={render,setEntries,refresh};",
+            "const agentPanelAPI={render,setEntries,refresh,finishConversationPolling,stopConversationPolling,whenFinished:()=>conversationFinishPromise,isFinishedSynchronized:()=>conversationPollingFinished&&conversationFinishSynchronized&&conversationScopeKey===JSON.stringify(conversationScope()),getSynchronizationStatus:synchronizationStatus};",
             "agent conversation export seam changed",
         ),
     )
@@ -265,6 +271,7 @@ _base.DASHBOARD_HTML = inject_flow_canvas(
     )
     )
 )
+_base.DASHBOARD_HTML = inject_structure_share(inject_content_health(inject_workflow_mode(_base.DASHBOARD_HTML)))
 DASHBOARD_HTML = _base.DASHBOARD_HTML
 render_static_dashboard_html = _base.render_static_dashboard_html
 

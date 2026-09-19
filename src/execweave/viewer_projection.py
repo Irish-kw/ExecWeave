@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .run_assessment import build_run_assessment
+
 from pathlib import Path
 from typing import Any
 
@@ -353,6 +355,9 @@ def project_viewer_graph(
     caller threads it through so a node already on screen can only move further right;
     a one-shot render leaves it unset.
     """
+    # Derive before display folding; task/content records may disappear from the canvas.
+    graph = dict(graph)
+    graph["run_assessment"] = build_run_assessment(graph)
     projected = _base_project_viewer_graph(graph)
     nodes = [node for node in projected.get("nodes", []) if isinstance(node, dict)]
     edges = [edge for edge in projected.get("edges", []) if isinstance(edge, dict)]
@@ -429,18 +434,28 @@ def _conversation_entries(
 def _render_unified_dashboard(
     graph: dict[str, Any],
     entries: list[dict[str, Any]],
+    investigation_index: dict[str, Any] | None = None,
 ) -> str:
     """Render exactly one product shell for both live and finalized runs."""
     return render_static_dashboard_html(
         project_viewer_graph(graph),
         conversation_entries=entries,
+        investigation_index=investigation_index,
     )
 
 
 def render_graph_html(graph: dict[str, Any]) -> str:
     """Render the final graph with the exact same shell used by the live dashboard."""
-    entries = _conversation_entries(graph, _run_root_from_graph(graph))
-    return _render_unified_dashboard(graph, entries)
+    root = _run_root_from_graph(graph)
+    payload: dict[str, Any] = {}
+    if root is not None:
+        try:
+            payload = conversation_index_payload(graph, root, include_investigation=True)
+        except (OSError, RuntimeError, ValueError):
+            pass
+    entries = payload.get("entries")
+    return _render_unified_dashboard(graph, entries if isinstance(entries, list) else [],
+                                     payload.get("investigation"))
 
 
 def write_graph_html(
@@ -454,10 +469,10 @@ def write_graph_html(
     output.parent.mkdir(parents=True, exist_ok=True)
     if output.exists() and output.stat().st_size > 0:
         raise FileExistsError(f"ExecWeave viewer output already exists: {output}")
-    payload = conversation_index_payload(graph, output.parent)
+    payload = conversation_index_payload(graph, output.parent, include_investigation=True)
     write_conversation_records(graph, output.parent, payload=payload)
     output.write_text(
-        _render_unified_dashboard(graph, payload["entries"]),
+        _render_unified_dashboard(graph, payload["entries"], payload.get("investigation")),
         encoding="utf-8",
     )
     if open_browser:

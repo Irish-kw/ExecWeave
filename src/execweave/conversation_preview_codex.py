@@ -96,7 +96,7 @@ def conversation_preview(
 ) -> dict[str, Any] | None:
     del content_kind, timestamp, ordinal
     source_path = Path(path).expanduser().resolve(strict=False)
-    previews = codex_rollout_previews(source_path)
+    previews = codex_rollout_previews(source_path, preserve_history=True)
     if not previews:
         return None
     identity = _agent_identity(provider, source)

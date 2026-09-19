@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from .agent_topology import THREAD_ID_EXECWEAVE_DERIVED, THREAD_ID_PROVIDER_NATIVE
+
 
 def drop_root_user_prompts_from_codex_children(entries: list[dict[str, Any]]) -> None:
     """Child threads must not carry the user's prompt to /root."""
@@ -25,6 +27,21 @@ def drop_root_user_prompts_from_codex_children(entries: list[dict[str, Any]]) ->
                 and str(message.get("recipient") or "") == "/root"
             )
         ]
+        preview["message_count"] = len(preview["messages"])
+
+
+def _execution_scope(entry: dict[str, Any], preview: dict[str, Any]) -> str:
+    """Mirror the publication namespace before reconciling observations."""
+    source = entry.get("source_id")
+    source = source if isinstance(source, str) and source else None
+    path = preview.get("agent_path")
+    path = path if isinstance(path, str) and path else None
+    if preview.get("thread_id_source") in {THREAD_ID_PROVIDER_NATIVE, THREAD_ID_EXECWEAVE_DERIVED}:
+        native = preview.get("provider_native_id")
+        if isinstance(native, str) and native:
+            return native
+        return source or path or "unknown"
+    return path or source or "unknown"
 
 
 def _same_merged_execution(
@@ -38,6 +55,9 @@ def _same_merged_execution(
     if observed_preview.get("agent_path") != merged_preview.get("agent_path"):
         return False
 
+    if _execution_scope(representative_entry, merged_preview) != _execution_scope(observed_entry, observed_preview):
+        return False
+
     representative_source = representative_entry.get("source_id")
     observed_source = observed_entry.get("source_id")
     if (
@@ -46,6 +66,10 @@ def _same_merged_execution(
         and observed_source == representative_source
     ):
         return True
+
+    # Derived names such as codex:root are presentation aliases, not join keys.
+    if observed_preview.get("thread_id_source") == THREAD_ID_EXECWEAVE_DERIVED:
+        return False
 
     evidence_thread_ids = {
         value
