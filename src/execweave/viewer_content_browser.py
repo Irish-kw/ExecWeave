@@ -36,10 +36,18 @@ const processed=new WeakSet();
 function element(tag,id,value){const node=document.createElement(tag);if(id)node.id=id;if(value!==undefined)node.textContent=value;return node}
 function button(label,action){const node=element('button',null,label);node.type='button';node.onclick=action;return node}
 function graph(){return window.__execweaveCore?.getGraph?.()||window.__execweaveStaticGraph||{}}
-function identity(){const g=graph();return JSON.stringify(g.session_id??g.run_id??g.source_path??null)}
+function identity(){const g=graph();return JSON.stringify([g.run_id??null,g.session_id??null,g.source_path??null])}
 function report(state,message){dialog.dataset.state=state;status.textContent=message}
 function controls(enabled){for(const node of [previous,next,search,find,copy])node.disabled=!enabled}
 function cancel(){generation++;controller?.abort();controller=null;text=null;current=null;page=0;if(body)body.textContent='';if(dialog){controls(false);dialog.close()}}
+// A selected folder is an in-memory capability for one complete run scope.
+// Reusing a session identifier must not authorize files from another execution.
+function clearRun(){cancel();files=new Map();if(folder)folder.value=''}
+function syncRun(){
+  const key=identity();
+  if(runKey!==null&&key!==runKey){clearRun();runKey=key;return false}
+  runKey=key;return true;
+}
 function reference(value){
   if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('invalid_reference');
   const match=typeof value.path==='string'?PATH.exec(value.path):null;
@@ -63,6 +71,7 @@ function ensureDialog(){
   const load=button('Load / retry',()=>loadCurrent());load.id='execweave-content-load';
   folder=element('input','execweave-content-folder');folder.type='file';folder.multiple=true;folder.setAttribute('webkitdirectory','');folder.setAttribute('aria-label','Choose exported run folder');
   folder.onchange=()=>{
+    if(!syncRun()||!current){folder.value='';return}
     generation++;controller?.abort();text=null;body.textContent='';controls(false);files=new Map();
     if(folder.files.length>50000){report('folder_limit','Too many files. Choose one exported run folder.');return}
     for(const file of folder.files){
@@ -142,7 +151,7 @@ async function bytesFromResponse(response,signal){
   const bytes=new Uint8Array(size);let offset=0;for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.byteLength}return bytes;
 }
 async function loadCurrent(){
-  if(!current)return;
+  if(!syncRun()||!current)return;
   const value=current.ref,token=++generation,startedRun=identity();
   controller?.abort();controller=new AbortController();const active=controller;
   const timer=setTimeout(()=>active.abort(),TIMEOUT);
@@ -186,7 +195,7 @@ async function loadCurrent(){
   }finally{clearTimeout(timer);if(controller===active)controller=null}
 }
 function open(value,context){
-  const key=identity();if(runKey!==null&&key!==runKey){cancel();files=new Map()}runKey=key;
+  syncRun();
   ensureDialog();generation++;controller?.abort();text=null;body.textContent='';controls(false);current=null;
   title.textContent='Recorded content';meta.textContent=String(context||'');search.value='';
   if(!dialog.open)dialog.showModal();
@@ -212,7 +221,7 @@ function attach(parent,refs,context){
   parent.append(actions);
 }
 function refresh(){
-  const key=identity();if(runKey!==null&&key!==runKey){cancel();files=new Map()}runKey=key;
+  syncRun();
   // Only parse metadata containers emitted by the existing inspector. Never parse
   // arbitrary message bodies or tool results to discover paths or owners.
   for(const occurrence of inspector.querySelectorAll('.execweave-tool-occurrence')){
@@ -230,6 +239,12 @@ function refresh(){
 }
 let scheduled=false;
 new MutationObserver(()=>{if(scheduled)return;scheduled=true;queueMicrotask(()=>{scheduled=false;refresh()})}).observe(inspector,{childList:true,subtree:true});
+const previousDashboard=window.__execweaveDashboard||{};
+window.__execweaveDashboard={...previousDashboard,
+  onPayload(...args){const result=previousDashboard.onPayload?.apply(this,args);syncRun();return result},
+  onFinished(...args){const result=previousDashboard.onFinished?.apply(this,args);syncRun();return result}
+};
+window.addEventListener('pagehide',()=>{clearRun();runKey=null});
 window.__execweaveContentBrowser={refresh,close:cancel,attach};refresh();
 })();
 """.strip()
