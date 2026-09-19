@@ -9,6 +9,7 @@ from .viewer_run_assessment import inject_run_assessment
 from .viewer_investigation import inject_investigation
 from .viewer_runtime_evidence import inject_runtime_evidence
 from .viewer_agent_panel import inject_agent_panel
+from .viewer_framework_model_output import inject_framework_model_output
 from .viewer_content_browser import inject_content_browser
 from .viewer_dashboard_clean import fold_budget_bootstrap, inject_live_dashboard_clean
 from .viewer_dashboard_focus import inject_live_dashboard_focus
@@ -90,6 +91,7 @@ def _build_dashboard_html() -> str:
         harden_execution_flow_projection(inject_execution_flow(html))
     )
     html = _align_agent_panel_topology(inject_agent_panel(_guard_compact_live_snapshot(html)))
+    html = inject_framework_model_output(html)
     return inject_runtime_evidence(inject_investigation(inject_run_assessment(inject_content_browser(html))))
 
 

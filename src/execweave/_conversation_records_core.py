@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections import Counter
 from pathlib import Path
 from typing import Any
 from .content_store import _filesystem_path
@@ -491,6 +492,7 @@ def conversation_record_entries(
         for node in nodes
         if isinstance(node.get("id"), str) and node.get("id")
     }
+    source_counts = Counter(node.get("id") for node in nodes if isinstance(node.get("id"), str))
     entries: list[dict[str, Any]] = []
     for edge in edges:
         target_id = edge.get("target")
@@ -542,6 +544,36 @@ def conversation_record_entries(
         derived = preview.pop("derived_agent_previews", None) if isinstance(preview, dict) else None
         if preview is not None:
             entry["conversation_preview"] = preview
+        # Keep each framework model response attached to its own content reference.
+        # Conversation merging publishes only one aggregate preview and can otherwise
+        # leave the actual model bodies behind a later control/status message.
+        source_attrs = source.get("attributes") if isinstance(source, dict) else None
+        if (
+            isinstance(source_attrs, dict)
+            and source.get("type") == "agent"
+            and source_counts[source_id] == 1
+            and source_attrs.get("conversation_scope") == "framework_agent"
+            and reference["content_kind"] in {
+                "metagpt.model_response", "autogen.model_response", "camel.model_response"
+            }
+            and edge.get("relation") == "HAS_MODEL_CONTENT"
+            and all(
+                record.get(flag) is None or record.get(flag) is False
+                for record in (edge, edge.get("attributes") if isinstance(edge.get("attributes"), dict) else {})
+                for flag in ("inferred", "viewer_only")
+            )
+            and isinstance(preview, dict)
+        ):
+            agent_path = preview.get("agent_path")
+            entry["model_response_preview"] = {
+                "schema_version": "1",
+                "source_id": source_id,
+                "agent_path": agent_path,
+                "messages": [dict(message) for message in preview.get("messages", [])
+                             if isinstance(message, dict) and agent_path
+                             and message.get("sender") == agent_path],
+                "messages_truncated": bool(preview.get("messages_truncated")),
+            }
         entries.append(entry)
         if isinstance(derived, list):
             entries.extend(_derived_agent_entries(entry, derived))
