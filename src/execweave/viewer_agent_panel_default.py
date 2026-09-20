@@ -18,7 +18,10 @@ function execweaveFrameworkTerminalCards(cards,inside,path,response){
   const nativeIds=new Set(exact.map(e=>e.conversation_preview.provider_native_id).filter(Boolean));
   if(nativeIds.size>1)return cards;
   const kinds=new Set(['agent_message','agent_result','subagent_final_response']);
-  const outgoing=m=>m&&m.sender===path&&m.recipient!==path&&kinds.has(m.kind)&&
+  // Reuse the inspector's ownership predicate only after requiring an explicit
+  // string sender. Its legacy missing-sender fallback is not annotation evidence.
+  const hasExactSender=m=>typeof m?.sender==='string'&&m.sender.length>0&&own(m,path);
+  const outgoing=m=>hasExactSender(m)&&m.recipient!==path&&kinds.has(m.kind)&&
     !['request','received','assignment','candidate'].includes(m.phase)&&
     !isEncrypted(m)&&!isInjected(m)&&isObserved(m);
   const marker=m=>m?.text_truncated!==true&&['TERMINATE','<CAMEL_TASK_DONE>'].includes(messageText(m));
@@ -27,7 +30,7 @@ function execweaveFrameworkTerminalCards(cards,inside,path,response){
   // Annotating its displayed text does not establish that it was sent. Keep
   // outgoing() unchanged for the earlier-message excerpt below.
   const modelResponseText=response?.kind==='assistant_message'&&response.phase==='response'&&
-    response.sender===path&&(response.recipient==null||response.recipient==='')&&
+    hasExactSender(response)&&(response.recipient==null||response.recipient==='')&&
     !isEncrypted(response)&&!isInjected(response)&&isObserved(response);
   if((!outgoing(response)&&!modelResponseText)||!marker(response))return cards;
   const at=inside.indexOf(response);if(at<0)return cards;
