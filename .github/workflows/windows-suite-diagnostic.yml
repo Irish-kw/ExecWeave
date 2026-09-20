@@ -1,11 +1,9 @@
 name: Windows Suite Diagnosis
 
+# The fixed historical candidate now has a complete diagnostic artifact.
+# Keep explicit replay available without rerunning that known failure on every
+# synchronize event in the implementation PR. Ordinary CI still tests each head.
 on:
-  pull_request:
-    paths:
-      - .github/workflows/windows-suite-diagnostic.yml
-      - scripts/diagnose_pytest.py
-      - tests/test_pytest_diagnostic_runner.py
   workflow_dispatch:
 
 permissions:

@@ -36,7 +36,13 @@ def errors(report):
     return {item['code'] for item in report['errors']}
 
 
-@pytest.mark.parametrize('payload', [b'', b'null', b'false', b'0', '中文'.encode(), b'\x00\xff\xfe', b'x' * (integrity.CHUNK + 17)])
+@pytest.mark.parametrize(
+    'payload',
+    [b'', b'null', b'false', b'0', '中文'.encode(), b'\x00\xff\xfe',
+     b'x' * (integrity.CHUNK + 17)],
+    ids=['empty', 'null-literal', 'false-literal', 'zero-literal', 'utf8-text',
+         'binary', 'cross-chunk-boundary'],
+)
 def test_all_captured_bytes_and_duplicate_refs_are_verified_once(tmp_path, payload):
     ref = archive(tmp_path, payload, extension='bin')
     report = integrity.audit_content_references(tmp_path)
