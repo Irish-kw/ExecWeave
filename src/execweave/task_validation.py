@@ -269,6 +269,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     for arg in ("graph", "task-id", "junit", "validator", "criterion", "output"):
         parser.add_argument("--" + arg, required=True)
+    parser.add_argument(
+        "--artifact", action="append", default=[], metavar="RELATIVE_NAME=LOCAL_FILE",
+        help="Associate explicit artifact bytes with this report; does not prove they were tested.",
+    )
     args = parser.parse_args(argv)
     try:
         graph = json.loads(
@@ -285,6 +289,10 @@ def main(argv: list[str] | None = None) -> int:
             validator=args.validator,
             criterion=args.criterion,
         )
+        if args.artifact:
+            from .task_artifacts import bind_artifacts
+
+            receipt = bind_artifacts(receipt, args.artifact)
         # Exclusive creation preserves original evidence and existing derivatives.
         with Path(args.output).open("x", encoding="utf-8", newline="\n") as handle:
             json.dump(receipt, handle, ensure_ascii=False, indent=2, allow_nan=False)

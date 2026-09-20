@@ -65,8 +65,87 @@ function targetMatches(r){
   const subjects=list(a?.task_validation?.external_report_subjects),match=subjects.filter(s=>s?.task_id===r?.subject?.task_id);
   return match.length===1&&match[0].task_snapshot_sha256===r?.subject?.task_snapshot_sha256;
 }
+// Artifact names are lookup keys in an explicitly selected FileList, not paths
+// the browser or server may fetch. The report never chooses a local directory.
+const ARTIFACT_FORMAT='execweave.selected-artifact-versions.v1',ARTIFACT_FILE=8*1024*1024,ARTIFACT_TOTAL=64*1024*1024;
+function artifactPath(v){
+  if(!text(v,512)||v.normalize('NFC')!==v||/[\\:*?"<>|\x00-\x1f\x7f]/.test(v)||
+     Array.from(v).some(c=>{const n=c.codePointAt(0);return n>=0xd800&&n<=0xdfff})||
+     v.split('/').some(p=>!p||p==='.'||p==='..'||/[ .]$/.test(p)||/^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i.test(p)))fail('Invalid artifact relative name.');
+  return v;
+}
+async function artifactManifest(value){
+  if(!obj(value)||value.format!==ARTIFACT_FORMAT||!Array.isArray(value.entries)||!value.entries.length||value.entries.length>100)fail('Unsupported artifact inventory.');
+  const seen=new Set(),entries=[];let total=0;
+  for(const item of value.entries){
+    if(!obj(item))fail('Invalid artifact entry.');const path=artifactPath(item.path),folded=path.toLowerCase();
+    if(seen.has(folded))fail('Duplicate or case-colliding artifact name.');seen.add(folded);
+    if(!Number.isSafeInteger(item.size_bytes)||item.size_bytes<0||item.size_bytes>ARTIFACT_FILE||(typeof item.sha256!=='string'||item.sha256.length!==64||!/^[a-f0-9]{64}$/.test(item.sha256)))fail('Invalid artifact size or digest.');
+    total+=item.size_bytes;if(total>ARTIFACT_TOTAL)fail('Artifact inventory exceeds 64 MiB.');
+    entries.push({path,size_bytes:item.size_bytes,sha256:item.sha256});
+  }
+  const encoded=new TextEncoder().encode(JSON.stringify(entries.map(e=>[e.path,e.size_bytes,e.sha256])));
+  const digest=await artifactDigest(encoded);
+  if(digest!==value.manifest_sha256)fail('Artifact manifest hash mismatch.');
+  return {format:ARTIFACT_FORMAT,entries,manifest_sha256:digest};
+}
+async function artifactDigest(bytes){
+  if(!globalThis.crypto?.subtle)fail('Native SHA-256 unavailable; artifact bytes not checked.');
+  return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),v=>v.toString(16).padStart(2,'0')).join('');
+}
+async function compareArtifacts(r,id,files){
+  const token=++generation,started=key();
+  const valid=()=>token===generation&&started===key()&&dialog?.open&&reports.get(id)===r&&targetMatches(r);
+  r.artifact_check={state:'checking',message:'Comparing only the explicitly associated files…',rows:[]};draw();
+  try{
+    if(!files.length||files.length>10000)fail('Select a nonempty folder with at most 10,000 files.');
+    const byPath=new Map(),folded=new Set();let root=null;
+    for(const file of files){
+      if(typeof file.webkitRelativePath!=='string'||!file.webkitRelativePath.includes('/'))fail('Directory-relative file identity is unavailable.');
+      const parts=file.webkitRelativePath.split('/'),folder=parts.shift();
+      if(!folder||(root!==null&&root!==folder))fail('Select exactly one folder.');root=folder;
+      const path=artifactPath(parts.join('/')),identity=path.toLowerCase();
+      if(folded.has(identity))fail('Duplicate or case-colliding selected path.');folded.add(identity);byPath.set(path,file);
+    }
+    const rows=[];let matched=0,bytesMatched=0;
+    for(const item of r.artifacts.entries){
+      if(!valid())return;
+      const file=byPath.get(item.path);let state;
+      if(!file)state='missing';
+      else if(file.size!==item.size_bytes)state='size_mismatch';
+      else{
+        const bytes=await file.arrayBuffer();if(!valid())return;
+        if(bytes.byteLength!==item.size_bytes||bytes.byteLength>ARTIFACT_FILE)fail('Selected artifact changed or exceeded its limit.');
+        const hash=await artifactDigest(bytes);if(!valid())return;
+        state=hash===item.sha256?'match':'hash_mismatch';
+      }
+      if(state==='match'){matched++;bytesMatched+=item.size_bytes}
+      rows.push({path:item.path,state});
+    }
+    if(!valid())return;
+    r.artifact_check={state:matched===rows.length?'match':'mismatch',rows,
+      message:`Last selected-file comparison: ${matched}/${rows.length} match; ${bytesMatched} matching bytes. ${files.length-rows.filter(x=>x.state!=='missing').length} other selected files were not read. This does not prove these files were tested.`};
+    draw();
+  }catch(e){if(valid()){r.artifact_check={state:'unavailable',message:'Artifact comparison not completed: '+e.message,rows:[]};draw()}}
+}
+function appendArtifacts(card,r,id){
+  const box=make('section');box.className='execweave-task-artifacts';
+  box.append(make('h4','Associated artifact versions'));
+  if(!r.artifacts){box.dataset.state='not_supplied';box.append(make('p','No artifact versions supplied. A task snapshot does not identify the files tested.'));card.append(box);return}
+  const result=r.artifact_check||{state:'not_checked',rows:[],message:'Artifact bytes have not been compared in this tab.'};box.dataset.state=result.state;
+  box.append(make('p','Operator-associated file versions, not proof of test execution on these files.'),make('p','Manifest SHA-256: '+r.artifacts.manifest_sha256));
+  const input=make('input');input.type='file';input.multiple=true;input.setAttribute('webkitdirectory','');input.className='execweave-task-artifact-folder';input.setAttribute('aria-label','Select folder to compare associated artifacts');
+  input.onchange=()=>{const files=Array.from(input.files||[]);void compareArtifacts(r,id,files)};
+  const message=make('p',result.message);message.className='artifact-comparison-status';message.setAttribute('role','status');box.append(input,message);
+  const details=make('details');details.append(make('summary',`${r.artifacts.entries.length} associated file version(s)`));
+  for(const entry of r.artifacts.entries)details.append(make('p',`${entry.path} · ${entry.size_bytes} bytes · ${entry.sha256}`));
+  box.append(details);for(const row of result.rows)box.append(make('p',row.path+' · '+row.state));
+  box.append(make('p','Only the listed files are compared. Extra files, permissions, dependencies and the entire delivered directory are not certified. Results are past comparisons and do not continuously monitor changes.'));
+  card.append(box);
+}
+
 async function validate(r){
-  if(!obj(r)||r.format!=='execweave.external-task-report.v1'||r.authority!=='operator_supplied_not_authenticated'||
+  if(!obj(r)||!['execweave.external-task-report.v1','execweave.external-task-report.v2'].includes(r.format)||r.authority!=='operator_supplied_not_authenticated'||
      !text(r.validator,256)||!text(r.criterion,2048)||!text(r.subject?.task_id,4096)||
      !/^[a-f0-9]{64}$/.test(r.subject?.task_snapshot_sha256||'')||!targetMatches(r))fail('Unsupported report or task/run snapshot mismatch.');
   const summary=inspectXML(r.report?.xml);
@@ -74,23 +153,26 @@ async function validate(r){
   if(!globalThis.crypto?.subtle)fail('Native SHA-256 unavailable; no report accepted.');
   const digest=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(r.report.xml))),b=>b.toString(16).padStart(2,'0')).join('');
   if(digest!==r.report.sha256)fail('Report hash mismatch.');
+  if(r.format==='execweave.external-task-report.v1'&&r.artifacts!==undefined)fail('Artifact binding requires a v2 receipt.');
+  const artifacts=r.format==='execweave.external-task-report.v2'?await artifactManifest(r.artifacts):null;
   // Claimed summaries are not evidence. Recount the original XML in this browser.
-  return {scope:{...r.scope},subject:{...r.subject},validator:r.validator,criterion:r.criterion,report_hash:digest,summary};
+  return {scope:{...r.scope},subject:{...r.subject},validator:r.validator,criterion:r.criterion,report_hash:digest,summary,artifacts};
 }
 function clear(){generation++;reports.clear();dialog?.close();body?.replaceChildren();if(picker)picker.value=''}
 function reconcile(){
   if(lastKey!==key()){clear();assessment=null;lastKey=key()}
   for(const [id,r] of reports)if(!targetMatches(r))reports.delete(id);
 }
-function close(){generation++;dialog?.close();body?.replaceChildren();if(picker)picker.value='';(invoker?.isConnected?invoker:section?.querySelector('button'))?.focus()}
+function close(){generation++;for(const r of reports.values())if(r.artifact_check?.state==='checking')r.artifact_check={state:'cancelled',message:'Comparison cancelled; no complete version-match result.',rows:[]};dialog?.close();body?.replaceChildren();if(picker)picker.value='';(invoker?.isConnected?invoker:section?.querySelector('button'))?.focus()}
 function draw(){
   if(!dialog?.open)return;reconcile();body.replaceChildren();
-  for(const r of reports.values()){
+  for(const [id,r] of reports){
     const card=make('article');card.className='execweave-task-report';card.dataset.state=r.summary.state;
     const labels={checks_passed:'Report: checks passed',checks_failed:'Report: checks failed',partial:'Report: incomplete coverage',no_executed_checks:'Report: no executed passing checks'};
     card.append(make('h3',labels[r.summary.state]),make('p','Task: '+r.subject.task_id),make('p','Operator-named verifier: '+r.validator),make('p','Operator-stated criterion: '+r.criterion));
     const c=r.summary.counts;card.append(make('p',`${c.tests} case records: ${c.passed} passed, ${c.failures} failures, ${c.errors} errors, ${c.skipped} skipped.`),make('p','Report SHA-256: '+r.report_hash));
     card.append(make('p','Report bytes verified and cases recounted. The report author, tested artifact version, execution and adequacy of these checks are not authenticated. This is not proof that the whole task succeeded.'));
+    appendArtifacts(card,r,id);
     const details=make('details');details.append(make('summary','Case details (first 50)'));
     for(const item of r.summary.cases.slice(0,50))details.append(make('p',[item.outcome,item.classname,item.name].join(' · ')));
     if(r.summary.cases.length>50)details.append(make('p','Detail preview limited to 50; all supported cases were counted.'));
@@ -116,7 +198,7 @@ function ensure(){
       const accepted=await validate(value);
       if(token!==generation||started!==key()||!dialog.open)return;
       if(!targetMatches(accepted))fail('Task changed during report verification.');
-      const id=JSON.stringify([accepted.subject,accepted.report_hash,accepted.validator,accepted.criterion]);
+      const id=JSON.stringify([accepted.subject,accepted.report_hash,accepted.validator,accepted.criterion,accepted.artifacts?.manifest_sha256??null]);
       if(!reports.has(id)&&reports.size>=20)fail('20-report limit reached; clear imported reports first.');
       reports.set(id,accepted);status.textContent='Report accepted as operator-supplied evidence; task success is not inferred.';draw();mount();
     }catch(e){if(token===generation&&started===key()&&dialog.open)status.textContent='Report not accepted: '+e.message}
