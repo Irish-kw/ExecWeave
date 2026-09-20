@@ -15,6 +15,7 @@ import math
 from pathlib import Path
 import subprocess
 import sys
+import threading
 import time
 
 import psutil
@@ -55,20 +56,74 @@ class Progress:
         self.emit("sessionfinish", exitstatus=int(exitstatus))
 
 
+STACK_SAMPLING = {
+    "mode": "cooperative_faulthandler",
+    "limitation": "Sampling requires Python thread scheduling; a GIL-held native stall "
+                  "may prevent stack samples. The separate parent deadline still applies.",
+}
+
+
+class StackSampler:
+    """Call the native dump function from a scheduled Python thread.
+
+    The process-global watchdog crashed during imports in an independent local
+    probe. Scheduled dumps avoid that path and leave pytest's timer untouched.
+    This observer is cooperative, not a GIL-independent deadlock detector.
+    """
+
+    def __init__(self, root: Path, stream, interval: float) -> None:
+        self.root = root
+        self.stream = stream
+        self.interval = interval
+        self.stop = threading.Event()
+        self.samples = 0
+        self.error: str | None = None
+        self.thread = threading.Thread(target=self.sample, name="pytest-stack-sampler", daemon=True)
+
+    def report(self, state: str) -> None:
+        write_json(self.root / "stack-sampling.json", {
+            **STACK_SAMPLING, "state": state, "interval_seconds": self.interval,
+            "samples": self.samples, "error_type": self.error,
+        })
+
+    def start(self) -> None:
+        self.report("running")
+        self.thread.start()
+
+    def sample(self) -> None:
+        while not self.stop.wait(self.interval):
+            try:
+                # No frame locals, source text, process arguments or environment.
+                faulthandler.dump_traceback(file=self.stream, all_threads=True)
+                self.samples += 1
+            except Exception as error:
+                self.error = type(error).__name__
+                return
+
+    def close(self) -> None:
+        self.stop.set()
+        # The worker must not close the file while the sampler still uses it.
+        # The independent supervisor bounds this join if I/O itself stalls.
+        self.thread.join()
+        self.report("failed" if self.error else "stopped")
+
+
 def worker(root: Path, stack_interval: float, pytest_args: list[str]) -> int:
     import pytest
 
     progress = Progress(root)
     with (root / "stacks.txt").open("x", encoding="utf-8") as stacks:
-        faulthandler.dump_traceback_later(stack_interval, repeat=True, file=stacks)
+        sampler = StackSampler(root, stacks, stack_interval)
+        sampler.start()
         try:
             code = int(pytest.main(["-q", "--junitxml=" + str(root / "pytest.xml"),
                                     *pytest_args], plugins=[progress]))
-            write_json(root / "worker-result.json", {"exit_code": code})
-            return code
         finally:
-            faulthandler.cancel_dump_traceback_later()
+            sampler.close()
             progress.stream.close()
+        result = code if code else (2 if sampler.error else 0)
+        write_json(root / "worker-result.json", {"exit_code": result, "pytest_exit_code": code})
+        return result
 
 
 def snapshot(process: psutil.Process) -> tuple[list[psutil.Process], list[dict]]:
@@ -141,7 +196,7 @@ def supervise(root: Path, budget: float, stack_interval: float, pytest_args: lis
     started = time.monotonic()
     write_json(root / "invocation.json", {"python": sys.version, "platform": sys.platform,
                "cwd": str(Path.cwd()), "budget_seconds": budget, "pytest_args": pytest_args,
-               "acceptance": False})
+               "acceptance": False, "stack_sampling": STACK_SAMPLING})
     timed_out = False
     with (root / "pytest.log").open("xb") as output:
         child = subprocess.Popen(command, stdout=output, stderr=subprocess.STDOUT)
