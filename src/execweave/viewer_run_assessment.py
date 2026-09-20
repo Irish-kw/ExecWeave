@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from .viewer_delivery_status import delivery_scripts
+from .viewer_task_validation import inject_task_reports
 
 RUN_ASSESSMENT_JS = r"""
 (()=>{
@@ -113,6 +114,6 @@ def inject_run_assessment(html: str) -> str:
         return html
     if "</body>" not in html:
         raise RuntimeError("run assessment requires a dashboard body")
-    return html.replace("</body>", "<style>" + RUN_ASSESSMENT_CSS + "</style>"
+    return inject_task_reports(html.replace("</body>", "<style>" + RUN_ASSESSMENT_CSS + "</style>"
                         + delivery_scripts() + '<script id="execweave-run-assessment-script">' + RUN_ASSESSMENT_JS
-                        + "</script>\n</body>", 1)
+                        + "</script>\n</body>", 1))

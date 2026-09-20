@@ -7,6 +7,8 @@ reference is not proof that its bytes exist or that capture was exhaustive.
 from __future__ import annotations
 
 import re
+
+from .task_validation import assessment_subjects
 from typing import Any
 
 SCHEMA_VERSION = "0.1"
@@ -168,6 +170,7 @@ def build_run_assessment(graph: dict[str, Any], *, max_records: int = MAX_RECORD
     scope = "partial" if limited or invalid or ambiguous or projected else "declared_graph"
     return {
         "schema_version": SCHEMA_VERSION,
+        "run_id": _text(graph.get("run_id")),
         "session_id": _text(graph.get("session_id")),
         "source_path": _text(graph.get("source_path")),
         "scope": "published_graph_metadata",
@@ -175,7 +178,7 @@ def build_run_assessment(graph: dict[str, Any], *, max_records: int = MAX_RECORD
                        "inspected_records": max_records - remaining,
                        "invalid_records": invalid, "ambiguous_node_ids": len(ambiguous)},
         "execution": _execution(graph),
-        "task_validation": {"state": "unverified", "reason": "no_independent_validation_contract",
+        "task_validation": {**assessment_subjects(list(nodes.values())), "state": "unverified", "reason": "no_independent_validation_contract",
                             "declared_tasks": len(task_ids), "reported_completed": len(completed),
                             "reported_failed": len(failed), "both_reported": len(completed & failed),
                             "reports": reports},
