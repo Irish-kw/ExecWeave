@@ -131,3 +131,27 @@ content-health counts and delivery states retain their prior meanings.
 Grok #92's three-path PASS remains scoped to 7f51c21. It does not validate this
 new task-report feature. This change requires its own fixed-target native review
 and current-head CI; main and release state remain unchanged.
+
+## Post-push fixture correction
+
+The first uploaded candidate, `9cba254`, failed the unchanged stage-integrity
+check because the literal pytest skip decorator inside the generated temporary
+child suite matched its added-marker scan. This was a real gate failure, not a
+passing result. No repository test was actually skipped by that decorator.
+
+The temporary child now raises the standard `unittest.SkipTest` outcome instead.
+It still runs through real pytest, returns one pass, one failure and one skip,
+and the parent still asserts all three exact counts and the nonzero child exit.
+No result is mocked; no product test, assertion, workflow or integrity allowlist
+is removed or relaxed. This only changes how the intentionally skipped input
+record for the report parser is produced. The parent test itself remains active.
+
+The full 105-case core/assessment command and unchanged stage-integrity check
+were rerun on the correction; exact outcomes are recorded in the PR and evidence
+package. Browser and production source are byte-identical to the first candidate,
+so its 20 component passes and four blocked native attempts retain that scope.
+
+One correction rerun selected an unavailable bundled browser and reported 97
+passes plus eight setup errors. Repeating the unchanged command with the already
+installed Chromium selected produced 105 passes, zero skips/errors/failures.
+Both logs are retained; the setup-error attempt is not reported as passing.

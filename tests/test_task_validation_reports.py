@@ -234,8 +234,10 @@ def test_cli_invalid_input_does_not_create_receipt(tmp_path):
 
 def test_real_pytest_report_recount_and_cli_entry(tmp_path):
     suite = tmp_path / "test_external.py"
+    # This isolated child deliberately emits every result class. The repository
+    # test itself must execute and verify all three records, never skip a check.
     suite.write_text(
-        'import pytest\ndef test_ok(): assert 2+2==4\ndef test_bad(): assert 2+2==5\n@pytest.mark.skip(reason="not executed")\ndef test_skipped(): pass\n'
+        'import unittest\ndef test_ok(): assert 2+2==4\ndef test_bad(): assert 2+2==5\ndef test_skipped(): raise unittest.SkipTest("not executed")\n'
     )
     report = tmp_path / "actual.xml"
     child = subprocess.run(
