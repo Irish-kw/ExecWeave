@@ -22,7 +22,14 @@ function execweaveFrameworkTerminalCards(cards,inside,path,response){
     !['request','received','assignment','candidate'].includes(m.phase)&&
     !isEncrypted(m)&&!isInjected(m)&&isObserved(m);
   const marker=m=>m?.text_truncated!==true&&['TERMINATE','<CAMEL_TASK_DONE>'].includes(messageText(m));
-  if(!outgoing(response)||!marker(response))return cards;
+  // The selected Response may be a normalized model response rather than a
+  // routed message (the default SDK shape in the original CAMEL/AutoGen runs).
+  // Annotating its displayed text does not establish that it was sent. Keep
+  // outgoing() unchanged for the earlier-message excerpt below.
+  const modelResponseText=response?.kind==='assistant_message'&&response.phase==='response'&&
+    response.sender===path&&(response.recipient==null||response.recipient==='')&&
+    !isEncrypted(response)&&!isInjected(response)&&isObserved(response);
+  if((!outgoing(response)&&!modelResponseText)||!marker(response))return cards;
   const at=inside.indexOf(response);if(at<0)return cards;
   // Generic assistant records can be replayed model-request context. Without
   // per-record provenance they are not substituted for an outgoing message.
