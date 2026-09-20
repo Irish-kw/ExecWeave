@@ -33,16 +33,33 @@ if(!inspector)return;
 let dialog=null,body,status,meta,title,folder,previous,next,search,find,copy;
 let generation=0,controller=null,current=null,text=null,page=0,files=new Map(),runKey=null;
 const processed=new WeakSet();
+// This tab-local ledger contains identities and outcomes only, never body text.
+// A new folder invalidates old file capabilities and their previous outcomes.
+const READ_LIMIT=10000,readOutcomes=new Map();let readEvictions=0;
+function resetReadOutcomes(){readOutcomes.clear();readEvictions=0}
+function recordRead(ref,state,verifiedBytes=null){
+  if(!ref||!PATH.test(ref.path)||typeof ref.sha256!=='string')return;
+  const size=Number.isSafeInteger(ref.size_bytes)?ref.size_bytes:null;
+  const key=JSON.stringify([ref.path,ref.sha256,size]);readOutcomes.delete(key);
+  readOutcomes.set(key,{path:ref.path,sha256:ref.sha256,size_bytes:size,state,
+    hash_verified_bytes:Number.isSafeInteger(verifiedBytes)?verifiedBytes:null,
+    readable:state==='verified',source:(window.__execweaveStaticMode||location.protocol==='file:')?'selected_folder':'live_http'});
+  while(readOutcomes.size>READ_LIMIT){readOutcomes.delete(readOutcomes.keys().next().value);readEvictions++}
+}
+function getReadOutcomes(){
+  syncRun();return {schema_version:'1',scope:identity(),evicted:readEvictions,
+    records:[...readOutcomes.values()].map(r=>({...r}))};
+}
 function element(tag,id,value){const node=document.createElement(tag);if(id)node.id=id;if(value!==undefined)node.textContent=value;return node}
 function button(label,action){const node=element('button',null,label);node.type='button';node.onclick=action;return node}
 function graph(){return window.__execweaveCore?.getGraph?.()||window.__execweaveStaticGraph||{}}
 function identity(){const g=graph();return JSON.stringify([g.run_id??null,g.session_id??null,g.source_path??null])}
 function report(state,message){dialog.dataset.state=state;status.textContent=message}
 function controls(enabled){for(const node of [previous,next,search,find,copy])node.disabled=!enabled}
-function cancel(){generation++;controller?.abort();controller=null;text=null;current=null;page=0;if(body)body.textContent='';if(dialog){controls(false);dialog.close()}}
+function cancel(){if(controller&&current?.ref)recordRead(current.ref,'cancelled');generation++;controller?.abort();controller=null;text=null;current=null;page=0;if(body)body.textContent='';if(dialog){controls(false);dialog.close()}}
 // A selected folder is an in-memory capability for one complete run scope.
 // Reusing a session identifier must not authorize files from another execution.
-function clearRun(){cancel();files=new Map();if(folder)folder.value=''}
+function clearRun(){cancel();files=new Map();resetReadOutcomes();if(folder)folder.value=''}
 function syncRun(){
   const key=identity();
   if(runKey!==null&&key!==runKey){clearRun();runKey=key;return false}
@@ -89,7 +106,7 @@ function ensureDialog(){
   folder=element('input','execweave-content-folder');folder.type='file';folder.multiple=true;folder.setAttribute('webkitdirectory','');folder.setAttribute('aria-label','Choose exported run folder');
   folder.onchange=()=>{
     if(!syncRun()||!current){folder.value='';return}
-    generation++;controller?.abort();text=null;body.textContent='';controls(false);files=new Map();
+    generation++;controller?.abort();text=null;body.textContent='';controls(false);files=new Map();resetReadOutcomes();
     if(folder.files.length>50000){report('folder_limit','Too many files. Choose one exported run folder.');return}
     for(const file of folder.files){
       const relative=String(file.webkitRelativePath||'');
@@ -177,8 +194,9 @@ async function loadCurrent(){
   controller?.abort();controller=new AbortController();const active=controller;
   const timer=setTimeout(()=>active.abort(),TIMEOUT);
   text=null;page=0;body.textContent='';controls(false);report('loading','Loading recorded content; verification pending.');
+  let checkedRef=null,verifiedBytes=null;
   try{
-    const ref=reference(value);if(ref.size_bytes>LIMIT)throw new Error('too_large');
+    const ref=reference(value);checkedRef=ref;recordRead(ref,'reading');if(ref.size_bytes>LIMIT)throw new Error('too_large');
     let bytes;
     if(window.__execweaveStaticMode||location.protocol==='file:'){
       if(!files.size)throw new Error('folder_required');
@@ -205,19 +223,21 @@ async function loadCurrent(){
     if(active.signal.aborted)throw new DOMException('Aborted','AbortError');
     const actual=Array.from(new Uint8Array(digest),value=>value.toString(16).padStart(2,'0')).join('');
     if(actual!==ref.sha256)throw new Error('hash_mismatch');
+    verifiedBytes=bytes.byteLength;
     let decoded;try{decoded=new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(bytes)}catch(_){throw new Error('binary_content')}
     if(decoded.includes('\u0000'))throw new Error('binary_content');
-    text=decoded;showPage();
+    text=decoded;recordRead(ref,'verified',verifiedBytes);showPage();
   }catch(error){
     if(token!==generation)return;
     text=null;body.textContent='';controls(false);
     const state=error?.name==='AbortError'?'cancelled':(ERRORS[error?.message]?error.message:'request_failed');
+    if(identity()===startedRun)recordRead(checkedRef||value,state,verifiedBytes);
     report(state,state==='cancelled'?'Content read cancelled or timed out. Retry when ready.':ERRORS[state]);
   }finally{clearTimeout(timer);if(controller===active)controller=null}
 }
 function open(value,context){
   syncRun();
-  ensureDialog();generation++;controller?.abort();text=null;body.textContent='';controls(false);current=null;
+  ensureDialog();if(controller&&current?.ref)recordRead(current.ref,'cancelled');generation++;controller?.abort();text=null;body.textContent='';controls(false);current=null;
   title.textContent='Recorded content';meta.textContent=String(context||'');search.value='';
   if(!dialog.open)dialog.showModal();
   try{
@@ -266,7 +286,7 @@ window.__execweaveDashboard={...previousDashboard,
   onFinished(...args){const result=previousDashboard.onFinished?.apply(this,args);syncRun();return result}
 };
 window.addEventListener('pagehide',()=>{clearRun();runKey=null});
-window.__execweaveContentBrowser={refresh,close:cancel,attach};refresh();
+window.__execweaveContentBrowser={refresh,close:cancel,attach,getReadOutcomes};refresh();
 })();
 """.strip()
 

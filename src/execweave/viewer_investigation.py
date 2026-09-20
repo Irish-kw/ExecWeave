@@ -139,7 +139,21 @@ function card(row,tab=activeTab){
     }
     article.append(make('p','Native occurrence: '+(row.native_id||'Unavailable')+' · '+(row.owner_id||'Unknown owner')+' → '+(row.target_id||'Unknown target')));
     if(tab==='messages')article.append(make('p','Sent, addressed and received are separate observations. Receipt is not proof of consumption, comprehension or successful work. Consumption: not observed by this contract.'));
-    else article.append(make('p','Request, response and failure are retained separately. A response does not imply task success. This view does not observe the internals of a remote tool.'));
+    else{
+      article.append(make('p','Request, response and failure are retained separately. A response does not imply task success. This view does not observe the internals of a remote tool.'));
+      article.append(button('Runtime evidence for this invocation',()=>{
+        if(!checkScope())return;
+        const matches=list(current().calls).filter(r=>r.key===row.key);
+        const identity=r=>JSON.stringify([r.kind,r.native_id,r.owner_id,r.target_id]);
+        if(matches.length!==1||identity(matches[0])!==identity(row)){
+          notice.textContent='The indexed invocation changed or is ambiguous. Refresh before opening its runtime evidence.';return;
+        }
+        const result=window.__execweaveRuntimeEvidence?.openInvocation?.(row);
+        if(result?.state!=='exact_invocation')notice.textContent=
+          'No unambiguous exact invocation node is available ('+(result?.state||'reader unavailable')+'). '+
+          'Agent-wide or shared-tool activity is not substituted for this call.';
+      }));
+    }
     if(!row.identity_bound)article.append(make('p','Occurrence/participant identity is incomplete; unrelated records are not joined.'));
     if(row.observation_basis==='explicit_graph_call')article.append(make('p','Graph-backed call identity. Content relationships are not a complete invocation transcript.'));
     if(list(row.owner_candidates).length>1)article.append(make('p','Conflicting owner candidates (not assigned): '+row.owner_candidates.join(', ')));
@@ -196,7 +210,13 @@ function openRecord(tab,key){
   activeTab=tab;recordKey=key;open();query.value='';kind.value='all';draw();return true;
 }
 /*EXECWEAVE_MESSAGE_HANDOFFS*/
-window.__execweaveInvestigation={setIndex,open,close:clear,getIndex:()=>{checkScope();return current()},openRecord};
+function openTab(tab){
+  if(!['agents','messages','calls','artifacts'].includes(tab))return false;
+  checkScope();ensure();activeTab=tab;recordKey='';focusId='';query.value='';kind.value='all';
+  if(!dialog.open)open();else{pinned=current();page=0;draw()}
+  return true;
+}
+window.__execweaveInvestigation={setIndex,open,openTab,close:clear,getIndex:()=>{checkScope();return current()},openRecord};
 })();
 """.strip().replace("/*EXECWEAVE_MESSAGE_HANDOFFS*/", MESSAGE_HANDOFFS_JS, 1)
 

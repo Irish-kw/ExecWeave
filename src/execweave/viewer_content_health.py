@@ -50,8 +50,69 @@ function summarize(index){
   }
   return report;
 }
+function verifiedReads(index,ledger){
+  const result={denominator_version:'unique-indexed-files-v1',files:0,declared_bytes:0,
+    hash_verified_files:0,hash_verified_bytes:0,readable_files:0,readable_bytes:0,
+    failed_reads:0,unverified_files:0,conflicting_files:0,partial:false};
+  if(document.getElementById('protective')?.hidden===false)return {...result,partial:true};
+  const refs=new Map(),bad=new Set();let inspected=0;
+  if(index?.schema_version!=='0.1'||index.scope!=='recorded_event_investigation'||
+    !['calls','messages','artifacts'].every(k=>Array.isArray(index[k])))return {...result,partial:true};
+  const budget=100000;
+  outer:for(const tab of ['calls','messages','artifacts'])for(const row of index[tab]){
+    if(++inspected>budget){result.partial=true;break outer}
+    for(const item of list(tab==='artifacts'?row?.snapshots:row?.references)){
+      if(++inspected>budget){result.partial=true;break outer}
+      const r=item?.reference;if(!r)continue;
+      if(!validRef(r)||item.state!=='registered_not_read'){
+        if(typeof r.path==='string')bad.add(r.path);result.partial=true;continue;
+      }
+      const old=refs.get(r.path);
+      if(old&&(old.sha256!==r.sha256||old.size_bytes!==r.size_bytes))bad.add(r.path);
+      else refs.set(r.path,r);
+    }
+  }
+  for(const path of bad)refs.delete(path);result.conflicting_files=bad.size;
+  const reads=new Map(),duplicate=new Set();
+  if(ledger?.schema_version==='1'&&ledger.scope===scope()&&Array.isArray(ledger.records)){
+    for(const r of ledger.records.slice(0,10000)){
+      if(!r||typeof r.path!=='string')continue;
+      if(reads.has(r.path))duplicate.add(r.path);else reads.set(r.path,r);
+    }
+    if(ledger.evicted||ledger.records.length>10000)result.partial=true;
+  }
+  // Recheck current graph declarations once, not once per file. A previously
+  // verified path cannot override a changed size/hash or conflicting identity.
+  const declared=new Map();
+  for(const node of list(raw().nodes).slice(0,100000)){
+    const a=node?.attributes;
+    if(node?.type!=='observed_content'||typeof a?.path!=='string')continue;
+    const old=declared.get(a.path);
+    if(old===false)continue;
+    if(!validRef(a)||(old&&(old.sha256!==a.sha256||old.size_bytes!==a.size_bytes)))declared.set(a.path,false);
+    else declared.set(a.path,a);
+  }
+  if(list(raw().nodes).length>100000)result.partial=true;
+  for(const r of refs.values()){
+    result.files++;result.declared_bytes+=r.size_bytes;
+    const observed=reads.get(r.path),g=declared.get(r.path);
+    const bound=observed&&!duplicate.has(r.path)&&observed.sha256===r.sha256&&observed.size_bytes===r.size_bytes&&
+      g&&g.sha256===r.sha256&&g.size_bytes===r.size_bytes;
+    const verified=bound&&['verified','binary_content'].includes(observed.state)&&observed.hash_verified_bytes===r.size_bytes;
+    if(verified){result.hash_verified_files++;result.hash_verified_bytes+=r.size_bytes;
+      if(observed.state==='verified'&&observed.readable===true){result.readable_files++;result.readable_bytes+=r.size_bytes}
+    }else result.unverified_files++;
+    if(bound&&['missing_blob','hash_mismatch','size_mismatch','unauthorized','request_failed','incomplete_response','conflicting_reference','invalid_reference'].includes(observed.state))result.failed_reads++;
+  }
+  if(!Number.isSafeInteger(result.declared_bytes)){result.declared_bytes=null;result.partial=true}
+  const inspection=index.inspection||{};
+  result.partial=result.partial||bad.size>0||inspection.state!=='scanned_selected_streams'||
+    inspection.graph_inventory_partial===true||inspection.limit_reached===true;
+  return result;
+}
+let pinnedReads=null;
 let dialog=null,body,summary,filter,refreshButton,invoker=null,currentScope=scope(),pinned=null,page=0,generation=0;
-function close(){generation++;if(refreshButton)refreshButton.disabled=false;dialog?.close();body?.replaceChildren();pinned=null;page=0;invoker?.focus()}
+function close(){generation++;if(refreshButton)refreshButton.disabled=false;dialog?.close();body?.replaceChildren();pinned=null;pinnedReads=null;page=0;invoker?.focus()}
 function checkScope(){if(scope()===currentScope)return true;currentScope=scope();close();return false}
 function ensure(){
   if(dialog)return;
@@ -82,7 +143,7 @@ function ensure(){
 }
 function capture(){
   const index=window.__execweaveInvestigation?.getIndex?.();
-  pinned=summarize(index);page=0;
+  pinned=summarize(index);pinnedReads=verifiedReads(index,window.__execweaveContentBrowser?.getReadOutcomes?.());page=0;
   const chosen=filter.value;while(filter.options.length>1)filter.remove(1);
   for(const g of pinned.groups){const option=make('option',g.title);option.value=g.id;filter.append(option)}
   filter.value=[...filter.options].some(o=>o.value===chosen)?chosen:'all';
@@ -93,6 +154,16 @@ function draw(){
   summary.textContent=`Denominator: ${pinned.denominator_version}. `+(pinned.partial?'Partial or unavailable index; counts are lower bounds. ':'Selected recorded streams inspected. ')+
     'The snapshot stays pinned until Refresh content health. '+(pinned.invalid_rows?`${pinned.invalid_rows} invalid or duplicate record-phase rows withheld. `:'');
   if(!pinned.groups.length){body.append(make('p','No versioned investigation index is available. Refresh to request it. Missing inventory is not zero activity.'));return}
+  const reads=pinnedReads,readSummary=make('section');readSummary.id='execweave-health-verified-reads';
+  readSummary.append(make('h3','Verified reads in this tab'),
+    make('p',`${reads.hash_verified_files}/${reads.files} indexed files hash-verified; ${reads.readable_files} readable as UTF-8. `+
+      `${reads.hash_verified_bytes} verified bytes / ${reads.declared_bytes===null?'unknown':reads.declared_bytes} declared bytes; ${reads.readable_bytes} readable verified bytes. `+
+      `${reads.failed_reads} latest read failures; ${reads.unverified_files} files without a matching verified result.`),
+    make('p','Denominator: '+reads.denominator_version+'. Duplicate references share one byte count, not one invocation. '+
+      'Results describe the latest reads in this tab and selected folder, not continuous file integrity, provider recall, task success or an archive certificate. '+
+      'Opening another folder or execution resets these results; reloading the page does not retain them. '+
+      (reads.partial?'Inventory or retained outcomes are partial. ':'')+`${reads.conflicting_files} conflicting file declaration(s) withheld.`));
+  body.append(readSummary);
   const table=make('table');table.id='execweave-health-table';const header=make('tr');
   for(const label of ['Category','Indexed records','Reference registered','Source incomplete','Explicit metadata-only','Other gaps / unknown'])header.append(make('th',label));table.append(header);
   for(const g of pinned.groups){const tr=make('tr');tr.dataset.category=g.id;const c=g.counts;
@@ -113,7 +184,7 @@ function open(){checkScope();ensure();invoker=document.activeElement;capture();d
 const launch=button('Content health',open);launch.id='execweave-content-health-launcher';
 const host=document.getElementById('execweave-workflow-controls');if(host)host.append(launch);else{const anchor=document.getElementById('theme-toggle');anchor?.parentElement?.insertBefore(launch,anchor)};
 const prior=window.__execweaveDashboard||{};window.__execweaveDashboard={...prior,onPayload(...args){prior.onPayload?.(...args);checkScope()},onFinished(...args){prior.onFinished?.(...args);checkScope()}};
-window.addEventListener('pagehide',close);window.__execweaveContentHealth={summarize,open,close};
+window.addEventListener('pagehide',close);window.__execweaveContentHealth={summarize,verifiedReads,open,close};
 })();
 """.strip()
 

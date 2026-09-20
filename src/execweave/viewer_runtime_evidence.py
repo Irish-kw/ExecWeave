@@ -59,6 +59,8 @@ function buildIndex(graph,anchorIds=[]){
     inferred:inferred(e),causal:e.causal===true&&attrs(e).causal!==false&&!inferred(e),timestamp:label(e.first_seen),
     count:Number.isSafeInteger(e.count)&&e.count>=0?e.count:null});
   const seeds=[...new Set(list(anchorIds).filter(x=>id(x)&&byId.has(x)))];
+  const callTypes=new Set(['tool_call','model_call','inference_call','inference_request']);
+  const invocationOnly=seeds.length===1&&callTypes.has(byId.get(seeds[0])?.type);
   const paths=new Map(seeds.map(x=>[x,[]])),queue=[...seeds];let traversed=0,walkLimited=false;
   for(let at=0;at<queue.length;at++){
     const current=queue[at],path=paths.get(current);
@@ -67,6 +69,7 @@ function buildIndex(graph,anchorIds=[]){
       if(++traversed>MAX_RECORDS){walkLimited=true;break}
       const next=e.source===current?e.target:e.source,node=byId.get(next);
       if(!node||paths.has(next)||node.type==='agent')continue;
+      if(invocationOnly&&callTypes.has(node.type))continue;
       // Never use shared model/tool/file/network resources to bridge siblings.
       // Calls can be found from a selected shared resource, but not crossed
       // through it while starting from a particular agent or invocation.
@@ -175,6 +178,28 @@ function draw(){
   body.replaceChildren();body.scrollTop=0;for(const row of rows.slice(page*PAGE,(page+1)*PAGE))body.append(rowCard(row));
   if(!rows.length)body.append(make('p','No matching recorded runtime path. This does not prove no runtime activity occurred. Show all runtime evidence to inspect unlinked records.'));
 }
+function invocationTarget(row){
+  if(document.getElementById('protective')?.hidden===false)return {state:'partial',id:null};
+  const key=id(row?.native_id),allowed=row?.kind==='tool'?new Set(['tool_call']):
+    row?.kind==='model'?new Set(['model_call','inference_call','inference_request']):new Set();
+  if(!key||!allowed.size)return {state:'unavailable',id:null};
+  const g=raw(),records=list(g.nodes);
+  if(g.live_payload_compact||records.length>MAX_RECORDS)return {state:'partial',id:null};
+  const matches=records.filter(n=>n?.id===key);
+  if(matches.length!==1||!allowed.has(matches[0]?.type)||viewOnly(matches[0])||inferred(matches[0]))
+    return {state:matches.length>1?'ambiguous':'unavailable',id:null};
+  if(list(g.edges).length>MAX_RECORDS)return {state:'partial',id:null};
+  const owners=new Set(),targets=new Set();
+  for(const e of list(g.edges)){
+    if(!e||viewOnly(e)||inferred(e))continue;
+    if(e.target===key&&['REQUESTED_TOOL_CALL','REQUESTS_TOOL_CALL','ISSUED_TOOL_CALL','REQUESTS_MODEL_CALL'].includes(e.relation))owners.add(e.source);
+    if(e.source===key&&['USES_TOOL','USED_MODEL'].includes(e.relation))targets.add(e.target);
+  }
+  if(owners.size>1||targets.size>1||(row.owner_id&&owners.size&&!owners.has(row.owner_id))||
+    (row.target_id&&targets.size&&!targets.has(row.target_id)))return {state:'conflicting_participants',id:null};
+  return {state:'exact_invocation',id:key};
+}
+function openInvocation(row){const resolved=invocationTarget(row);if(resolved.id)open([resolved.id]);return resolved}
 function open(ids=[]){checkScope();ensure();invoker=document.activeElement;anchors=typeof ids==='string'?[ids]:list(ids).filter(x=>id(x));pinned=buildIndex(raw(),anchors);page=0;search.value='';category.value='all';connection.value='all';notice.textContent='';dialog.showModal();draw()}
 function attachSelection(){
   const selected=document.querySelector('#nodes .node.selected'),details=document.getElementById('details');
@@ -201,7 +226,7 @@ const prior=window.__execweaveDashboard||{};
 function changed(){if(!checkScope())return;if(dialog?.open)notice.textContent='New graph evidence is available. The current runtime snapshot remains pinned until you refresh it.';schedule()}
 window.__execweaveDashboard={...prior,onPayload(...args){prior.onPayload?.(...args);changed()},onFinished(...args){prior.onFinished?.(...args);changed()}};
 window.addEventListener('pagehide',()=>{close();opened.clear()});
-window.__execweaveRuntimeEvidence={open,close,buildIndex};schedule();
+window.__execweaveRuntimeEvidence={open,close,buildIndex,invocationTarget,openInvocation};schedule();
 })();
 """.strip()
 

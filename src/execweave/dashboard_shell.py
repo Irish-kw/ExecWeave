@@ -7,6 +7,7 @@ from .viewer_flow_canvas import inject_flow_canvas
 from .viewer_workflow_mode import inject_workflow_mode
 from .viewer_content_health import inject_content_health
 from .viewer_structure_share import inject_structure_share
+from .viewer_run_guide import inject_run_guide
 from .viewer_semantic_projection import project_provider_neutral_viewer_graph
 
 
@@ -272,6 +273,7 @@ _base.DASHBOARD_HTML = inject_flow_canvas(
     )
 )
 _base.DASHBOARD_HTML = inject_structure_share(inject_content_health(inject_workflow_mode(_base.DASHBOARD_HTML)))
+_base.DASHBOARD_HTML = inject_run_guide(_base.DASHBOARD_HTML)
 DASHBOARD_HTML = _base.DASHBOARD_HTML
 render_static_dashboard_html = _base.render_static_dashboard_html
 
