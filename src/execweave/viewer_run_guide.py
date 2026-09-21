@@ -1,4 +1,4 @@
-"""Role-first entry points above the inspector, without filtering the graph."""
+"""Role-first discovery and selected-content priority without graph filtering."""
 
 from __future__ import annotations
 
@@ -43,6 +43,28 @@ for(const [tab,name] of [['agents','All roles'],['calls','Browse calls'],['messa
 let pinned=null,lastScope=scope(),lastKey='',pending=false;
 const refreshButton=button('Refresh role list',()=>{if(protectedView()){update();return}capture();draw()});actions.append(refreshButton);
 host.append(summary,search,status,rowsHost,actions);section.prepend(host);
+// Discovery comes first only when there is no selected evidence to read.
+// Move the existing guide, never close/recreate it: search, focus, buttons and
+// disclosure intent survive selection and live history refreshes.
+const evidence=document.getElementById('details'),empty=document.getElementById('details-empty');
+function placeGuide(){
+  const reading=!protectedView()&&evidence.childElementCount>0&&empty?.hidden!==false;
+  const assessment=document.getElementById('execweave-run-assessment');
+  if(reading){
+    if(evidence.nextSibling!==host)evidence.after(host);
+    if(assessment?.parentElement===section&&host.nextSibling!==assessment)host.after(assessment);
+  }else{
+    if(section.firstChild!==host)section.prepend(host);
+    if(assessment?.parentElement===section&&host.nextSibling!==assessment)host.after(assessment);
+  }
+  // The separate delivery summary is deliberately not moved. Export/sync
+  // failures stay ahead of the selected body while full assessment stays reachable.
+}
+new MutationObserver(placeGuide).observe(evidence,{childList:true});
+if(empty)new MutationObserver(placeGuide).observe(empty,{attributes:true,attributeFilter:['hidden']});
+const protection=document.getElementById('protective');
+if(protection)new MutationObserver(placeGuide).observe(protection,{attributes:true,attributeFilter:['hidden']});
+placeGuide();
 function capture(){pinned=roles(raw());lastKey=JSON.stringify(pinned);pending=false}
 function inspect(id){
   if(protectedView()){update();return}
