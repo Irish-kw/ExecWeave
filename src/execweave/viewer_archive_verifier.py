@@ -6,6 +6,7 @@ ARCHIVE_VERIFIER_JS = r"""
 'use strict';
 if(globalThis.__execweaveArchiveVerifier)return;
 const PRIMARY=['graph.json','conversations.json','viewer.html'];
+const LINEAGE='lineage.json',DERIVATIVE='execweave.redacted-archive.v1',LINEAGE_FORMAT='execweave.redacted-lineage.v1';
 const PATH=/^content\/sha256\/([0-9a-f]{64})\.(?:txt|json|bin)$/;
 const HASH=/^[0-9a-f]{64}$/;
 const DEFAULTS={fileBytes:64*1024*1024,totalBytes:256*1024*1024,manifestBytes:16*1024*1024,files:100000,references:100000,jsonTokens:2000000};
@@ -61,7 +62,7 @@ function filesFromSelection(selection){
     const parts=relative.split('/');roots.add(parts.shift());
     if(roots.size!==1||parts.some(p=>!p||p==='.'||p==='..'))fail('invalid_folder');
     const path=parts.join('/');
-    if(path!=='finalization.json'&&!PRIMARY.includes(path)&&!PATH.test(path))continue;
+    if(path!=='finalization.json'&&path!==LINEAGE&&!PRIMARY.includes(path)&&!PATH.test(path))continue;
     if(files.has(path))fail('duplicate_file',path);files.set(path,file);
   }
   return files;
@@ -76,7 +77,7 @@ async function verifyArchive(files,scope,{signal,onProgress,limits={}}={}){
   check(signal);let totalBytes=0,checkedFiles=0;
   async function read(path,expected,asJSON=false,limit=budget.fileBytes){
     check(signal);
-    if(path!=='finalization.json'&&!PRIMARY.includes(path)&&!PATH.test(path))fail('invalid_reference',path);
+    if(path!=='finalization.json'&&path!==LINEAGE&&!PRIMARY.includes(path)&&!PATH.test(path))fail('invalid_reference',path);
     const file=files.get(path);if(!file)fail('missing_file',path);
     if(!integer(file.size)||file.size>limit||totalBytes+file.size>budget.totalBytes)fail('verification_limit',path);
     if(expected&&!fingerprint(expected))fail('invalid_receipt',path);
@@ -137,9 +138,38 @@ async function verifyArchive(files,scope,{signal,onProgress,limits={}}={}){
     // Legacy references can omit size, but their hash must still be checked.
     await read(path,{sha256:ref.sha256,size_bytes:ref.size_bytes??file.size});
   }
+  let derivation=null;
+  if(report.derivation!==undefined){
+    const d=report.derivation;
+    if(!object(d)||Object.keys(d).sort().join(',')!=='format,lineage,policy_sha256,source_finalization_sha256'||
+      d.format!==DERIVATIVE||!fingerprint(d.lineage)||typeof d.policy_sha256!=='string'||!HASH.test(d.policy_sha256)||
+      typeof d.source_finalization_sha256!=='string'||!HASH.test(d.source_finalization_sha256))fail('invalid_lineage','finalization.json');
+    const lineage=await read(LINEAGE,d.lineage,true,budget.manifestBytes);
+    if(!object(lineage)||lineage.format!==LINEAGE_FORMAT||!object(lineage.policy)||lineage.policy.sha256!==d.policy_sha256||
+      !object(lineage.source)||!object(lineage.derived)||!Array.isArray(lineage.mappings)||!Array.isArray(lineage.limitations))fail('invalid_lineage',LINEAGE);
+    if(lineage.mappings.length>budget.references)fail('verification_limit',LINEAGE);
+    if(lineage.derived.session_id!==graph.session_id||!object(lineage.derived.artifacts))fail('invalid_lineage',LINEAGE);
+    for(const name of PRIMARY)if(JSON.stringify(lineage.derived.artifacts[name])!==JSON.stringify(report.artifacts[name]))fail('lineage_mismatch',name);
+    const marker=graph.redacted_derivative;
+    if(!object(marker)||marker.format!==DERIVATIVE||marker.policy_sha256!==d.policy_sha256||marker.lineage_file!==LINEAGE)fail('invalid_lineage','graph.json');
+    const mapped=new Set();
+    for(const row of lineage.mappings){
+      if(!object(row)||!object(row.source)||!object(row.derived)||!Array.isArray(row.actions)||typeof row.changed!=='boolean'||
+        typeof row.source.path!=='string'||typeof row.derived.path!=='string'||!fingerprint({sha256:row.source.sha256,size_bytes:row.source.size_bytes})||
+        !fingerprint({sha256:row.derived.sha256,size_bytes:row.derived.size_bytes}))fail('invalid_lineage',LINEAGE);
+      const dm=PATH.exec(row.derived.path),sm=PATH.exec(row.source.path);
+      if(!dm||dm[0]!==row.derived.path||dm[1]!==row.derived.sha256||!sm||sm[0]!==row.source.path||sm[1]!==row.source.sha256)fail('invalid_lineage',LINEAGE);
+      const current=refs.get(row.derived.path);
+      if(!current||current.sha256!==row.derived.sha256||(current.size_bytes!==undefined&&current.size_bytes!==row.derived.size_bytes))fail('lineage_mismatch',row.derived.path);
+      mapped.add(row.derived.path);
+    }
+    if(mapped.size!==refs.size||[...refs.keys()].some(path=>!mapped.has(path))||lineage.derived.content_file_count!==mapped.size)fail('lineage_mismatch',LINEAGE);
+    derivation={state:'verified_now',format:d.format,policy_sha256:d.policy_sha256,source_finalization_sha256:d.source_finalization_sha256,
+      mapping_count:lineage.mappings.length,source_state:'declared_not_rechecked'};
+  }
   check(signal);
   return {state:'verified_now',reference_count:referenceCount,verified_file_count:refs.size,
-    primary_file_count:3,checked_bytes:totalBytes,checked_at:new Date().toISOString(),
+    primary_file_count:3,checked_bytes:totalBytes,checked_at:new Date().toISOString(),derivation,
     recorded_state:['recording','exporting','complete','incomplete','failed'].includes(report.state)?report.state:'unknown',
     scope:'declared_graph_and_conversation_content',session_id:graph.session_id,source_path:graph.source_path||null};
 }

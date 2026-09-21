@@ -43,6 +43,8 @@ const ERRORS={
   duplicate_file:'The folder selection contains duplicate archive paths.',
   crypto_unavailable:'Native SHA-256 is unavailable in this browser context. Nothing is marked verified.',
   changed_during_read:'A selected file changed while being read.',
+  invalid_lineage:'The redacted derivative lineage manifest is malformed or inconsistent.',
+  lineage_mismatch:'The redacted derivative files do not match their lineage manifest.',
   cancelled:'Verification was cancelled. No complete verdict is issued.'
 };
 function redraw(){
@@ -70,6 +72,9 @@ function redraw(){
     archive=card('archive','Selected archive verification','verified_now','Selected archive files verified',
       `${offline.primary_file_count} primary files and ${offline.verified_file_count} unique content files (${offline.reference_count} references) verified using native SHA-256. `+
       `Recorded export state: ${offline.recorded_state}. Checked: ${offline.checked_at}.`);
+    if(offline.derivation?.state==='verified_now')archive.append(make('p',
+      `Redacted derivative lineage verified for ${offline.derivation.mapping_count} source→derived mapping(s). `+
+      `Policy SHA-256: ${offline.derivation.policy_sha256}. The source archive itself was declared by fingerprint and was not rechecked from this selected derivative folder.`));
   }else if(offline){
     archive=card('archive','Selected archive verification',offline.state,
       offline.state==='checking'?'Checking selected archive':'Archive not verified',
@@ -139,7 +144,7 @@ function mount(panel){
 }
 window.addEventListener('execweave:conversation-sync',()=>{queueMicrotask(redraw)});
 window.addEventListener('pagehide',()=>{generation++;controller?.abort();controller=null;receipt=null;offline=null;if(picker)picker.value=''});
-window.__execweaveDeliveryStatus={mount,accept};
+window.__execweaveDeliveryStatus={mount,accept,verifySelected};
 })();
 """.strip()
 
