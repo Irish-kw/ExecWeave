@@ -21,6 +21,7 @@ jobs:
           REPOSITORY: ${{ github.repository }}
           CURRENT_RUN_ID: ${{ github.run_id }}
           V070_PUBLISH_RUN_ID: "33179361863"
+          V0834_PUBLISH_RUN_ID: "35588969765"
         run: |
           python - <<'PY'
           import json
@@ -31,7 +32,10 @@ jobs:
           repo = os.environ["REPOSITORY"]
           token = os.environ["GH_TOKEN"]
           current_run_id = int(os.environ["CURRENT_RUN_ID"])
-          protected_publish_run_id = int(os.environ["V070_PUBLISH_RUN_ID"])
+          protected_publish_run_ids = {
+              int(os.environ["V070_PUBLISH_RUN_ID"]),
+              int(os.environ["V0834_PUBLISH_RUN_ID"]),
+          }
           api = f"https://api.github.com/repos/{repo}"
           headers = {
               "Accept": "application/vnd.github+json",
@@ -58,7 +62,7 @@ jobs:
           completed = [run for run in runs if run.get("status") == "completed"]
           completed.sort(key=lambda run: run.get("created_at", ""), reverse=True)
 
-          keep = {current_run_id, protected_publish_run_id}
+          keep = {current_run_id} | protected_publish_run_ids
           seen_success = set()
           seen_failure = set()
 
