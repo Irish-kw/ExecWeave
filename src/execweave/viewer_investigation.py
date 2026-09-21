@@ -115,7 +115,7 @@ function card(row,tab=activeTab){
   let summary;
   if(tab==='agents')summary=[row.name,row.role,row.provider].filter(Boolean).join(' · ');
   else if(tab==='artifacts')summary=[row.name,row.snapshot_count?'Snapshot reference recorded':'No file snapshot recorded'].join(' · ');
-  else if(tab==='messages')summary=[row.source_name+' → '+row.target_name,list(row.phases).includes('received')?'Receipt observed':'Receipt not observed',row.native_id||'Message ID unavailable'].join(' · ');
+  else if(tab==='messages')summary=[row.source_name+' → '+row.target_name,list(row.phases).includes('sent')?'Send observed':'Send not observed',list(row.phases).includes('received')?'Receipt observed':'Receipt not observed','Consumption not observed',row.native_id||'Message ID unavailable'].join(' · ');
   else summary=[row.source_name,row.kind,row.target_name,list(row.phases).join(' / '),row.native_id||'Call ID unavailable'].join(' · ');
   article.append(make('summary',summary));
   const readingKey=JSON.stringify([tab,row.key||row.id]);
@@ -126,11 +126,17 @@ function card(row,tab=activeTab){
     if(tab==='agents'){
       article.append(make('p','Exact source: '+row.id),button('Inspect agent',()=>inspectAgent(row)),
         button('Show agent handoffs',()=>{focusId=row.id;activeTab='messages';query.value='';kind.value='all';page=0;draw()}),
-        button('Show agent calls',()=>{focusId=row.id;activeTab='calls';query.value='';kind.value='all';page=0;draw()}));return;
+        button('Show agent calls',()=>{focusId=row.id;activeTab='calls';query.value='';kind.value='all';page=0;draw()}),
+        button('Show agent artifacts',()=>{focusId=row.id;activeTab='artifacts';query.value='';kind.value='all';page=0;draw()}));return;
     }
     if(tab==='artifacts'){
       article.append(make('p','File identity: '+row.id));
-      if(!row.snapshot_count)article.append(make('p','Only a file/path observation is available. The current workspace file is not read or presented as a historical snapshot.'));
+      if(!row.snapshot_count)article.append(make('p','Historical snapshot: not recorded. Only a file/path observation is available; the current workspace file is not read or presented as historical evidence.'));
+      else article.append(make('p','Historical snapshot reference(s) recorded at execution time. Current workspace bytes are not substituted.'));
+      for(const item of list(row.snapshots)){
+        const ref=item?.reference;
+        if(ref)article.append(make('p',`Historical snapshot SHA-256: ${ref.sha256} · ${ref.size_bytes} bytes${item.timestamp?' · observed '+item.timestamp:''}`));
+      }
       refs(article,row.snapshots,row.id);
       if(row.related_content_count){article.append(make('p','Associated content below has no recognized file-snapshot contract.'));refs(article,row.related_content,row.id)}
       for(const e of list(row.relations))article.append(make('p',[e.source,e.relation,e.target,e.edge_id,e.causal===true?'Recorded causal edge':'Relationship only; no producer/consumer inference'].join(' · ')));
@@ -138,7 +144,11 @@ function card(row,tab=activeTab){
       return;
     }
     article.append(make('p','Native occurrence: '+(row.native_id||'Unavailable')+' · '+(row.owner_id||'Unknown owner')+' → '+(row.target_id||'Unknown target')));
-    if(tab==='messages')article.append(make('p','Sent, addressed and received are separate observations. Receipt is not proof of consumption, comprehension or successful work. Consumption: not observed by this contract.'));
+    if(tab==='messages'){
+      const sent=list(row.phases).includes('sent'),received=list(row.phases).includes('received');
+      article.append(make('p',`Evidence states · addressed recipient: ${row.target_name||row.target_id||'unknown'} · send: ${sent?'observed':'not observed'} · receipt: ${received?'observed':'not observed'} · consumption evidence: not observed.`));
+      article.append(make('p','Sent, addressed and received are separate observations. Receipt is not proof of consumption, comprehension or successful work. Consumption: not observed by this contract.'));
+    }
     else{
       article.append(make('p','Request, response and failure are retained separately. A response does not imply task success. This view does not observe the internals of a remote tool.'));
       article.append(button('Runtime evidence for this invocation',()=>{
@@ -216,7 +226,14 @@ function openTab(tab){
   if(!dialog.open)open();else{pinned=current();page=0;draw()}
   return true;
 }
-window.__execweaveInvestigation={setIndex,open,openTab,close:clear,getIndex:()=>{checkScope();return current()},openRecord};
+function openForAgent(tab,id){
+  if(!['messages','calls','artifacts'].includes(tab)||typeof id!=='string'||!id)return false;
+  checkScope();const index=current();if(!compatible(index)||list(index.agents).filter(r=>r?.id===id).length!==1)return false;
+  ensure();activeTab=tab;recordKey='';focusId=id;query.value='';kind.value='all';
+  if(!dialog.open){open();focusId=id;activeTab=tab;page=0;draw()}else{pinned=current();page=0;draw()}
+  return true;
+}
+window.__execweaveInvestigation={setIndex,open,openTab,openForAgent,close:clear,getIndex:()=>{checkScope();return current()},openRecord};
 })();
 """.strip().replace("/*EXECWEAVE_MESSAGE_HANDOFFS*/", MESSAGE_HANDOFFS_JS, 1)
 

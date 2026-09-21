@@ -11,6 +11,15 @@ const list=x=>Array.isArray(x)?x:[],label=x=>typeof x==='string'?x.slice(0,256):
 const raw=()=>window.__execweaveCore?.getGraph?.()||window.__execweaveStaticGraph||{};
 const protectedView=()=>document.getElementById('protective')?.hidden===false;
 const scope=()=>JSON.stringify([raw().run_id??null,raw().session_id??null,raw().source_path??null]);
+let roleInventoryCurrent=Array.isArray(raw().nodes)&&raw().live_payload_compact!==true;
+const inventoryBlocked=()=>protectedView()&&!roleInventoryCurrent;
+function payloadGraph(args){const value=args?.[0];return value?.graph&&typeof value.graph==='object'?value.graph:value}
+function observePayload(args){const value=payloadGraph(args);if(value?.live_payload_compact===true)roleInventoryCurrent=false;else if(Array.isArray(value?.nodes))roleInventoryCurrent=true}
+function evidenceCounts(id,index){
+  if(index?.schema_version!=='0.1'||index?.scope!=='recorded_event_investigation')return null;
+  const related=row=>row?.owner_id===id||row?.target_id===id||list(row?.relations).some(e=>e?.source===id||e?.target===id);
+  return {handoffs:list(index.messages).filter(related).length,calls:list(index.calls).filter(related).length,artifacts:list(index.artifacts).filter(related).length};
+}
 function roles(graph){
   const nodes=list(graph.nodes),byId=new Map(),bad=new Set();let invalid=0;
   for(const n of nodes.slice(0,100000)){
@@ -40,15 +49,25 @@ const actions=make('div');actions.className='run-guide-actions';
 for(const [tab,name] of [['agents','All roles'],['calls','Browse calls'],['messages','Browse handoffs'],['artifacts','Browse artifacts']]){
   actions.append(button(name,()=>{if(!window.__execweaveInvestigation?.openTab?.(tab))status.textContent='The investigation reader is unavailable.'}));
 }
+const selected=make('div');selected.className='run-guide-selected';selected.hidden=true;
+const selectedLabel=make('p');selected.append(selectedLabel);
+let selectedRole=null;
+function openSelected(tab){
+  if(!selectedRole||!window.__execweaveInvestigation?.openForAgent?.(tab,selectedRole.id)){
+    status.textContent='No unique accepted evidence index is available for this selected role.';return;
+  }
+}
+for(const [tab,name] of [['messages','Handoffs for selected role'],['calls','Calls for selected role'],['artifacts','Artifacts for selected role']])selected.append(button(name,()=>openSelected(tab)));
+selected.append(button('Content health',()=>{if(!window.__execweaveContentHealth?.open)status.textContent='Content health is unavailable.';else window.__execweaveContentHealth.open()}));
 let pinned=null,lastScope=scope(),lastKey='',pending=false;
-const refreshButton=button('Refresh role list',()=>{if(protectedView()){update();return}capture();draw()});actions.append(refreshButton);
-host.append(summary,search,status,rowsHost,actions);section.prepend(host);
+const refreshButton=button('Refresh role list',()=>{if(inventoryBlocked()){update();return}capture();draw()});actions.append(refreshButton);
+host.append(summary,search,status,rowsHost,selected,actions);section.prepend(host);
 // Discovery comes first only when there is no selected evidence to read.
 // Move the existing guide, never close/recreate it: search, focus, buttons and
 // disclosure intent survive selection and live history refreshes.
 const evidence=document.getElementById('details'),empty=document.getElementById('details-empty');
 function placeGuide(){
-  const reading=!protectedView()&&evidence.childElementCount>0&&empty?.hidden!==false;
+  const reading=roleInventoryCurrent&&evidence.childElementCount>0&&empty?.hidden!==false;
   const assessment=document.getElementById('execweave-run-assessment');
   if(reading){
     if(evidence.nextSibling!==host)evidence.after(host);
@@ -65,16 +84,32 @@ if(empty)new MutationObserver(placeGuide).observe(empty,{attributes:true,attribu
 const protection=document.getElementById('protective');
 if(protection)new MutationObserver(placeGuide).observe(protection,{attributes:true,attributeFilter:['hidden']});
 placeGuide();
-function capture(){pinned=roles(raw());lastKey=JSON.stringify(pinned);pending=false}
+function capture(){
+  pinned=roles(raw());
+  const index=window.__execweaveInvestigation?.getIndex?.();
+  pinned.rows=pinned.rows.map(r=>({...r,evidence:evidenceCounts(r.id,index)}));
+  lastKey=JSON.stringify(roles(raw()));pending=false
+}
 function inspect(id){
-  if(protectedView()){update();return}
+  if(inventoryBlocked()){update();return}
   if(scope()!==lastScope){update();return}
   const current=roles(raw()).rows.filter(r=>r.id===id);
   if(current.length!==1){status.textContent='This exact role is no longer unique. Refresh the role list; no same-name replacement is used.';return}
-  const core=window.__execweaveCore,display=core?.getDisplayGraph?.()||raw();
-  const matches=list(display.nodes).filter(n=>n?.type==='agent'&&(n.id===id||list(n.attributes?.viewer_agent_member_ids).includes(id)));
-  if(matches.length!==1){status.textContent='This role is not uniquely represented in the current canvas. All roles retains its indexed evidence.';return}
-  core?.selectNode?.(matches[0].id);window.__execweaveDashboard?.agentPanel?.render?.(matches[0]);
+  const core=window.__execweaveCore;
+  if(protectedView()){
+    const matches=list(raw().nodes).filter(n=>n?.type==='agent'&&n.id===id);
+    if(matches.length!==1){status.textContent='This exact role is not uniquely available in the current full snapshot.';return}
+    window.__execweaveDashboard?.agentPanel?.render?.(matches[0]);
+    status.textContent='Canvas rendering is paused for safety; showing this exact role from the current full snapshot.';
+  }else{
+    const display=core?.getDisplayGraph?.()||raw();
+    const matches=list(display.nodes).filter(n=>n?.type==='agent'&&(n.id===id||list(n.attributes?.viewer_agent_member_ids).includes(id)));
+    if(matches.length!==1){status.textContent='This role is not uniquely represented in the current canvas. All roles retains its indexed evidence.';return}
+    core?.selectNode?.(matches[0].id);window.__execweaveDashboard?.agentPanel?.render?.(matches[0]);
+  }
+  selectedRole=(pinned?.rows||[]).find(r=>r.id===id)||current[0];selected.hidden=false;
+  const c=selectedRole.evidence;
+  selectedLabel.textContent='Selected exact role: '+selectedRole.name+(c?` · ${c.handoffs} handoff(s) · ${c.calls} call(s) · ${c.artifacts} artifact(s)`: ' · accepted detailed inventory unavailable');
   // A role selection is an explicit action; bring its body into view without
   // fitting the graph or changing the camera mode.
   document.getElementById('details')?.scrollIntoView({block:'nearest'});
@@ -84,7 +119,9 @@ function draw(){
   const q=search.value.toLocaleLowerCase(),matches=pinned.rows.filter(r=>!q||[r.id,r.name,r.role,r.provider].some(v=>v.toLocaleLowerCase().includes(q)));
   const shown=matches.slice(0,q?25:6);rowsHost.replaceChildren();
   for(const r of shown){
-    const b=button([r.name,r.role,r.provider].filter(Boolean).join(' · '),()=>inspect(r.id));
+    const counts=r.evidence,total=counts?counts.handoffs+counts.calls+counts.artifacts:0;
+    const suffix=counts&&total?` · ${counts.handoffs} handoff · ${counts.calls} call · ${counts.artifacts} artifact`:'';
+    const b=button([r.name,r.role,r.provider].filter(Boolean).join(' · ')+suffix,()=>inspect(r.id));
     b.dataset.agentId=r.id;b.title=r.id;rowsHost.append(b);
   }
   status.textContent=`${matches.length} recorded role(s); showing ${shown.length}. `+
@@ -94,19 +131,20 @@ function draw(){
     'The complete graph and runtime evidence are unchanged.';
 }
 function update(){
-  const blocked=protectedView();search.disabled=blocked;
+  const blocked=inventoryBlocked();search.disabled=blocked;
   for(const b of actions.querySelectorAll('button'))b.disabled=blocked;
-  if(blocked){pinned=null;rowsHost.replaceChildren();status.textContent='Large-graph protection is active. A retained graph is not the current role inventory.';return}
+  if(blocked){pinned=null;selectedRole=null;selected.hidden=true;rowsHost.replaceChildren();status.textContent='Large-graph protection received a compact/stale payload. The retained graph is not used as the current role inventory.';return}
   const now=scope();
-  if(now!==lastScope){lastScope=now;search.value='';capture();draw();return}
+  if(now!==lastScope){lastScope=now;search.value='';selectedRole=null;selected.hidden=true;capture();draw();return}
   if(!pinned){capture();draw();return}
-  if(JSON.stringify(roles(raw()))!==lastKey){pending=true;status.textContent='Updated roles are available. Refresh the role list; current search and buttons are retained.'}
+  if(JSON.stringify(roles(raw()))!==lastKey){pending=true;status.textContent='Updated roles are available. Refresh the role list; current search and buttons are retained.';return}
+  if(protectedView())status.textContent='Large-graph canvas rendering is paused. Role discovery remains available from the current full snapshot; raw evidence is unchanged.';
 }
 search.addEventListener('input',draw);
 const previous=window.__execweaveDashboard||{};
-window.__execweaveDashboard={...previous,onPayload(...args){previous.onPayload?.(...args);update()},onFinished(...args){previous.onFinished?.(...args);update()}};
-window.addEventListener('pagehide',()=>{pinned=null;rowsHost.replaceChildren();search.value=''});
-window.__execweaveRunGuide={roles,refresh:()=>{if(protectedView()){update();return}capture();draw()}};update();
+window.__execweaveDashboard={...previous,onPayload(...args){previous.onPayload?.(...args);observePayload(args);update()},onFinished(...args){previous.onFinished?.(...args);update()}};
+window.addEventListener('pagehide',()=>{pinned=null;selectedRole=null;selected.hidden=true;rowsHost.replaceChildren();search.value=''});
+window.__execweaveRunGuide={roles,refresh:()=>{if(inventoryBlocked()){update();return}capture();draw()}};update();
 })();
 """.strip()
 
