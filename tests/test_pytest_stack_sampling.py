@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import json
 import subprocess
 import sys
@@ -15,6 +16,17 @@ def load_runner():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def wait_for_sample(sampler, timeout=2):
+    """Wait for an observed sample, never assume a fixed scheduling delay."""
+    deadline = time.monotonic() + timeout
+    while not sampler.samples and sampler.error is None:
+        if time.monotonic() >= deadline:
+            raise AssertionError("sampler did not produce a sample")
+        time.sleep(.005)
+    if not sampler.samples:
+        raise AssertionError("sampler failed before its first sample")
 
 
 def test_scheduled_sampling_covers_tests_without_serializing_locals(tmp_path):
@@ -57,10 +69,13 @@ def test_sampler_does_not_replace_or_cancel_an_existing_native_timer(tmp_path):
         "import faulthandler, importlib.util, pathlib, time\n"
         f"spec = importlib.util.spec_from_file_location('runner', {str(RUNNER)!r})\n"
         "module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)\n"
-        f"with open({str(native)!r}, 'w') as original, open({str(sampled)!r}, 'w') as output:\n"
+        + inspect.getsource(wait_for_sample) + "\n"
+        + f"with open({str(native)!r}, 'w') as original, open({str(sampled)!r}, 'w') as output:\n"
         "    faulthandler.dump_traceback_later(.5, file=original)\n"
         f"    sampler = module.StackSampler(pathlib.Path({str(tmp_path)!r}), output, .02)\n"
-        "    sampler.start(); time.sleep(.1); sampler.close()\n"
+        "    sampler.start()\n"
+        "    try: wait_for_sample(sampler)\n"
+        "    finally: sampler.close()\n"
         "    time.sleep(.65)\n"
         "    faulthandler.cancel_dump_traceback_later()\n",
         encoding='utf-8',
@@ -123,3 +138,41 @@ def test_sampling_failure_cannot_be_reported_as_a_successful_diagnostic(tmp_path
     assert json.loads((out / 'worker-result.json').read_text()) == {
         'exit_code': 2, 'pytest_exit_code': 0,
     }
+
+
+def test_sample_wait_accepts_delayed_real_sampling(tmp_path):
+    import threading
+
+    module = load_runner()
+    gate = threading.Event()
+    with (tmp_path / "delayed.txt").open("w") as output:
+        sampler = module.StackSampler(tmp_path, output, .01)
+        original = sampler.thread._target
+
+        def delayed():
+            gate.wait()
+            original()
+
+        sampler.thread = threading.Thread(target=delayed, daemon=True)
+        sampler.start()
+        timer = threading.Timer(.2, gate.set)
+        timer.start()
+        try:
+            wait_for_sample(sampler)
+            assert sampler.samples > 0
+        finally:
+            gate.set()
+            timer.cancel()
+            timer.join()
+            sampler.close()
+    assert "test_pytest_stack_sampling.py" in (tmp_path / "delayed.txt").read_text()
+
+
+def test_sample_wait_refuses_absent_or_failed_observer():
+    from types import SimpleNamespace
+    import pytest
+
+    with pytest.raises(AssertionError, match="did not produce"):
+        wait_for_sample(SimpleNamespace(samples=0, error=None), timeout=.02)
+    with pytest.raises(AssertionError, match="failed before"):
+        wait_for_sample(SimpleNamespace(samples=0, error="ValueError"), timeout=.02)

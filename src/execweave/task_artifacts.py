@@ -15,9 +15,8 @@ import re
 import stat
 import unicodedata
 from pathlib import Path
-from typing import Any
-
-from .content_integrity import ArchiveReadError, _path_descriptor_stat
+from contextlib import contextmanager
+from typing import Any, Iterator, BinaryIO
 
 FORMAT = "execweave.selected-artifact-versions.v1"
 RECEIPT_FORMAT = "execweave.external-task-report.v2"
@@ -91,42 +90,61 @@ def _signature(s: os.stat_result) -> tuple[int, ...]:
     return (s.st_dev, s.st_ino, s.st_size, s.st_mtime_ns, s.st_ctime_ns)
 
 
-def _selected_snapshot(path: str) -> os.stat_result:
-    """Use the archive reader's metadata-only handle and link checks."""
+@contextmanager
+def _selected_handle(path: str) -> Iterator[BinaryIO]:
+    """Open only an explicitly selected regular, non-reparse leaf."""
     info = os.lstat(path)
     if not stat.S_ISREG(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
         raise ValueError("selected artifact must be a regular file without links")
-    try:
-        value = _path_descriptor_stat(Path(path))
-    except ArchiveReadError as exc:
-        raise ValueError("selected artifact must be a regular file without links") from exc
-    if value.st_size > MAX_FILE_BYTES:
-        raise ValueError("selected artifact must be at most 8 MiB")
-    return value
-
-
-def _read_selected(path: str) -> bytes:
-    # Explicit CLI selections authorize reads, never paths inside a report.
-    # Compare open-handle metadata on every boundary. Windows path-stat and
-    # descriptor-stat timestamps need not agree even when the bytes are stable.
-    before = _selected_snapshot(path)
     flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
     flags |= getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
     fd = os.open(path, flags)
-    with os.fdopen(fd, "rb") as handle:
-        opened = os.fstat(handle.fileno())
-        if not stat.S_ISREG(opened.st_mode) or _signature(opened) != _signature(before):
+    try:
+        handle = os.fdopen(fd, "rb")
+    except BaseException:
+        os.close(fd)
+        raise
+    with handle:
+        yield handle
+
+
+def _capture_selected(handle: BinaryIO) -> tuple[os.stat_result, bytes]:
+    """Bound one read and check exact descriptor metadata on both sides."""
+    before = os.fstat(handle.fileno())
+    if not stat.S_ISREG(before.st_mode) or getattr(before, "st_file_attributes", 0) & 0x400:
+        raise ValueError("selected artifact must be a regular file without links")
+    if before.st_size < 0 or before.st_size > MAX_FILE_BYTES:
+        raise ValueError("selected artifact must be at most 8 MiB")
+    payload = handle.read(MAX_FILE_BYTES + 1)
+    after = os.fstat(handle.fileno())
+    if len(payload) != before.st_size or _signature(before) != _signature(after):
+        raise ValueError("selected artifact changed while reading")
+    return before, payload
+
+
+def _read_selected(path: str) -> bytes:
+    # Metadata alone cannot reveal every same-size rewrite on coarse/overlay
+    # filesystems. Compare actual bounded observations as well, never silently
+    # retry a changed file and certify its latest contents instead.
+    with _selected_handle(path) as initial:
+        before, payload = _capture_selected(initial)
+    with _selected_handle(path) as handle:
+        opened, observed = _capture_selected(handle)
+        if _signature(before) != _signature(opened) or payload != observed:
             raise ValueError("selected artifact changed before reading")
-        payload = handle.read(MAX_FILE_BYTES + 1)
-        after = os.fstat(handle.fileno())
-        # Keep the data handle open while reopening the selected path. Identity,
-        # size and both timestamps remain exact; no rounding or ignored fields.
+        del observed
+        # Reopen the name while the data handle stays alive. The archive helper
+        # remains unchanged; this extra read is only for explicitly selected files.
+        with _selected_handle(path) as final:
+            reopened, observed = _capture_selected(final)
         if (
-            len(payload) != before.st_size
-            or _signature(before) != _signature(after)
-            or _signature(after) != _signature(_selected_snapshot(path))
+            _signature(before) != _signature(reopened)
+            or _signature(opened) != _signature(os.fstat(handle.fileno()))
+            or payload != observed
         ):
             raise ValueError("selected artifact changed while reading")
+    # Equal observations are not an atomic snapshot or proof of no transient
+    # changes between reads. The caller hashes/evaluates this exact byte buffer.
     return payload
 
 
