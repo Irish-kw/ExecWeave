@@ -322,3 +322,54 @@ def test_cli_create_and_verify_are_explicit(tmp_path):
         env=env,
     )
     assert checked.returncode == 0 and json.loads(checked.stdout)["state"] == "complete"
+
+
+def test_metadata_reader_compares_reopened_descriptor_not_path_ctime(tmp_path, monkeypatch):
+    """Windows path stat/fstat ctime semantics must not create a false change."""
+    from execweave import redacted_archive as module
+
+    target = tmp_path / "finalization.json"
+    raw = b'{"state":"complete"}\n'
+    target.write_bytes(raw)
+    original_lstat = Path.lstat
+
+    class PathStatProxy:
+        def __init__(self, value):
+            self._value = value
+
+        def __getattr__(self, name):
+            if name == "st_ctime_ns":
+                return self._value.st_ctime_ns + 1
+            return getattr(self._value, name)
+
+    def differing_path_stat(self):
+        value = original_lstat(self)
+        return PathStatProxy(value) if self == target else value
+
+    monkeypatch.setattr(Path, "lstat", differing_path_stat)
+    assert module._read_named_regular(tmp_path, "finalization.json", 1024) == raw
+
+
+def test_metadata_reader_reopened_descriptor_difference_still_rejects(tmp_path, monkeypatch):
+    """Portability must not weaken exact descriptor identity/time checks."""
+    from execweave import redacted_archive as module
+
+    target = tmp_path / "finalization.json"
+    target.write_bytes(b'{"state":"complete"}\n')
+    original = module._path_descriptor_stat
+
+    class DescriptorStatProxy:
+        def __init__(self, value):
+            self._value = value
+
+        def __getattr__(self, name):
+            if name == "st_mtime_ns":
+                return self._value.st_mtime_ns + 1
+            return getattr(self._value, name)
+
+    def changed(path):
+        return DescriptorStatProxy(original(path))
+
+    monkeypatch.setattr(module, "_path_descriptor_stat", changed)
+    with pytest.raises(RedactedArchiveError, match="metadata_changed_during_read"):
+        module._read_named_regular(tmp_path, "finalization.json", 1024)

@@ -23,6 +23,7 @@ from typing import Any
 from .content_integrity import (
     ArchiveReadError,
     CONTENT_PATH,
+    _path_descriptor_stat,
     _read as _integrity_read,
     audit_content_references,
     hash_export,
@@ -163,9 +164,10 @@ def _read_named_regular(root: Path, name: str, limit: int) -> bytes:
             after = os.fstat(fd)
         finally:
             os.close(fd)
-        final = path.lstat()
-        if stat.S_ISLNK(final.st_mode) or getattr(final, "st_file_attributes", 0) & 0x400:
-            raise RedactedArchiveError("unsafe_metadata_file")
+        try:
+            final = _path_descriptor_stat(path)
+        except ArchiveReadError as exc:
+            raise RedactedArchiveError("unsafe_metadata_file") from exc
 
         def signature(value):
             return (value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns, value.st_ctime_ns)
