@@ -121,8 +121,11 @@ def test_export_manifest_never_calls_missing_viewer_complete(tmp_path):
     payload = json.loads((tmp_path / "finalization.json").read_text())
     assert payload["state"] == "incomplete"
     assert set(payload["missing"]) == set(REQUIRED_EXPORTS)
+    # A nonempty placeholder is not a valid graph/conversation index.
+    fixtures = {"graph.json": '{"nodes":[],"edges":[]}',
+                "conversations.json": '{"entries":[]}', "viewer.html": "<html></html>"}
     for name in REQUIRED_EXPORTS:
-        (tmp_path / name).write_text("artifact", encoding="utf-8")
+        (tmp_path / name).write_text(fixtures[name], encoding="utf-8")
     result = record_finalization(tmp_path, state="complete")
     assert result["state"] == "complete" and result["missing"] == []
     assert all(len(value["sha256"]) == 64 for value in result["artifacts"].values())

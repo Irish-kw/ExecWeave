@@ -10,6 +10,7 @@ from .conversation_records import conversation_index_payload
 from .dashboard_shell import DASHBOARD_HTML
 from .content_store import _filesystem_path
 from .graph import logical_event_key
+from .investigation_index import InvestigationCache
 from .viewer_limits import resolve_viewer_limits
 from .viewer_flow_layout import layers_of
 from .viewer_projection import (
@@ -88,12 +89,12 @@ def _handler_factory(state, token: str):
     run_root_fs = _filesystem_path(run_root)
 
     class Handler(base_handler):
-        def _live_conversation_index(self) -> dict[str, object] | None:
+        def _live_conversation_index(self, *, include_investigation: bool = False) -> dict[str, object] | None:
             project = getattr(state, "conversation_index", None)
             if project is None:
                 return None
             try:
-                return project(run_root)
+                return project(run_root, include_investigation=True) if include_investigation else project(run_root)
             except (OSError, RuntimeError, ValueError):
                 return None
 
@@ -144,7 +145,7 @@ def _handler_factory(state, token: str):
                 return
             if not target.is_file():
                 payload = (
-                    self._live_conversation_index()
+                    self._live_conversation_index(include_investigation=_core.parse_qs(parsed.query).get("investigation") == ["1"])
                     if request_path == "/conversations.json"
                     else None
                 )
@@ -188,6 +189,7 @@ class _LiveState(_BaseLiveState):
         self._raw_semantic_entry_keys: dict[int, str] = {}
         self._internal_hook_process_ids: set[str] = set()
         self._viewer_projection_ever_active = False
+        self._investigation_cache = InvestigationCache()
 
     def _reset_incremental_state_locked(self) -> None:
         super()._reset_incremental_state_locked()
@@ -197,6 +199,7 @@ class _LiveState(_BaseLiveState):
         self._raw_semantic_entries.clear()
         self._raw_semantic_entry_keys.clear()
         self._internal_hook_process_ids.clear()
+        self._investigation_cache = InvestigationCache()
 
     def _append_raw_entry_locked(
         self,
@@ -364,11 +367,12 @@ class _LiveState(_BaseLiveState):
     def _snapshot_from_accumulator_locked(self) -> dict[str, object]:
         return self._projected_snapshot_locked()
 
-    def conversation_index(self, run_root: Path) -> dict[str, object]:
+    def conversation_index(self, run_root: Path, *, include_investigation: bool = False) -> dict[str, object]:
         """Build conversation ownership from observed evidence, never viewer-only collapse."""
         with self._lock:
             graph = self._raw_graph_locked()
-        return conversation_index_payload(graph, run_root)
+        return conversation_index_payload(graph, run_root, investigation_cache=self._investigation_cache,
+                                          include_investigation=include_investigation)
 
     def _refresh_incremental_locked(self) -> None:
         before_sequence = self._update_sequence

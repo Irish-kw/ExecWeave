@@ -1,0 +1,79 @@
+name: Windows Suite Diagnosis
+
+# The fixed historical candidate now has a complete diagnostic artifact.
+# Keep explicit replay available without rerunning that known failure on every
+# synchronize event in the implementation PR. Ordinary CI still tests each head.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-diagnosis-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    # One bounded investigation of the existing candidate, not another matrix.
+    if: github.event_name == 'workflow_dispatch' || (github.event.pull_request.number == 110 && github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: windows-latest
+    timeout-minutes: 40
+    env:
+      EXECWEAVE_E2E_REQUIRED: '1'
+    steps:
+      - name: Check out diagnostic tooling
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          path: diagnostic-tools
+          persist-credentials: false
+      - name: Check out unchanged product candidate
+        uses: actions/checkout@v4
+        with:
+          ref: fc3184e884a39ecd761c719c86672dfc1f957f8a
+          path: candidate
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install candidate using the normal project requirements
+        working-directory: candidate
+        run: |
+          python -m pip install -e ".[dev,e2e]"
+          python -m playwright install --with-deps chromium
+      - name: Capture unchanged candidate source
+        working-directory: candidate
+        shell: pwsh
+        run: |
+          python scripts/acceptance_source_provenance.py --output "$env:GITHUB_WORKSPACE/windows-source-before.json"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $tree = git rev-parse 'HEAD^{tree}'
+          if ($tree -ne 'c599c821341e583f7dc36280dc3086ff888d32da') { throw 'Candidate tree mismatch' }
+      - name: Diagnose the full test collection in one pytest process
+        working-directory: candidate
+        shell: pwsh
+        run: |
+          python ../diagnostic-tools/scripts/diagnose_pytest.py --output "$env:GITHUB_WORKSPACE/windows-suite-evidence" --budget 1500 --stack-interval 120
+          exit $LASTEXITCODE
+      - name: Confirm candidate source stayed unchanged
+        if: always()
+        working-directory: candidate
+        shell: pwsh
+        run: |
+          if (Test-Path "$env:GITHUB_WORKSPACE/windows-source-before.json") {
+            python scripts/acceptance_source_provenance.py --output "$env:GITHUB_WORKSPACE/windows-source-after.json" --compare "$env:GITHUB_WORKSPACE/windows-source-before.json"
+            exit $LASTEXITCODE
+          }
+          throw 'No pre-run source fingerprint; source invariance is unverified'
+      - name: Upload partial diagnostic evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-suite-diagnostic-py312
+          path: |
+            windows-suite-evidence/
+            windows-source-before.json
+            windows-source-after.json
+          if-no-files-found: error
+          retention-days: 7

@@ -4,7 +4,13 @@ import json
 from typing import Any
 
 from .live_view import LIVE_HTML as _BASE_LIVE_HTML
+from .run_assessment import build_run_assessment
+from .viewer_run_assessment import inject_run_assessment
+from .viewer_investigation import inject_investigation
+from .viewer_runtime_evidence import inject_runtime_evidence
 from .viewer_agent_panel import inject_agent_panel
+from .viewer_framework_model_output import inject_framework_model_output
+from .viewer_content_browser import inject_content_browser
 from .viewer_dashboard_clean import fold_budget_bootstrap, inject_live_dashboard_clean
 from .viewer_dashboard_focus import inject_live_dashboard_focus
 from .viewer_dashboard_pr70 import inject_pr70_dashboard_repairs
@@ -84,7 +90,9 @@ def _build_dashboard_html() -> str:
     html = normalize_provider_execution_flow(
         harden_execution_flow_projection(inject_execution_flow(html))
     )
-    return _align_agent_panel_topology(inject_agent_panel(_guard_compact_live_snapshot(html)))
+    html = _align_agent_panel_topology(inject_agent_panel(_guard_compact_live_snapshot(html)))
+    html = inject_framework_model_output(html)
+    return inject_runtime_evidence(inject_investigation(inject_run_assessment(inject_content_browser(html))))
 
 
 DASHBOARD_HTML = _build_dashboard_html()
@@ -103,14 +111,21 @@ def render_static_dashboard_html(
     graph: dict[str, Any],
     *,
     conversation_entries: list[dict[str, Any]] | None = None,
+    investigation_index: dict[str, Any] | None = None,
 ) -> str:
     """Render the exact dashboard shell used by live, backed by embedded snapshots."""
+    # Derived presentation metadata belongs beside the raw graph, not in it.
+    assessment = graph.get("run_assessment")
+    if not isinstance(assessment, dict):
+        assessment = build_run_assessment(graph)
     bootstrap = (
         "<script>window.__execweaveStaticMode=true;"
         f"{fold_budget_bootstrap()}"
         f"{viewer_limits_bootstrap(resolve_viewer_limits())}"
+        f"window.__execweaveStaticRunAssessment={_safe_json(assessment)};"
         f"window.__execweaveStaticGraph={_safe_json(graph)};"
         f"window.__execweaveStaticConversations={_safe_json(conversation_entries or [])};"
+        f"window.__execweaveStaticInvestigation={_safe_json(investigation_index)};"
         "</script>\n"
     )
     html = DASHBOARD_HTML.replace("<script>", bootstrap + "<script>", 1)

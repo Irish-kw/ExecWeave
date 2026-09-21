@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections import Counter
 from pathlib import Path
 from typing import Any
 from .content_store import _filesystem_path
@@ -491,6 +492,7 @@ def conversation_record_entries(
         for node in nodes
         if isinstance(node.get("id"), str) and node.get("id")
     }
+    source_counts = Counter(node.get("id") for node in nodes if isinstance(node.get("id"), str))
     entries: list[dict[str, Any]] = []
     for edge in edges:
         target_id = edge.get("target")
@@ -542,6 +544,36 @@ def conversation_record_entries(
         derived = preview.pop("derived_agent_previews", None) if isinstance(preview, dict) else None
         if preview is not None:
             entry["conversation_preview"] = preview
+        # Keep each framework model response attached to its own content reference.
+        # Conversation merging publishes only one aggregate preview and can otherwise
+        # leave the actual model bodies behind a later control/status message.
+        source_attrs = source.get("attributes") if isinstance(source, dict) else None
+        if (
+            isinstance(source_attrs, dict)
+            and source.get("type") == "agent"
+            and source_counts[source_id] == 1
+            and source_attrs.get("conversation_scope") == "framework_agent"
+            and reference["content_kind"] in {
+                "metagpt.model_response", "autogen.model_response", "camel.model_response"
+            }
+            and edge.get("relation") == "HAS_MODEL_CONTENT"
+            and all(
+                record.get(flag) is None or record.get(flag) is False
+                for record in (edge, edge.get("attributes") if isinstance(edge.get("attributes"), dict) else {})
+                for flag in ("inferred", "viewer_only")
+            )
+            and isinstance(preview, dict)
+        ):
+            agent_path = preview.get("agent_path")
+            entry["model_response_preview"] = {
+                "schema_version": "1",
+                "source_id": source_id,
+                "agent_path": agent_path,
+                "messages": [dict(message) for message in preview.get("messages", [])
+                             if isinstance(message, dict) and agent_path
+                             and message.get("sender") == agent_path],
+                "messages_truncated": bool(preview.get("messages_truncated")),
+            }
         entries.append(entry)
         if isinstance(derived, list):
             entries.extend(_derived_agent_entries(entry, derived))
@@ -810,14 +842,19 @@ def _mark_shared_evidence(entries: list[dict[str, Any]]) -> None:
 def conversation_index_payload(
     graph: dict[str, Any],
     run_root: str | Path,
+    *,
+    investigation_cache=None,
+    include_investigation: bool = False,
 ) -> dict[str, Any]:
-    """Build the conversation index exactly as ``conversations.json`` carries it.
+    """Build the shared conversation projection, with opt-in investigation.
 
-    The live dashboard and the finalized viewer both read this. Keeping one
-    builder is the point: a live run that computed its own projection would be
-    free to disagree with the file written at finalization, and the disagreement
-    would show up as an agent seeing conversations that are not its own.
+    The default is the historical, lightweight conversation contract used by
+    ordinary Live polling. Event-stream inspection is requested explicitly by
+    the investigation reader and offline exporters. Both modes publish exactly
+    the same conversation entries; the extended mode only adds an index.
     """
+    from .investigation_index import build_investigation_index
+
     root = Path(run_root).expanduser().resolve()
     entries = conversation_record_entries(graph, root)
     _mark_shared_injected_context(entries)
@@ -830,6 +867,10 @@ def conversation_index_payload(
     return {
         "schema_version": "0.3",
         "scope": "run_local_provider_neutral_conversation_projection",
+        "session_id": graph.get("session_id") if isinstance(graph.get("session_id"), str) else None,
+        "source_path": graph.get("source_path") if isinstance(graph.get("source_path"), str) else None,
+        **({"investigation": build_investigation_index(graph, root, cache=investigation_cache)}
+           if include_investigation else {}),
         "entry_count": len(entries),
         "visible_message_count": visible_message_count,
         "external_provider_folder_lookup_required": False,
@@ -852,7 +893,7 @@ def write_conversation_records(
     root = Path(run_root).expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True)
     if payload is None:
-        payload = conversation_index_payload(graph, root)
+        payload = conversation_index_payload(graph, root, include_investigation=True)
     entries = payload["entries"]
     json_path = root / "conversations.json"
     markdown_path = root / "conversations.md"

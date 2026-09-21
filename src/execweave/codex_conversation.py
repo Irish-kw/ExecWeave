@@ -354,7 +354,7 @@ class _DerivedThreads:
             return
         self._messages.setdefault(str(agent_path), []).append(message)
 
-    def previews(self) -> list[dict[str, Any]]:
+    def previews(self, *, preserve_history: bool = False) -> list[dict[str, Any]]:
         results: list[dict[str, Any]] = []
         for agent_path in sorted(self._messages):
             messages = sorted(
@@ -364,7 +364,7 @@ class _DerivedThreads:
                     str(message.get("timestamp") or ""),
                 ),
             )
-            truncated = len(messages) > _MAX_PREVIEW_MESSAGES
+            truncated = not preserve_history and len(messages) > _MAX_PREVIEW_MESSAGES
             if truncated:
                 messages = messages[:10] + messages[-(_MAX_PREVIEW_MESSAGES - 10) :]
             thread_id = self._thread_ids.get(agent_path)
@@ -393,8 +393,14 @@ def codex_rollout_preview(path: str | Path) -> dict[str, Any] | None:
     return previews[0] if previews else None
 
 
-def codex_rollout_previews(path: str | Path) -> list[dict[str, Any]]:
+def codex_rollout_previews(
+    path: str | Path, *, preserve_history: bool = False,
+) -> list[dict[str, Any]]:
     """Extract agent-local conversations a single Codex rollout provides evidence for.
+
+    ``preserve_history`` retains all normalized message records for the Dashboard;
+    the default remains the bounded preview used by existing callers. This does
+    not change per-message text limits or the provider visibility boundary.
 
     The first result is the rollout's own thread. Codex subagent rollouts can
     physically contain inherited parent history: newer paginated rollouts persist
@@ -597,7 +603,7 @@ def codex_rollout_previews(path: str | Path) -> list[dict[str, Any]]:
                         )
     except (OSError, RuntimeError, UnicodeError):
         return []
-    truncated = len(messages) > _MAX_PREVIEW_MESSAGES
+    truncated = not preserve_history and len(messages) > _MAX_PREVIEW_MESSAGES
     if truncated:
         messages = messages[:10] + messages[-(_MAX_PREVIEW_MESSAGES - 10) :]
     owner = {
@@ -612,4 +618,4 @@ def codex_rollout_previews(path: str | Path) -> list[dict[str, Any]]:
         "messages_truncated": truncated,
         "messages": messages,
     }
-    return [owner, *derived.previews()]
+    return [owner, *derived.previews(preserve_history=preserve_history)]
