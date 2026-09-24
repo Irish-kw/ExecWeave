@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/shot5_brand.jpg" alt="ExecWeave" width="100%">
+</p>
+
 # ExecWeave
 
 <!-- i18n-nav:start -->
