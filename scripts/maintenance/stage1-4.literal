@@ -1,0 +1,143 @@
+[{'path': 'src/execweave/live_core.py',
+  'before_sha256': 'b545a9d1ddf81ece62da840d3a164ce835c2839247fb3e51e4e06c23baa2f0f8',
+  'after_sha256': '76a039bf2329a7ad074f4e9019ff1f8a4b2cd23fba6ce8745b72e9378cb350ef',
+  'edits': [[5180, 5180,
+             'artifacts = {}\n'
+             '        for key in ("event_stream", "semantic_sidecar", "materialized_event_stream", "graph", "viewer"):\n'
+             '            path = getattr(self, key)\n'
+             '            try:\n'
+             '                info = path.stat()\n'
+             '                status = "produced" if path.is_file() and info.st_size else "empty_or_not_regular"\n'
+             '            except FileNotFoundError:\n'
+             '                status = "not_produced"\n'
+             '            except OSError:\n'
+             '                status = "unreadable"\n'
+             '            artifacts[key] = {"status": status, "path": str(path) if status == "produced" else None}\n'
+             '        '],
+            [5376, 5428,
+             '**{key: value["path"] for key, value in artifacts.items()},\n'
+             '            "semantic_sidecar_status": artifacts['],
+            [5446, 5630, ']["status"],\n            "artifacts": artifacts'],
+            [6757, 6757, '"),\n        "observation_assessment": graph.get("observation_assessment']]},
+ {'path': 'src/execweave/live_view_script_a.py',
+  'before_sha256': '043d645347cf4ed0a76e18b90362161bd313240ef23f94e585086afce30f3ddf',
+  'after_sha256': 'a36fe7bfcc30a1c46bfeecc48aaa049b965e7866f6b2567ee072c5f8af056452',
+  'edits': [[5351, 5351, "observation_incomplete:'OBSERVATION INCOMPLETE',"], [5362, 5371, 'PROCESS EXITED 0']]},
+ {'path': 'src/execweave/run_assessment.py',
+  'before_sha256': '6894cf3d309e65651717e169d0f414c4306bd7b0cca78c80c6fa3a68505e844a',
+  'after_sha256': '798dc6fa19bd4188d1e03da2bc3198146db03b932a6b618f3d8fae01b819921d',
+  'edits': [[2068, 2068, 'execution_state", outcome.get("'],
+            [2074, 2074, ')'],
+            [7550, 7550,
+             'observation": _object(graph.get("observation_assessment")) or {\n'
+             '            "state": "not_verified", "reasons": ["legacy_observation_assessment_missing"],\n'
+             '            "end_to_end_completeness_proven": False,\n'
+             '        },\n'
+             '        "']]},
+ {'path': 'src/execweave/session_summary.py',
+  'before_sha256': '07a357156f96bdaf2257a8eee5c9a8f463e61e356ad94db298417ccb469269fc',
+  'after_sha256': '4e778f7b7a5b9d21fe98e34f153f9a7a4c6f30612bb344b0f92294623978c762',
+  'edits': [[287, 287, 'from .observation import assess_observation\n\n'],
+            [527, 527,
+             '        self._unknown_files: set[str] = set()\n'
+             '        self._missing_snapshots: set[str] = set()\n'
+             '        self._warning_codes: set[str] = set()\n'
+             '        self._short_lived_loss_possible: bool | None = None\n'
+             '        self._filesystem_enabled: bool | None = None\n'
+             '\n'
+             '    @property\n'
+             '    def observation(self) -> dict[str, Any]:\n'
+             '        return assess_observation(\n'
+             '            specialized=self.counts["specialized"],\n'
+             '            finished=self.outcome.get("recorder_finished") is True,\n'
+             '            unknown_files=len(self._unknown_files),\n'
+             '            missing_snapshots=len(self._missing_snapshots),\n'
+             '            short_lived_loss_possible=self._short_lived_loss_possible,\n'
+             '            filesystem_enabled=self._filesystem_enabled,\n'
+             '            warning_codes=self._warning_codes,\n'
+             '        )\n'],
+            [1083, 1083,
+             '        if kind == "observation.warning":\n'
+             '            reason = attributes.get("reason")\n'
+             '            if isinstance(reason, str) and reason:\n'
+             '                self._warning_codes.add(reason)\n'
+             '        if kind in {"filesystem.created", "filesystem.modified", "filesystem.moved", "filesystem.deleted"} and attributes.get("is_directory") is not True:\n'
+             '            target = event.get("target")\n'
+             '            if isinstance(target, dict) and isinstance(target.get("id"), str):\n'
+             '                if attributes.get("causal") is not True:\n'
+             '                    self._unknown_files.add(target["id"])\n'
+             '                snapshot = attributes.get("snapshot_state")\n'
+             '                if isinstance(snapshot, str) and snapshot in {"not_captured", "missing"}:\n'
+             '                    self._missing_snapshots.add(target["id"])\n'
+             '        if kind in {"session.started", "session.finished"}:\n'
+             '            value = attributes.get("short_lived_process_loss_possible")\n'
+             '            if type(value) is bool:\n'
+             '                self._short_lived_loss_possible = value\n'
+             '            value = attributes.get("filesystem_collection_enabled")\n'
+             '            if type(value) is bool:\n'
+             '                self._filesystem_enabled = value\n']]},
+ {'path': 'src/execweave/sink.py',
+  'before_sha256': '04b535193e4b420054f2af12606e59a46140493eaa4fdf1de060343a21220f3f',
+  'after_sha256': 'ca67fc69aac2cf5c954ec9ab58800c612a7cb7755d4ed873548dff7cf0f7d759',
+  'edits': [[47, 47, '\nimport os\nimport stat'],
+            [480, 489, 'original'],
+            [516, 525,
+             'absolute()\n'
+             '        if original.is_symlink():\n'
+             '            raise ValueError("event stream must not be a symlink")\n'
+             '        self.path = original'],
+            [1081, 1081,
+             'flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)\n'
+             '            fd = os.open(self.path, flags, 0o600)\n'
+             '            '],
+            [1086, 1103, 'os.fdopen(fd, "w'],
+            [1151, 1151,
+             'info = os.fstat(handle.fileno())\n'
+             '                if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:\n'
+             '                    raise ValueError("event stream must be a private regular file")\n'
+             '                if os.name != "nt" and stat.S_IMODE(info.st_mode) != 0o600:\n'
+             '                    os.fchmod(handle.fileno(), 0o600)\n'
+             '                ']]},
+ {'path': 'src/execweave/viewer_run_assessment.py',
+  'before_sha256': '9413c47b0740e91aff858b0c61bd9ed2c34ddc7601a68df49a5c461156d246ce',
+  'after_sha256': 'a34a58a5e148a8ea98b8a72897aca0e5c295c19e3912e3abd4d36d8bc45762cd',
+  'edits': [[3280, 3280,
+             "  const observation=object(value?.observation),incomplete=observation.state==='observation_incomplete';\n"
+             "  card('observation','Observation completeness',incomplete?'incomplete':'not_verified',\n"
+             "    incomplete?'OBSERVATION INCOMPLETE':'Completeness not verified',\n"
+             "    (Array.isArray(observation.reasons)?observation.reasons.join('; '):'No observation assessment recorded.')+\n"
+             "    ' Process exit and task verification do not establish observation completeness.');\n"]]},
+ {'path': 'tests/test_agent_bootstrap.py',
+  'before_sha256': '8180e1cd0a5d9da409230a4fe2c43871d3905c83fdc0879c8f957a25acadeac7',
+  'after_sha256': '73cbf4ec786afc76538b854d76d73a9041413249001e80b476379109c9946d0b',
+  'edits': [[458, 458, '\nfrom execweave.hook_command import hook_argv'],
+            [1154, 1166, '.claude_hook_cli'],
+            [1232, 1243, '.codex_hook_entry'],
+            [1311, 1323, '.cursor_hook_cli'],
+            [2034, 2040, 'configured_unverified'],
+            [2131, 2144, ''],
+            [2154, 2154, '; delivery unverified'],
+            [2192, 2198, 'configured_unverified'],
+            [4865, 4871, 'configured_unverified'],
+            [5037, 5038, '"'],
+            [5048, 5060, '" in text\n    assert plugin_text(tuple(hook_argv("'],
+            [5068, 5157, '")']]},
+ {'path': 'tests/test_antigravity_cursor_launch.py',
+  'before_sha256': 'e85949f82c1f48a48da6d10a1739976cb1061b278502d633e02730dee08d2d00',
+  'after_sha256': '7a28a38c3c0340498e3eace17e6c0625de400a6344d59182d929e4d8de2f3b88',
+  'edits': [[2507, 2513, 'configured_unverified'],
+            [2614, 2620, 'configured_unverified'],
+            [2960, 2977, '.antigravity_hook_cli']]},
+ {'path': 'tests/test_audit_closure_20260917.py',
+  'before_sha256': '6f1ab2a3809509c76debd16b2beb5c92621d74a7a564845ba929e3d67a5d1a8f',
+  'after_sha256': '26d6d5aac93e9102bc3d92b1c530ef7254076aa5cd4a8f468a624114d38ab28e',
+  'edits': [[8418, 8418, 'observation_incomplete"\n    assert result["session_outcome"]["execution_state"] == "']]},
+ {'path': 'tests/test_investigation_integration.py',
+  'before_sha256': '187401cab38cadfba8af54109916da2dd10980b16a66dc83cae424e7b9baecfe',
+  'after_sha256': 'f751e7ccea64d792d5cebbafcf79b2fa54fc3e425aba2854a04052630b21a154',
+  'edits': [[9508, 9508, 'observation_incomplete"\n    assert raw["session_outcome"]["execution_state"] == "']]},
+ {'path': 'tests/test_pypi_0812_regressions.py',
+  'before_sha256': '133b04cd15b01448ad342205dcdbf79d270ab3ba02225369f66e482f1e7286ae',
+  'after_sha256': 'f4fc7e4fcd13c91d4e2154e09cd35c902e110d0cc60a53e993bb570792a12388',
+  'edits': [[1763, 1778, 'artifacts_not_entire'],
+            [2396, 2396, 'not in excluded\n    assert semantic_path.resolve() ']]}]

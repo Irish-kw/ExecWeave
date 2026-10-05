@@ -1,0 +1,124 @@
+[{'path': 'src/execweave/filesystem.py',
+  'before_sha256': '22907b48b4d3ab069e00d695b8da14bc45fc6596ccc3e2be3fd560097a63739d',
+  'after_sha256': '53fc92a0160c9dba180ef2b3a17f402d13b42af7d677e5a1999e9d627558a9f5',
+  'edits': [[207, 207, ', FileCreatedEvent, FileModifiedEvent, FileDeletedEvent'],
+            [3758, 3758,
+             '\n'
+             '        # watchdog emits a parent DirModifiedEvent when an internal file closes.\n'
+             '        # Recording that event writes the sink again, producing an infinite loop.\n'
+             '        # Suppress only aggregate directory-modified hints along recorder paths;\n'
+             '        # concrete user file changes and directory create/move/delete remain visible.\n'
+             '        sink_path = getattr(self.sink, "path", None)\n'
+             '        internal = (*self.excluded_roots, *((sink_path.resolve(),) if isinstance(sink_path, Path) else ()))\n'
+             '        self._internal_parents = {parent for path in internal for parent in path.parents}'],
+            [4140, 4140,
+             'if event.is_directory and event.event_type == "modified" and src in self._internal_parents:\n'
+             '            return\n'
+             '        '],
+            [4376, 4376, '\n            "writer_identity": "unknown",\n            "snapshot_state": "not_captured",'],
+            [4821, 4821, '\n            '],
+            [4895, 4895,
+             ',\n'
+             '            attributes={"path": str(target_path), "writer_identity": "unknown",\n'
+             '                        "snapshot_state": "not_captured"},\n'
+             '        '],
+            [6717, 6717,
+             'self._baseline: dict[str, tuple[int, int, int, int]] | None = None\n'
+             '        self._inventory_limited = False\n'
+             '        '],
+            [8030, 8035, '_inventory'],
+            [8045, 8045,
+             'dict[str, tuple[int, int, int, int]]:\n'
+             '        found: dict[str, tuple[int, int, int, int]] = {}\n'
+             '        budget = 100000\n'
+             '        def failed(_error: OSError) -> '],
+            [8050, 8050,
+             '\n'
+             '            self._inventory_limited = True\n'
+             '        for base, directories, files in os.walk(self.root, followlinks=False, onerror=failed):\n'
+             '            directories[:] = [name for name in directories\n'
+             '                              if not self.handler._excluded(str(Path(base) / name))]\n'
+             '            budget -= 1\n'
+             '            for name in files:\n'
+             '                budget -= 1\n'
+             '                if budget < 0:\n'
+             '                    self._inventory_limited = True\n'
+             '                    return found\n'
+             '                path = Path(base) / name\n'
+             '                if self.handler._excluded(str(path)):\n'
+             '                    continue\n'
+             '                try:\n'
+             '                    info = path.lstat()\n'
+             '                    found[str(path)] = (info.st_size, info.st_mtime_ns, info.st_ctime_ns, info.st_ino)\n'
+             '                except OSError:\n'
+             '                    self._inventory_limited = True\n'
+             '            if budget < 0:\n'
+             '                self._inventory_limited = True\n'
+             '                break\n'
+             '        return found\n'
+             '\n'
+             '    def start(self) -> None:\n'
+             '        self._baseline = self._inventory()'],
+            [9167, 9167,
+             '\n'
+             '        before, self._baseline = self._baseline, None\n'
+             '        if before is None:\n'
+             '            return\n'
+             '        after = self._inventory()\n'
+             '        # A final metadata difference is independent observation, not a process edge.\n'
+             '        for path, signature in after.items():\n'
+             '            if path not in before:\n'
+             '                self.handler._emit(FileCreatedEvent(path))\n'
+             '            elif before[path] != signature:\n'
+             '                self.handler._emit(FileModifiedEvent(path))\n'
+             '        if not self._inventory_limited:\n'
+             '            for path in before.keys() - after.keys():\n'
+             '                self.handler._emit(FileDeletedEvent(path))\n'
+             '        if self._inventory_limited:\n'
+             '            self.handler.sink.emit(RuntimeEvent.create(\n'
+             '                session_id=self.handler.session_id, event_type="observation.warning",\n'
+             '                relation="HAS_OBSERVATION_WARNING", source=self.handler.session_entity,\n'
+             '                attributes={"reason": "filesystem_inventory_incomplete", "severity": "warning"},\n'
+             '            ))']]},
+ {'path': 'src/execweave/finalization.py',
+  'before_sha256': '2541753069b373415732709040f1b7ea384e3c3089a78c967a01780304e9e22c',
+  'after_sha256': '3e57063ece488f88c479d9cf05a9113eaa19214028e8474426bfcd4c71ce11fa',
+  'edits': [[292, 292, ', _read'],
+            [1820, 1820,
+             '    payload["observation_assessment"] = {\n'
+             '        "state": "not_verified", "reasons": ["graph_assessment_unavailable"],\n'
+             '    }\n'
+             '    if state != "recording" and "graph.json" in files:\n'
+             '        try:\n'
+             '            fingerprint, raw = _read(run_dir, "graph.json", 64 * 1024 * 1024, collect=True)\n'
+             '            graph = json.loads(raw)\n'
+             '            if fingerprint != files["graph.json"] or not isinstance(graph, dict):\n'
+             '                raise ValueError("inconsistent_graph")\n'
+             '            assessment = graph.get("observation_assessment")\n'
+             '            if assessment is not None:\n'
+             '                if not (isinstance(assessment, dict) and assessment.get("schema_version") == "0.1"\n'
+             '                        and isinstance(assessment.get("state"), str)\n'
+             '                        and assessment["state"] in {"not_verified", "observation_incomplete"}):\n'
+             '                    raise ValueError("invalid_observation_assessment")\n'
+             '                payload["observation_assessment"] = assessment\n'
+             '            outcome = graph.get("session_outcome")\n'
+             '            if isinstance(outcome, dict):\n'
+             '                payload["session_outcome"] = outcome\n'
+             '        except (ArchiveReadError, ValueError, UnicodeError):\n'
+             '            payload["observation_assessment"] = {\n'
+             '                "state": "observation_incomplete", "reasons": ["graph_assessment_unreadable"],\n'
+             '            }\n'
+             '    # state=complete is retained as the archive/export axis for older readers.\n'
+             '    # Overall session_status must not claim success merely because bytes were exported.\n'
+             '    payload["session_status"] = payload["observation_assessment"]["state"]\n']]},
+ {'path': 'src/execweave/graph.py',
+  'before_sha256': 'fead6f1ea7830a7ff9f16f5ef043ecb79bf5ee18015cad6bf15826bec6e273d5',
+  'after_sha256': '4fa77264b1441253ddee8b6765e9a2c647a4fcaef35f39ea36e69530c7abd453',
+  'edits': [[244, 244, '\nfrom .observation import session_outcome as assessed_session_outcome'],
+            [13343, 13343, '\n    observation_assessment: dict[str, Any] = field(default_factory=dict)'],
+            [14007, 14007, '),\n            "observation_assessment": dict(self.observation_assessment'],
+            [18693, 18698, 'assessed_session_outcome(\n                '],
+            [18727, 18728,
+             ', self._session_summary.observation\n'
+             '            ),\n'
+             '            observation_assessment=self._session_summary.observation']]}]
