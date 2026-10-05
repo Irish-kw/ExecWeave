@@ -21,7 +21,7 @@ jobs:
   review-source:
     name: Export exact review source (not release acceptance)
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
@@ -35,6 +35,8 @@ jobs:
           git archive --format=zip --output=review-artifacts/source.zip HEAD src tests scripts pyproject.toml README.md LICENSE .github/workflows
           sha256sum review-artifacts/source.zip > review-artifacts/SHA256SUMS
           printf '%s\n' 'SOURCE_EXPORT_ONLY=true' 'RELEASE_ACCEPTANCE=NOT_RUN' > review-artifacts/status.txt
+      - name: Prepare offline test dependencies
+        run: python -m pip download --only-binary=:all: --dest review-artifacts/wheels watchdog hatchling build 'ruff>=0.16,<0.17'
       - uses: actions/upload-artifact@v4
         with:
           name: observation-review-source-${{ github.event.pull_request.head.sha || github.sha }}
