@@ -36,7 +36,8 @@ jobs:
           sha256sum review-artifacts/source.zip > review-artifacts/SHA256SUMS
           printf '%s\n' 'SOURCE_EXPORT_ONLY=true' 'RELEASE_ACCEPTANCE=NOT_RUN' > review-artifacts/status.txt
       - name: Prepare offline test dependencies
-        run: python -m pip download --only-binary=:all: --dest review-artifacts/wheels watchdog hatchling build 'ruff>=0.16,<0.17'
+        run: |
+          python -m pip download --only-binary=:all: --dest review-artifacts/wheels watchdog hatchling build 'ruff>=0.16,<0.17'
       - uses: actions/upload-artifact@v4
         with:
           name: observation-review-source-${{ github.event.pull_request.head.sha || github.sha }}
