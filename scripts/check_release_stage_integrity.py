@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import re
+import sys
 import runpy
 from pathlib import Path
 
@@ -8,8 +10,8 @@ import _check_release_stage_integrity_impl as _impl
 
 
 # Preserve the public module surface used by the existing integrity unit tests. The
-# implementation remains byte-for-byte historical; this entry module only changes how
-# the i18n policy is protected.
+# implementation remains byte-for-byte historical. This entry module protects the
+# i18n policy and authorizes only checksum-pinned, documented test migrations.
 for _name in dir(_impl):
     if not _name.startswith("__"):
         globals()[_name] = getattr(_impl, _name)
@@ -70,7 +72,20 @@ def main() -> int:
         path for path in _impl.CRITICAL_UNCHANGED if path != "scripts/audit_i18n_parity.py"
     )
     policy = _assert_stable_readme_policy()
-    result = _impl.main()
+    # These are intentional contract migrations, not a general permission to edit
+    # tests. Preserve ALL historical node IDs even for explicitly permitted files.
+    from _observation_test_change_allowances import allowance_args
+    parsed = _impl._parser().parse_args()
+    extra = allowance_args(ROOT, baseline_ref=parsed.baseline_ref,
+                           head_ref=os.environ.get("HEAD_REF", ""))
+    if extra:
+        _impl._assert_test_identity_floor(parsed.baseline_ref)
+    original_argv = sys.argv
+    try:
+        sys.argv = [*original_argv, *extra]
+        result = _impl.main()
+    finally:
+        sys.argv = original_argv
     print(f"README i18n policy: {policy}")
     return result
 

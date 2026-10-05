@@ -41,9 +41,12 @@ def test_supported_agent_normalizes_platform_launchers(
 @pytest.mark.parametrize(
     ("provider", "expected_relative", "marker"),
     [
-        ("claude", Path(".claude/settings.json"), "execweave.claude_hook_cli --auto"),
-        ("codex", Path(".codex/hooks.json"), "execweave.codex_hook_entry --auto"),
-        ("cursor", Path(".cursor/hooks.json"), "execweave.cursor_hook_cli --auto"),
+        pytest.param("claude", Path(".claude/settings.json"), "execweave.claude_hook_cli --auto",
+                     id="claude-expected_relative0-execweave-claude-hook --auto"),
+        pytest.param("codex", Path(".codex/hooks.json"), "execweave.codex_hook_entry --auto",
+                     id="codex-expected_relative1-execweave-codex-hook --auto"),
+        pytest.param("cursor", Path(".cursor/hooks.json"), "execweave.cursor_hook_cli --auto",
+                     id="cursor-expected_relative2-execweave-cursor-hook --auto"),
     ],
 )
 def test_json_bootstrap_is_idempotent_and_preserves_existing_configuration(

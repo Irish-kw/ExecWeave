@@ -201,10 +201,9 @@ def test_explicit_installer_and_status_are_distinct(tmp_path, monkeypatch, capsy
     assert "configured_unverified" in capsys.readouterr().out
 
 
-@pytest.mark.skipif(not hasattr(os, "geteuid"), reason="POSIX effective UID check")
 def test_explicit_installer_refuses_root(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
-    monkeypatch.setattr(os, "geteuid", lambda: 0)
+    monkeypatch.setattr(os, "geteuid", lambda: 0, raising=False)
     assert entry.main(["hooks", "install", "antigravity"]) == 2
     assert list(tmp_path.iterdir()) == []
 
@@ -235,16 +234,23 @@ def test_explicit_install_upgrades_old_bare_antigravity_hook(tmp_path):
     assert bootstrap_supported_agent(["agy"], home=tmp_path, environment={}).changed is False
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes; Windows ACLs require separate verification")
-def test_events_created_owner_only_and_no_symlink_or_hardlink(tmp_path):
+def test_events_created_owner_only_and_no_symlink_or_hardlink(tmp_path, monkeypatch):
     event = RuntimeEvent.create(session_id="test", event_type="test", relation="TEST")
     path = tmp_path / "events.jsonl"
     JsonlSink(path).emit(event)
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
-    link = tmp_path / "link"
-    link.symlink_to(path)
-    with pytest.raises(ValueError, match="symlink"):
-        JsonlSink(link)
+    assert path.is_file() and len(records(path)) == 1
+    if os.name != "nt":
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+        link = tmp_path / "link"
+        link.symlink_to(path)
+        with pytest.raises(ValueError, match="symlink"):
+            JsonlSink(link)
+    # Windows may lack symlink-creation privilege. Exercise the refusal on every
+    # platform; this injected case is not a claim of native Windows ACL coverage.
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "is_symlink", lambda self: True)
+        with pytest.raises(ValueError, match="symlink"):
+            JsonlSink(tmp_path / "synthetic-link")
     original = tmp_path / "original"
     original.touch()
     hardlink = tmp_path / "hardlink"
@@ -335,3 +341,18 @@ def test_invalid_observation_metadata_is_not_promoted_at_finalization(tmp_path):
     report = record_finalization(tmp_path, state="complete")
     assert report["session_status"] == "observation_incomplete"
     assert report["observation_assessment"]["reasons"] == ["graph_assessment_unreadable"]
+
+
+def test_event_stream_open_is_nonblocking_where_supported(tmp_path, monkeypatch):
+    original = os.open
+    calls = []
+    def recording_open(path, flags, mode):
+        calls.append(flags)
+        return original(path, flags, mode)
+    monkeypatch.setattr(os, "open", recording_open)
+    path = tmp_path / "events.jsonl"
+    JsonlSink(path).emit(RuntimeEvent.create(session_id="test", event_type="test", relation="TEST"))
+    assert len(calls) == 1
+    if hasattr(os, "O_NONBLOCK"):
+        assert calls[0] & os.O_NONBLOCK
+    assert len(records(path)) == 1

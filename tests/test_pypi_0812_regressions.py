@@ -59,10 +59,12 @@ def test_explicit_virtualenv_python_keeps_launcher_and_site_prefix(tmp_path: Pat
     assert Path(completed.stdout.strip()).resolve() == venv_root.resolve()
 
 
-def test_live_sibling_sidecar_excludes_artifacts_not_entire_output_dir(
+def test_live_sibling_sidecar_excludes_entire_internal_output_dir(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    # Historical node ID retained. Whole-directory exclusion was the 0.8.34 bug;
+    # only recorder-owned artifacts may be excluded under the corrected contract.
     run_dir = tmp_path / "custom-live-output"
     run_dir.mkdir()
     event_path = run_dir / "events.jsonl"
