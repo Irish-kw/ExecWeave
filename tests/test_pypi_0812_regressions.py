@@ -59,7 +59,7 @@ def test_explicit_virtualenv_python_keeps_launcher_and_site_prefix(tmp_path: Pat
     assert Path(completed.stdout.strip()).resolve() == venv_root.resolve()
 
 
-def test_live_sibling_sidecar_excludes_entire_internal_output_dir(
+def test_live_sibling_sidecar_excludes_artifacts_not_entire_output_dir(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -79,7 +79,8 @@ def test_live_sibling_sidecar_excludes_entire_internal_output_dir(
     )
 
     excluded = collector._filesystem_excluded_roots()
-    assert run_dir.resolve() in excluded
+    assert run_dir.resolve() not in excluded
+    assert semantic_path.resolve() in excluded
     assert event_path.resolve() in excluded
 
 

@@ -153,7 +153,8 @@ def test_live_collector_error_still_exports_valid_terminal_evidence(tmp_path, mo
     for name in REQUIRED_EXPORTS:
         assert (tmp_path / "run" / name).is_file()
     result = json.loads((tmp_path / "run" / "graph.json").read_text())
-    assert result["session_outcome"]["state"] == "collector_failed"
+    assert result["session_outcome"]["state"] == "observation_incomplete"
+    assert result["session_outcome"]["execution_state"] == "collector_failed"
     manifest = json.loads((tmp_path / "run" / "finalization.json").read_text())
     assert manifest["state"] == "complete" and manifest["error_type"] == "RuntimeError"
 

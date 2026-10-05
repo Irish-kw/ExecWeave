@@ -88,7 +88,9 @@ execweave top -- codex
 
 ### Provider integration approval
 
-Some agents and IDEs ask for permission before enabling a local hook or plugin. Approve the ExecWeave integration if you want provider-level prompt, response, tool, model, and conversation evidence. If you do not approve it, OS-runtime observation can still work, but semantic coverage may be reduced.
+In this development branch, `live` only checks hook configuration; it never installs or rewrites it. Explicitly run `execweave hooks install antigravity` (or `claude`, `codex`, `cursor`, `opencode`) from your user-owned environment, without sudo. `execweave hooks status antigravity` checks setup without writing. Provider approval may still be required. **Configured does not mean evidence was delivered.** Missing delivery and incomplete observation are recorded independently of process exit.
+
+See [observation integrity and the negative example](docs/observation-integrity.md) for the three result axes and remaining release blockers. These changes are unreleased; version 0.8.34 on PyPI does not contain them.
 
 Google Antigravity currently uses the `agy` CLI command. ExecWeave also accepts `antigravity` as a friendly alias.
 

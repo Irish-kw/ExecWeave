@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .session_summary import SessionSummary
+from .observation import session_outcome as assessed_session_outcome
 from .fidelity import FidelityAccumulator
 from .provider_lifecycle import ProviderLifecycleAnnotation, provider_lifecycle_annotation
 from .validate import validate_event_stream
@@ -350,6 +351,7 @@ class ExecutionGraph:
     evidence_counts: dict[str, int] = field(default_factory=dict)
     session_outcome: dict[str, Any] = field(default_factory=dict)
     runtime_environment: dict[str, Any] = field(default_factory=dict)
+    observation_assessment: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -365,6 +367,7 @@ class ExecutionGraph:
             "evidence_counts": dict(self.evidence_counts),
             "session_outcome": dict(self.session_outcome),
             "runtime_environment": dict(self.runtime_environment),
+            "observation_assessment": dict(self.observation_assessment),
             "nodes": [node.to_dict() for node in self.nodes],
             "edges": [edge.to_dict() for edge in self.edges],
         }
@@ -484,7 +487,10 @@ class GraphAccumulator:
             ),
             fidelity=self._fidelity.to_dict(),
             evidence_counts=dict(self._session_summary.counts),
-            session_outcome=dict(self._session_summary.outcome),
+            session_outcome=assessed_session_outcome(
+                self._session_summary.outcome, self._session_summary.observation
+            ),
+            observation_assessment=self._session_summary.observation,
             runtime_environment=dict(self._session_summary.environment),
         )
 

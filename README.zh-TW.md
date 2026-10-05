@@ -88,7 +88,9 @@ execweave top -- codex
 
 ### Provider integration 授權
 
-部分 Agent 或 IDE 第一次啟用本機 hook / plugin 時會要求授權。如果你希望看到 Prompt、Response、Tool、Model 與 Conversation 等 Provider-level evidence，請允許 ExecWeave integration。若不允許，OS runtime 觀察仍可能正常運作，但 Provider 語意覆蓋會較少。
+此開發分支的 `live` 只檢查 hook 設定，不會自動安裝或改寫。請在使用者自己的環境明確執行 `execweave hooks install antigravity`（也支援 `claude`、`codex`、`cursor`、`opencode`），不要使用 sudo。`execweave hooks status antigravity` 只讀取設定。Provider 本身仍可能要求授權；**完成設定不等於已送出證據**。缺少證據與觀測不完整會獨立於行程退出結果記錄。
+
+[觀測完整度與失敗示例](docs/observation-integrity.md) 說明行程結果、獨立任務驗證、觀測完整度三個軸，以及尚未解除的發布阻擋項目。這批修改尚未發布，PyPI 0.8.34 不包含這些修改。
 
 Google Antigravity 目前實際 CLI 指令為 `agy`；ExecWeave 同時接受 `antigravity` 作為較好記的 alias。
 

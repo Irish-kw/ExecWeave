@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import stat
 import threading
 from pathlib import Path
 
@@ -16,7 +18,10 @@ class JsonlSink:
     """
 
     def __init__(self, path: str | Path) -> None:
-        self.path = Path(path).expanduser().resolve()
+        original = Path(path).expanduser().absolute()
+        if original.is_symlink():
+            raise ValueError("event stream must not be a symlink")
+        self.path = original
         self.path.parent.mkdir(parents=True, exist_ok=True)
         if self.path.exists() and self.path.stat().st_size > 0:
             raise FileExistsError(f"ExecWeave event stream already exists: {self.path}")
@@ -29,5 +34,12 @@ class JsonlSink:
             self._sequence += 1
             payload["sequence"] = self._sequence
             line = json.dumps(payload, ensure_ascii=False, sort_keys=True)
-            with self.path.open("a", encoding="utf-8") as handle:
+            flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+            fd = os.open(self.path, flags, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                info = os.fstat(handle.fileno())
+                if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                    raise ValueError("event stream must be a private regular file")
+                if os.name != "nt" and stat.S_IMODE(info.st_mode) != 0o600:
+                    os.fchmod(handle.fileno(), 0o600)
                 handle.write(line + "\n")

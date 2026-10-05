@@ -16,6 +16,7 @@ from .antigravity_adapter import (
 from .antigravity_full_fidelity import antigravity_hook_to_content_events
 from .antigravity_trace_capability import antigravity_agent_trace_visibility_event
 from .content_store import FullFidelityContentStore
+from .hook_command import hook_command
 from .conversation_archive import antigravity_conversation_archive_events
 
 _CAPTURE_ERRORS = (OSError, RuntimeError, TimeoutError, TypeError, ValueError)
@@ -42,7 +43,7 @@ def _now() -> str:
 def _handler(event: str) -> dict[str, Any]:
     return {
         "type": "command",
-        "command": f"execweave-antigravity-hook --auto --event {event}",
+        "command": f"{hook_command('antigravity')} --event {event}",
         "timeout": 30,
     }
 

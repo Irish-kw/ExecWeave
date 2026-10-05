@@ -154,25 +154,18 @@ class RuntimeCollector:
         self._cursor_handoff_info: dict[str, object] = {}
 
     def _filesystem_excluded_roots(self) -> list[Path]:
-        """Return ExecWeave-owned paths that must never become workload evidence.
-
-        The default ``.execweave`` tree and the runtime event stream were already
-        internal. Live mode can also place ``events.jsonl`` and ``semantic.jsonl``
-        together in a caller-selected output directory inside the watch root. When
-        those files are siblings, exclude their whole run directory so ExecWeave's
-        own evidence writes cannot recursively manufacture filesystem evidence.
-        A separately configured semantic sidecar remains an exact-file exclusion.
-        """
+        """Exclude reserved artifacts, never the caller's entire output directory."""
         sink_path = self.sink.path.expanduser().resolve()
+        run_root = sink_path.parent
         excluded = [(self.watch_root / ".execweave").resolve(), sink_path]
-        configured = os.environ.get("EXECWEAVE_SEMANTIC_SIDECAR")
-        if not configured:
-            return excluded
-
-        semantic_path = Path(configured).expanduser().resolve()
-        excluded.append(
-            semantic_path.parent if semantic_path.parent == sink_path.parent else semantic_path
+        reserved = (
+            "events.jsonl", "events.semantic.jsonl", "semantic.jsonl", "graph.json",
+            "viewer.html", "conversations.json", "finalization.json", "content",
         )
+        excluded.extend(run_root / name for name in reserved)
+        configured = os.environ.get("EXECWEAVE_SEMANTIC_SIDECAR")
+        if configured:
+            excluded.append(Path(configured).expanduser().resolve())
         return excluded
 
     def run(self, command: list[str]) -> int:
@@ -208,6 +201,9 @@ class RuntimeCollector:
                 target=session,
                 attributes={
                     "collector_pid": os.getpid(),
+                    "short_lived_process_loss_possible": True,
+                    "filesystem_collection_enabled": self.collect_filesystem,
+                    "process_coverage": "polling_not_exhaustive",
                     "backend": self.backend_name,
                     "execweave_version": __version__,
                     "python_executable": sys.executable,
@@ -305,6 +301,7 @@ class RuntimeCollector:
             self._restore_linux_child_subreaper(subreaper_previous)
             if watcher is not None:
                 watcher.stop()
+            self._record_observation_warnings(command, session)
             # A failed termination must not become a false clean result merely
             # because the selected child has since reparented out of the tree.
             workload_alive_after_cleanup = any(
@@ -328,6 +325,9 @@ class RuntimeCollector:
                             workload_terminated_due_to_collector_error
                         ),
                         "workload_alive_after_cleanup": workload_alive_after_cleanup,
+                        "short_lived_process_loss_possible": True,
+                        "filesystem_collection_enabled": self.collect_filesystem,
+                        "process_coverage": "polling_not_exhaustive",
                         "network_collection_status": self._network_collection_status(),
                         "network_sample_attempts": self._network_sample_attempts,
                         "network_sample_successes": self._network_sample_successes,
@@ -338,6 +338,29 @@ class RuntimeCollector:
                     },
                 )
             )
+
+    def _record_observation_warnings(self, command: list[str], session: Entity) -> None:
+        from .agent_bootstrap import inspect_supported_agent, supported_agent
+        from .hook_delivery import sidecar_delivery
+
+        def warning(reason: str, **details: object) -> None:
+            self.sink.emit(RuntimeEvent.create(
+                session_id=self.session_id, event_type="observation.warning",
+                relation="HAS_OBSERVATION_WARNING", source=session,
+                target=Entity(type="observation_warning", id=f"warning:{self.session_id}:{reason}",
+                              name=reason),
+                attributes={"reason": reason, "severity": "warning", **details},
+            ))
+
+        warning("short_lived_process_loss_possible", backend=self.backend_name,
+                poll_interval_seconds=self.poll_interval, missed_process_lower_bound=None)
+        provider = supported_agent(command)
+        if provider is not None:
+            configured = inspect_supported_agent(command)
+            delivery = sidecar_delivery(os.environ.get("EXECWEAVE_SEMANTIC_SIDECAR"))
+            if delivery["state"] != "records_present":
+                warning("hook_no_evidence", provider=provider,
+                        hook_configuration_state=configured.status, delivery=delivery)
 
     @staticmethod
     def _linux_child_subreaper_state() -> bool | None:

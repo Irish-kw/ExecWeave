@@ -22,7 +22,7 @@ function updateEvidence(data){
   const specializedMarkup=`specialized ${specialized}`.replace(specialized,`<strong>${specialized}</strong>`);
   evidence.innerHTML=`OS <strong>${count(counts.os_runtime)}</strong> · ${specializedMarkup}${provisional?' · provisional':''}`;
   evidence.classList.toggle('provisional',provisional);evidence.title='Observed event counts. — means unavailable, not zero.';
-  const outcome=data.session_outcome||raw.session_outcome||{},labels={succeeded:'SUCCEEDED',failed:'FAILED',interrupted:'INTERRUPTED',collector_failed:'COLLECTOR FAILED',unknown:'UNKNOWN'};
+  const outcome=data.session_outcome||raw.session_outcome||{},labels={observation_incomplete:'OBSERVATION INCOMPLETE',succeeded:'PROCESS EXITED 0',failed:'FAILED',interrupted:'INTERRUPTED',collector_failed:'COLLECTOR FAILED',unknown:'UNKNOWN'};
   let badge=document.getElementById('workload-outcome');if(!badge){badge=document.createElement('span');badge.id='workload-outcome';evidence.after(badge)}
   const finished=outcome.recorder_finished||data.live_finished||window.__execweaveStaticMode;
   badge.textContent=finished?` · Workload: ${labels[outcome.state]||'UNKNOWN'}${Number.isInteger(outcome.return_code)?' · exit '+outcome.return_code:''}`:'';

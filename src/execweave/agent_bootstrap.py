@@ -8,6 +8,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
+from .hook_command import hook_argv, hook_command, hook_markers
+
 _AUTO_FLAG = "--auto"
 _CONFIG_RETRIES = 3
 _SUPPORTED_AGENTS = {
@@ -73,12 +75,34 @@ def _read_bytes(path: Path) -> bytes | None:
 def _contains_execweave_command(value: object, marker: str) -> bool:
     if isinstance(value, dict):
         command = value.get("command")
-        if isinstance(command, str) and marker in command:
+        if isinstance(command, str) and any(value in command for value in hook_markers(marker)):
             return True
         return any(_contains_execweave_command(child, marker) for child in value.values())
     if isinstance(value, list):
         return any(_contains_execweave_command(child, marker) for child in value)
     return False
+
+
+def _migrate_hook_commands(value: object, marker: str) -> bool:
+    """Upgrade only our old canonical bare entry point, retaining user settings."""
+    changed = False
+    if isinstance(value, dict):
+        command = value.get("command")
+        if isinstance(command, str):
+            prefix = f"{marker} --auto"
+            suffix = command[len(prefix):] if command.startswith(prefix) else None
+            valid_suffixes = {"", " --event PreInvocation", " --event PostInvocation",
+                              " --event PostToolUse", " --event Stop"}
+            if suffix in valid_suffixes:
+                provider = marker.removeprefix("execweave-").removesuffix("-hook")
+                value["command"] = hook_command(provider) + suffix
+                changed = True
+        for child in value.values():
+            changed = _migrate_hook_commands(child, marker) or changed
+    elif isinstance(value, list):
+        for child in value:
+            changed = _migrate_hook_commands(child, marker) or changed
+    return changed
 
 
 def _merge_hook_fragment(
@@ -88,7 +112,7 @@ def _merge_hook_fragment(
     marker: str,
 ) -> tuple[dict[str, Any], bool]:
     merged = deepcopy(current)
-    changed = False
+    changed = _migrate_hook_commands(merged, marker)
 
     for key, value in fragment.items():
         if key == "hooks":
@@ -135,8 +159,9 @@ def _merge_named_hook_fragment(
 ) -> tuple[dict[str, Any], bool]:
     """Merge Antigravity's named-hook ``hooks.json`` schema conservatively."""
     merged = deepcopy(current)
+    changed = _migrate_hook_commands(merged, marker)
     if _contains_execweave_command(merged, marker):
-        return merged, False
+        return merged, changed
     for name, definition in fragment.items():
         if name in merged:
             raise FileExistsError(
@@ -215,9 +240,11 @@ def _write_plugin_file(path: Path, content: str, *, marker: str) -> bool:
                 existing = original.decode("utf-8")
             except UnicodeDecodeError as exc:
                 raise ValueError(f"existing OpenCode plugin is not UTF-8: {path}") from exc
-            if existing == content or marker in existing:
+            if existing == content:
                 return False
-            raise FileExistsError(f"refusing to replace existing OpenCode plugin: {path}")
+            from .opencode_plugin_cli import plugin_text
+            if existing != plugin_text(("execweave-opencode-hook", _AUTO_FLAG)):
+                raise FileExistsError(f"refusing to replace existing OpenCode plugin: {path}")
         if _write_bytes_optimistic(path, original, encoded):
             return True
     raise RuntimeError(f"plugin path changed concurrently while updating {path}")
@@ -254,11 +281,11 @@ def _provider_fragment(provider: str) -> tuple[dict[str, Any], str]:
     if provider == "claude":
         from .claude_hook_cli import claude_hook_config
 
-        return claude_hook_config(f"execweave-claude-hook {_AUTO_FLAG}"), "execweave-claude-hook"
+        return claude_hook_config(hook_command("claude")), "execweave-claude-hook"
     if provider == "codex":
         from .codex_hook_cli import codex_hook_config
 
-        return codex_hook_config(f"execweave-codex-hook {_AUTO_FLAG}"), "execweave-codex-hook"
+        return codex_hook_config(hook_command("codex")), "execweave-codex-hook"
     if provider == "antigravity":
         from .antigravity_hook_cli import antigravity_hook_config
 
@@ -266,7 +293,7 @@ def _provider_fragment(provider: str) -> tuple[dict[str, Any], str]:
     if provider == "cursor":
         from .cursor_hook_cli import cursor_hook_config
 
-        return cursor_hook_config(f"execweave-cursor-hook {_AUTO_FLAG}"), "execweave-cursor-hook"
+        return cursor_hook_config(hook_command("cursor")), "execweave-cursor-hook"
     raise ValueError(f"provider does not use JSON hooks: {provider}")
 
 
@@ -293,7 +320,7 @@ def bootstrap_supported_agent(
         if provider == "opencode":
             from .opencode_plugin_cli import plugin_text
 
-            content = plugin_text(("execweave-opencode-hook", _AUTO_FLAG))
+            content = plugin_text(tuple(hook_argv("opencode")))
             changed = _write_plugin_file(target, content, marker="execweave-opencode-hook")
         else:
             fragment, marker = _provider_fragment(provider)
@@ -317,10 +344,10 @@ def bootstrap_supported_agent(
 
         return AgentBootstrapResult(
             provider=provider,
-            status="active",
+            status="configured_unverified",
             path=str(target),
             changed=changed,
-            detail="specialized hook/plugin bootstrap is configured",
+            detail="specialized hook/plugin configured; delivery unverified",
         )
     except (FileExistsError, OSError, RuntimeError, TypeError, ValueError) as exc:
         return AgentBootstrapResult(
@@ -330,3 +357,39 @@ def bootstrap_supported_agent(
             changed=False,
             detail=_bounded_detail(exc),
         )
+
+
+def inspect_supported_agent(
+    command: list[str], *, home: str | Path | None = None,
+    environment: Mapping[str, str] | None = None,
+) -> AgentBootstrapResult:
+    """Read configuration only. Configuration is never proof of hook delivery."""
+    provider = supported_agent(command)
+    if provider is None:
+        return AgentBootstrapResult(provider=None, status="unavailable",
+                                    detail="no specialized lifecycle integration")
+    env = os.environ if environment is None else environment
+    home_path = Path.home() if home is None else Path(home).expanduser()
+    target = _provider_target(provider, home=home_path, environment=env)
+    try:
+        raw = _read_bytes(target)
+        if raw is None:
+            return AgentBootstrapResult(provider=provider, status="not_configured", path=str(target),
+                                        detail=f"Run execweave hooks install {provider} explicitly; never use sudo")
+        if provider == "opencode":
+            present = any(marker in raw.decode("utf-8")
+                          for marker in hook_markers("execweave-opencode-hook"))
+        else:
+            config = _load_json_object(raw, path=target)
+            present = _contains_execweave_command(config, f"execweave-{provider}-hook")
+            if provider == "claude" and config.get("disableAllHooks") is True:
+                present = False
+            if provider == "antigravity":
+                group = config.get("execweave-observability", {})
+                present = present and isinstance(group, dict) and group.get("enabled") is True
+        return AgentBootstrapResult(provider=provider,
+                                    status="configured_unverified" if present else "not_configured",
+                                    path=str(target), detail="delivery must be verified from recorded evidence")
+    except (OSError, ValueError, UnicodeError) as exc:
+        return AgentBootstrapResult(provider=provider, status="bootstrap_failed", path=str(target),
+                                    detail=type(exc).__name__)

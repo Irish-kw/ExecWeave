@@ -119,16 +119,25 @@ class LiveResult:
     viewer: Path
 
     def to_dict(self) -> dict[str, object]:
+        artifacts = {}
+        for key in ("event_stream", "semantic_sidecar", "materialized_event_stream", "graph", "viewer"):
+            path = getattr(self, key)
+            try:
+                info = path.stat()
+                status = "produced" if path.is_file() and info.st_size else "empty_or_not_regular"
+            except FileNotFoundError:
+                status = "not_produced"
+            except OSError:
+                status = "unreadable"
+            artifacts[key] = {"status": status, "path": str(path) if status == "produced" else None}
         return {
             "session_id": self.session_id,
             "return_code": self.return_code,
             "live_url": self.live_url,
             "output_dir": str(self.output_dir),
-            "event_stream": str(self.event_stream),
-            "semantic_sidecar": str(self.semantic_sidecar),
-            "materialized_event_stream": str(self.materialized_event_stream),
-            "graph": str(self.graph),
-            "viewer": str(self.viewer),
+            **{key: value["path"] for key, value in artifacts.items()},
+            "semantic_sidecar_status": artifacts["semantic_sidecar"]["status"],
+            "artifacts": artifacts,
         }
 
 
@@ -158,6 +167,7 @@ def _compact_live_graph(graph: dict[str, object]) -> dict[str, object]:
         "live_payload_compact": True,
         "evidence_counts": graph.get("evidence_counts"),
         "session_outcome": graph.get("session_outcome"),
+        "observation_assessment": graph.get("observation_assessment"),
         "runtime_environment": graph.get("runtime_environment"),
         "run_assessment": graph.get("run_assessment"),
     }

@@ -7,7 +7,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from .content_integrity import ArchiveReadError, audit_content_references, hash_export
+from .content_integrity import ArchiveReadError, audit_content_references, hash_export, _read
 
 
 REQUIRED_EXPORTS = ("graph.json", "viewer.html", "conversations.json")
@@ -41,6 +41,32 @@ def record_finalization(
     }
     if state == "complete" and not complete:
         payload["state"] = "incomplete"
+    payload["observation_assessment"] = {
+        "state": "not_verified", "reasons": ["graph_assessment_unavailable"],
+    }
+    if state != "recording" and "graph.json" in files:
+        try:
+            fingerprint, raw = _read(run_dir, "graph.json", 64 * 1024 * 1024, collect=True)
+            graph = json.loads(raw)
+            if fingerprint != files["graph.json"] or not isinstance(graph, dict):
+                raise ValueError("inconsistent_graph")
+            assessment = graph.get("observation_assessment")
+            if assessment is not None:
+                if not (isinstance(assessment, dict) and assessment.get("schema_version") == "0.1"
+                        and isinstance(assessment.get("state"), str)
+                        and assessment["state"] in {"not_verified", "observation_incomplete"}):
+                    raise ValueError("invalid_observation_assessment")
+                payload["observation_assessment"] = assessment
+            outcome = graph.get("session_outcome")
+            if isinstance(outcome, dict):
+                payload["session_outcome"] = outcome
+        except (ArchiveReadError, ValueError, UnicodeError):
+            payload["observation_assessment"] = {
+                "state": "observation_incomplete", "reasons": ["graph_assessment_unreadable"],
+            }
+    # state=complete is retained as the archive/export axis for older readers.
+    # Overall session_status must not claim success merely because bytes were exported.
+    payload["session_status"] = payload["observation_assessment"]["state"]
     fd, temporary = tempfile.mkstemp(prefix=".finalization-", dir=run_dir)
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:

@@ -46,6 +46,11 @@ function render(value){
   if(Number.isSafeInteger(task.both_reported)&&task.both_reported>0){
     panel.lastElementChild.append(make('p',`${task.both_reported} task(s) have both completion and failure reports; neither report is discarded.`));
   }
+  const observation=object(value?.observation),incomplete=observation.state==='observation_incomplete';
+  card('observation','Observation completeness',incomplete?'incomplete':'not_verified',
+    incomplete?'OBSERVATION INCOMPLETE':'Completeness not verified',
+    (Array.isArray(observation.reasons)?observation.reasons.join('; '):'No observation assessment recorded.')+
+    ' Process exit and task verification do not establish observation completeness.');
   const gaps=content.state==='declared_gaps';
   card('content','Recorded content',gaps?'declared_gaps':'not_verified',gaps?'Declared content gaps':'Bytes not verified in this view',
     `${count(content.declared)} content record(s); ${count(content.invalid_references)} invalid reference(s); `+
