@@ -32,7 +32,7 @@ jobs:
         run: |
           mkdir -p review-artifacts
           git rev-parse HEAD > review-artifacts/SOURCE_SHA.txt
-          git archive --format=zip --output=review-artifacts/source.zip HEAD src tests scripts pyproject.toml README.md LICENSE .github/workflows
+          git archive --format=zip --output=review-artifacts/source.zip HEAD
           sha256sum review-artifacts/source.zip > review-artifacts/SHA256SUMS
           printf '%s\n' 'SOURCE_EXPORT_ONLY=true' 'RELEASE_ACCEPTANCE=NOT_RUN' > review-artifacts/status.txt
       - name: Prepare offline test dependencies
