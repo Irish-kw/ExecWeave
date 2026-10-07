@@ -1,8 +1,10 @@
-# Observation integrity: 0.8.35 work in progress
+# Observation integrity (0.8.35)
 
-This document describes the first implementation batch in PR #112. **It is not
-release approval.** The package version remains 0.8.34 until all release blockers
-are resolved, CI is green, and a new exact-SHA Grok Bot verification passes.
+This document describes the observation-integrity semantics introduced by PR #112
+and their honest limits. **It is not release approval.** The version metadata moves
+to 0.8.35 only in a separate release-only change; whether 0.8.35 was published, and
+with which verification evidence, is recorded by the `v0.8.35` tag, its GitHub
+Release notes, and the PyPI upload.
 
 ## Three different results
 
@@ -115,9 +117,9 @@ The demo exits 0 when this **negative example** reproduces correctly. Its report
 still says `observation_acceptance: FAIL`. General runs retain `task_validation:
 unverified` unless a real independent validation contract supplies evidence.
 
-## Remaining release blockers
+## Release gates and honest limits
 
-The source-level blockers above are implemented but **release acceptance is still not
+The source-level requirements above are implemented, but **release acceptance is not
 automatic**. The finished candidate must pass the complete Linux/macOS/Windows matrix,
 including native Windows ACL behavior, and a new independent exact-SHA review. A safe real
 provider run must be used where the verifier can guarantee that the provider cannot escape
@@ -135,6 +137,7 @@ regression coverage. Hard-kill behavior still cannot be represented as a success
 finalization event when the recorder itself is forcibly terminated; consumers must treat a
 missing terminal receipt as incomplete evidence, not reconstruct a fictitious success.
 
-No merge, version bump, tag, GitHub Release, or PyPI upload is authorized until CI and the
-final exact-SHA independent acceptance both pass. Published-PyPI clean-install verification
-remains a separate post-publication gate.
+The code stage merges to `main` without a version change. The 0.8.35 version bump is a
+separate release-only change, and no tag, GitHub Release, or PyPI upload is made until full
+CI and a new exact-SHA independent acceptance of that release commit both pass.
+Published-PyPI clean-install verification remains a separate post-publication gate.

@@ -1,8 +1,13 @@
 # Changelog
 
-## Unreleased — target 0.8.35, release blocked
+## 0.8.35 — observation integrity and release hardening
 
-PR #112 observation-integrity and release-hardening work now includes:
+The `v0.8.35` tag, its GitHub Release, and the PyPI upload are the release record. Until
+they exist, this entry describes unreleased code on `main`; the version metadata moves to
+0.8.35 only in a separate release-only change. Final verification results for a published
+version are recorded in its GitHub Release notes.
+
+Observation-integrity and release-hardening work from PR #112:
 
 - Separate process exit, independent task verification, observation completeness, and
   archive finalization. `finalization.json` persists a durable `run_assessment` bound to
@@ -33,6 +38,7 @@ PR #112 observation-integrity and release-hardening work now includes:
 - Add reproducible negative-observation and release-hardening regression tests while
   preserving all historical test IDs through exact SHA-256-pinned migrations.
 
-Release remains blocked until full Linux/macOS/Windows CI (including real Windows ACL
-checks), a safe real-provider acceptance path, and a new exact-SHA independent Grok Bot
-release review are complete. No 0.8.35 tag, GitHub Release, or PyPI upload has been made.
+Release gates for 0.8.35: full Linux/macOS/Windows CI (including real Windows ACL checks),
+a safe real-provider acceptance path, and a new exact-SHA independent Grok Bot review of the
+release-only commit must all pass before the `v0.8.35` tag, GitHub Release, or PyPI upload is
+made. Clean-venv installation from public PyPI is verified after publication.
