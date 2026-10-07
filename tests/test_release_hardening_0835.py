@@ -253,6 +253,35 @@ def test_browser_pairing_exchanges_post_body_for_http_only_cookie(tmp_path: Path
         thread.join(timeout=5)
 
 
+def test_live_csp_allows_only_the_blob_image_capability_needed_by_gif_export(tmp_path: Path) -> None:
+    state = _LiveState("csp", tmp_path / "events.jsonl")
+    server = _LocalThreadingHTTPServer(
+        ("127.0.0.1", 0),
+        _handler_factory(state, "api-secret", _PairingGate("pair-secret")),
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    host, port = server.server_address[:2]
+    try:
+        connection = HTTPConnection(host, port, timeout=2)
+        connection.request("GET", "/")
+        response = connection.getresponse()
+        assert response.status == 200
+        csp = response.getheader("Content-Security-Policy")
+        assert csp is not None
+        assert "img-src 'self' data: blob:" in csp
+        assert "connect-src 'self'" in csp
+        assert "frame-ancestors 'none'" in csp
+        assert "unsafe-eval" not in csp
+        assert "*" not in csp
+        response.read()
+        connection.close()
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
 def test_automatic_capture_policy_fails_closed_without_breaking_explicit_sdk_capture(
     tmp_path: Path, monkeypatch
 ) -> None:
