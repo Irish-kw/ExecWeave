@@ -5,7 +5,7 @@ import os
 import stat
 import threading
 from http.client import HTTPConnection
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import pytest
 
@@ -215,6 +215,60 @@ def test_macos_private_etc_canonical_path_remains_system_configuration(monkeypat
         )
         == "system_configuration"
     )
+
+
+# PureWindowsPath stands in for the host-native WindowsPath that Path(...) yields on
+# a Windows verifier, so every host exercises the cross-host rendering.
+_HOST_PATH_FLAVOURS = pytest.mark.parametrize(
+    "flavour", [str, PurePosixPath, PureWindowsPath], ids=["str", "posix_path", "windows_path"]
+)
+
+
+@_HOST_PATH_FLAVOURS
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("/etc", "system_configuration"),
+        ("/etc/hosts", "system_configuration"),
+        ("/usr/local/bin/tool", "system_software"),
+        ("/bin/sh", "system_software"),
+        ("/sbin/init", "system_software"),
+        ("/lib/libc.so", "system_software"),
+        ("/lib64/ld.so", "system_software"),
+        ("/boot/grub/grub.cfg", "boot_configuration"),
+        ("/System/Library/CoreServices/x", "macos_system"),
+        ("/Library/LaunchDaemons/x.plist", "macos_system_library"),
+        ("/home/user/work/primes.py", None),
+        ("/tmp/execweave-run/output.txt", None),
+        ("/Users/me/Library/x", None),
+        ("/etcetera/x", None),
+        ("/usrdata/x", None),
+        ("/private/etcetera/x", None),
+        ("/private/var/folders/x/primes.py", None),
+    ],
+)
+@pytest.mark.parametrize("host_platform", ["linux", "darwin"])
+def test_posix_system_path_category_is_independent_of_host_path_flavour(
+    monkeypatch, flavour, raw: str, expected: str | None, host_platform: str
+) -> None:
+    import execweave.risk as risk
+
+    monkeypatch.setattr(risk.sys, "platform", host_platform)
+    assert risk.system_path_category(flavour(raw), os_name="posix") == expected
+
+
+@_HOST_PATH_FLAVOURS
+@pytest.mark.parametrize(
+    ("host_platform", "expected"), [("darwin", "system_configuration"), ("linux", None)]
+)
+def test_private_etc_alias_is_darwin_only_for_every_host_path_flavour(
+    monkeypatch, flavour, host_platform: str, expected: str | None
+) -> None:
+    import execweave.risk as risk
+
+    monkeypatch.setattr(risk.sys, "platform", host_platform)
+    for raw in ("/private/etc", "/private/etc/execweave-never-created"):
+        assert risk.system_path_category(flavour(raw), os_name="posix") == expected
 
 
 def test_hook_configuration_is_time_qualified_at_start_and_end(tmp_path: Path, monkeypatch) -> None:

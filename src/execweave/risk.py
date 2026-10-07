@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 import sys
-from pathlib import Path, PureWindowsPath
+from pathlib import Path, PurePath, PureWindowsPath
 from typing import Mapping, Sequence
 
 _PRIVILEGE_LAUNCHERS = frozenset({"sudo", "doas", "pkexec", "su", "runas"})
@@ -78,7 +78,10 @@ def system_path_category(
                 return category
         return None
 
-    candidate = str(path)
+    # POSIX semantics were selected, so the verdict must not depend on the host's
+    # Path flavour: a host-native WindowsPath renders "/etc/x" as "\etc\x".
+    # Strings are already logical POSIX paths and stay verbatim.
+    candidate = path.as_posix() if isinstance(path, PurePath) else str(path)
     if sys.platform == "darwin":
         # macOS resolves /etc through /private/etc. Preserve the system-config
         # classification after canonical path resolution without treating
