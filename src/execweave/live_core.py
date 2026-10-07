@@ -726,6 +726,12 @@ def _handler_factory(
         def do_GET(self) -> None:
             parsed = urlsplit(self.path)
             path = parsed.path
+            if path == "/favicon.ico" and not parsed.query and not parsed.fragment:
+                # Browsers may request a favicon before pairing/authentication.
+                # Return no content so this cosmetic request cannot leak run evidence
+                # or create a misleading authentication error in the JS console.
+                self._send(b"", "image/x-icon", 204)
+                return
             if path == "/" and not self._authorized(parsed):
                 # This page contains no run evidence and no authentication secret.
                 self._send(_PAIRING_HTML.encode("utf-8"), "text/html; charset=utf-8")

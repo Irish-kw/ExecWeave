@@ -156,17 +156,65 @@ def test_system_path_change_creates_risk_without_writing_system_path(tmp_path: P
     handler = SessionFileEventHandler(
         session_id="s", session_entity=session, sink=sink, excluded_roots=[sink.path]
     )
-    handler._emit(FileModifiedEvent("/etc/execweave-never-created"))
+    if os.name == "nt":
+        system_root = Path(os.environ.get("SystemRoot", r"C:\\Windows"))
+        observed = system_root / "execweave-never-created"
+        expected_trigger = "windows_system"
+    else:
+        observed = Path("/etc/execweave-never-created")
+        expected_trigger = "system_configuration"
+    handler._emit(FileModifiedEvent(str(observed)))
     rows = _records(sink.path)
     assert [row["event_type"] for row in rows] == [
         "filesystem.modified",
         "risk.system_path_change",
     ]
     risk = rows[-1]
-    assert risk["attributes"]["trigger"] == "system_configuration"
+    assert risk["attributes"]["trigger"] == expected_trigger
     assert risk["attributes"]["default_decision"] == "deny"
     assert risk["attributes"]["enforced"] is False
-    assert not Path("/etc/execweave-never-created").exists()
+    assert not observed.exists()
+
+
+def test_unauthenticated_favicon_is_empty_and_does_not_require_run_access(tmp_path: Path) -> None:
+    state = _LiveState("favicon", tmp_path / "events.jsonl")
+    server = _LocalThreadingHTTPServer(
+        ("127.0.0.1", 0),
+        _handler_factory(state, "api-secret", _PairingGate("pair-secret")),
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    host, port = server.server_address[:2]
+    try:
+        connection = HTTPConnection(host, port, timeout=2)
+        connection.request("GET", "/favicon.ico")
+        response = connection.getresponse()
+        assert response.status == 204
+        assert response.read() == b""
+        connection.close()
+
+        connection = HTTPConnection(host, port, timeout=2)
+        connection.request("GET", "/graph.json")
+        response = connection.getresponse()
+        assert response.status == 401
+        response.read()
+        connection.close()
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_macos_private_etc_canonical_path_remains_system_configuration(monkeypatch) -> None:
+    import execweave.risk as risk
+
+    monkeypatch.setattr(risk.sys, "platform", "darwin")
+    assert (
+        risk.system_path_category(
+            Path("/private/etc/execweave-never-created"), os_name="posix"
+        )
+        == "system_configuration"
+    )
 
 
 def test_hook_configuration_is_time_qualified_at_start_and_end(tmp_path: Path, monkeypatch) -> None:

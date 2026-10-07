@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path, PureWindowsPath
 from typing import Mapping, Sequence
 
@@ -78,6 +79,12 @@ def system_path_category(
         return None
 
     candidate = str(path)
+    if sys.platform == "darwin":
+        # macOS resolves /etc through /private/etc. Preserve the system-config
+        # classification after canonical path resolution without treating
+        # /private/etc as a Linux system root.
+        if candidate == "/private/etc" or candidate.startswith("/private/etc/"):
+            return "system_configuration"
     for prefix, category in _POSIX_SYSTEM_PREFIXES:
         if candidate == prefix or candidate.startswith(prefix + "/"):
             return category

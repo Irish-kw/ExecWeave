@@ -80,6 +80,18 @@ CHANGES = {
         "b649a31b5273dbaf6551f6a8bd33523e2ffddc98c6a9e144da2a75385e376aea",
         "PR #112: preserve the historical Ollama visible-acceptance test ID while changing its URL parser contract to require a credential-free loopback URL plus a separately announced one-time pairing code; provider availability, cleanup, and evidence checks remain unchanged.",
     ),
+    "tests/test_live_logs_export.py": (
+        "2a2b6a640884e151c01ff39d5a386d2c5f539959d7bbb60236dcb899f48f5d90",
+        "PR #112: preserve the historical replay/live-auth test ID while reversing its obsolete browser-secret assertions: the authenticated live shell must not embed the API token or header credential and must use same-origin cookie authentication; final-document replacement prohibitions remain unchanged.",
+    ),
+    "tests/test_rule_pack.py": (
+        "d79ab8a8e1d25cef16ce77570f1bbd3780045227a0a7f636f0a28dd516030758",
+        "PR #112: preserve every historical rule-pack test ID while adding the current graph schema version to the synthetic graph fixture so the CLI exercises the new strict versioned reader rather than depending on an invalid versionless artifact.",
+    ),
+    "tests/test_cursor_lifecycle_handoff.py": (
+        "5513ed3187f901c894afb2d60ebf3e826c2070822f0fc5861d0734a9532837d9",
+        "PR #112: preserve all historical Cursor handoff test IDs and exact executable/ancestry assertions while extending only the synthetic child lifetime to make the real-process integration deterministic on slower Windows runners; attribution rules are not relaxed.",
+    ),
 }
 
 
