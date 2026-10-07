@@ -620,3 +620,164 @@ def test_external_integrity_anchor_must_match_out_of_band_digest(tmp_path: Path)
     assert mismatch.external_anchor_checked is True
     assert mismatch.external_anchor_match is False
     assert "external anchor digest mismatch" in mismatch.errors
+
+
+_PAIRING_STEPS_LIVE_URL = "http://127.0.0.1:9/"
+
+
+class _FakeLocator:
+    def count(self) -> int:
+        return 1
+
+
+class _FakePairingPage:
+    """Record the browser calls a live-pairing journey makes, without a browser."""
+
+    def __init__(self, url_after_submit: str = _PAIRING_STEPS_LIVE_URL) -> None:
+        self.calls: list[tuple] = []
+        self.url = "about:blank"
+        self._url_after_submit = url_after_submit
+
+    def on(self, event: str, handler) -> None:
+        pass
+
+    def goto(self, url: str) -> None:
+        self.calls.append(("goto", url))
+        self.url = url
+
+    def wait_for_selector(self, selector: str, timeout: int) -> None:
+        self.calls.append(("wait_for_selector", selector, timeout))
+
+    def fill(self, selector: str, value: str) -> None:
+        self.calls.append(("fill", selector, value))
+
+    def click(self, selector: str) -> None:
+        self.calls.append(("click", selector))
+        self.url = self._url_after_submit
+
+    def evaluate(self, expression: str) -> None:
+        self.calls.append(("evaluate", expression))
+
+    def locator(self, selector: str):
+        self.calls.append(("locator", selector))
+        return _FakeLocator()
+
+    def screenshot(self, **kwargs) -> None:
+        pass
+
+
+def _pairing_steps(code: str, timeout_ms: int) -> list[tuple]:
+    return [
+        ("goto", _PAIRING_STEPS_LIVE_URL),
+        ("wait_for_selector", 'input[name="code"]', timeout_ms),
+        ("fill", 'input[name="code"]', code),
+        ("click", 'button[type="submit"]'),
+        ("wait_for_selector", ".node", timeout_ms),
+    ]
+
+
+def _g5_harness(monkeypatch):
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "scripts"))
+    import ollama_interactive_acceptance as interactive
+
+    return interactive
+
+
+def _fake_live_popen(monkeypatch, announcement: str) -> None:
+    """Replace only the harness's ``execweave live`` launch with a fixed announcement."""
+    import subprocess
+    import sys
+
+    real_popen = subprocess.Popen
+
+    def popen(command, *args, **kwargs):
+        if list(command[:2]) == ["fake-execweave", "live"]:
+            command = [sys.executable, "-c", f"print({announcement!r}, flush=True)"]
+        return real_popen(command, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "Popen", popen)
+
+
+def test_live_pairing_helper_submits_the_one_time_code_on_the_credential_free_url(
+    monkeypatch,
+) -> None:
+    visible = _g5_harness(monkeypatch)._impl.visible
+    page = _FakePairingPage()
+    visible._pair_live_page(page, _PAIRING_STEPS_LIVE_URL, "PAIR123", timeout=2.5)
+    assert page.calls == _pairing_steps("PAIR123", 2500)
+
+    redirected = _FakePairingPage(url_after_submit=_PAIRING_STEPS_LIVE_URL + "?token=x")
+    with pytest.raises(AssertionError, match="unexpected browser URL"):
+        visible._pair_live_page(redirected, _PAIRING_STEPS_LIVE_URL, "PAIR123", timeout=2.5)
+
+
+def test_g5_journey_fails_explicitly_without_a_pairing_code(monkeypatch, tmp_path: Path) -> None:
+    from acceptance.reporting import Status
+
+    interactive = _g5_harness(monkeypatch)
+    monkeypatch.setattr(interactive._impl, "_terminal_backend_reason", lambda: None)
+    _fake_live_popen(monkeypatch, f"ExecWeave live: {_PAIRING_STEPS_LIVE_URL}")
+
+    result = interactive._run_interactive(
+        output_root=tmp_path,
+        model="local-model",
+        execweave_bin="fake-execweave",
+        ollama_bin="ollama",
+        timeout=1.0,
+    )
+    assert result.status == Status.FAIL
+    assert result.checks["Launch"].status == Status.FAIL
+    assert "one-time pairing code was not announced" in result.checks["Launch"].reason
+    assert result.checks["Cleanup"].status == Status.PASS
+
+
+def test_g5_journey_pairs_the_browser_with_the_announced_code(monkeypatch, tmp_path: Path) -> None:
+    import sys
+    import types
+
+    from acceptance.reporting import Status
+
+    interactive = _g5_harness(monkeypatch)
+    page = _FakePairingPage()
+
+    class _Playwright:
+        def __init__(self) -> None:
+            browser = types.SimpleNamespace(new_page=lambda **kwargs: page, close=lambda: None)
+            self.chromium = types.SimpleNamespace(launch=lambda **kwargs: browser)
+
+        def start(self):
+            return self
+
+        def stop(self) -> None:
+            pass
+
+    sync_api = types.ModuleType("playwright.sync_api")
+    sync_api.Error = RuntimeError
+    sync_api.sync_playwright = _Playwright
+    monkeypatch.setitem(sys.modules, "playwright.sync_api", sync_api)
+
+    def stop_after_pairing(*args, **kwargs):
+        raise RuntimeError("stop after browser pairing")
+
+    monkeypatch.setattr(interactive._impl, "_terminal_backend_reason", lambda: None)
+    monkeypatch.setattr(interactive._impl, "_spawn_terminal", stop_after_pairing)
+    monkeypatch.setattr(interactive._impl.visible, "_wait_json", lambda url, timeout: {"models": []})
+    monkeypatch.setattr(interactive._impl.visible, "_local_model_present", lambda tags, model: True)
+    _fake_live_popen(
+        monkeypatch,
+        f"ExecWeave live: {_PAIRING_STEPS_LIVE_URL}\nExecWeave pairing code: G5PAIRCODE",
+    )
+
+    result = interactive._run_interactive(
+        output_root=tmp_path,
+        model="local-model",
+        execweave_bin="fake-execweave",
+        ollama_bin="ollama",
+        timeout=3.0,
+    )
+    assert page.calls[:5] == _pairing_steps("G5PAIRCODE", 3000)
+    assert page.calls[5] == ("evaluate", "window.__execweaveG5Document=document")
+    assert result.checks["Launch"].status == Status.FAIL
+    assert "stop after browser pairing" in result.checks["Launch"].reason
+    assert result.checks["Cleanup"].status == Status.PASS
+

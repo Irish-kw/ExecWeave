@@ -135,6 +135,17 @@ def _wait_agent_panel_finished(page: Any, *, timeout: float) -> None:
     )
 
 
+def _pair_live_page(page: Any, live_url: str, pairing_code: str, *, timeout: float) -> None:
+    """Open the credential-free live URL and complete the one-time POST pairing."""
+    page.goto(live_url)
+    page.wait_for_selector('input[name="code"]', timeout=int(timeout * 1000))
+    page.fill('input[name="code"]', pairing_code)
+    page.click('button[type="submit"]')
+    page.wait_for_selector(".node", timeout=int(timeout * 1000))
+    if page.url != live_url:
+        raise AssertionError(f"pairing left an unexpected browser URL: {page.url!r}")
+
+
 def _owned_process_node_ids(
     graph: dict[str, Any], identities: tuple[ProcessIdentity, ...]
 ) -> set[str]:
@@ -588,13 +599,7 @@ def _run_visible(
 
         page = browser.new_page(viewport={"width": 1440, "height": 1000})
         diagnostics = BrowserDiagnostics(page)
-        page.goto(live_url)
-        page.wait_for_selector('input[name="code"]', timeout=int(timeout * 1000))
-        page.fill('input[name="code"]', pairing_code)
-        page.click('button[type="submit"]')
-        page.wait_for_selector(".node", timeout=int(timeout * 1000))
-        if page.url != live_url:
-            raise AssertionError(f"pairing left an unexpected browser URL: {page.url!r}")
+        _pair_live_page(page, live_url, pairing_code, timeout=timeout)
         page.evaluate("window.__execweaveG4Document=document")
         initial_nodes = page.locator(".node").count()
 

@@ -514,8 +514,9 @@ def _run_interactive(
         live_stdout = visible._PipeCapture(live_process.stdout, run_root / "execweave.stdout.txt")
         live_stderr = visible._PipeCapture(live_process.stderr, run_root / "execweave.stderr.txt")
         live_url = live_stdout.wait_for_live_url(timeout=min(timeout, 15.0))
-        if not live_url:
-            raise AssertionError("ExecWeave live URL was not announced")
+        pairing_code = live_stdout.wait_for_pairing_code(timeout=min(timeout, 15.0))
+        if not live_url or not pairing_code:
+            raise AssertionError("ExecWeave live URL or one-time pairing code was not announced")
 
         tags = visible._wait_json(f"{public_endpoint}/api/tags", timeout=min(timeout, 20.0))
         if tags is None:
@@ -542,7 +543,7 @@ def _run_interactive(
 
         page = browser.new_page(viewport={"width": 1440, "height": 1000})
         page.on("pageerror", lambda error: page_errors.append(str(error)))
-        page.goto(live_url)
+        visible._pair_live_page(page, live_url, pairing_code, timeout=timeout)
         page.evaluate("window.__execweaveG5Document=document")
         initial_nodes = page.locator(".node").count()
 
