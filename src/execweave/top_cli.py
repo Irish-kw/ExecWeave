@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from .privacy import add_content_capture_arguments
 from .top import _consume_attach_token_file, run_attached_top, run_top
 from .viewer_dashboard_clean import add_fold_budget_argument, apply_fold_budget
 
@@ -65,11 +66,7 @@ def build_parser() -> argparse.ArgumentParser:
         dest="open_browser",
         help="Open the Web Viewer in addition to the detached terminal dashboard",
     )
-    parser.add_argument(
-        "--capture-content",
-        action="store_true",
-        help="Explicitly opt in to full provider/model plaintext capture (default: metadata only)",
-    )
+    add_content_capture_arguments(parser)
     parser.add_argument("--attach", default=None, help=argparse.SUPPRESS)
     parser.add_argument("--attach-token-file", default=None, help=argparse.SUPPRESS)
     parser.add_argument("--attach-command-json", default="[]", help=argparse.SUPPRESS)
@@ -146,7 +143,7 @@ def main(argv: list[str] | None = None) -> int:
             port=args.port,
             open_browser=args.open_browser,
             linger_seconds=args.linger,
-            content_capture="full" if args.capture_content else "metadata_only",
+            content_capture=args.content_capture,
         )
     except (FileExistsError, RuntimeError, ValueError, OSError) as exc:
         parser.error(str(exc))

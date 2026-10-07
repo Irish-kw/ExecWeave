@@ -273,4 +273,12 @@ jobs:
             fi
             args+=(--allow-test-change "$fixture=PR #110: replace only the nonempty placeholder success fixture with valid graph/conversation JSON because finalization now verifies declared content. Historical test IDs and every assertion are unchanged; new malformed-index and missing-content regressions are added separately. The complete fixture file hash is pinned above.")
           fi
+          if [[ "$HEAD_REF" == "fix/0.8.35-dashboard-integrity" ]]; then
+            fixture="tests/test_release_hardening_0835.py"
+            if [[ "$(git hash-object --no-filters "$fixture")" != "a4e04112df826cc6bee4b13e50f59b54433b110b" ]]; then
+              echo "Unexpected capture-default test change; review the exact test update before allowing it." >&2
+              exit 1
+            fi
+            args+=(--allow-test-change "$fixture=Full provider/model content is now the live/top default because the run stays on the user's machine, so the historical default-capture test keeps its node ID while asserting the default is full and the metadata-only opt-out still stamps explicit_metadata_only. Every other test ID and assertion is unchanged; new parser, mutual-exclusion, entry, and default-run tests live in tests/test_capture_default_full.py. The complete test file hash is pinned above.")
+          fi
           python scripts/check_release_stage_integrity.py "${args[@]}"

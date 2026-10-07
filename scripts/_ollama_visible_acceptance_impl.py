@@ -538,7 +538,7 @@ def _run_visible(
             execweave_bin,
             "live",
             # The journey verifies recorded prompts/responses, so it opts in explicitly;
-            # `live` records no provider plaintext under its metadata-only default.
+            # Request full capture explicitly so this journey never depends on the default.
             "--capture-content",
             "--watch-root",
             str(watch_root),
