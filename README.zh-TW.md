@@ -134,6 +134,8 @@ execweave live --open -- ollama run deepseek-r1:1.5b
 
 這個模式不會幫你啟動 Ollama Server，因此仍需要一個可連線的 upstream server。
 
+兩種模式的 relay 都會轉送每個 request，但在預設的 metadata-only policy 下不會記錄 inference exchange，run 裡不會保存任何 Prompt 或 Response。只有在明確需要記錄對話時，才加上 `--capture-content`（例如 `execweave live --capture-content --open -- ollama serve`）。
+
 ## Dashboard
 
 Dashboard 的設計目標是讓大型、多 Agent 執行仍然可讀，同時不修改底層 evidence。

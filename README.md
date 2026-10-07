@@ -134,6 +134,8 @@ execweave live --open -- ollama run deepseek-r1:1.5b
 
 This mode does not start an Ollama server. A reachable upstream server is still required.
 
+In both modes the relay forwards every request, but under the default metadata-only policy it does not record the inference exchanges, so no prompt or response is stored in the run. Add `--capture-content` (for example, `execweave live --capture-content --open -- ollama serve`) only when you explicitly want the conversation recorded.
+
 ## Dashboard
 
 The dashboard is designed to keep large, multi-agent runs inspectable without changing the underlying evidence.
