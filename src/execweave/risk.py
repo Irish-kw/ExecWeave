@@ -69,10 +69,10 @@ def system_path_category(
             if raw:
                 roots.append((str(PureWindowsPath(raw)).casefold().rstrip("\\/"), category))
         # Standard roots remain covered even in deliberately sparse environments.
-        roots.extend(((r"c:\\windows", "windows_system"),
-                      (r"c:\\program files", "installed_programs"),
-                      (r"c:\\program files (x86)", "installed_programs"),
-                      (r"c:\\programdata", "system_program_data")))
+        roots.extend(((r"c:\windows", "windows_system"),
+                      (r"c:\program files", "installed_programs"),
+                      (r"c:\program files (x86)", "installed_programs"),
+                      (r"c:\programdata", "system_program_data")))
         for root, category in roots:
             if candidate == root or candidate.startswith(root + "\\"):
                 return category

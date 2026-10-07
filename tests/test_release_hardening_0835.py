@@ -271,6 +271,36 @@ def test_private_etc_alias_is_darwin_only_for_every_host_path_flavour(
         assert risk.system_path_category(flavour(raw), os_name="posix") == expected
 
 
+@pytest.mark.parametrize("flavour", [str, PureWindowsPath], ids=["str", "windows_path"])
+@pytest.mark.parametrize(
+    ("environment", "raw", "expected"),
+    [
+        # Standard roots stay covered when the environment is sparse or simulated.
+        ({}, r"C:\Windows\System32\drivers\etc\hosts", "windows_system"),
+        ({}, "C:/Windows/System32/x.dll", "windows_system"),
+        ({}, r"c:\windows", "windows_system"),
+        ({}, r"C:\Program Files\Tool\tool.exe", "installed_programs"),
+        ({}, r"C:\Program Files (x86)\Tool\tool.exe", "installed_programs"),
+        ({}, r"C:\ProgramData\Vendor\config.json", "system_program_data"),
+        ({}, r"C:\Users\me\work\primes.py", None),
+        ({}, r"C:\Windowsfoo\x", None),
+        ({}, r"C:\Program Files Extra\x", None),
+        ({"SystemRoot": r"D:\WinNT"}, r"D:\WinNT\System32\x.dll", "windows_system"),
+        ({"ProgramFiles": r"D:\Apps"}, r"d:\apps\tool.exe", "installed_programs"),
+        ({"ProgramFiles(x86)": r"D:\Apps86"}, r"D:\Apps86\tool.exe", "installed_programs"),
+        ({"ProgramData": r"D:\Data"}, r"D:\Data\Vendor\x", "system_program_data"),
+        ({"SystemRoot": r"D:\WinNT"}, r"D:\WinNTX\x", None),
+        ({"SystemRoot": r"D:\WinNT"}, r"D:\work\primes.py", None),
+    ],
+)
+def test_windows_system_path_category_covers_environment_and_standard_roots(
+    flavour, environment: dict[str, str], raw: str, expected: str | None
+) -> None:
+    from execweave.risk import system_path_category
+
+    assert system_path_category(flavour(raw), os_name="nt", environment=environment) == expected
+
+
 def test_hook_configuration_is_time_qualified_at_start_and_end(tmp_path: Path, monkeypatch) -> None:
     import execweave.agent_bootstrap as bootstrap
 
