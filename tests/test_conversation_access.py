@@ -231,8 +231,9 @@ def test_live_dashboard_includes_conversation_panel_and_authenticated_links() ->
     )
     assert "stopConversationPolling" in html
     assert "conversationRefreshController.abort()" in html
-    assert "window.__execweaveToken" in live_module._AUTHENTICATED_LIVE_HTML
-    assert "X-ExecWeave-Token" in live_module._AUTHENTICATED_LIVE_HTML
+    assert "window.__execweaveToken" not in live_module._AUTHENTICATED_LIVE_HTML
+    assert "X-ExecWeave-Token" not in live_module._AUTHENTICATED_LIVE_HTML
+    assert "credentials:'same-origin'" in live_module._AUTHENTICATED_LIVE_HTML
 
 
 def test_live_content_server_auth_and_path_boundaries(tmp_path: Path) -> None:
@@ -259,16 +260,22 @@ def test_live_content_server_auth_and_path_boundaries(tmp_path: Path) -> None:
             urlopen(f"{base}/content/sha256/{digest}.txt", timeout=2)
         assert unauthorized.value.code == 401
 
-        with urlopen(f"{base}/content/sha256/{digest}.txt?t={token}", timeout=2) as response:
+        from urllib.request import Request
+        headers = {"X-ExecWeave-Token": token}
+        with urlopen(Request(f"{base}/content/sha256/{digest}.txt", headers=headers), timeout=2) as response:
             assert response.read().decode("utf-8") == "stored conversation"
-        with urlopen(f"{base}/conversations.md?t={token}", timeout=2) as response:
+        with urlopen(Request(f"{base}/conversations.md", headers=headers), timeout=2) as response:
             assert response.read().decode("utf-8").splitlines() == ["# index"]
 
+        # Query-string credentials are no longer a supported authentication path.
+        with pytest.raises(HTTPError) as query_token:
+            urlopen(f"{base}/content/sha256/{digest}.txt?t={token}", timeout=2)
+        assert query_token.value.code == 401
         with pytest.raises(HTTPError) as traversal:
-            urlopen(f"{base}/content/../secret.txt?t={token}", timeout=2)
+            urlopen(Request(f"{base}/content/../secret.txt", headers=headers), timeout=2)
         assert traversal.value.code == 404
         with pytest.raises(HTTPError) as arbitrary:
-            urlopen(f"{base}/secret.txt?t={token}", timeout=2)
+            urlopen(Request(f"{base}/secret.txt", headers=headers), timeout=2)
         assert arbitrary.value.code == 404
     finally:
         server.shutdown()

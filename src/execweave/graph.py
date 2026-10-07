@@ -8,9 +8,11 @@ from pathlib import Path
 from typing import Any
 
 from .session_summary import SessionSummary
+from .observation import session_outcome as assessed_session_outcome
 from .fidelity import FidelityAccumulator
 from .provider_lifecycle import ProviderLifecycleAnnotation, provider_lifecycle_annotation
 from .validate import validate_event_stream
+from .private_io import private_artifact_path, write_private_json
 
 GRAPH_SCHEMA_VERSION = "0.2"
 
@@ -350,6 +352,7 @@ class ExecutionGraph:
     evidence_counts: dict[str, int] = field(default_factory=dict)
     session_outcome: dict[str, Any] = field(default_factory=dict)
     runtime_environment: dict[str, Any] = field(default_factory=dict)
+    observation_assessment: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -365,6 +368,7 @@ class ExecutionGraph:
             "evidence_counts": dict(self.evidence_counts),
             "session_outcome": dict(self.session_outcome),
             "runtime_environment": dict(self.runtime_environment),
+            "observation_assessment": dict(self.observation_assessment),
             "nodes": [node.to_dict() for node in self.nodes],
             "edges": [edge.to_dict() for edge in self.edges],
         }
@@ -484,7 +488,10 @@ class GraphAccumulator:
             ),
             fidelity=self._fidelity.to_dict(),
             evidence_counts=dict(self._session_summary.counts),
-            session_outcome=dict(self._session_summary.outcome),
+            session_outcome=assessed_session_outcome(
+                self._session_summary.outcome, self._session_summary.observation
+            ),
+            observation_assessment=self._session_summary.observation,
             runtime_environment=dict(self._session_summary.environment),
         )
 
@@ -530,15 +537,12 @@ def write_execution_graph(
     *,
     metadata: dict[str, Any] | None = None,
 ) -> Path:
-    output = Path(path).expanduser().resolve()
+    output = private_artifact_path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
     if output.exists() and output.stat().st_size > 0:
         raise FileExistsError(f"ExecWeave graph output already exists: {output}")
     payload = graph.to_dict()
     if metadata is not None:
         payload["metadata"] = metadata
-    output.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    write_private_json(output, payload)
     return output

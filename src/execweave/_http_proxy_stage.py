@@ -6,6 +6,7 @@ from . import _http_proxy_base as _base
 from . import model_runtime_full_fidelity as _runtime_ff
 from . import openai_compatible_full_fidelity as _openai_ff
 from ._http_proxy_base import *  # noqa: F403
+from .privacy import full_content_capture_enabled
 
 
 # OpenAI-compatible request config is request-side evidence too. Without this relation
@@ -435,6 +436,8 @@ def record_exchange_fail_open(
     request_only: bool = False,
     request_recorded: bool = False,
 ) -> bool:
+    if not full_content_capture_enabled():
+        return False
     try:
         if request_only:
             return _record_request_phase(

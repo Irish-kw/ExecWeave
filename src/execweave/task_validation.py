@@ -14,9 +14,10 @@ import os
 import re
 import stat
 import sys
-from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree as ET
+
+from .private_io import write_private_json
 
 MAX_REPORT_BYTES = 2 * 1024 * 1024
 MAX_CASES = 10_000
@@ -293,10 +294,9 @@ def main(argv: list[str] | None = None) -> int:
             from .task_artifacts import bind_artifacts
 
             receipt = bind_artifacts(receipt, args.artifact)
-        # Exclusive creation preserves original evidence and existing derivatives.
-        with Path(args.output).open("x", encoding="utf-8", newline="\n") as handle:
-            json.dump(receipt, handle, ensure_ascii=False, indent=2, allow_nan=False)
-            handle.write("\n")
+        # Exclusive private creation preserves original evidence and existing derivatives.
+        json.dumps(receipt, ensure_ascii=False, indent=2, allow_nan=False)
+        write_private_json(args.output, receipt)
         print(
             json.dumps(
                 {

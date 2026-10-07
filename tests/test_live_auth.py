@@ -9,7 +9,7 @@ import threading
 import time
 from pathlib import Path
 from urllib.error import HTTPError
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 import pytest
@@ -18,6 +18,7 @@ from execweave.live import (
     _AUTHENTICATED_LIVE_HTML,
     _LiveState,
     _LocalThreadingHTTPServer,
+    _PairingGate,
     _handler_factory,
     run_live,
 )
@@ -26,26 +27,33 @@ from execweave.live import (
 def test_live_handler_requires_token_for_all_evidence_routes(tmp_path: Path) -> None:
     state = _LiveState("s1", tmp_path / "events.jsonl")
     token = "secret-token"
-    server = _LocalThreadingHTTPServer(("127.0.0.1", 0), _handler_factory(state, token))
+    server = _LocalThreadingHTTPServer(
+        ("127.0.0.1", 0), _handler_factory(state, token, _PairingGate("pair-code"))
+    )
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     host, port = server.server_address[:2]
     base = f"http://{host}:{port}"
     try:
-        for path in ("/", "/graph.json", "/live.json?after=-1", "/final"):
+        with urlopen(base + "/", timeout=1) as response:
+            html = response.read().decode("utf-8")
+            assert response.status == 200
+            assert "one-time pairing code" in html
+            assert token not in html
+
+        for path in ("/graph.json", "/live.json?after=-1", "/final"):
             with pytest.raises(HTTPError) as exc_info:
                 urlopen(base + path, timeout=1)
             assert exc_info.value.code == 401
 
+        # Historical query-token bootstrap is deliberately rejected.
+        with pytest.raises(HTTPError) as exc_info:
+            urlopen(base + "/graph.json?t=secret-token", timeout=1)
+        assert exc_info.value.code == 401
+
         with pytest.raises(HTTPError) as exc_info:
             urlopen(Request(base + "/graph.json", headers={"X-ExecWeave-Token": "wrong"}), timeout=1)
         assert exc_info.value.code == 401
-
-        with urlopen(base + "/?t=secret-token", timeout=1) as response:
-            html = response.read().decode("utf-8")
-            assert response.status == 200
-            assert response.headers["Referrer-Policy"] == "no-referrer"
-            assert "X-ExecWeave-Token" in html
 
         request = Request(base + "/graph.json", headers={"X-ExecWeave-Token": token})
         with urlopen(request, timeout=1) as response:
@@ -72,7 +80,9 @@ def test_client_reset_during_live_response_is_a_clean_disconnect(tmp_path: Path)
                 self.unexpected.append((error_type, error))
             super().handle_error(request, client_address)
 
-    server = RecordingServer(("127.0.0.1", 0), _handler_factory(state, token))
+    server = RecordingServer(
+        ("127.0.0.1", 0), _handler_factory(state, token, _PairingGate("pair-code"))
+    )
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -80,7 +90,7 @@ def test_client_reset_during_live_response_is_a_clean_disconnect(tmp_path: Path)
             client = socket.create_connection(server.server_address, timeout=2)
             client.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 256)
             client.sendall(
-                f"GET /?t={token} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n".encode()
+                f"GET / HTTP/1.1\r\nHost: localhost\r\nX-ExecWeave-Token: {token}\r\nConnection: close\r\n\r\n".encode()
             )
             # Winsock exposes ``linger`` as two unsigned shorts; POSIX uses two
             # ints. Supplying the four-byte Winsock layout to Linux/macOS is an
@@ -107,9 +117,11 @@ def test_live_viewer_bootstrap_keeps_token_in_memory_and_uses_headers() -> None:
     completion no longer fetches or renders a separate ``/final`` document, so the
     authenticated page a reader ends on is the one they were already looking at.
     """
-    assert "new URLSearchParams(location.search).get('t')" in _AUTHENTICATED_LIVE_HTML
-    assert "history.replaceState(null,'',location.pathname)" in _AUTHENTICATED_LIVE_HTML
-    assert "'X-ExecWeave-Token':liveAuthToken" in _AUTHENTICATED_LIVE_HTML
+    # Historical test ID retained: the browser no longer owns the API token at all.
+    assert "URLSearchParams(location.search)" not in _AUTHENTICATED_LIVE_HTML
+    assert "liveAuthToken" not in _AUTHENTICATED_LIVE_HTML
+    assert "X-ExecWeave-Token" not in _AUTHENTICATED_LIVE_HTML
+    assert "credentials:'same-origin'" in _AUTHENTICATED_LIVE_HTML
 
     assert "fetch('/final'" not in _AUTHENTICATED_LIVE_HTML
     assert "location.href='/final'" not in _AUTHENTICATED_LIVE_HTML
@@ -122,7 +134,13 @@ def test_run_live_announces_token_but_does_not_persist_it(tmp_path: Path) -> Non
 
     def announce(url: str) -> None:
         observed["url"] = url
+
+    def announce_token(token: str) -> None:
+        observed["token"] = token
         announced.set()
+
+    def announce_pairing(code: str) -> None:
+        observed["pairing"] = code
 
     def worker() -> None:
         try:
@@ -137,6 +155,8 @@ def test_run_live_announces_token_but_does_not_persist_it(tmp_path: Path) -> Non
                 open_browser=False,
                 linger_seconds=0.05,
                 announce=announce,
+                announce_api_token=announce_token,
+                announce_pairing_code=announce_pairing,
             )
         except BaseException as exc:
             observed["error"] = exc
@@ -148,12 +168,12 @@ def test_run_live_announces_token_but_does_not_persist_it(tmp_path: Path) -> Non
     if "error" in observed:
         raise observed["error"]  # type: ignore[misc]
 
-    authenticated_url = str(observed["url"])
-    parsed = urlsplit(authenticated_url)
-    values = parse_qs(parsed.query).get("t", [])
-    assert len(values) == 1 and values[0]
-    token = values[0]
-    base = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+    base = str(observed["url"])
+    parsed = urlsplit(base)
+    assert parsed.query == "" and parsed.fragment == ""
+    token = str(observed["token"])
+    pairing = str(observed["pairing"])
+    assert token and pairing and token != pairing
 
     request = Request(base + "live.json?after=-1", headers={"X-ExecWeave-Token": token})
     with urlopen(request, timeout=1) as response:
@@ -173,4 +193,6 @@ def test_run_live_announces_token_but_does_not_persist_it(tmp_path: Path) -> Non
         result.graph,  # type: ignore[union-attr]
         result.viewer,  # type: ignore[union-attr]
     ):
-        assert token not in artifact.read_text(encoding="utf-8")
+        text = artifact.read_text(encoding="utf-8")
+        assert token not in text
+        assert pairing not in text

@@ -16,6 +16,7 @@ from execweave.claude_hook_cli import main as claude_hook_main
 from execweave.codex_hook_cli import main as codex_hook_main
 from execweave.cursor_hook_cli import main as cursor_hook_main
 from execweave.entry import _live_command
+from execweave.hook_command import hook_argv
 from execweave.opencode_hook_cli import main as opencode_hook_main
 from execweave.opencode_plugin_cli import plugin_text
 
@@ -40,9 +41,12 @@ def test_supported_agent_normalizes_platform_launchers(
 @pytest.mark.parametrize(
     ("provider", "expected_relative", "marker"),
     [
-        ("claude", Path(".claude/settings.json"), "execweave-claude-hook --auto"),
-        ("codex", Path(".codex/hooks.json"), "execweave-codex-hook --auto"),
-        ("cursor", Path(".cursor/hooks.json"), "execweave-cursor-hook --auto"),
+        pytest.param("claude", Path(".claude/settings.json"), "execweave.claude_hook_cli --auto",
+                     id="claude-expected_relative0-execweave-claude-hook --auto"),
+        pytest.param("codex", Path(".codex/hooks.json"), "execweave.codex_hook_entry --auto",
+                     id="codex-expected_relative1-execweave-codex-hook --auto"),
+        pytest.param("cursor", Path(".cursor/hooks.json"), "execweave.cursor_hook_cli --auto",
+                     id="cursor-expected_relative2-execweave-cursor-hook --auto"),
     ],
 )
 def test_json_bootstrap_is_idempotent_and_preserves_existing_configuration(
@@ -64,12 +68,12 @@ def test_json_bootstrap_is_idempotent_and_preserves_existing_configuration(
 
     assert first == AgentBootstrapResult(
         provider=provider,
-        status="active",
+        status="configured_unverified",
         path=str(target),
         changed=True,
-        detail="specialized hook/plugin bootstrap is configured",
+        detail="specialized hook/plugin configured; delivery unverified",
     )
-    assert second.status == "active"
+    assert second.status == "configured_unverified"
     assert second.changed is False
     payload = json.loads(target.read_text(encoding="utf-8"))
     assert payload["unrelated"] == {"keep": True}
@@ -138,13 +142,13 @@ def test_opencode_bootstrap_uses_global_plugin_and_is_idempotent(tmp_path: Path)
     second = bootstrap_supported_agent(["opencode"], home=tmp_path, environment={})
     target = tmp_path / ".config" / "opencode" / "plugins" / "execweave.ts"
 
-    assert result.status == "active"
+    assert result.status == "configured_unverified"
     assert result.changed is True
     assert second.changed is False
     assert result.path == str(target)
     text = target.read_text(encoding="utf-8")
-    assert 'Bun.spawn(["execweave-opencode-hook", "--auto"], {' in text
-    assert plugin_text(("execweave-opencode-hook", "--auto")) == text
+    assert "Bun.spawn(" in text
+    assert plugin_text(tuple(hook_argv("opencode"))) == text
     assert not (tmp_path / ".opencode").exists()
 
 

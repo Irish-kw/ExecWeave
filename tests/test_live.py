@@ -3,7 +3,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 import execweave.live as live_module
@@ -155,6 +155,9 @@ def test_live_graph_serves_snapshot_and_writes_final_artifacts(tmp_path: Path) -
 
     def announce(url: str) -> None:
         state["url"] = url
+
+    def announce_token(token: str) -> None:
+        state["token"] = token
         announced.set()
 
     def worker() -> None:
@@ -170,6 +173,7 @@ def test_live_graph_serves_snapshot_and_writes_final_artifacts(tmp_path: Path) -
                 open_browser=False,
                 linger_seconds=0.1,
                 announce=announce,
+                announce_api_token=announce_token,
             )
         except BaseException as exc:  # surfaced in the main test thread below
             state["error"] = exc
@@ -181,18 +185,18 @@ def test_live_graph_serves_snapshot_and_writes_final_artifacts(tmp_path: Path) -
     if "error" in state:
         raise state["error"]  # type: ignore[misc]
 
-    authenticated_url = str(state["url"])
-    parsed = urlsplit(authenticated_url)
-    token_values = parse_qs(parsed.query).get("t", [])
-    assert len(token_values) == 1 and token_values[0]
-    base_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+    base_url = str(state["url"])
+    parsed = urlsplit(base_url)
+    assert parsed.query == "" and parsed.fragment == ""
+    token = str(state["token"])
+    assert token
     payload: dict[str, object] | None = None
     deadline = time.monotonic() + 3
     while time.monotonic() < deadline:
         try:
             request = Request(
                 base_url + "graph.json",
-                headers={"X-ExecWeave-Token": token_values[0]},
+                headers={"X-ExecWeave-Token": token},
             )
             with urlopen(request, timeout=1) as response:
                 payload = json.loads(response.read().decode("utf-8"))

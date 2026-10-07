@@ -41,7 +41,7 @@ def _execution(graph: dict[str, Any]) -> dict[str, Any]:
     result = {
         "state": "unknown", "reason": "no_terminal_evidence", "return_code": code,
         "event_id": event_id, "timestamp": _text(outcome.get("timestamp")),
-        "task_success_implied": False,
+        "task_success_implied": False, "failure_domain": None,
     }
     if outcome.get("recorder_finished") is not True or event_id is None:
         return result
@@ -54,12 +54,20 @@ def _execution(graph: dict[str, Any]) -> dict[str, Any]:
         "interrupted" if outcome.get("interrupted") is True else
         "succeeded" if code == 0 else "failed" if code is not None else "unknown"
     )
-    declared = outcome.get("state")
+    declared = outcome.get("execution_state", outcome.get("state"))
     if declared not in (None, state):
         result["reason"] = "conflicting_terminal_metadata"
         return result
-    result.update(state=state, reason="recorded_terminal_event" if state != "unknown"
-                  else "terminal_exit_unavailable")
+    failure_domain = (
+        "environment" if state == "collector_failed" else
+        "operator" if state == "interrupted" else
+        "task" if state == "failed" else None
+    )
+    result.update(
+        state=state,
+        reason="recorded_terminal_event" if state != "unknown" else "terminal_exit_unavailable",
+        failure_domain=failure_domain,
+    )
     return result
 
 
@@ -178,6 +186,10 @@ def build_run_assessment(graph: dict[str, Any], *, max_records: int = MAX_RECORD
                        "inspected_records": max_records - remaining,
                        "invalid_records": invalid, "ambiguous_node_ids": len(ambiguous)},
         "execution": _execution(graph),
+        "observation": _object(graph.get("observation_assessment")) or {
+            "state": "not_verified", "reasons": ["legacy_observation_assessment_missing"],
+            "end_to_end_completeness_proven": False,
+        },
         "task_validation": {**assessment_subjects(list(nodes.values())), "state": "unverified", "reason": "no_independent_validation_contract",
                             "declared_tasks": len(task_ids), "reported_completed": len(completed),
                             "reported_failed": len(failed), "both_reported": len(completed & failed),

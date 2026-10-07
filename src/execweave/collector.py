@@ -26,8 +26,10 @@ from .cursor_lifecycle import (
     run_cursor_handoff,
 )
 from .filesystem import FileWatcher
+from .privacy import content_capture_policy
 from .schema import Entity, RuntimeEvent
 from .sink import JsonlSink
+from .risk import privilege_process_trigger, risk_attributes
 
 
 _PR_SET_CHILD_SUBREAPER = 36
@@ -154,38 +156,32 @@ class RuntimeCollector:
         self._cursor_handoff_info: dict[str, object] = {}
 
     def _filesystem_excluded_roots(self) -> list[Path]:
-        """Return ExecWeave-owned paths that must never become workload evidence.
-
-        The default ``.execweave`` tree and the runtime event stream were already
-        internal. Live mode can also place ``events.jsonl`` and ``semantic.jsonl``
-        together in a caller-selected output directory inside the watch root. When
-        those files are siblings, exclude their whole run directory so ExecWeave's
-        own evidence writes cannot recursively manufacture filesystem evidence.
-        A separately configured semantic sidecar remains an exact-file exclusion.
-        """
+        """Exclude reserved artifacts, never the caller's entire output directory."""
         sink_path = self.sink.path.expanduser().resolve()
+        run_root = sink_path.parent
         excluded = [(self.watch_root / ".execweave").resolve(), sink_path]
-        configured = os.environ.get("EXECWEAVE_SEMANTIC_SIDECAR")
-        if not configured:
-            return excluded
-
-        semantic_path = Path(configured).expanduser().resolve()
-        excluded.append(
-            semantic_path.parent if semantic_path.parent == sink_path.parent else semantic_path
+        reserved = (
+            "events.jsonl", "events.semantic.jsonl", "semantic.jsonl", "graph.json",
+            "viewer.html", "conversations.json", "finalization.json", "content",
         )
+        excluded.extend(run_root / name for name in reserved)
+        configured = os.environ.get("EXECWEAVE_SEMANTIC_SIDECAR")
+        if configured:
+            excluded.append(Path(configured).expanduser().resolve())
         return excluded
 
     def run(self, command: list[str]) -> int:
         if not command:
             raise ValueError("command must not be empty")
 
-        launch_command = resolve_launch_command(command)
+        launch_command: list[str] | None = None
         cursor_invocation = os.name == "nt" and is_cursor_invocation(command)
-        cursor_baseline = process_baseline(launch_command[0]) if cursor_invocation else set()
+        cursor_baseline: set[tuple[int, float]] = set()
         self._preserved_processes = set()
         self._cursor_handoff_info = {
             "cursor_lifecycle_handoff": "launcher" if cursor_invocation else "not_applicable",
         }
+        privacy = content_capture_policy()
         agent_name = infer_agent_name(command)
         agent = Entity(type="agent", id=f"agent:{agent_name}", name=agent_name)
         session = Entity(
@@ -197,6 +193,8 @@ class RuntimeCollector:
                 "cwd": str(self.watch_root),
                 "backend": self.backend_name,
                 "execweave_version": __version__,
+                "content_capture_mode": privacy.mode,
+                "content_capture_policy_state": privacy.state,
             },
         )
         self.sink.emit(
@@ -208,14 +206,21 @@ class RuntimeCollector:
                 target=session,
                 attributes={
                     "collector_pid": os.getpid(),
+                    "short_lived_process_loss_possible": True,
+                    "filesystem_collection_enabled": self.collect_filesystem,
+                    "process_coverage": "polling_not_exhaustive",
                     "backend": self.backend_name,
                     "execweave_version": __version__,
                     "python_executable": sys.executable,
                     "python_version": sys.version.split()[0],
                     "package_path": str(Path(__file__).resolve().parent),
+                    "content_capture_mode": privacy.mode,
+                    "content_capture_policy_state": privacy.state,
                 },
             )
         )
+
+        self._record_hook_state(command, session, phase="session_start")
 
         watcher: FileWatcher | None = None
         if self.collect_filesystem:
@@ -235,13 +240,19 @@ class RuntimeCollector:
         collector_error_type: str | None = None
         workload_terminated_due_to_collector_error = False
         subreaper_previous: bool | None = None
-        live_probe_admission = prepare_live_specialized_probe(command)
-        post_command_probe = prepare_post_command_specialized_probe(command)
+        live_probe_admission = None
+        post_command_probe = None
         try:
             if watcher is not None:
                 watcher.start()
 
             try:
+                launch_command = resolve_launch_command(command)
+                cursor_baseline = (
+                    process_baseline(launch_command[0]) if cursor_invocation else set()
+                )
+                live_probe_admission = prepare_live_specialized_probe(command)
+                post_command_probe = prepare_post_command_specialized_probe(command)
                 with auto_specialized_launch(
                     command,
                     server_relay=True,
@@ -305,6 +316,8 @@ class RuntimeCollector:
             self._restore_linux_child_subreaper(subreaper_previous)
             if watcher is not None:
                 watcher.stop()
+            self._record_hook_state(command, session, phase="session_end")
+            self._record_observation_warnings(command, session)
             # A failed termination must not become a false clean result merely
             # because the selected child has since reparented out of the tree.
             workload_alive_after_cleanup = any(
@@ -328,6 +341,9 @@ class RuntimeCollector:
                             workload_terminated_due_to_collector_error
                         ),
                         "workload_alive_after_cleanup": workload_alive_after_cleanup,
+                        "short_lived_process_loss_possible": True,
+                        "filesystem_collection_enabled": self.collect_filesystem,
+                        "process_coverage": "polling_not_exhaustive",
                         "network_collection_status": self._network_collection_status(),
                         "network_sample_attempts": self._network_sample_attempts,
                         "network_sample_successes": self._network_sample_successes,
@@ -338,6 +354,70 @@ class RuntimeCollector:
                     },
                 )
             )
+
+    def _record_hook_state(self, command: list[str], session: Entity, *, phase: str) -> None:
+        from .agent_bootstrap import inspect_supported_agent, supported_agent
+
+        provider = supported_agent(command)
+        if provider is None:
+            return
+        result = inspect_supported_agent(command)
+        target = Entity(
+            type="hook_configuration",
+            id=f"hook:{self.session_id}:{provider}",
+            name=provider,
+            attributes={"provider": provider, "configuration_path": result.path},
+        )
+        self.sink.emit(RuntimeEvent.create(
+            session_id=self.session_id, event_type="observation.hook_state",
+            relation="HAS_HOOK_CONFIGURATION", source=session, target=target,
+            attributes={
+                "phase": phase, "provider": provider, "status": result.status,
+                "configuration_path": result.path, "changed": result.changed,
+                "delivery_proven": False,
+            },
+        ))
+
+    def _record_privilege_risk(self, snapshot: ProcessSnapshot) -> None:
+        trigger = privilege_process_trigger(
+            name=snapshot.name, cmdline=snapshot.cmdline, exe=snapshot.exe
+        )
+        if trigger is None:
+            return
+        target = Entity(
+            type="risk_record", id=f"risk:{self.session_id}:privilege:{snapshot.entity.id}",
+            name="privileged execution observed",
+        )
+        self.sink.emit(RuntimeEvent.create(
+            session_id=self.session_id, event_type="risk.privilege_process",
+            relation="HAS_RISK", source=snapshot.entity, target=target,
+            attributes=risk_attributes(
+                "privileged_execution", trigger, process_id=snapshot.entity.id
+            ),
+        ))
+
+    def _record_observation_warnings(self, command: list[str], session: Entity) -> None:
+        from .agent_bootstrap import inspect_supported_agent, supported_agent
+        from .hook_delivery import sidecar_delivery
+
+        def warning(reason: str, **details: object) -> None:
+            self.sink.emit(RuntimeEvent.create(
+                session_id=self.session_id, event_type="observation.warning",
+                relation="HAS_OBSERVATION_WARNING", source=session,
+                target=Entity(type="observation_warning", id=f"warning:{self.session_id}:{reason}",
+                              name=reason),
+                attributes={"reason": reason, "severity": "warning", **details},
+            ))
+
+        warning("short_lived_process_loss_possible", backend=self.backend_name,
+                poll_interval_seconds=self.poll_interval, missed_process_lower_bound=None)
+        provider = supported_agent(command)
+        if provider is not None:
+            configured = inspect_supported_agent(command)
+            delivery = sidecar_delivery(os.environ.get("EXECWEAVE_SEMANTIC_SIDECAR"))
+            if delivery["state"] != "records_present":
+                warning("hook_no_evidence", provider=provider,
+                        hook_configuration_state=configured.status, delivery=delivery)
 
     @staticmethod
     def _linux_child_subreaper_state() -> bool | None:
@@ -589,6 +669,7 @@ class RuntimeCollector:
                 },
             )
         )
+        self._record_privilege_risk(snapshot)
 
     def _record_process_exit(self, snapshot: ProcessSnapshot, *, reason: str | None = None) -> None:
         attributes: dict[str, object] = {

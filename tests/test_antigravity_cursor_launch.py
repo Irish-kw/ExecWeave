@@ -70,10 +70,10 @@ def test_antigravity_bootstrap_uses_named_passive_hook_schema(tmp_path: Path) ->
     second = bootstrap_supported_agent(["agy"], home=tmp_path, environment={})
 
     assert first.provider == "antigravity"
-    assert first.status == "active"
+    assert first.status == "configured_unverified"
     assert first.changed is True
     assert first.path == str(target)
-    assert second.status == "active"
+    assert second.status == "configured_unverified"
     assert second.changed is False
 
     payload = json.loads(target.read_text(encoding="utf-8"))
@@ -83,7 +83,7 @@ def test_antigravity_bootstrap_uses_named_passive_hook_schema(tmp_path: Path) ->
     assert "PreInvocation" in hook
     assert "PostInvocation" in hook
     assert "PreToolUse" not in hook
-    assert "execweave-antigravity-hook" in json.dumps(hook)
+    assert "execweave.antigravity_hook_cli" in json.dumps(hook)
 
 
 def test_antigravity_config_does_not_auto_approve_tool_permissions() -> None:

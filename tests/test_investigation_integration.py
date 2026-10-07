@@ -190,7 +190,8 @@ raise SystemExit(3)
     assert "__execweaveStaticInvestigation=" in (tmp_path / "run" / "viewer.html").read_text()
     raw = json.loads((tmp_path / "run" / "graph.json").read_text())
     assert "investigation" not in raw
-    assert raw["session_outcome"]["state"] == "failed"
+    assert raw["session_outcome"]["state"] == "observation_incomplete"
+    assert raw["session_outcome"]["execution_state"] == "failed"
     assert json.loads((tmp_path / "run" / "finalization.json").read_text())["state"] == "complete"
 
 

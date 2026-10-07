@@ -211,11 +211,15 @@ def test_cleanup_failure_overrides_unavailable_skip(tmp_path: Path) -> None:
 
 
 def test_live_url_pattern_requires_loopback_tokenized_url() -> None:
-    line = "ExecWeave live: http://127.0.0.1:43123/?t=secret-token"
+    # Historical node ID retained; the security contract now requires a credential-free URL.
+    line = "ExecWeave live: http://127.0.0.1:43123/"
     match = visible._LIVE_URL_RE.search(line)
     assert match is not None
-    assert match.group(1) == "http://127.0.0.1:43123/?t=secret-token"
-    assert visible._LIVE_URL_RE.search("ExecWeave live: http://0.0.0.0:43123/?t=x") is None
+    assert match.group(1) == "http://127.0.0.1:43123/"
+    assert visible._LIVE_URL_RE.search("ExecWeave live: http://0.0.0.0:43123/") is None
+    assert visible._LIVE_URL_RE.search("ExecWeave live: http://127.0.0.1:43123/?t=x") is None
+    code = visible._PAIRING_CODE_RE.search("ExecWeave pairing code: one-time_code-123")
+    assert code is not None and code.group(1) == "one-time_code-123"
 
 
 def test_main_reports_missing_prerequisites_as_skip(

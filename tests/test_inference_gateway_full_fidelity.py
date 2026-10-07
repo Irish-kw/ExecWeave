@@ -385,6 +385,7 @@ execweave_litellm_callback.log_success_event(
         port=0,
         open_browser=False,
         linger_seconds=0,
+        content_capture="full",
     )
     assert result.return_code == 0
 

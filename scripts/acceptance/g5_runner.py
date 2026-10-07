@@ -106,6 +106,9 @@ def run_interactive(
         live_command = [
             execweave_bin,
             "live",
+            # The journey verifies recorded prompts/responses, so it opts in explicitly;
+            # `live` records no provider plaintext under its metadata-only default.
+            "--capture-content",
             "--watch-root",
             str(watch_root),
             "--output-dir",
@@ -149,8 +152,11 @@ def run_interactive(
             run_root / "execweave.stderr.txt",
         )
         live_url = live_stdout.wait_for_live_url(timeout=min(timeout, 15.0))
-        if not live_url:
-            raise AssertionError("ExecWeave live URL was not announced")
+        pairing_code = live_stdout.wait_for_pairing_code(timeout=min(timeout, 15.0))
+        if not live_url or not pairing_code:
+            raise AssertionError(
+                "ExecWeave live URL or one-time pairing code was not announced"
+            )
 
         tags = impl.visible._wait_json(
             f"{public_endpoint}/api/tags",
@@ -181,7 +187,7 @@ def run_interactive(
 
         page = browser.new_page(viewport={"width": 1440, "height": 1000})
         diagnostics = BrowserDiagnostics(page)
-        page.goto(live_url)
+        impl.visible._pair_live_page(page, live_url, pairing_code, timeout=timeout)
         page.evaluate("window.__execweaveG5Document=document")
         initial_nodes = page.locator(".node").count()
 

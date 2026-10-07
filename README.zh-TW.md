@@ -88,7 +88,15 @@ execweave top -- codex
 
 ### Provider integration 授權
 
-部分 Agent 或 IDE 第一次啟用本機 hook / plugin 時會要求授權。如果你希望看到 Prompt、Response、Tool、Model 與 Conversation 等 Provider-level evidence，請允許 ExecWeave integration。若不允許，OS runtime 觀察仍可能正常運作，但 Provider 語意覆蓋會較少。
+此開發分支的 `live` 只檢查 hook 設定，不會自動安裝或改寫。請在使用者自己的環境明確執行 `execweave hooks install antigravity`（也支援 `claude`、`codex`、`cursor`、`opencode`），不要使用 sudo。`execweave hooks status antigravity` 只讀取設定。Provider 本身仍可能要求授權；**完成設定不等於已送出證據**。缺少證據與觀測不完整會獨立於行程退出結果記錄。
+
+[觀測完整度與失敗示例](docs/observation-integrity.md) 說明行程結果、獨立任務驗證、觀測完整度三個軸，以及尚未解除的發布阻擋項目。這批修改尚未發布，PyPI 0.8.34 不包含這些修改。
+
+**Live 隱私與驗證（尚未發布的 0.8.35 工作）**
+
+`execweave live` 與 `execweave top` 預設只保存 Provider／Model 的 **metadata**。只有使用者明確加上 `--capture-content` 時，才會保存 integration 真正暴露的完整 Prompt、Response、Tool value 等內容；無效的 capture policy 會在自動 recorder 邊界 fail closed 成 metadata-only。
+
+Live dashboard 不再把 API credential 放進 `?t=...`。公開顯示的 URL 不含 credential；瀏覽器以一次性 pairing code 經 POST body 換取 `HttpOnly; SameSite=Strict` cookie，非瀏覽器 API client 則使用私有的 `X-ExecWeave-Token` header。
 
 Google Antigravity 目前實際 CLI 指令為 `agy`；ExecWeave 同時接受 `antigravity` 作為較好記的 alias。
 
@@ -125,6 +133,8 @@ execweave live --open -- ollama run deepseek-r1:1.5b
 ```
 
 這個模式不會幫你啟動 Ollama Server，因此仍需要一個可連線的 upstream server。
+
+兩種模式的 relay 都會轉送每個 request，但在預設的 metadata-only policy 下不會記錄 inference exchange，run 裡不會保存任何 Prompt 或 Response。只有在明確需要記錄對話時，才加上 `--capture-content`（例如 `execweave live --capture-content --open -- ollama serve`）。
 
 ## Dashboard
 
@@ -280,7 +290,8 @@ Raw observation 與 derived semantic/correlation output 會維持分離。
 - **失敗時的 ownership cleanup：** Portable collector 若在已啟動 managed workload 後非預期失敗，會先終止自己擁有的 workload，再記錄 terminal session state；filesystem watcher 即使只啟動一部分，也會在錯誤往外傳前清理。
 - Linux 另外提供 `strace` reference backend，可在支援的執行中取得更強的 syscall-attributed evidence。
 - Provider semantic coverage 完全取決於該 integration 真正暴露的資訊。未暴露的 Prompt、hidden reasoning、遠端 Provider internals 與 routing 無法被可靠重建。
-- Full-fidelity Provider content 可能包含 Credential、Secret、Source code、Prompt、Tool value、Model response、Shell output 與 File content。
+- Full-fidelity Provider content 可能包含 Credential、Secret、Source code、Prompt、Tool value、Model response、Shell output 與 File content。因此 `live`／`top` 預設為 metadata-only；完整 Provider／Model plaintext 必須明確使用 `--capture-content`。
+- Run artifacts 使用 owner-private writer。POSIX 會在敏感 bytes 發布前建立 owner-only 權限；Windows 路徑會套用 protected owner DACL。Windows 的最終保證仍必須由 release CI matrix 實機驗證，不能由 Linux 測試推定。
 - Conversation isolation 是 attribution 規則，不是 redaction boundary。Provider 明確路由的內容可能合理地出現在多個參與者上。
 - 本機 integrity manifest 可以檢查相對於 manifest 的檔案變化，但如果 evidence 與 manifest 都位於同一個可寫 trust boundary，就不是 adversary-resistant trusted logging system。
 - 分享前請檢查完整 run directory。

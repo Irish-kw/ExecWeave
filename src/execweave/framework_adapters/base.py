@@ -23,6 +23,7 @@ from uuid import uuid4
 import psutil
 
 from ..content_store import ContentReference, FullFidelityContentStore
+from ..private_io import append_private_text
 from ..schema import SCHEMA_VERSION
 
 CaptureMode = Literal[
@@ -250,7 +251,11 @@ class SemanticWriter:
 
     def __init__(self, path: str | Path | None = None) -> None:
         configured = path or os.environ.get("EXECWEAVE_SEMANTIC_SIDECAR")
-        self.path = Path(configured).expanduser().resolve() if configured else None
+        if configured:
+            raw_path = Path(configured).expanduser()
+            self.path = raw_path.parent.resolve() / raw_path.name
+        else:
+            self.path = None
 
     @property
     def enabled(self) -> bool:
@@ -294,10 +299,7 @@ class SemanticWriter:
                         raise TimeoutError(f"timed out waiting for semantic sidecar lock: {lock_dir}")
                     time.sleep(0.01)
             try:
-                with self.path.open("a", encoding="utf-8", newline="\n") as handle:
-                    handle.write(payload)
-                    handle.flush()
-                    os.fsync(handle.fileno())
+                append_private_text(self.path, payload)
             finally:
                 lock_dir.rmdir()
 

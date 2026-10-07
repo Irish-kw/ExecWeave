@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from .private_io import append_private_text
 from urllib.parse import urlsplit, urlunsplit
 
 
@@ -207,7 +208,8 @@ def response_to_events(
 def append_openai_compatible_records(
     path: str | Path, records: list[dict[str, Any]]
 ) -> Path:
-    output = Path(path).expanduser().resolve()
+    raw_output = Path(path).expanduser()
+    output = raw_output.parent.resolve() / raw_output.name
     output.parent.mkdir(parents=True, exist_ok=True)
     if not records:
         return output
@@ -228,10 +230,7 @@ def append_openai_compatible_records(
                 )
             time.sleep(0.01)
     try:
-        with output.open("a", encoding="utf-8", newline="\n") as handle:
-            handle.write(blob)
-            handle.flush()
-            os.fsync(handle.fileno())
+        append_private_text(output, blob)
     finally:
         try:
             lock_dir.rmdir()

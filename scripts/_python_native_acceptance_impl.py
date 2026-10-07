@@ -323,11 +323,17 @@ def _run_native(
         tracker.start()
         assert process.stdout is not None
         capture = _LineCapture(process.stdout, run_root / "execweave-python-native.log")
-        url_match = capture.wait_for(r"ExecWeave live: (http://\S+)", timeout=min(timeout, 15))
+        url_match = capture.wait_for(r"ExecWeave live: (http://127\.0\.0\.1:\d+/)", timeout=min(timeout, 15))
+        pairing_match = capture.wait_for(
+            r"ExecWeave pairing code: ([A-Za-z0-9_-]+)", timeout=min(timeout, 15)
+        )
         ready = capture.wait_for(r"(?m)^READY\s*$", timeout=min(timeout, 15))
-        if not url_match or not ready:
-            raise AssertionError("ExecWeave live URL or Python readiness was not observed")
+        if not url_match or not pairing_match or not ready:
+            raise AssertionError(
+                "ExecWeave credential-free live URL, pairing code, or Python readiness was not observed"
+            )
         live_url = url_match.group(1)
+        pairing_code = pairing_match.group(1)
 
         try:
             from playwright.sync_api import Error as PlaywrightError
@@ -347,7 +353,12 @@ def _run_native(
         page = browser.new_page(viewport={"width": 1366, "height": 768})
         diagnostics = BrowserDiagnostics(page)
         page.goto(live_url)
+        page.wait_for_selector('input[name="code"]', timeout=int(timeout * 1000))
+        page.fill('input[name="code"]', pairing_code)
+        page.click('button[type="submit"]')
         page.wait_for_selector(".node", timeout=int(timeout * 1000))
+        if page.url != live_url:
+            raise AssertionError(f"pairing left an unexpected browser URL: {page.url!r}")
         page.evaluate("window.__execweaveG6Document=document")
         initial_nodes = page.locator(".node").count()
 

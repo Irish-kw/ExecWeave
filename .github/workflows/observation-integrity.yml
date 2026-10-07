@@ -1,0 +1,46 @@
+name: Observation Integrity
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'scripts/**'
+      - 'pyproject.toml'
+      - '.github/workflows/observation-integrity.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: observation-integrity-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  review-source:
+    name: Export exact review source (not release acceptance)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Export tracked review material
+        shell: bash
+        run: |
+          mkdir -p review-artifacts
+          git rev-parse HEAD > review-artifacts/SOURCE_SHA.txt
+          git archive --format=zip --output=review-artifacts/source.zip HEAD
+          sha256sum review-artifacts/source.zip > review-artifacts/SHA256SUMS
+          printf '%s\n' 'SOURCE_EXPORT_ONLY=true' 'RELEASE_ACCEPTANCE=NOT_RUN' > review-artifacts/status.txt
+      - name: Prepare offline test dependencies
+        run: |
+          python -m pip download --only-binary=:all: --dest review-artifacts/wheels watchdog hatchling build 'ruff>=0.16,<0.17'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: observation-review-source-${{ github.event.pull_request.head.sha || github.sha }}
+          path: review-artifacts/
+          if-no-files-found: error
+          retention-days: 14

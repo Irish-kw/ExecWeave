@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import threading
+import time
 from urllib.parse import urlsplit
 
 import pytest
@@ -15,6 +16,26 @@ from execweave.live import _LiveState, _LocalThreadingHTTPServer, _handler_facto
 from execweave.viewer_projection import project_viewer_graph
 from test_live_final_snapshot import append, event, finalized
 from test_viewer_agent_isolation_e2e import _browser, _launch
+
+def _wait_for_node_count(page, expected: int, *, timeout_ms: int = 30_000) -> None:
+    nodes = page.locator('.node')
+    deadline = time.monotonic() + timeout_ms / 1000
+    while time.monotonic() < deadline:
+        if nodes.count() == expected:
+            return
+        page.wait_for_timeout(50)
+    raise AssertionError(f"live graph did not reach {expected} rendered nodes; got {nodes.count()}")
+
+
+def _wait_for_status(page, expected: str, *, timeout_ms: int = 30_000) -> None:
+    status = page.locator('#status')
+    deadline = time.monotonic() + timeout_ms / 1000
+    while time.monotonic() < deadline:
+        if status.inner_text() == expected:
+            return
+        page.wait_for_timeout(50)
+    raise AssertionError(f"live status did not reach {expected!r}; got {status.inner_text()!r}")
+
 
 pytestmark = pytest.mark.viewer_e2e
 
@@ -52,8 +73,9 @@ def test_final_graph_is_applied_before_polling_stops_and_matches_reopened_viewer
                 errors = []
                 page.on('pageerror', lambda error: errors.append(str(error)))
                 page.on('console', lambda msg: errors.append(msg.text) if msg.type == 'error' else None)
-                page.goto(f'http://127.0.0.1:{server.server_port}/?t={token}')
-                page.wait_for_function("window.__execweaveCore?.getGraph().nodes?.length===2")
+                page.set_extra_http_headers({'X-ExecWeave-Token': token})
+                page.goto(f'http://127.0.0.1:{server.server_port}/')
+                _wait_for_node_count(page, 2)
                 page.locator('#zoom-in').click()
                 page.wait_for_timeout(250)
                 page.locator('.node[data-id="process:p"]').click()
@@ -69,7 +91,7 @@ def test_final_graph_is_applied_before_polling_stops_and_matches_reopened_viewer
                 viewer = tmp_path / 'viewer.html'
                 viewer.write_text(render_static_dashboard_html(expected), encoding='utf-8')
                 state.finish(final, final_html=viewer.read_text(encoding='utf-8'))
-                page.wait_for_function("document.getElementById('status').textContent==='FINISHED'")
+                _wait_for_status(page, 'FINISHED')
                 completed = page.evaluate('window.__execweaveCore.getGraph()')
                 display = page.evaluate('window.__execweaveCore.getDisplayGraph()')
                 assert completed == expected, 'FINISHED exposed a graph older than the saved artifact'

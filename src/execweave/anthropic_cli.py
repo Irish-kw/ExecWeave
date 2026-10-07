@@ -10,6 +10,7 @@ from pathlib import Path
 from .anthropic import append_anthropic_records, response_to_events, sanitize_anthropic_endpoint
 from .anthropic_full_fidelity import exchange_to_content_events, response_to_content_events
 from .content_store import FullFidelityContentStore
+from .privacy import full_content_capture_enabled
 
 
 def _now() -> str:
@@ -65,6 +66,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _append_full_fidelity_fail_open(sidecar: Path, records_factory) -> int:
+    if not full_content_capture_enabled():
+        return 0
     try:
         records = records_factory(FullFidelityContentStore(sidecar.parent))
         append_anthropic_records(sidecar, records)

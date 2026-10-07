@@ -10,6 +10,7 @@ from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 from .content_store import FullFidelityContentStore
+from .privacy import full_content_capture_enabled
 from .model_runtime import (
     append_model_runtime_records,
     llamacpp_metrics_to_events,
@@ -137,6 +138,8 @@ def _response_converter(runtime: str):
 
 
 def _append_full_fidelity_fail_open(sidecar: Path, records_factory) -> int:
+    if not full_content_capture_enabled():
+        return 0
     try:
         records = records_factory(FullFidelityContentStore(sidecar.parent))
         append_model_runtime_records(sidecar, records)

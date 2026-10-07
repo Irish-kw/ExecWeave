@@ -63,6 +63,8 @@ def test_live_sibling_sidecar_excludes_entire_internal_output_dir(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    # Historical node ID retained. Whole-directory exclusion was the 0.8.34 bug;
+    # only recorder-owned artifacts may be excluded under the corrected contract.
     run_dir = tmp_path / "custom-live-output"
     run_dir.mkdir()
     event_path = run_dir / "events.jsonl"
@@ -79,7 +81,8 @@ def test_live_sibling_sidecar_excludes_entire_internal_output_dir(
     )
 
     excluded = collector._filesystem_excluded_roots()
-    assert run_dir.resolve() in excluded
+    assert run_dir.resolve() not in excluded
+    assert semantic_path.resolve() in excluded
     assert event_path.resolve() in excluded
 
 

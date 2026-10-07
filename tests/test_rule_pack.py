@@ -11,6 +11,7 @@ from execweave.rule_pack import (
     load_rule_pack,
 )
 from execweave.rule_pack_cli import main as rule_pack_main
+from execweave.graph import GRAPH_SCHEMA_VERSION
 
 
 def _write_pack(path: Path, payload: dict) -> Path:
@@ -41,6 +42,7 @@ def _pack_payload() -> dict:
 
 def _graph() -> dict:
     return {
+        "graph_schema_version": GRAPH_SCHEMA_VERSION,
         "session_id": "rule-pack-session",
         "nodes": [
             {"id": "process:s1:10", "type": "process", "name": "python"},

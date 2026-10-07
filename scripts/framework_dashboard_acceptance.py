@@ -321,9 +321,10 @@ def _browser_check(
         browser = playwright.chromium.launch(headless=True)
         try:
             page = browser.new_page(viewport={"width": 1440, "height": 1000})
+            page.set_extra_http_headers({"X-ExecWeave-Token": token})
             page.on("console", lambda message: errors.append(f"console:{message.type}:{message.text}") if message.type == "error" else None)
             page.on("pageerror", lambda error: errors.append(f"pageerror:{error}"))
-            url = f"http://127.0.0.1:{server.server_port}/?t={token}"
+            url = f"http://127.0.0.1:{server.server_port}/"
             page.goto(url)
             page.wait_for_function("document.querySelectorAll('.node').length > 0", timeout=15000)
             page.wait_for_function(
@@ -362,7 +363,7 @@ def _browser_check(
             live_details = page.locator("#details").inner_text()
             page.screenshot(path=str(output / "live.png"))
             state.finish(final_graph, final_html=final_html)
-            page.goto(f"http://127.0.0.1:{server.server_port}/final?t={token}")
+            page.goto(f"http://127.0.0.1:{server.server_port}/final")
             page.locator("#fit").click()
             page.wait_for_timeout(400)
             page.locator(selector).click(timeout=10000)

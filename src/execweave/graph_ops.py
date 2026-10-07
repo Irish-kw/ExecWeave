@@ -7,6 +7,27 @@ from copy import deepcopy
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable
 
+from .private_io import private_artifact_path, write_private_json
+
+SUPPORTED_GRAPH_SCHEMA_VERSIONS = frozenset({"0.1", "0.2"})
+
+
+def validate_graph_payload(
+    payload: Any,
+    *,
+    supported_versions: frozenset[str] = SUPPORTED_GRAPH_SCHEMA_VERSIONS,
+) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise ValueError("graph root must be a JSON object")
+    version = payload.get("graph_schema_version")
+    if not isinstance(version, str) or version not in supported_versions:
+        shown = version if isinstance(version, str) else "missing"
+        raise ValueError(f"unsupported graph schema version: {shown}")
+    if not isinstance(payload.get("nodes"), list) or not isinstance(payload.get("edges"), list):
+        raise ValueError("graph must contain nodes and edges arrays")
+    return payload
+
+
 
 def load_graph(path: str | Path) -> dict[str, Any]:
     graph_path = Path(path).expanduser().resolve()
@@ -16,22 +37,15 @@ def load_graph(path: str | Path) -> dict[str, Any]:
         raise ValueError(f"graph does not exist: {graph_path}") from exc
     except json.JSONDecodeError as exc:
         raise ValueError(f"graph is not valid JSON: {exc.msg}") from exc
-    if not isinstance(payload, dict):
-        raise ValueError("graph root must be a JSON object")
-    if not isinstance(payload.get("nodes"), list) or not isinstance(payload.get("edges"), list):
-        raise ValueError("graph must contain nodes and edges arrays")
-    return payload
+    return validate_graph_payload(payload)
 
 
 def write_graph_payload(graph: dict[str, Any], path: str | Path) -> Path:
-    output = Path(path).expanduser().resolve()
+    output = private_artifact_path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
     if output.exists() and output.stat().st_size > 0:
         raise FileExistsError(f"ExecWeave graph output already exists: {output}")
-    output.write_text(
-        json.dumps(graph, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    write_private_json(output, graph)
     return output
 
 

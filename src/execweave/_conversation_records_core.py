@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import json
 import re
 from collections import Counter
 from pathlib import Path
 from typing import Any
 from .content_store import _filesystem_path
+from .private_io import write_private_json, write_private_text
 
 from .agent_topology import (
     COMPLETENESS_ROUTING_ONLY,
@@ -897,9 +897,6 @@ def write_conversation_records(
     entries = payload["entries"]
     json_path = root / "conversations.json"
     markdown_path = root / "conversations.md"
-    json_path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-    markdown_path.write_text(_render_markdown(entries), encoding="utf-8")
+    write_private_json(json_path, payload, replace=json_path.exists())
+    write_private_text(markdown_path, _render_markdown(entries), replace=markdown_path.exists())
     return json_path, markdown_path

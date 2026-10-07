@@ -3,13 +3,14 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import tempfile
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
+from .private_io import private_artifact_path, write_private_text
 from .schema import SCHEMA_VERSION
 from .validate import validate_event_stream
 
@@ -488,7 +489,7 @@ def correlate_tool_process(
     if max_window_ms <= 0:
         raise ValueError("max_window_ms must be greater than zero")
     source = Path(input_path).expanduser().resolve()
-    output = Path(output_path).expanduser().resolve()
+    output = private_artifact_path(output_path)
     if output.exists() and output.stat().st_size > 0:
         raise FileExistsError(f"ExecWeave correlation output already exists: {output}")
 
@@ -563,32 +564,23 @@ def correlate_tool_process(
     for sequence, event in enumerate(correlated, start=1):
         event["sequence"] = sequence
 
-    output.parent.mkdir(parents=True, exist_ok=True)
-    fd, temp_name = tempfile.mkstemp(
-        prefix=".execweave-correlate-",
-        suffix=".jsonl",
-        dir=output.parent,
+    blob = "".join(
+        json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n" for event in correlated
     )
-    os.close(fd)
-    temp_path = Path(temp_name)
+    validation_path = output.parent / f".{output.name}.validate-{uuid4().hex}.jsonl"
     try:
-        temp_path.write_text(
-            "".join(
-                json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n"
-                for event in correlated
-            ),
-            encoding="utf-8",
+        write_private_text(validation_path, blob)
+        correlated_validation = validate_event_stream(
+            validation_path, require_complete_session=True
         )
-        correlated_validation = validate_event_stream(temp_path, require_complete_session=True)
         if not correlated_validation.valid:
             raise ValueError(
                 "correlated event stream is invalid: "
                 + "; ".join(correlated_validation.errors)
             )
-        temp_path.replace(output)
+        write_private_text(output, blob)
     finally:
-        if temp_path.exists():
-            temp_path.unlink()
+        validation_path.unlink(missing_ok=True)
 
     return CorrelationResult(
         session_id=session_id,

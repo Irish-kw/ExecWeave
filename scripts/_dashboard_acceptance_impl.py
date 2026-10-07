@@ -383,8 +383,9 @@ def _run_offline(output_root: Path, headed: bool) -> Result:
             browser = pw.chromium.launch(headless=not headed)
             try:
                 page = browser.new_page(viewport={"width": 1440, "height": 1000})
+                page.set_extra_http_headers({"X-ExecWeave-Token": token})
                 diagnostics = BrowserDiagnostics(page)
-                page.goto(f"http://127.0.0.1:{live_server.server_port}/?t={token}")
+                page.goto(f"http://127.0.0.1:{live_server.server_port}/")
                 node = page.locator('.node[data-id="agent:Ollama"]')
                 node.click(timeout=10000)
                 page.evaluate("window.__execweaveAcceptanceDocument=document")

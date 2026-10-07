@@ -16,6 +16,9 @@ from .antigravity_adapter import (
 from .antigravity_full_fidelity import antigravity_hook_to_content_events
 from .antigravity_trace_capability import antigravity_agent_trace_visibility_event
 from .content_store import FullFidelityContentStore
+from .hook_command import hook_command
+from .private_io import private_artifact_path
+from .privacy import full_content_capture_enabled
 from .conversation_archive import antigravity_conversation_archive_events
 
 _CAPTURE_ERRORS = (OSError, RuntimeError, TimeoutError, TypeError, ValueError)
@@ -42,7 +45,7 @@ def _now() -> str:
 def _handler(event: str) -> dict[str, Any]:
     return {
         "type": "command",
-        "command": f"execweave-antigravity-hook --auto --event {event}",
+        "command": f"{hook_command('antigravity')} --event {event}",
         "timeout": 30,
     }
 
@@ -126,7 +129,7 @@ def main(argv: list[str] | None = None) -> int:
         if sidecar is None:
             configured = os.environ.get("EXECWEAVE_SEMANTIC_SIDECAR")
             sidecar = Path(configured) if configured else _default_sidecar(payload)
-        sidecar = Path(sidecar).expanduser().resolve()
+        sidecar = private_artifact_path(sidecar)
     except _CAPTURE_ERRORS as exc:
         print(f"ExecWeave Antigravity hook warning [setup]: {exc}", file=sys.stderr)
         print(json.dumps(_passive_response(args.event), sort_keys=True))
@@ -155,6 +158,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.strict:
             print(json.dumps(_passive_response(args.event), sort_keys=True))
             return 1
+
+    if not full_content_capture_enabled():
+        print(json.dumps(_passive_response(args.event), sort_keys=True))
+        return 0
 
     try:
         store = FullFidelityContentStore(sidecar.parent)

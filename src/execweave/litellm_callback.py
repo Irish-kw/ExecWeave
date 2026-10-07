@@ -13,6 +13,7 @@ from .inference_gateway import (
     sanitize_gateway_endpoint,
 )
 from .inference_gateway_full_fidelity import litellm_callback_to_content_events
+from .privacy import full_content_capture_enabled
 
 try:
     from litellm.integrations.custom_logger import CustomLogger as _LiteLLMCustomLogger
@@ -162,6 +163,9 @@ class ExecWeaveLiteLLMCallback(_LiteLLMCustomLogger):
             append_gateway_records(sidecar, records)
         except Exception:
             # Observability must never alter the LiteLLM request outcome.
+            return
+
+        if not full_content_capture_enabled():
             return
 
         try:

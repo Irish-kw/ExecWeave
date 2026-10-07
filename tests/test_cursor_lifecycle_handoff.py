@@ -108,7 +108,7 @@ def test_cursor_invocation_only_matches_cursor_executable():
 def test_fake_cursor_launcher_hands_off_to_unique_gui_process(tmp_path, monkeypatch):
     launch_code = (
         "import subprocess, sys, time; "
-        "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(0.5)']); time.sleep(0.15)"
+        "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(2.0)']); time.sleep(0.25)"
     )
     monkeypatch.setattr(
         "execweave.collector.resolve_launch_command",

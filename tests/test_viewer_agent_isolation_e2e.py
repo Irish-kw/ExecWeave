@@ -265,7 +265,8 @@ def test_the_live_dashboard_isolates_agents_before_the_run_finishes(tmp_path: Pa
                 static_stats = static_page.locator("#stats").inner_text().strip()
 
                 live_page = browser.new_page(viewport={"width": 1440, "height": 1000})
-                live_page.goto(f"http://{host}:{port}/?t={token}")
+                live_page.set_extra_http_headers({"X-ExecWeave-Token": token})
+                live_page.goto(f"http://{host}:{port}/")
                 live_page.wait_for_selector(".node", timeout=15000)
                 live_page.wait_for_function(
                     "expected=>(document.getElementById('stats')?.innerText||'').trim()===expected",
@@ -390,7 +391,8 @@ def test_live_raw_event_opens_its_md_file_target(tmp_path: Path) -> None:
             browser = _launch(playwright, executable)
             try:
                 page = browser.new_page(viewport={"width": 1440, "height": 1000})
-                page.goto(f"http://{host}:{port}/?t={token}")
+                page.set_extra_http_headers({"X-ExecWeave-Token": token})
+                page.goto(f"http://{host}:{port}/")
                 page.wait_for_selector(".node", timeout=15000)
                 page.locator('[data-log-mode="raw"]').click()
                 page.locator(".raw-row").filter(
@@ -539,7 +541,7 @@ def test_agy_followup_conversation_stays_on_one_role_node(tmp_path: Path) -> Non
 
 
 def test_the_live_server_serves_the_same_index_the_file_would_carry(tmp_path: Path) -> None:
-    from urllib.request import urlopen
+    from urllib.request import Request, urlopen
 
     from execweave import live as live_module
     from execweave.conversation_records import conversation_index_payload
@@ -559,7 +561,11 @@ def test_the_live_server_serves_the_same_index_the_file_would_carry(tmp_path: Pa
     host, port = server.server_address[:2]
     try:
         assert not (tmp_path / "conversations.json").exists()
-        with urlopen(f"http://{host}:{port}/conversations.json?t={token}", timeout=5) as response:
+        request = Request(
+            f"http://{host}:{port}/conversations.json",
+            headers={"X-ExecWeave-Token": token},
+        )
+        with urlopen(request, timeout=5) as response:
             served = json.loads(response.read().decode("utf-8"))
     finally:
         server.shutdown()
@@ -715,7 +721,8 @@ def test_finishing_a_run_keeps_the_reader_on_the_same_dashboard(tmp_path: Path) 
             browser = _launch(playwright, executable)
             try:
                 page = browser.new_page(viewport={"width": 1440, "height": 1000})
-                page.goto(f"http://{host}:{port}/?t={token}")
+                page.set_extra_http_headers({"X-ExecWeave-Token": token})
+                page.goto(f"http://{host}:{port}/")
                 page.wait_for_selector(".node", timeout=15000)
                 _click_id(page, _agent_id(graph, "/root"))
                 _wait_for_text(page, "spawn four agents")

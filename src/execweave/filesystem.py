@@ -7,12 +7,13 @@ import warnings
 from pathlib import Path
 from typing import Iterable
 
-from watchdog.events import FileSystemEvent, FileSystemEventHandler
+from watchdog.events import FileSystemEvent, FileSystemEventHandler, FileCreatedEvent, FileModifiedEvent, FileDeletedEvent
 from watchdog.observers import Observer
 from watchdog.observers.polling import PollingObserver
 
 from .schema import Entity, RuntimeEvent
 from .sink import JsonlSink
+from .risk import risk_attributes, system_path_category
 
 LINUX_INOTIFY_MIN_SAFE_DIRS = 2048
 LINUX_INOTIFY_MAX_SAFE_DIRS = 32768
@@ -109,6 +110,13 @@ class SessionFileEventHandler(FileSystemEventHandler):
         self.session_entity = session_entity
         self.sink = sink
         self.excluded_roots = tuple(path.resolve() for path in excluded_roots)
+        # watchdog emits a parent DirModifiedEvent when an internal file closes.
+        # Recording that event writes the sink again, producing an infinite loop.
+        # Suppress only aggregate directory-modified hints along recorder paths;
+        # concrete user file changes and directory create/move/delete remain visible.
+        sink_path = getattr(self.sink, "path", None)
+        internal = (*self.excluded_roots, *((sink_path.resolve(),) if isinstance(sink_path, Path) else ()))
+        self._internal_parents = {parent for path in internal for parent in path.parents}
 
     def _excluded(self, path: str) -> bool:
         candidate = Path(path).expanduser().resolve()
@@ -119,12 +127,16 @@ class SessionFileEventHandler(FileSystemEventHandler):
             return
 
         src = Path(event.src_path).expanduser().resolve()
+        if event.is_directory and event.event_type == "modified" and src in self._internal_parents:
+            return
         target_path = src
         attributes: dict[str, object] = {
             "filesystem_event": event.event_type,
             "is_directory": event.is_directory,
             "attribution": "session_observation",
             "causal": False,
+            "writer_identity": "unknown",
+            "snapshot_state": "not_captured",
         }
 
         destination = getattr(event, "dest_path", None)
@@ -137,7 +149,11 @@ class SessionFileEventHandler(FileSystemEventHandler):
             target_path = dest
 
         entity_type = "directory" if event.is_directory else "file"
-        target = Entity(type=entity_type, id=f"{entity_type}:{target_path}", name=target_path.name)
+        target = Entity(
+            type=entity_type, id=f"{entity_type}:{target_path}", name=target_path.name,
+            attributes={"path": str(target_path), "writer_identity": "unknown",
+                        "snapshot_state": "not_captured"},
+        )
         self.sink.emit(
             RuntimeEvent.create(
                 session_id=self.session_id,
@@ -148,6 +164,21 @@ class SessionFileEventHandler(FileSystemEventHandler):
                 attributes=attributes,
             )
         )
+        category = system_path_category(target_path)
+        if category is not None and event.event_type in {"created", "modified", "deleted", "moved"}:
+            risk = Entity(
+                type="risk_record",
+                id=f"risk:{self.session_id}:system_path:{target_path}",
+                name="sensitive system path change observed",
+            )
+            self.sink.emit(RuntimeEvent.create(
+                session_id=self.session_id, event_type="risk.system_path_change",
+                relation="HAS_RISK", source=self.session_entity, target=risk,
+                attributes=risk_attributes(
+                    "system_path_change", category, path=str(target_path),
+                    operation=event.event_type, writer_identity="unknown",
+                ),
+            ))
 
     def on_any_event(self, event: FileSystemEvent) -> None:
         self._emit(event)
@@ -187,6 +218,8 @@ class FileWatcher:
         self.observer = PollingObserver(timeout=1.0) if prefer_polling else Observer()
         self.fallback_reason: str | None = None
         self._started = False
+        self._baseline: dict[str, tuple[int, int, int, int]] | None = None
+        self._inventory_limited = False
         if prefer_polling:
             self.fallback_reason = (
                 "ExecWeave selected polling filesystem observation because this Linux "
@@ -222,7 +255,35 @@ class FileWatcher:
             pass
         self._started = False
 
+    def _inventory(self) -> dict[str, tuple[int, int, int, int]]:
+        found: dict[str, tuple[int, int, int, int]] = {}
+        budget = 100000
+        def failed(_error: OSError) -> None:
+            self._inventory_limited = True
+        for base, directories, files in os.walk(self.root, followlinks=False, onerror=failed):
+            directories[:] = [name for name in directories
+                              if not self.handler._excluded(str(Path(base) / name))]
+            budget -= 1
+            for name in files:
+                budget -= 1
+                if budget < 0:
+                    self._inventory_limited = True
+                    return found
+                path = Path(base) / name
+                if self.handler._excluded(str(path)):
+                    continue
+                try:
+                    info = path.lstat()
+                    found[str(path)] = (info.st_size, info.st_mtime_ns, info.st_ctime_ns, info.st_ino)
+                except OSError:
+                    self._inventory_limited = True
+            if budget < 0:
+                self._inventory_limited = True
+                break
+        return found
+
     def start(self) -> None:
+        self._baseline = self._inventory()
         if self.fallback_reason is not None:
             warnings.warn(self.fallback_reason, RuntimeWarning, stacklevel=2)
         try:
@@ -245,3 +306,22 @@ class FileWatcher:
         # watchdog backend may have partially initialized before raising even when
         # _started never became true.
         self._shutdown_observer(timeout=5)
+        before, self._baseline = self._baseline, None
+        if before is None:
+            return
+        after = self._inventory()
+        # A final metadata difference is independent observation, not a process edge.
+        for path, signature in after.items():
+            if path not in before:
+                self.handler._emit(FileCreatedEvent(path))
+            elif before[path] != signature:
+                self.handler._emit(FileModifiedEvent(path))
+        if not self._inventory_limited:
+            for path in before.keys() - after.keys():
+                self.handler._emit(FileDeletedEvent(path))
+        if self._inventory_limited:
+            self.handler.sink.emit(RuntimeEvent.create(
+                session_id=self.handler.session_id, event_type="observation.warning",
+                relation="HAS_OBSERVATION_WARNING", source=self.handler.session_entity,
+                attributes={"reason": "filesystem_inventory_incomplete", "severity": "warning"},
+            ))

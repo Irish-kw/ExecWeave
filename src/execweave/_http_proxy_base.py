@@ -16,6 +16,7 @@ from .content_store import FullFidelityContentStore
 from .model_runtime_full_fidelity import runtime_exchange_to_content_events
 from .openai_compatible import append_openai_compatible_records
 from .openai_compatible_full_fidelity import exchange_to_content_events
+from .privacy import full_content_capture_enabled
 from .stream_assembly import (
     OLLAMA_NDJSON,
     OPENAI_CHAT_DELTA,
@@ -208,6 +209,8 @@ def record_exchange_fail_open(
     request_only: bool = False,
     request_recorded: bool = False,
 ) -> bool:
+    if not full_content_capture_enabled():
+        return False
     try:
         request = _json(request_body)
         if not isinstance(request, dict):

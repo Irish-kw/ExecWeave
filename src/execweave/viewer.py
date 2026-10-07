@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .graph_ops import load_graph
+from .private_io import private_artifact_path, write_private_text
 from .viewer_limits import resolve_viewer_limits
 
 VIEWER_MAX_NODES = 1500
@@ -453,11 +454,11 @@ def write_graph_html(
     *,
     open_browser: bool = False,
 ) -> Path:
-    output = Path(path).expanduser().resolve()
+    output = private_artifact_path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
     if output.exists() and output.stat().st_size > 0:
         raise FileExistsError(f"ExecWeave viewer output already exists: {output}")
-    output.write_text(render_graph_html(graph), encoding="utf-8")
+    write_private_text(output, render_graph_html(graph))
     if open_browser:
         webbrowser.open(output.as_uri())
     return output

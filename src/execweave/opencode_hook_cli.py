@@ -16,6 +16,8 @@ from .opencode_adapter import (
 from .opencode_event_contract import opencode_official_event_semantic_events
 from .opencode_full_fidelity import opencode_plugin_to_content_events
 from .opencode_task_linkage import opencode_task_session_events
+from .private_io import private_artifact_path
+from .privacy import full_content_capture_enabled
 
 
 def _now() -> str:
@@ -63,9 +65,8 @@ def main(argv: list[str] | None = None) -> int:
         if sidecar is None:
             configured = os.environ.get("EXECWEAVE_SEMANTIC_SIDECAR")
             sidecar = Path(configured) if configured else _default_sidecar(payload)
-        sidecar = Path(sidecar).expanduser().resolve()
+        sidecar = private_artifact_path(sidecar)
         observed_at = _now()
-        store = FullFidelityContentStore(sidecar.parent)
 
         summary_records = opencode_plugin_to_semantic_events(
             payload,
@@ -77,6 +78,11 @@ def main(argv: list[str] | None = None) -> int:
                 timestamp=observed_at,
             )
         )
+        if not full_content_capture_enabled():
+            append_semantic_records(sidecar, summary_records)
+            print("{}")
+            return 0
+        store = FullFidelityContentStore(sidecar.parent)
         summary_records.extend(
             opencode_task_session_events(
                 payload,

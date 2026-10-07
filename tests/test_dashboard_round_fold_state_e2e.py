@@ -247,7 +247,8 @@ def test_round_fold_state_survives_live_polling_payload_changes_and_agent_switch
                 _exercise_state_contract(static_page, graph, entries, polling=False)
 
                 live_page = browser.new_page(viewport={"width": 1440, "height": 1000})
-                live_page.goto(f"http://{host}:{port}/?t={token}")
+                live_page.set_extra_http_headers({"X-ExecWeave-Token": token})
+                live_page.goto(f"http://{host}:{port}/")
                 live_page.wait_for_selector(".node", timeout=15000)
                 _exercise_state_contract(live_page, graph, entries, polling=True)
             finally:
