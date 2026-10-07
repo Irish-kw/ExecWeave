@@ -280,5 +280,11 @@ jobs:
               exit 1
             fi
             args+=(--allow-test-change "$fixture=Full provider/model content is now the live/top default because the run stays on the user's machine, so the historical default-capture test keeps its node ID while asserting the default is full and the metadata-only opt-out still stamps explicit_metadata_only. Every other test ID and assertion is unchanged; new parser, mutual-exclusion, entry, and default-run tests live in tests/test_capture_default_full.py. The complete test file hash is pinned above.")
+            flow_test="tests/test_session_execution_flow.py"
+            if [[ "$(git hash-object --no-filters "$flow_test")" != "ed6716406250be1e6a7a7688e169b228d60b0795" ]]; then
+              echo "Unexpected session-flow test change; review the exact test update before allowing it." >&2
+              exit 1
+            fi
+            args+=(--allow-test-change "$flow_test=The dashboard spine is root -> model -> session: a session is entered through the model the root used, and a model switch adds a second model from the root into the same session. The historical assertions pinned the session drawn straight off the root with the model contexts after it, which is the reported defect, so only those direction assertions are inverted. Test node IDs are unchanged; the root-to-session RECORDED_IN_SESSION membership assertions move unchanged to the new test_session_without_an_observed_model_is_recorded_from_the_root, where no model is observed and that edge is still correct; every child-model, reply, uniqueness, endpoint and message-history assertion is kept. Cross-provider browser invariants live in tests/test_dashboard_graph_invariants_e2e.py. The complete test file hash is pinned above.")
           fi
           python scripts/check_release_stage_integrity.py "${args[@]}"
