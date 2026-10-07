@@ -683,8 +683,42 @@ def _g5_harness(monkeypatch):
     return interactive
 
 
+_FAKE_OLLAMA_SERVE = "import signal, time; signal.signal(signal.SIGINT, signal.SIG_DFL); time.sleep(60)"
+
+
+def _fake_live_script(announcement: str) -> str:
+    """Python source for a fake ``execweave live -- ollama serve`` wrapper.
+
+    Like the real wrapper, it owns one ``ollama serve`` child and stays alive until
+    the harness requests finalization: POSIX interrupts the process group, Windows
+    terminates the uniquely owned ``ollama serve`` descendant. On Windows the child
+    is the Python interpreter started with an ``ollama.exe`` command line, so the
+    harness's descendant selection sees the same command shape as a real server.
+    """
+    import sys
+
+    serve_argv0 = "ollama.exe" if os.name == "nt" else sys.executable
+    return "\n".join(
+        [
+            "import subprocess, sys",
+            "serve = subprocess.Popen(",
+            f"    [{serve_argv0!r}, '-c', {_FAKE_OLLAMA_SERVE!r}, 'serve'],",
+            "    executable=sys.executable,",
+            "    stdin=subprocess.DEVNULL,",
+            "    stdout=subprocess.DEVNULL,",
+            "    stderr=subprocess.DEVNULL,",
+            ")",
+            f"print({announcement!r}, flush=True)",
+            "try:",
+            "    serve.wait()",
+            "except KeyboardInterrupt:",
+            "    serve.wait()",
+        ]
+    )
+
+
 def _fake_live_popen(monkeypatch, announcement: str) -> list[list[str]]:
-    """Replace only the harness's ``execweave live`` launch with a fixed announcement."""
+    """Replace only the harness's ``execweave live`` launch with a fake live wrapper."""
     import subprocess
     import sys
 
@@ -694,7 +728,7 @@ def _fake_live_popen(monkeypatch, announcement: str) -> list[list[str]]:
     def popen(command, *args, **kwargs):
         if list(command[:2]) == ["fake-execweave", "live"]:
             launches.append(list(command))
-            command = [sys.executable, "-c", f"print({announcement!r}, flush=True)"]
+            command = [sys.executable, "-c", _fake_live_script(announcement)]
         return real_popen(command, *args, **kwargs)
 
     monkeypatch.setattr(subprocess, "Popen", popen)
