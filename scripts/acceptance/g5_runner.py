@@ -106,6 +106,9 @@ def run_interactive(
         live_command = [
             execweave_bin,
             "live",
+            # The journey verifies recorded prompts/responses, so it opts in explicitly;
+            # `live` records no provider plaintext under its metadata-only default.
+            "--capture-content",
             "--watch-root",
             str(watch_root),
             "--output-dir",

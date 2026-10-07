@@ -683,19 +683,22 @@ def _g5_harness(monkeypatch):
     return interactive
 
 
-def _fake_live_popen(monkeypatch, announcement: str) -> None:
+def _fake_live_popen(monkeypatch, announcement: str) -> list[list[str]]:
     """Replace only the harness's ``execweave live`` launch with a fixed announcement."""
     import subprocess
     import sys
 
     real_popen = subprocess.Popen
+    launches: list[list[str]] = []
 
     def popen(command, *args, **kwargs):
         if list(command[:2]) == ["fake-execweave", "live"]:
+            launches.append(list(command))
             command = [sys.executable, "-c", f"print({announcement!r}, flush=True)"]
         return real_popen(command, *args, **kwargs)
 
     monkeypatch.setattr(subprocess, "Popen", popen)
+    return launches
 
 
 def test_live_pairing_helper_submits_the_one_time_code_on_the_credential_free_url(
@@ -781,3 +784,45 @@ def test_g5_journey_pairs_the_browser_with_the_announced_code(monkeypatch, tmp_p
     assert "stop after browser pairing" in result.checks["Launch"].reason
     assert result.checks["Cleanup"].status == Status.PASS
 
+
+def _assert_live_opts_into_content_capture(launches: list[list[str]]) -> None:
+    assert len(launches) == 1
+    command = launches[0]
+    separator = command.index("--")
+    assert command[separator + 1 :] == ["ollama", "serve"]
+    assert "--capture-content" in command[:separator]
+
+
+def test_g5_journey_opts_into_explicit_content_capture(monkeypatch, tmp_path: Path) -> None:
+    interactive = _g5_harness(monkeypatch)
+    monkeypatch.setattr(interactive._impl, "_terminal_backend_reason", lambda: None)
+    launches = _fake_live_popen(monkeypatch, f"ExecWeave live: {_PAIRING_STEPS_LIVE_URL}")
+
+    interactive._run_interactive(
+        output_root=tmp_path,
+        model="local-model",
+        execweave_bin="fake-execweave",
+        ollama_bin="ollama",
+        timeout=1.0,
+    )
+    _assert_live_opts_into_content_capture(launches)
+
+
+def test_g4_visible_journey_opts_into_explicit_content_capture(
+    monkeypatch, tmp_path: Path
+) -> None:
+    from acceptance.reporting import Status
+
+    visible = _g5_harness(monkeypatch)._impl.visible
+    launches = _fake_live_popen(monkeypatch, f"ExecWeave live: {_PAIRING_STEPS_LIVE_URL}")
+
+    result = visible._run_visible(
+        output_root=tmp_path,
+        model="local-model",
+        execweave_bin="fake-execweave",
+        ollama_bin="ollama",
+        timeout=1.0,
+    )
+    _assert_live_opts_into_content_capture(launches)
+    assert result.checks["Launch"].status == Status.FAIL
+    assert "one-time pairing code was not announced" in result.checks["Launch"].reason
