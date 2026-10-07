@@ -57,12 +57,12 @@ CHANGES = {
         "PR #112: preserve the historical relay/live browser test ID while replacing query-string authentication with the supported X-ExecWeave-Token header; prompt-before-response ordering, live DOM visibility, final parity, and no-duplication checks remain unchanged.",
     ),
     "tests/test_delivery_native_browser.py": (
-        "55f8620e22e935e7e3d7dda614a80f05686cff59839a69bd3ff95fa3586161a1",
-        "PR #112: preserve the historical native delivery test IDs while authenticating the direct localhost handler through the supported header rather than a URL credential; archive verification and tamper rejection assertions remain unchanged.",
+        "cf31625a1b6a5a68b9cfb8c07a5b4c22e299afec4a801ba8d467dd775b70bf6d",
+        "PR #112: preserve the historical native delivery test IDs while authenticating the direct localhost handler through the supported header and replacing CSP-incompatible string-eval waits with bounded locator polling; archive verification and tamper rejection assertions remain unchanged.",
     ),
     "tests/test_live_final_snapshot_e2e.py": (
-        "178f8a6f60917b236e155a4b3382c4693b360a7054f72d31849c96db3af0a4ba",
-        "PR #112: preserve the historical final-snapshot browser test ID while moving its direct-handler authentication from query token to header; terminal-delta ordering, polling stop, DOM identity, and reopened-viewer parity remain required.",
+        "70ae07994e1f9782e99aae404ed9f9632be06317bcf7456e84320c08ef4019ec",
+        "PR #112: preserve the historical final-snapshot browser test ID while moving direct-handler authentication to the supported header and replacing CSP-incompatible string-eval waits with bounded locator polling; terminal-delta ordering, polling stop, DOM identity, and reopened-viewer parity remain required.",
     ),
     "tests/test_v079_review_e2e.py": (
         "11a07bd88f10dc7fe188c3804a45381d9e76756bff66f1f742a1c2613996487c",
