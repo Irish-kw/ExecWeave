@@ -100,7 +100,13 @@ def native_probe(browser, cli: Path, out: Path, export_and_decode) -> dict:
         with urllib.request.urlopen(request, timeout=5) as response:
             assert response.status == 200
         (work / 'release.signal').write_text('go', encoding='utf-8')
-        page.wait_for_function("document.getElementById('status').textContent.includes('FINISHED')", timeout=30000)
+        finished_deadline = time.monotonic() + 30
+        while time.monotonic() < finished_deadline:
+            if 'FINISHED' in page.locator('#status').inner_text():
+                break
+            page.wait_for_timeout(100)
+        else:
+            raise AssertionError('live status did not reach FINISHED')
         page.wait_for_timeout(1000)
         polls = requests.count('/live.json')
         page.wait_for_timeout(1200)
