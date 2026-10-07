@@ -88,11 +88,11 @@ execweave top -- codex
 
 ### Provider integration approval
 
-In this development branch, `live` only checks hook configuration; it never installs or rewrites it. Explicitly run `execweave hooks install antigravity` (or `claude`, `codex`, `cursor`, `opencode`) from your user-owned environment, without sudo. `execweave hooks status antigravity` checks setup without writing. Provider approval may still be required. **Configured does not mean evidence was delivered.** Missing delivery and incomplete observation are recorded independently of process exit.
+Since 0.8.35, `live` only checks hook configuration; it never installs or rewrites it. Explicitly run `execweave hooks install antigravity` (or `claude`, `codex`, `cursor`, `opencode`) from your user-owned environment, without sudo. `execweave hooks status antigravity` checks setup without writing. Provider approval may still be required. **Configured does not mean evidence was delivered.** Missing delivery and incomplete observation are recorded independently of process exit.
 
-See [observation integrity and the negative example](docs/observation-integrity.md) for the three result axes and remaining release blockers. These changes are unreleased; version 0.8.34 on PyPI does not contain them.
+See [observation integrity and the negative example](docs/observation-integrity.md) for the three result axes and their honest limits. These changes ship in 0.8.35; earlier versions do not contain them.
 
-**Live privacy and authentication (unreleased 0.8.35 work)**
+**Live privacy and authentication (0.8.35)**
 
 `execweave live` and `execweave top` default provider/model plaintext capture to **metadata only**. Use `--capture-content` only when you explicitly want complete exposed prompts, responses, tool values, and other provider content stored in the run. Invalid capture-policy values fail closed to metadata-only at automatic recorder boundaries.
 

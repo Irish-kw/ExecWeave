@@ -88,11 +88,11 @@ execweave top -- codex
 
 ### Provider integration 授權
 
-此開發分支的 `live` 只檢查 hook 設定，不會自動安裝或改寫。請在使用者自己的環境明確執行 `execweave hooks install antigravity`（也支援 `claude`、`codex`、`cursor`、`opencode`），不要使用 sudo。`execweave hooks status antigravity` 只讀取設定。Provider 本身仍可能要求授權；**完成設定不等於已送出證據**。缺少證據與觀測不完整會獨立於行程退出結果記錄。
+自 0.8.35 起，`live` 只檢查 hook 設定，不會自動安裝或改寫。請在使用者自己的環境明確執行 `execweave hooks install antigravity`（也支援 `claude`、`codex`、`cursor`、`opencode`），不要使用 sudo。`execweave hooks status antigravity` 只讀取設定。Provider 本身仍可能要求授權；**完成設定不等於已送出證據**。缺少證據與觀測不完整會獨立於行程退出結果記錄。
 
-[觀測完整度與失敗示例](docs/observation-integrity.md) 說明行程結果、獨立任務驗證、觀測完整度三個軸，以及尚未解除的發布阻擋項目。這批修改尚未發布，PyPI 0.8.34 不包含這些修改。
+[觀測完整度與失敗示例](docs/observation-integrity.md) 說明行程結果、獨立任務驗證、觀測完整度三個軸，以及這些結果的誠實限制。這批修改隨 0.8.35 發布，更早的版本不包含這些修改。
 
-**Live 隱私與驗證（尚未發布的 0.8.35 工作）**
+**Live 隱私與驗證（0.8.35）**
 
 `execweave live` 與 `execweave top` 預設只保存 Provider／Model 的 **metadata**。只有使用者明確加上 `--capture-content` 時，才會保存 integration 真正暴露的完整 Prompt、Response、Tool value 等內容；無效的 capture policy 會在自動 recorder 邊界 fail closed 成 metadata-only。
 
