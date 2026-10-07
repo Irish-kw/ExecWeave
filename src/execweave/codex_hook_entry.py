@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .private_io import append_private_text
+
 _SEMANTIC_ENV = "EXECWEAVE_SEMANTIC_SIDECAR"
 _AUTO_FLAG = "--auto"
 _STRICT_FLAG = "--strict"
@@ -113,7 +115,8 @@ def _append_interrupt_fast(sidecar: Path, payload: dict[str, Any]) -> None:
     observation when another writer owns the sidecar lock. It never blocks Codex.
     """
 
-    output = sidecar.expanduser().resolve()
+    raw_output = sidecar.expanduser()
+    output = raw_output.parent.resolve() / raw_output.name
     output.parent.mkdir(parents=True, exist_ok=True)
     record = _interrupt_record(payload, timestamp=_now())
     blob = json.dumps(
@@ -130,9 +133,7 @@ def _append_interrupt_fast(sidecar: Path, payload: dict[str, Any]) -> None:
                 return
             time.sleep(0.005)
     try:
-        with output.open("a", encoding="utf-8", newline="\n") as handle:
-            handle.write(blob)
-            handle.flush()
+        append_private_text(output, blob)
     finally:
         try:
             lock_dir.rmdir()

@@ -18,6 +18,14 @@ def build_parser() -> argparse.ArgumentParser:
     seal.add_argument("run_dir", type=Path)
     verify = subparsers.add_parser("verify", help="verify a sealed run")
     verify.add_argument("run_dir", type=Path)
+    verify.add_argument(
+        "--expected-manifest-body-sha256",
+        default=None,
+        help=(
+            "Expected digest supplied from an external trust domain (for example CI/GitHub); "
+            "never read this value from the run directory being verified"
+        ),
+    )
     return parser
 
 
@@ -43,7 +51,10 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
 
-    result = verify_run_integrity(args.run_dir)
+    result = verify_run_integrity(
+        args.run_dir,
+        expected_manifest_body_sha256=args.expected_manifest_body_sha256,
+    )
     print(json.dumps(result.to_dict(), sort_keys=True))
     return 0 if result.valid else 1
 

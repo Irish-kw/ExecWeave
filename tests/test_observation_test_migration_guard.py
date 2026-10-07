@@ -25,7 +25,7 @@ def test_changed_baseline_cannot_reuse_approval():
 
 def test_reviewed_postimages_have_explicit_reasons():
     args = guard.allowance_args(ROOT, baseline_ref=guard.BASELINE, head_ref=guard.BRANCH)
-    assert args[::2] == ["--allow-test-change"] * 5
+    assert args[::2] == ["--allow-test-change"] * 10
     assert {value.split("=", 1)[0] for value in args[1::2]} == set(guard.CHANGES)
     assert all(len(value.split("=", 1)[1]) > 80 for value in args[1::2])
 

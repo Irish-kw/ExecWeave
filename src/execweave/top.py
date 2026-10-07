@@ -516,6 +516,7 @@ def run_top(
     port: int = 0,
     open_browser: bool = False,
     linger_seconds: float = 2.0,
+    content_capture: str = "metadata_only",
     stream: TextIO | None = None,
 ) -> LiveResult:
     if not command:
@@ -524,49 +525,55 @@ def run_top(
     stop_event = threading.Event()
     terminal_thread: threading.Thread | None = None
     token_file: Path | None = None
+    access: dict[str, str | None] = {"url": None, "token": None}
+    dashboard_started = False
 
-    def announce(authenticated_live_url: str) -> None:
-        nonlocal terminal_thread, token_file
-        live_url, token = _split_authenticated_live_url(authenticated_live_url)
+    def maybe_start_dashboard() -> None:
+        nonlocal terminal_thread, token_file, dashboard_started
+        live_url, token = access["url"], access["token"]
+        if dashboard_started or live_url is None or token is None:
+            return
+        dashboard_started = True
         if stream is not None:
             client = TerminalTopClient(
-                live_url=live_url,
-                token=token,
-                command=command,
-                refresh_seconds=refresh_seconds,
-                stream=stream,
-                stop_event=stop_event,
+                live_url=live_url, token=token, command=command,
+                refresh_seconds=refresh_seconds, stream=stream, stop_event=stop_event,
             )
             terminal_thread = threading.Thread(
-                target=client.run,
-                name="execweave-top-inline",
-                daemon=True,
+                target=client.run, name="execweave-top-inline", daemon=True,
             )
             terminal_thread.start()
             return
 
         token_file = _create_attach_token_file(token)
         launched = launch_dashboard_terminal(
-            live_url,
-            token_file=token_file,
-            command=command,
+            live_url, token_file=token_file, command=command,
             refresh_seconds=refresh_seconds,
         )
         if not launched:
             attach = shlex.join(
                 _dashboard_attach_argv(
-                    live_url,
-                    token_file=token_file,
-                    command=command,
+                    live_url, token_file=token_file, command=command,
                     refresh_seconds=refresh_seconds,
                 )
             )
             print(
                 "ExecWeave Top: no GUI terminal was detected. "
                 f"Open another terminal and run: {attach}",
-                file=sys.stderr,
-                flush=True,
+                file=sys.stderr, flush=True,
             )
+
+    def announce(live_url: str) -> None:
+        access["url"] = live_url
+        maybe_start_dashboard()
+
+    def announce_api_token(token: str) -> None:
+        access["token"] = token
+        maybe_start_dashboard()
+
+    def announce_pairing_code(code: str) -> None:
+        if open_browser:
+            print(f"ExecWeave pairing code: {code}", file=sys.stderr, flush=True)
 
     try:
         return run_live(
@@ -579,7 +586,10 @@ def run_top(
             port=port,
             open_browser=open_browser,
             linger_seconds=max(linger_seconds, refresh_seconds * 2),
+            content_capture=content_capture,
             announce=announce,
+            announce_api_token=announce_api_token,
+            announce_pairing_code=announce_pairing_code,
         )
     finally:
         stop_event.set()

@@ -12,6 +12,7 @@ from .observation import session_outcome as assessed_session_outcome
 from .fidelity import FidelityAccumulator
 from .provider_lifecycle import ProviderLifecycleAnnotation, provider_lifecycle_annotation
 from .validate import validate_event_stream
+from .private_io import private_artifact_path, write_private_json
 
 GRAPH_SCHEMA_VERSION = "0.2"
 
@@ -536,15 +537,12 @@ def write_execution_graph(
     *,
     metadata: dict[str, Any] | None = None,
 ) -> Path:
-    output = Path(path).expanduser().resolve()
+    output = private_artifact_path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
     if output.exists() and output.stat().st_size > 0:
         raise FileExistsError(f"ExecWeave graph output already exists: {output}")
     payload = graph.to_dict()
     if metadata is not None:
         payload["metadata"] = metadata
-    output.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    write_private_json(output, payload)
     return output

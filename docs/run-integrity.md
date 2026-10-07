@@ -26,7 +26,11 @@ The seal is intended to run only after capture and all desired derived artifacts
 ```text
 execweave-integrity seal .execweave/runs/<run-id>
 execweave-integrity verify .execweave/runs/<run-id>
+execweave-integrity verify .execweave/runs/<run-id> \
+  --expected-manifest-body-sha256 <digest-stored-outside-the-run>
 ```
+
+The optional expected digest is meaningful only when its value comes from a trust domain the observed process cannot rewrite. A match sets the verifier's external-anchor check to true; it does not retroactively make the in-directory manifest itself an external anchor.
 
 `seal` refuses to overwrite an existing non-empty integrity contract. `verify` returns success only when the manifest schema is valid, its body digest matches, every sealed file has the expected size and SHA-256 digest, and no additional regular file has appeared since sealing.
 

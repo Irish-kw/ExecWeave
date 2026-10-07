@@ -26,7 +26,11 @@ seal 應只在 capture 與所有需要的 derived artifacts 都完成後執行�
 ```text
 execweave-integrity seal .execweave/runs/<run-id>
 execweave-integrity verify .execweave/runs/<run-id>
+execweave-integrity verify .execweave/runs/<run-id> \
+  --expected-manifest-body-sha256 <存放在-run-之外的-digest>
 ```
+
+這個 expected digest 只有在其值真的來自 observed process 無法改寫的 trust domain 時才有外部錨點意義。比對成功會把 verifier 的 external-anchor check 標為 true，但不會反過來把 run 目錄內的 manifest 宣稱成 external anchor。
 
 `seal` 不會覆寫已存在的 integrity contract。`verify` 只有在 manifest schema 合法、manifest body digest 相符、每個 sealed file 的 size 與 SHA-256 都符合，而且 seal 後沒有額外 regular file 出現時才回傳成功。
 

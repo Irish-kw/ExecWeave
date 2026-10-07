@@ -13,9 +13,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from functools import lru_cache
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.cookies import SimpleCookie
 from pathlib import Path
 from socketserver import TCPServer
-from urllib.parse import parse_qs, urlencode, urlsplit
+from urllib.parse import parse_qs, urlsplit
 from uuid import uuid4
 
 from .backends import create_collector
@@ -27,6 +28,7 @@ from .graph import GRAPH_SCHEMA_VERSION, GraphAccumulator, build_execution_graph
 from .live_view import LIVE_HTML as _LIVE_HTML
 from .semantic import LiveSemanticNormalizer, merge_semantic_sidecar
 from .sink import JsonlSink
+from .privacy import CONTENT_CAPTURE_ENV
 from .validate import validate_event_stream
 from .viewer_dashboard_clean import fold_budget_bootstrap, resolve_fold_budget
 from .viewer_limits import resolve_viewer_limits, viewer_limits_bootstrap
@@ -68,19 +70,38 @@ def _inject_final_theme(html: str) -> str:
 
 
 def _inject_live_auth(html: str) -> str:
-    marker = "(()=>{\nconst MAX_NODES="
-    replacement = (
-        "(()=>{\n"
-        "const liveAuthToken=new URLSearchParams(location.search).get('t')||'';"
-        "if(liveAuthToken){try{history.replaceState(null,'',location.pathname)}catch(_){}}\n"
-        "const MAX_NODES="
-    )
-    authenticated = html.replace(marker, replacement, 1)
-    return authenticated.replace(
+    """Keep browser authentication in an HttpOnly cookie, never page JavaScript."""
+    return html.replace(
         "fetch(`/live.json?after=${liveSequence}`,{cache:'no-store'})",
-        "fetch(`/live.json?after=${liveSequence}`,{cache:'no-store',headers:{'X-ExecWeave-Token':liveAuthToken}})",
+        "fetch(`/live.json?after=${liveSequence}`,{cache:'no-store',credentials:'same-origin'})",
         1,
     )
+
+
+_PAIRING_HTML = """<!doctype html>
+<meta charset="utf-8">
+<meta name="referrer" content="no-referrer">
+<title>ExecWeave live pairing</title>
+<style>body{font:16px system-ui;max-width:34rem;margin:12vh auto;padding:2rem}input,button{font:inherit;padding:.6rem}input{width:100%;box-sizing:border-box;margin:.5rem 0 1rem}</style>
+<h1>ExecWeave live pairing</h1>
+<p>Enter the one-time pairing code shown in the terminal. The evidence credential is never placed in the URL.</p>
+<form method="post" action="/pair"><label>Pairing code<input name="code" autocomplete="off" required></label><button type="submit">Open live graph</button></form>
+"""
+
+
+class _PairingGate:
+    def __init__(self, code: str) -> None:
+        self._code = code
+        self._used = False
+        self._lock = threading.Lock()
+
+    def consume(self, candidate: str) -> bool:
+        with self._lock:
+            if self._used or not candidate or not hmac.compare_digest(candidate, self._code):
+                return False
+            self._used = True
+            self._code = ""
+            return True
 
 
 _AUTHENTICATED_LIVE_HTML = _inject_live_auth(_LIVE_HTML)
@@ -623,12 +644,24 @@ class _LiveState:
             return self._final_html
 
 
-def _handler_factory(state: _LiveState, token: str):
+def _handler_factory(
+    state: _LiveState, token: str, pairing: _PairingGate | None = None
+):
+    pairing = pairing or _PairingGate(secrets.token_urlsafe(18))
+    cookie_name = "execweave_live"
+
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, format: str, *args: object) -> None:
             return
 
-        def _send(self, body: bytes, content_type: str, status: int = 200) -> None:
+        def _send(
+            self,
+            body: bytes,
+            content_type: str,
+            status: int = 200,
+            *,
+            headers: tuple[tuple[str, str], ...] = (),
+        ) -> None:
             try:
                 self.send_response(status)
                 self.send_header("Content-Type", content_type)
@@ -636,28 +669,70 @@ def _handler_factory(state: _LiveState, token: str):
                 self.send_header("Cache-Control", "no-store")
                 self.send_header("X-Content-Type-Options", "nosniff")
                 self.send_header("Referrer-Policy", "no-referrer")
+                self.send_header("Content-Security-Policy", "default-src 'self' 'unsafe-inline'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'")
+                for name, value in headers:
+                    self.send_header(name, value)
                 self.end_headers()
                 self.wfile.write(body)
             except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
-                # Browsers routinely cancel an in-flight poll while navigating or
-                # while the live server is shutting down.  The response belongs to
-                # that client only, so there is nothing left for the server to send.
                 self.close_connection = True
 
         def _authorized(self, parsed) -> bool:
             candidate = self.headers.get(_LIVE_TOKEN_HEADER)
             if candidate is None:
-                values = parse_qs(parsed.query).get("t", [])
-                if len(values) == 1:
-                    candidate = values[0]
+                raw_cookie = self.headers.get("Cookie", "")
+                try:
+                    cookies = SimpleCookie()
+                    cookies.load(raw_cookie)
+                    morsel = cookies.get(cookie_name)
+                    candidate = morsel.value if morsel is not None else None
+                except (KeyError, TypeError, ValueError):
+                    candidate = None
+            # Query-string credentials are intentionally unsupported.  A credential
+            # in a request target can leak through terminal output, browser history,
+            # proxies, crash reports and access logs.
             return bool(candidate) and hmac.compare_digest(candidate, token)
+
+        def do_POST(self) -> None:
+            parsed = urlsplit(self.path)
+            if parsed.path != "/pair" or parsed.query or parsed.fragment:
+                self._send(b"Not found", "text/plain; charset=utf-8", 404)
+                return
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+            except ValueError:
+                length = -1
+            if length < 0 or length > 4096:
+                self._send(b"Invalid pairing request", "text/plain; charset=utf-8", 400)
+                return
+            raw = self.rfile.read(length)
+            try:
+                values = parse_qs(raw.decode("utf-8"), keep_blank_values=True).get("code", [])
+            except UnicodeDecodeError:
+                values = []
+            if len(values) != 1 or not pairing.consume(values[0]):
+                self._send(b"Pairing code rejected", "text/plain; charset=utf-8", 403)
+                return
+            self._send(
+                b"",
+                "text/plain; charset=utf-8",
+                303,
+                headers=(
+                    ("Set-Cookie", f"{cookie_name}={token}; HttpOnly; SameSite=Strict; Path=/"),
+                    ("Location", "/"),
+                ),
+            )
 
         def do_GET(self) -> None:
             parsed = urlsplit(self.path)
+            path = parsed.path
+            if path == "/" and not self._authorized(parsed):
+                # This page contains no run evidence and no authentication secret.
+                self._send(_PAIRING_HTML.encode("utf-8"), "text/html; charset=utf-8")
+                return
             if not self._authorized(parsed):
                 self._send(b"Unauthorized", "text/plain; charset=utf-8", 401)
                 return
-            path = parsed.path
             if path == "/":
                 page = _live_page(_AUTHENTICATED_LIVE_HTML, resolve_fold_budget())
                 self._send(page.encode("utf-8"), "text/html; charset=utf-8")
@@ -720,7 +795,10 @@ def run_live(
     port: int = 0,
     open_browser: bool = True,
     linger_seconds: float = 2.0,
+    content_capture: str = "metadata_only",
     announce: Callable[[str], None] | None = None,
+    announce_pairing_code: Callable[[str], None] | None = None,
+    announce_api_token: Callable[[str], None] | None = None,
 ) -> LiveResult:
     """Run a command with the portable collector and expose an authenticated localhost graph."""
     if not command:
@@ -729,9 +807,13 @@ def run_live(
         raise ValueError("port must be between 0 and 65535")
     if linger_seconds < 0:
         raise ValueError("linger_seconds must be >= 0")
+    if content_capture not in {"metadata_only", "full"}:
+        raise ValueError("content_capture must be metadata_only or full")
 
     session_id = uuid4().hex
     live_token = secrets.token_urlsafe(32)
+    pairing_code = secrets.token_urlsafe(18)
+    pairing_gate = _PairingGate(pairing_code)
     root = Path(watch_root).expanduser().resolve()
     run_dir = (
         Path(output_dir).expanduser().resolve()
@@ -762,7 +844,9 @@ def run_live(
 
     state = _LiveState(session_id, event_path, semantic_path)
     state.publish_finalization(recording_report)
-    server = _LocalThreadingHTTPServer(("127.0.0.1", port), _handler_factory(state, live_token))
+    server = _LocalThreadingHTTPServer(
+        ("127.0.0.1", port), _handler_factory(state, live_token, pairing_gate)
+    )
     server.daemon_threads = True
     server_thread = threading.Thread(
         target=server.serve_forever,
@@ -772,17 +856,21 @@ def run_live(
     server_thread.start()
     host, selected_port = server.server_address[:2]
     live_url = f"http://{host}:{selected_port}/"
-    authenticated_live_url = f"{live_url}?{urlencode({'t': live_token})}"
     if announce is not None:
-        announce(authenticated_live_url)
+        announce(live_url)
+    if announce_pairing_code is not None:
+        announce_pairing_code(pairing_code)
+    if announce_api_token is not None:
+        announce_api_token(live_token)
     if open_browser:
-        webbrowser.open(authenticated_live_url)
+        webbrowser.open(live_url)
 
     return_code = 1
     environment_updates = {
         _SEMANTIC_ENV: str(semantic_path),
         _RUN_ID_ENV: session_id,
         _SESSION_ID_ENV: session_id,
+        CONTENT_CAPTURE_ENV: content_capture,
     }
     previous_environment = {
         key: os.environ.get(key) for key in environment_updates

@@ -31,7 +31,8 @@ def test_run_top_launches_dashboard_in_separate_terminal(monkeypatch, tmp_path) 
 
     def fake_run_live(command, **kwargs):
         observed["run_command"] = list(command)
-        kwargs["announce"]("http://127.0.0.1:43210/?t=secret-token")
+        kwargs["announce"]("http://127.0.0.1:43210/")
+        kwargs["announce_api_token"]("secret-token")
         return SimpleNamespace(return_code=0)
 
     monkeypatch.setattr(top_module, "launch_dashboard_terminal", fake_launch)

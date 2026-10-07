@@ -13,6 +13,7 @@ from watchdog.observers.polling import PollingObserver
 
 from .schema import Entity, RuntimeEvent
 from .sink import JsonlSink
+from .risk import risk_attributes, system_path_category
 
 LINUX_INOTIFY_MIN_SAFE_DIRS = 2048
 LINUX_INOTIFY_MAX_SAFE_DIRS = 32768
@@ -163,6 +164,21 @@ class SessionFileEventHandler(FileSystemEventHandler):
                 attributes=attributes,
             )
         )
+        category = system_path_category(target_path)
+        if category is not None and event.event_type in {"created", "modified", "deleted", "moved"}:
+            risk = Entity(
+                type="risk_record",
+                id=f"risk:{self.session_id}:system_path:{target_path}",
+                name="sensitive system path change observed",
+            )
+            self.sink.emit(RuntimeEvent.create(
+                session_id=self.session_id, event_type="risk.system_path_change",
+                relation="HAS_RISK", source=self.session_entity, target=risk,
+                attributes=risk_attributes(
+                    "system_path_change", category, path=str(target_path),
+                    operation=event.event_type, writer_identity="unknown",
+                ),
+            ))
 
     def on_any_event(self, event: FileSystemEvent) -> None:
         self._emit(event)

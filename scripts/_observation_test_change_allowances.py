@@ -32,6 +32,26 @@ CHANGES = {
         "b27d9ad4494cb63a804009192580bb297a513c94128ac3f3edd3c11f0446b101",
         "PR #112: retain the historical test ID but reject whole-output-directory exclusion, the independently reproduced cause of dropped primes.py/output.txt; exact internal artifact exclusions remain required.",
     ),
+    "tests/test_live_auth.py": (
+        "40f9a95878e3b378d685016563cba2ec153f6f9d83b7d1b389599cc88dca1c21",
+        "PR #112: preserve the historical live-auth test IDs while replacing URL query-token bootstrap with one-time POST pairing plus an HttpOnly SameSite cookie; header-token API access, 401 evidence-route protection, and no-persistence assertions remain.",
+    ),
+    "tests/test_live.py": (
+        "7a6f6f61695421c64627c910a651bed3fa6972c8c06430879ec3e96dcddfb7ff",
+        "PR #112: preserve the historical live graph test IDs while receiving the API token through the private callback instead of parsing it from the announced URL; snapshot, graph, viewer, finalization, and terminal-result assertions remain.",
+    ),
+    "tests/test_top_detached.py": (
+        "40562dd27b4831e2eb5beb9ee6ae8aea5591664577d445c4b38c36bcc867c86c",
+        "PR #112: preserve the historical detached-top test IDs while supplying the localhost API credential through announce_api_token and retaining private token-file, attach-command, cleanup, and dashboard-launch assertions.",
+    ),
+    "tests/test_conversation_access.py": (
+        "aceecde41e02fdefea3cbb5b786799632e29d67dfddcee750138c7b72cb85121",
+        "PR #112: preserve the historical conversation-access test IDs while forbidding query-token authentication and browser token JavaScript; authenticated header access, same-origin browser fetches, conversation boundaries, and content-route authorization remain required.",
+    ),
+    "tests/test_inference_gateway_full_fidelity.py": (
+        "5ca999addcf9cc608febac13819c13f2bf88eaf60937345b1e367fb703f4a93d",
+        "PR #112: preserve the historical LiteLLM full-fidelity live test ID while making its plaintext capture opt-in explicit; the test still requires complete prompt content references and graph materialization when full capture is requested.",
+    ),
 }
 
 

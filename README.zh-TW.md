@@ -92,6 +92,12 @@ execweave top -- codex
 
 [觀測完整度與失敗示例](docs/observation-integrity.md) 說明行程結果、獨立任務驗證、觀測完整度三個軸，以及尚未解除的發布阻擋項目。這批修改尚未發布，PyPI 0.8.34 不包含這些修改。
 
+**Live 隱私與驗證（尚未發布的 0.8.35 工作）**
+
+`execweave live` 與 `execweave top` 預設只保存 Provider／Model 的 **metadata**。只有使用者明確加上 `--capture-content` 時，才會保存 integration 真正暴露的完整 Prompt、Response、Tool value 等內容；無效的 capture policy 會在自動 recorder 邊界 fail closed 成 metadata-only。
+
+Live dashboard 不再把 API credential 放進 `?t=...`。公開顯示的 URL 不含 credential；瀏覽器以一次性 pairing code 經 POST body 換取 `HttpOnly; SameSite=Strict` cookie，非瀏覽器 API client 則使用私有的 `X-ExecWeave-Token` header。
+
 Google Antigravity 目前實際 CLI 指令為 `agy`；ExecWeave 同時接受 `antigravity` 作為較好記的 alias。
 
 Windows 上直接輸入 `cursor` 時，ExecWeave 會依照使用者 PATH 指向的 Cursor 安裝位置處理；若你明確提供 launcher path，ExecWeave 會保留該路徑。
@@ -282,7 +288,8 @@ Raw observation 與 derived semantic/correlation output 會維持分離。
 - **失敗時的 ownership cleanup：** Portable collector 若在已啟動 managed workload 後非預期失敗，會先終止自己擁有的 workload，再記錄 terminal session state；filesystem watcher 即使只啟動一部分，也會在錯誤往外傳前清理。
 - Linux 另外提供 `strace` reference backend，可在支援的執行中取得更強的 syscall-attributed evidence。
 - Provider semantic coverage 完全取決於該 integration 真正暴露的資訊。未暴露的 Prompt、hidden reasoning、遠端 Provider internals 與 routing 無法被可靠重建。
-- Full-fidelity Provider content 可能包含 Credential、Secret、Source code、Prompt、Tool value、Model response、Shell output 與 File content。
+- Full-fidelity Provider content 可能包含 Credential、Secret、Source code、Prompt、Tool value、Model response、Shell output 與 File content。因此 `live`／`top` 預設為 metadata-only；完整 Provider／Model plaintext 必須明確使用 `--capture-content`。
+- Run artifacts 使用 owner-private writer。POSIX 會在敏感 bytes 發布前建立 owner-only 權限；Windows 路徑會套用 protected owner DACL。Windows 的最終保證仍必須由 release CI matrix 實機驗證，不能由 Linux 測試推定。
 - Conversation isolation 是 attribution 規則，不是 redaction boundary。Provider 明確路由的內容可能合理地出現在多個參與者上。
 - 本機 integrity manifest 可以檢查相對於 manifest 的檔案變化，但如果 evidence 與 manifest 都位於同一個可寫 trust boundary，就不是 adversary-resistant trusted logging system。
 - 分享前請檢查完整 run directory。

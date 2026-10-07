@@ -6,6 +6,7 @@ import stat
 import threading
 from pathlib import Path
 
+from .private_io import harden_private_file, private_file_security_state
 from .schema import RuntimeEvent
 
 
@@ -43,4 +44,10 @@ class JsonlSink:
                     raise ValueError("event stream must be a private regular file")
                 if os.name != "nt" and stat.S_IMODE(info.st_mode) != 0o600:
                     os.fchmod(handle.fileno(), 0o600)
+                if not harden_private_file(self.path):
+                    raise OSError("unable to establish private event-stream permissions")
                 handle.write(line + "\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            if private_file_security_state(self.path) != "owner_only":
+                raise OSError("private event-stream permission verification failed")

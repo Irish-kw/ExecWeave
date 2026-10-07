@@ -64,13 +64,13 @@ def _within_live_payload_budget(node_count: int, edge_count: int) -> bool:
 
 def _inject_live_auth(html: str) -> str:
     authenticated = _base_inject_live_auth(html)
+    # Shared offline dashboard components can optionally use an API-token global.
+    # The live browser intentionally never receives that token; same-origin cookies
+    # authenticate these fetches instead. Remove the dead header branch from the
+    # served page so no future code can accidentally revive URL-token propagation.
     return authenticated.replace(
-        "const liveAuthToken=new URLSearchParams(location.search).get('t')||'';"
-        "if(liveAuthToken)",
-        "const liveAuthToken=new URLSearchParams(location.search).get('t')||'';"
-        "window.__execweaveToken=liveAuthToken;"
-        "if(liveAuthToken)",
-        1,
+        "const headers={};if(window.__execweaveToken)headers['X-ExecWeave-Token']=window.__execweaveToken;",
+        "const headers={};",
     )
 
 
@@ -83,8 +83,8 @@ def _build_execution_graph_without_internal_hooks(*args, **kwargs):
     return strip_internal_hook_execution_graph(_base_build_execution_graph(*args, **kwargs))
 
 
-def _handler_factory(state, token: str):
-    base_handler = _base_handler_factory(state, token)
+def _handler_factory(state, token: str, pairing=None):
+    base_handler = _base_handler_factory(state, token, pairing)
     run_root = state.event_path.parent.resolve()
     run_root_fs = _filesystem_path(run_root)
 

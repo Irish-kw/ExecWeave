@@ -41,7 +41,7 @@ def _execution(graph: dict[str, Any]) -> dict[str, Any]:
     result = {
         "state": "unknown", "reason": "no_terminal_evidence", "return_code": code,
         "event_id": event_id, "timestamp": _text(outcome.get("timestamp")),
-        "task_success_implied": False,
+        "task_success_implied": False, "failure_domain": None,
     }
     if outcome.get("recorder_finished") is not True or event_id is None:
         return result
@@ -58,8 +58,16 @@ def _execution(graph: dict[str, Any]) -> dict[str, Any]:
     if declared not in (None, state):
         result["reason"] = "conflicting_terminal_metadata"
         return result
-    result.update(state=state, reason="recorded_terminal_event" if state != "unknown"
-                  else "terminal_exit_unavailable")
+    failure_domain = (
+        "environment" if state == "collector_failed" else
+        "operator" if state == "interrupted" else
+        "task" if state == "failed" else None
+    )
+    result.update(
+        state=state,
+        reason="recorded_terminal_event" if state != "unknown" else "terminal_exit_unavailable",
+        failure_domain=failure_domain,
+    )
     return result
 
 

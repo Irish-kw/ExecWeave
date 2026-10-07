@@ -9,7 +9,7 @@ from . import cli
 from .agent_bootstrap import AgentBootstrapResult, bootstrap_supported_agent, inspect_supported_agent
 
 _LIVE_VALUE_OPTIONS = {"--watch-root", "--output-dir", "--interval", "--port", "--linger"}
-_LIVE_FLAG_OPTIONS = {"--no-files", "--no-network", "--open"}
+_LIVE_FLAG_OPTIONS = {"--no-files", "--no-network", "--open", "--capture-content"}
 
 
 def _live_command(args: list[str]) -> list[str]:

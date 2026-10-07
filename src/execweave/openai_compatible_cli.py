@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .content_store import FullFidelityContentStore
+from .privacy import full_content_capture_enabled
 from .openai_compatible import (
     append_openai_compatible_records,
     response_to_events,
@@ -79,6 +80,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _append_full_fidelity_fail_open(sidecar: Path, records_factory) -> int:
+    if not full_content_capture_enabled():
+        return 0
     try:
         records = records_factory(FullFidelityContentStore(sidecar.parent))
         append_openai_compatible_records(sidecar, records)

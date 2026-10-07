@@ -24,6 +24,8 @@ from .codex_hook_lifecycle import (
 )
 from .content_store import FullFidelityContentStore
 from .conversation_archive import codex_conversation_archive_events
+from .private_io import private_artifact_path
+from .privacy import full_content_capture_enabled
 
 _CAPTURE_ERRORS = (OSError, RuntimeError, TimeoutError, TypeError, ValueError)
 
@@ -182,7 +184,7 @@ def main(argv: list[str] | None = None) -> int:
         if sidecar is None:
             configured = os.environ.get("EXECWEAVE_SEMANTIC_SIDECAR")
             sidecar = Path(configured) if configured else _default_sidecar(payload)
-        sidecar = Path(sidecar).expanduser().resolve()
+        sidecar = private_artifact_path(sidecar)
     except _CAPTURE_ERRORS as exc:
         _capture_warning("setup", exc)
         return 1 if args.strict else 0
@@ -215,6 +217,8 @@ def main(argv: list[str] | None = None) -> int:
     # store/archive work even here; installed --auto Interrupt never reaches this
     # module because codex_hook_entry uses its bounded fast path.
     if payload.get("hook_event_name") == "Interrupt":
+        return 1 if args.strict and failures else 0
+    if not full_content_capture_enabled():
         return 1 if args.strict and failures else 0
 
     # The content store is itself optional telemetry infrastructure. If it is

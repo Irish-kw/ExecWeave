@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 from copy import deepcopy
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
+
+from .private_io import write_private_text
 
 from .schema import SCHEMA_VERSION
 from .validate import validate_event_stream
@@ -334,7 +334,9 @@ def merge_semantic_sidecar(
 ) -> SemanticMergeResult:
     runtime = Path(runtime_path).expanduser().resolve()
     semantic = Path(semantic_path).expanduser().resolve()
-    output = Path(output_path).expanduser().resolve()
+    raw_output = Path(output_path).expanduser()
+    raw_output.parent.mkdir(parents=True, exist_ok=True)
+    output = raw_output.parent.resolve() / raw_output.name
     if output.exists() and output.stat().st_size > 0:
         raise FileExistsError(f"ExecWeave merged event stream already exists: {output}")
 
@@ -401,22 +403,20 @@ def merge_semantic_sidecar(
     for sequence, event in enumerate(merged, start=1):
         event["sequence"] = sequence
 
-    output.parent.mkdir(parents=True, exist_ok=True)
-    fd, temp_name = tempfile.mkstemp(prefix=".execweave-semantic-", suffix=".jsonl", dir=output.parent)
-    os.close(fd)
-    temp_path = Path(temp_name)
+    blob = "".join(
+        json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n" for event in merged
+    )
+    validation_path = output.parent / f".{output.name}.validate-{uuid4().hex}.jsonl"
     try:
-        temp_path.write_text(
-            "".join(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n" for event in merged),
-            encoding="utf-8",
-        )
-        merged_validation = validate_event_stream(temp_path, require_complete_session=True)
+        write_private_text(validation_path, blob)
+        merged_validation = validate_event_stream(validation_path, require_complete_session=True)
         if not merged_validation.valid:
-            raise ValueError("merged semantic event stream is invalid: " + "; ".join(merged_validation.errors))
-        temp_path.replace(output)
+            raise ValueError(
+                "merged semantic event stream is invalid: " + "; ".join(merged_validation.errors)
+            )
+        write_private_text(output, blob)
     finally:
-        if temp_path.exists():
-            temp_path.unlink()
+        validation_path.unlink(missing_ok=True)
 
     return SemanticMergeResult(
         runtime_event_count=len(runtime_events),

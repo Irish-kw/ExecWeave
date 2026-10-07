@@ -92,6 +92,12 @@ In this development branch, `live` only checks hook configuration; it never inst
 
 See [observation integrity and the negative example](docs/observation-integrity.md) for the three result axes and remaining release blockers. These changes are unreleased; version 0.8.34 on PyPI does not contain them.
 
+**Live privacy and authentication (unreleased 0.8.35 work)**
+
+`execweave live` and `execweave top` default provider/model plaintext capture to **metadata only**. Use `--capture-content` only when you explicitly want complete exposed prompts, responses, tool values, and other provider content stored in the run. Invalid capture-policy values fail closed to metadata-only at automatic recorder boundaries.
+
+The live dashboard no longer puts its API credential in `?t=...`. The announced URL contains no credential. Browser access uses a one-time pairing code submitted in a POST body and then an `HttpOnly; SameSite=Strict` cookie; non-browser API clients use the private `X-ExecWeave-Token` header.
+
 Google Antigravity currently uses the `agy` CLI command. ExecWeave also accepts `antigravity` as a friendly alias.
 
 On Windows, bare `cursor` follows the Cursor installation referenced by the user's PATH. Explicit launcher paths are respected.
@@ -291,7 +297,8 @@ Raw observations remain separate from derived semantic and correlation outputs.
 - **Failure ownership cleanup:** if the portable collector fails unexpectedly after launching a managed workload, it terminates the workload it owns before recording terminal session state. A filesystem observer that only partially starts is also torn down before the startup error propagates.
 - Linux also provides a `strace` reference backend with stronger syscall-attributed evidence for supported executions.
 - Provider semantics depend on what each integration actually exposes. Missing prompts, hidden reasoning, remote provider internals, and unexposed routing cannot be reconstructed reliably.
-- Full-fidelity provider content may contain credentials, secrets, source code, prompts, tool values, model responses, shell output, and file contents.
+- Full-fidelity provider content may contain credentials, secrets, source code, prompts, tool values, model responses, shell output, and file contents. `live`/`top` therefore default to metadata-only; complete provider/model plaintext requires explicit `--capture-content`.
+- Run artifacts are written through owner-private primitives. POSIX permissions are established before sensitive bytes are published; the Windows path applies a protected owner DACL. Final Windows guarantees still depend on the release CI matrix and are not inferred from Linux tests.
 - Conversation isolation is an attribution rule, not a redaction boundary. Explicitly routed content may legitimately appear at more than one participant.
 - A local integrity manifest detects changes relative to the manifest; it is not an adversary-resistant trusted logging system if both evidence and manifest remain inside the same writable trust boundary.
 - Review the complete run directory before sharing it.

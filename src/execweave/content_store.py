@@ -8,6 +8,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from .private_io import harden_private_file, private_file_security_state
+
 _CONTENT_DIR = "content"
 _HASH_ALGORITHM = "sha256"
 _COPY_CHUNK_BYTES = 1024 * 1024
@@ -148,6 +150,9 @@ class FullFidelityContentStore:
         before = source_fs.stat()
         fd, temp_name = tempfile.mkstemp(prefix=".execweave-content-", dir=destination_dir)
         temp_path = _filesystem_path(Path(temp_name))
+        if not harden_private_file(temp_path):
+            os.close(fd)
+            raise OSError("unable to establish private content-store permissions")
         digest = hashlib.sha256()
         size = 0
         try:
@@ -188,11 +193,10 @@ class FullFidelityContentStore:
                     raise RuntimeError(f"content hash collision at {destination}")
             else:
                 temp_path.replace(destination_fs)
-            if os.name != "nt":
-                try:
-                    destination_fs.chmod(0o600)
-                except OSError:
-                    pass
+            if not harden_private_file(destination_fs):
+                raise OSError("unable to establish private content-store permissions")
+            if private_file_security_state(destination_fs) != "owner_only":
+                raise OSError("private content-store permission verification failed")
             return ContentReference(
                 sha256=digest_hex,
                 path=relative.as_posix(),
@@ -232,6 +236,9 @@ class FullFidelityContentStore:
             prefix=".execweave-content-", dir=destination_fs.parent
         )
         temp_path = _filesystem_path(Path(temp_name))
+        if not harden_private_file(temp_path):
+            os.close(fd)
+            raise OSError("unable to establish private content-store permissions")
         try:
             if os.name != "nt":
                 try:
@@ -249,11 +256,10 @@ class FullFidelityContentStore:
                     temp_path.unlink(missing_ok=True)
                 else:
                     raise
-            if os.name != "nt":
-                try:
-                    destination_fs.chmod(0o600)
-                except OSError:
-                    pass
+            if not harden_private_file(destination_fs):
+                raise OSError("unable to establish private content-store permissions")
+            if private_file_security_state(destination_fs) != "owner_only":
+                raise OSError("private content-store permission verification failed")
         finally:
             temp_path.unlink(missing_ok=True)
 

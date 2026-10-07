@@ -65,6 +65,11 @@ def build_parser() -> argparse.ArgumentParser:
         dest="open_browser",
         help="Open the Web Viewer in addition to the detached terminal dashboard",
     )
+    parser.add_argument(
+        "--capture-content",
+        action="store_true",
+        help="Explicitly opt in to full provider/model plaintext capture (default: metadata only)",
+    )
     parser.add_argument("--attach", default=None, help=argparse.SUPPRESS)
     parser.add_argument("--attach-token-file", default=None, help=argparse.SUPPRESS)
     parser.add_argument("--attach-command-json", default="[]", help=argparse.SUPPRESS)
@@ -141,6 +146,7 @@ def main(argv: list[str] | None = None) -> int:
             port=args.port,
             open_browser=args.open_browser,
             linger_seconds=args.linger,
+            content_capture="full" if args.capture_content else "metadata_only",
         )
     except (FileExistsError, RuntimeError, ValueError, OSError) as exc:
         parser.error(str(exc))

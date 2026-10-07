@@ -17,6 +17,8 @@ from .cursor_adapter import (
 )
 from .cursor_delegation import cursor_delegation_events
 from .cursor_full_fidelity import cursor_hook_to_content_events
+from .private_io import private_artifact_path
+from .privacy import full_content_capture_enabled
 from .cursor_hook_contract import (
     OFFICIAL_CURSOR_HOOK_EVENTS,
     cursor_official_hook_semantic_events,
@@ -137,7 +139,7 @@ def main(argv: list[str] | None = None) -> int:
         if sidecar is None:
             configured = os.environ.get("EXECWEAVE_SEMANTIC_SIDECAR")
             sidecar = Path(configured) if configured else _default_sidecar(payload)
-        sidecar = Path(sidecar).expanduser().resolve()
+        sidecar = private_artifact_path(sidecar)
         observed_at = _now()
         store = FullFidelityContentStore(sidecar.parent)
 
@@ -154,6 +156,9 @@ def main(argv: list[str] | None = None) -> int:
                 strict=args.strict,
             ),
         )
+        if not full_content_capture_enabled():
+            print("{}")
+            return 0
         append_semantic_records(
             sidecar,
             cursor_hook_to_content_events(

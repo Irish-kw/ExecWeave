@@ -20,6 +20,7 @@ from .graph_ops import (
     write_graph_payload,
 )
 from .live import run_live
+from .private_io import private_artifact_path, write_private_json
 from .semantic import merge_semantic_sidecar
 from .sink import JsonlSink
 from .validate import validate_event_stream
@@ -95,6 +96,11 @@ def _add_live_arguments(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         dest="open_browser",
         help="Open the live graph in the default browser",
+    )
+    parser.add_argument(
+        "--capture-content",
+        action="store_true",
+        help="Explicitly opt in to full provider/model plaintext capture (default: metadata only)",
     )
 
 
@@ -491,14 +497,8 @@ def main(argv: list[str] | None = None) -> int:
             payload = load_graph(args.graph)
             report = analyze_graph(payload)
             if args.output is not None:
-                output = args.output.expanduser().resolve()
-                output.parent.mkdir(parents=True, exist_ok=True)
-                if output.exists() and output.stat().st_size > 0:
-                    raise FileExistsError(f"ExecWeave analysis output already exists: {output}")
-                output.write_text(
-                    json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-                    encoding="utf-8",
-                )
+                output = private_artifact_path(args.output)
+                write_private_json(output, report)
         except (FileExistsError, ValueError) as exc:
             parser.error(str(exc))
         print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
@@ -586,7 +586,11 @@ def main(argv: list[str] | None = None) -> int:
                 port=args.port,
                 open_browser=args.open_browser,
                 linger_seconds=args.linger,
+                content_capture="full" if args.capture_content else "metadata_only",
                 announce=lambda url: print(f"ExecWeave live: {url}", flush=True),
+                announce_pairing_code=lambda code: print(
+                    f"ExecWeave pairing code: {code}", flush=True
+                ),
             )
         except (FileExistsError, RuntimeError, ValueError, OSError) as exc:
             parser.error(str(exc))

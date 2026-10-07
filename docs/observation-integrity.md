@@ -62,6 +62,39 @@ The installation status is `configured_unverified`, never proof of delivery.
 A missing/empty/unreadable sidecar produces a durable `hook_no_evidence` warning.
 A syntactically recognizable sidecar record is not proof of semantic validity.
 
+## Security and privacy hardening in this checkpoint
+
+`live` and `top` now set an explicit provider-content policy for every observed child.
+The default is `metadata_only`; `--capture-content` is the explicit opt-in to complete
+provider/model plaintext exposed by an integration. An invalid configured value resolves
+to metadata-only. The policy is enforced at automatic hook/proxy/callback/probe boundaries,
+not inside the low-level content store, so observability does not change an application's
+explicit SDK capture semantics.
+
+The browser no longer receives the API token through a query string. The announced live
+URL contains no credential. A one-time pairing code is POSTed to `/pair` and exchanged for
+an `HttpOnly; SameSite=Strict` cookie; query-token authentication is rejected. Header-token
+access remains available for non-browser local API clients such as `top`.
+
+Sensitive run writers establish private permissions before publishing bytes. POSIX uses
+owner-only mode; the Windows implementation applies a protected owner DACL and verifies
+the resulting security descriptor. Final-component symbolic/reparse links, non-regular
+files, and multiply linked targets are rejected. This covers the primary event and semantic
+streams, content blobs, graph/viewer/conversation exports, and finalization receipts.
+Actual Windows certification remains a release-CI requirement.
+
+When ExecWeave actually observes a privilege launcher or a create/modify/delete operation
+under a sensitive system path, it records a durable risk event with
+`default_decision=deny` and `enforced=false`. This is an observation/default-policy record,
+not proof that ExecWeave prevented the operation. Hook configuration is sampled at session
+start and end; the event timestamps provide the time-qualified receipt and delivery remains
+separate.
+
+`finalization.json` now persists the derived run assessment and binds it to the exact
+`graph.json` SHA-256/size. Execution failures distinguish `task`, `environment`, and
+`operator` domains. Graph readers accept the documented supported schema set and reject
+unknown future versions instead of attempting a best-effort parse.
+
 ## Reproduce the negative example
 
 Using an installed candidate wheel, with a **new** directory:
@@ -84,16 +117,24 @@ unverified` unless a real independent validation contract supplies evidence.
 
 ## Remaining release blockers
 
-This first batch does not yet complete privilege/system-path audit records,
-time-qualified system-hook presence, privacy-default and redaction fail-closed
-changes across all writers, Windows event-stream ACL verification, URL-token
-hardening, a genuinely external protected integrity anchor, strict cross-version
-evidence-reader coverage, or the file-only kill/upgrade/rollback drill. Main event
-streams now use POSIX 0600 and reject final-component symbolic/hard links; that is
-not a claim that every artifact writer or hostile same-UID access is protected.
+The source-level blockers above are implemented but **release acceptance is still not
+automatic**. The finished candidate must pass the complete Linux/macOS/Windows matrix,
+including native Windows ACL behavior, and a new independent exact-SHA review. A safe real
+provider run must be used where the verifier can guarantee that the provider cannot escape
+into privileged/system paths; an unsafe passwordless-sudo host remains BLOCKED rather than
+being treated as a passing test.
 
-A same-user home directory is **not** outside the observed process's trust domain.
-An observation risk label is **not** runtime enforcement. Unsupported environments
-or unavailable real-provider tests must be reported as BLOCKED/NOT_RUN, not PASS.
-No merge, tag, GitHub Release, or PyPI upload is allowed from this stage. Published
-PyPI verification is a separate post-publication gate, not a checkout test.
+The local `integrity.json` still truthfully declares `external_trust_anchor: false`.
+`execweave-integrity verify --expected-manifest-body-sha256 <digest>` can compare against a
+digest supplied from an external trust domain, but the digest only becomes an anchor when
+it is actually stored somewhere the observed process cannot rewrite (for example a CI or
+review record controlled outside the run). A same-UID home file is not such a boundary.
+
+File-reader upgrade/rollback behavior and incomplete/environment-failure archives now have
+regression coverage. Hard-kill behavior still cannot be represented as a successful
+finalization event when the recorder itself is forcibly terminated; consumers must treat a
+missing terminal receipt as incomplete evidence, not reconstruct a fictitious success.
+
+No merge, version bump, tag, GitHub Release, or PyPI upload is authorized until CI and the
+final exact-SHA independent acceptance both pass. Published-PyPI clean-install verification
+remains a separate post-publication gate.

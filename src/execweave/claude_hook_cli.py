@@ -20,6 +20,8 @@ from .claude_hook_contract import (
 from .claude_model_observer import append_claude_transcript_model_events
 from .content_store import FullFidelityContentStore
 from .conversation_archive import claude_conversation_archive_events
+from .private_io import private_artifact_path
+from .privacy import full_content_capture_enabled
 
 
 def _hook_handler(command: str) -> dict[str, str]:
@@ -141,7 +143,7 @@ def main(argv: list[str] | None = None) -> int:
         if sidecar is None:
             configured = os.environ.get("EXECWEAVE_SEMANTIC_SIDECAR")
             sidecar = Path(configured) if configured else _default_sidecar(payload)
-        sidecar = Path(sidecar).expanduser().resolve()
+        sidecar = private_artifact_path(sidecar)
         observed_at = _now()
         records = claude_hook_to_semantic_events(payload, timestamp=observed_at)
         records.extend(
@@ -159,6 +161,9 @@ def main(argv: list[str] | None = None) -> int:
                     evidence_source="provider_hook",
                 )
             )
+        if not full_content_capture_enabled():
+            append_semantic_records(sidecar, records)
+            return 0
         content_store = FullFidelityContentStore(sidecar.parent)
         content_records = claude_official_full_fidelity_events(
             payload,

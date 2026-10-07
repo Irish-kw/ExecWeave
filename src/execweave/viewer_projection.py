@@ -12,6 +12,7 @@ from .conversation_records import (
     write_conversation_records,
 )
 from .dashboard_shell import render_static_dashboard_html
+from .private_io import private_artifact_path, write_private_text
 from .viewer_flow_layout import flow_layout_graph
 from .viewer_external_endpoints import (
     EXTERNAL_NODE_ID,
@@ -465,15 +466,15 @@ def write_graph_html(
     open_browser: bool = False,
 ) -> Path:
     """Persist the live dashboard as an offline final snapshot."""
-    output = Path(path).expanduser().resolve()
+    output = private_artifact_path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
     if output.exists() and output.stat().st_size > 0:
         raise FileExistsError(f"ExecWeave viewer output already exists: {output}")
     payload = conversation_index_payload(graph, output.parent, include_investigation=True)
     write_conversation_records(graph, output.parent, payload=payload)
-    output.write_text(
+    write_private_text(
+        output,
         _render_unified_dashboard(graph, payload["entries"], payload.get("investigation")),
-        encoding="utf-8",
     )
     if open_browser:
         import webbrowser
