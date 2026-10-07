@@ -157,7 +157,8 @@ def test_finished_live_page_keeps_the_same_document(tmp_path: Path) -> None:
             browser = _launch(playwright, executable)
             try:
                 page = browser.new_page(viewport={"width": 1440, "height": 1000})
-                page.goto(f"http://{host}:{port}/?t={token}")
+                page.set_extra_http_headers({"X-ExecWeave-Token": token})
+                page.goto(f"http://{host}:{port}/")
                 page.wait_for_selector(".node", timeout=15000)
                 page.evaluate("document.body.dataset.execweaveDomIdentity='same-document'")
 

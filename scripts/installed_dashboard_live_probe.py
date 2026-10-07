@@ -57,34 +57,48 @@ def native_probe(browser, cli: Path, out: Path, export_and_decode) -> dict:
     try:
         deadline = time.monotonic() + 25
         url = None
+        pairing_code = None
         while time.monotonic() < deadline:
-            match = re.search(r'http://127\.0\.0\.1:\d+/\?t=[A-Za-z0-9_-]+', ''.join(lines))
-            if match:
-                url = match.group(0)
+            output = ''.join(lines)
+            url_match = re.search(r'ExecWeave live:\s+(http://127\.0\.0\.1:\d+/)', output)
+            code_match = re.search(r'ExecWeave pairing code:\s+([A-Za-z0-9_-]+)', output)
+            if url_match and code_match:
+                url = url_match.group(1)
+                pairing_code = code_match.group(1)
                 break
             if proc.poll() is not None:
                 break
             time.sleep(.05)
-        assert url, 'no authenticated live URL found'
+        assert url, 'no credential-free live URL found'
+        assert pairing_code, 'no one-time pairing code found'
         parsed = urllib.parse.urlsplit(url)
+        assert not parsed.query and not parsed.fragment, 'credential appeared in live URL'
         origin = f'{parsed.scheme}://{parsed.netloc}'
-        token = urllib.parse.parse_qs(parsed.query)['t'][0]
         try:
             urllib.request.urlopen(origin + '/live.json?after=-1', timeout=5)
             raise AssertionError('unauthenticated live.json was accepted')
         except urllib.error.HTTPError as error:
             assert error.code == 401
-        request = urllib.request.Request(origin + '/live.json?after=-1', headers={'X-ExecWeave-Token': token})
-        with urllib.request.urlopen(request, timeout=5) as response:
-            assert response.status == 200
         page = browser.new_page(viewport={'width': 1440, 'height': 1000}, accept_downloads=True)
         errors, requests = [], []
         page.on('pageerror', lambda e: errors.append(str(e)))
         page.on('console', lambda msg: errors.append(msg.text) if msg.type == 'error' else None)
         page.on('request', lambda req: requests.append(urllib.parse.urlsplit(req.url).path))
         page.goto(url)  # True product server, no interception/fulfillment.
+        page.wait_for_selector('input[name="code"]')
+        page.fill('input[name="code"]', pairing_code)
+        page.click('button[type="submit"]')
         page.wait_for_selector('.node')
-        assert not urllib.parse.urlsplit(page.url).query, 'token remained in browser URL'
+        assert not urllib.parse.urlsplit(page.url).query, 'credential remained in browser URL'
+        cookies = page.context.cookies(origin)
+        auth_cookie = next((cookie for cookie in cookies if cookie['name'] == 'execweave_live'), None)
+        assert auth_cookie and auth_cookie.get('httpOnly') is True, 'pairing did not establish HttpOnly auth cookie'
+        request = urllib.request.Request(
+            origin + '/live.json?after=-1',
+            headers={'Cookie': f"execweave_live={auth_cookie['value']}"},
+        )
+        with urllib.request.urlopen(request, timeout=5) as response:
+            assert response.status == 200
         (work / 'release.signal').write_text('go', encoding='utf-8')
         page.wait_for_function("document.getElementById('status').textContent.includes('FINISHED')", timeout=30000)
         page.wait_for_timeout(1000)
@@ -96,7 +110,7 @@ def native_probe(browser, cli: Path, out: Path, export_and_decode) -> dict:
         (out / 'completed-live-graph.json').write_text(json.dumps(live_graph, indent=2), encoding='utf-8')
         live_ids = sorted(n['id'] for n in live_graph['nodes'])
         result = {'live': export_and_decode(page, out / 'native-live'), 'live_nodes': live_ids,
-                  'auth_401': True, 'header_auth_200': True, 'token_removed': True, 'polling_stopped': True}
+                  'auth_401': True, 'cookie_auth_200': True, 'credential_free_url': True, 'polling_stopped': True}
         assert (run / 'viewer.html').is_file() and (run / 'graph.json').is_file()
         page.goto((run / 'viewer.html').as_uri())
         page.wait_for_selector('.node')
@@ -126,6 +140,6 @@ def native_probe(browser, cli: Path, out: Path, export_and_decode) -> dict:
                 proc.kill()
                 proc.wait(timeout=5)
         reader.join(timeout=2)
-        log = re.sub(r'([?&]t=)[A-Za-z0-9_-]+', r'\1REDACTED', ''.join(lines))
+        log = re.sub(r'(ExecWeave pairing code:\s+)[A-Za-z0-9_-]+', r'\1REDACTED', ''.join(lines))
         (out / 'native-cli.log').write_text(log, encoding='utf-8')
 

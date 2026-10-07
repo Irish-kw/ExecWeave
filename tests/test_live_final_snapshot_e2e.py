@@ -52,7 +52,8 @@ def test_final_graph_is_applied_before_polling_stops_and_matches_reopened_viewer
                 errors = []
                 page.on('pageerror', lambda error: errors.append(str(error)))
                 page.on('console', lambda msg: errors.append(msg.text) if msg.type == 'error' else None)
-                page.goto(f'http://127.0.0.1:{server.server_port}/?t={token}')
+                page.set_extra_http_headers({'X-ExecWeave-Token': token})
+                page.goto(f'http://127.0.0.1:{server.server_port}/')
                 page.wait_for_function("window.__execweaveCore?.getGraph().nodes?.length===2")
                 page.locator('#zoom-in').click()
                 page.wait_for_timeout(250)

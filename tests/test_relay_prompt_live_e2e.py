@@ -117,8 +117,9 @@ def test_prompt_is_visible_before_response_and_not_duplicated_when_finished(tmp_
             )
             try:
                 page = browser.new_page(viewport={"width": 1440, "height": 1000})
+                page.set_extra_http_headers({"X-ExecWeave-Token": "test-token"})
                 page.on("pageerror", lambda error: errors.append(str(error)))
-                page.goto(f"http://127.0.0.1:{server.server_port}/?t=test-token")
+                page.goto(f"http://127.0.0.1:{server.server_port}/")
                 page.locator('.node[data-id="agent:Ollama"]').click(timeout=10000)
                 page.wait_for_function(
                     "marker=>document.querySelector('#details').innerText.includes(marker)",

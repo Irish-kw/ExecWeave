@@ -52,6 +52,34 @@ CHANGES = {
         "5ca999addcf9cc608febac13819c13f2bf88eaf60937345b1e367fb703f4a93d",
         "PR #112: preserve the historical LiteLLM full-fidelity live test ID while making its plaintext capture opt-in explicit; the test still requires complete prompt content references and graph materialization when full capture is requested.",
     ),
+    "tests/test_relay_prompt_live_e2e.py": (
+        "d1b3af4f7b5503d2581d2655718ddbf79a1303db8cbbae19d47c66ddf8023c92",
+        "PR #112: preserve the historical relay/live browser test ID while replacing query-string authentication with the supported X-ExecWeave-Token header; prompt-before-response ordering, live DOM visibility, final parity, and no-duplication checks remain unchanged.",
+    ),
+    "tests/test_delivery_native_browser.py": (
+        "55f8620e22e935e7e3d7dda614a80f05686cff59839a69bd3ff95fa3586161a1",
+        "PR #112: preserve the historical native delivery test IDs while authenticating the direct localhost handler through the supported header rather than a URL credential; archive verification and tamper rejection assertions remain unchanged.",
+    ),
+    "tests/test_live_final_snapshot_e2e.py": (
+        "178f8a6f60917b236e155a4b3382c4693b360a7054f72d31849c96db3af0a4ba",
+        "PR #112: preserve the historical final-snapshot browser test ID while moving its direct-handler authentication from query token to header; terminal-delta ordering, polling stop, DOM identity, and reopened-viewer parity remain required.",
+    ),
+    "tests/test_v079_review_e2e.py": (
+        "11a07bd88f10dc7fe188c3804a45381d9e76756bff66f1f742a1c2613996487c",
+        "PR #112: preserve all historical v0.7.9 review browser test IDs while replacing query-string live authentication with the supported header; multi-agent evidence states, same-document live behavior, and final-view semantics remain unchanged.",
+    ),
+    "tests/test_viewer_agent_isolation_e2e.py": (
+        "c82c69384cdcb3801dc085a31b19a469d7c719930de89513bd9b6f30478604ba",
+        "PR #112: preserve the historical viewer-isolation test IDs while migrating direct live browser and conversation-index requests from query credentials to the supported authentication header; graph isolation, raw evidence, content boundaries, and live/static parity remain unchanged.",
+    ),
+    "tests/test_dashboard_round_fold_state_e2e.py": (
+        "f71e81242840bdf46db9020da08fc93359dcba2170895775a9fd2d85db62650a",
+        "PR #112: preserve the historical dashboard round-fold-state test ID while replacing query-string live authentication with the supported header; fold persistence and live/static state behavior remain unchanged.",
+    ),
+    "tests/test_ollama_visible_acceptance.py": (
+        "b649a31b5273dbaf6551f6a8bd33523e2ffddc98c6a9e144da2a75385e376aea",
+        "PR #112: preserve the historical Ollama visible-acceptance test ID while changing its URL parser contract to require a credential-free loopback URL plus a separately announced one-time pairing code; provider availability, cleanup, and evidence checks remain unchanged.",
+    ),
 }
 
 

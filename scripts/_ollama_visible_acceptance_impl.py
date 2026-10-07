@@ -48,7 +48,8 @@ from execweave.conversation_records import conversation_index_payload  # noqa: E
 _PROVIDER = "ollama"
 _MODE = "visible-live"
 _ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
-_LIVE_URL_RE = re.compile(r"ExecWeave live:\s+(http://127\.0\.0\.1:\d+/\?t=[^\s]+)")
+_LIVE_URL_RE = re.compile(r"ExecWeave live:\s+(http://127\.0\.0\.1:\d+/)(?:\s|$)")
+_PAIRING_CODE_RE = re.compile(r"ExecWeave pairing code:\s+([A-Za-z0-9_-]+)")
 _NETWORK_NODE_TYPE = "network_endpoint"
 _NETWORK_RELATIONS = frozenset({"CONNECTED_TO", "NETWORK_CONNECTED_TO"})
 _AGENT_CARD_TEXT_JS = r"""
@@ -366,17 +367,23 @@ class _PipeCapture:
         finally:
             self._handle.close()
 
-    def wait_for_live_url(self, timeout: float) -> str | None:
+    def _wait_for_pattern(self, pattern: re.Pattern[str], timeout: float) -> str | None:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             try:
                 line = self.lines.get(timeout=min(0.25, max(0.01, deadline - time.monotonic())))
             except queue.Empty:
                 continue
-            match = _LIVE_URL_RE.search(line)
+            match = pattern.search(line)
             if match:
                 return match.group(1)
         return None
+
+    def wait_for_live_url(self, timeout: float) -> str | None:
+        return self._wait_for_pattern(_LIVE_URL_RE, timeout)
+
+    def wait_for_pairing_code(self, timeout: float) -> str | None:
+        return self._wait_for_pattern(_PAIRING_CODE_RE, timeout)
 
     def join(self, timeout: float = 2.0) -> bool:
         self._thread.join(timeout)
@@ -552,8 +559,9 @@ def _run_visible(
         live_stdout = _PipeCapture(live_process.stdout, run_root / "execweave.stdout.txt")
         live_stderr = _PipeCapture(live_process.stderr, run_root / "execweave.stderr.txt")
         live_url = live_stdout.wait_for_live_url(timeout=min(timeout, 15.0))
-        if not live_url:
-            raise AssertionError("ExecWeave live URL was not announced")
+        pairing_code = live_stdout.wait_for_pairing_code(timeout=min(timeout, 15.0))
+        if not live_url or not pairing_code:
+            raise AssertionError("ExecWeave live URL or one-time pairing code was not announced")
 
         tags = _wait_json(f"{public_endpoint}/api/tags", timeout=min(timeout, 20.0))
         if tags is None:
@@ -581,6 +589,12 @@ def _run_visible(
         page = browser.new_page(viewport={"width": 1440, "height": 1000})
         diagnostics = BrowserDiagnostics(page)
         page.goto(live_url)
+        page.wait_for_selector('input[name="code"]', timeout=int(timeout * 1000))
+        page.fill('input[name="code"]', pairing_code)
+        page.click('button[type="submit"]')
+        page.wait_for_selector(".node", timeout=int(timeout * 1000))
+        if page.url != live_url:
+            raise AssertionError(f"pairing left an unexpected browser URL: {page.url!r}")
         page.evaluate("window.__execweaveG4Document=document")
         initial_nodes = page.locator(".node").count()
 
