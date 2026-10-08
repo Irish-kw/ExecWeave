@@ -405,6 +405,61 @@ def _ollama_interactive(sidecar: Path) -> None:
     )
 
 
+def _ollama_interactive_switch(sidecar: Path) -> None:
+    """`ollama run llama3.2`, two turns, `/load qwen3`, one more turn in the same REPL."""
+    config = ProxyConfig(upstream="http://127.0.0.1:11434", sidecar=sidecar, mode="ollama", provider_name="ollama")
+    history: list[dict[str, str]] = []
+    # `/load` clears the history and preloads the new model with an empty chat request.
+    turns = [("llama3.2", "2+3?"), ("llama3.2", "3+4?"), ("qwen3", None), ("qwen3", "4+5?")]
+    for index, (model, prompt) in enumerate(turns):
+        if prompt is None:
+            history = []
+            messages: list[dict[str, str]] = []
+            reply = {"role": "assistant", "content": ""}
+        else:
+            history.append({"role": "user", "content": prompt})
+            messages = list(history)
+            reply = {"role": "assistant", "content": f"answer {index}"}
+        request = {"model": model, "messages": messages}
+        response = {
+            "model": model,
+            "created_at": _now(index),
+            "message": reply,
+            "done_reason": "stop" if prompt else "load",
+            "done": True,
+        }
+        common = dict(
+            exchange_id=f"ex-{index}",
+            request_body=json.dumps(request).encode(),
+            request_content_type="application/json",
+            method="POST",
+            request_path="/api/chat",
+        )
+        recorded = record_exchange_fail_open(
+            config, **common, status=None, response_body=b"", response_content_type=None, request_only=True
+        )
+        answered = record_exchange_fail_open(
+            config,
+            **common,
+            status=200,
+            response_body=json.dumps(response).encode() + b"\n",
+            response_content_type="application/x-ndjson",
+            request_recorded=recorded,
+        )
+        assert recorded and answered, f"proxy did not record {model} turn {index}"
+        if prompt is not None:
+            history.append(reply)
+    # Ollama keeps the first model loaded after the switch.
+    _append(
+        sidecar,
+        model_runtime.ollama_ps_to_events(
+            {"models": [{"name": name, "model": name, "size": 1} for name in ("llama3.2", "qwen3")]},
+            endpoint="http://localhost:11434",
+            timestamp=_now(5),
+        ),
+    )
+
+
 def _anthropic_sdk(sidecar: Path) -> None:
     records: list[dict[str, Any]] = []
     for index, model in enumerate(["claude-opus-4-1", "claude-sonnet-4-5"]):
@@ -680,6 +735,13 @@ CASES: tuple[ProviderCase, ...] = (
         ["ollama", "run", "llama3.2"],
         _ollama_interactive,
         [_f("llama3.2")],
+        [("model_runtime", "ollama")],
+    ),
+    _case(
+        "ollama_interactive_switch",
+        ["ollama", "run", "llama3.2"],
+        _ollama_interactive_switch,
+        [_f("llama3.2", "qwen3")],
         [("model_runtime", "ollama")],
     ),
     _case(
