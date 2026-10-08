@@ -20,6 +20,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from uuid import uuid4
 
+from acceptance import graph_topology
 from acceptance.browser_diagnostics import BrowserDiagnostics
 from acceptance.contracts import ConversationSnapshot, same_conversation, verify_conversation
 from acceptance.reporting import Result, Status, write_report
@@ -34,6 +35,7 @@ from execweave.content_store import _filesystem_path
 from playwright.sync_api import sync_playwright
 
 _PROVIDER = "offline-ollama-fixture"
+_MODEL = "offline-fixture"
 
 
 def _iso(base: datetime, seconds: int) -> str:
@@ -258,6 +260,7 @@ def _run_offline(output_root: Path, headed: bool) -> Result:
         ("Network", "Offline semantic fixture does not claim native network observation"),
         ("Multi-agent", "Single-root offline scenario; multi-agent is exercised separately"),
         ("Fold state", "Single-round offline scenario; fold-state suites are separate"),
+        ("Model switch", "Single-model offline scenario; the real Ollama journeys switch models"),
     ):
         result.skip(feature, reason)
 
@@ -290,7 +293,7 @@ def _run_offline(output_root: Path, headed: bool) -> Result:
             payload = (
                 json.dumps(
                     {
-                        "model": "offline-fixture",
+                        "model": _MODEL,
                         "message": {
                             "role": "assistant",
                             "content": done,
@@ -345,7 +348,7 @@ def _run_offline(output_root: Path, headed: bool) -> Result:
                     "/api/chat",
                     body=json.dumps(
                         {
-                            "model": "offline-fixture",
+                            "model": _MODEL,
                             "stream": True,
                             "messages": [{"role": "user", "content": prompt}],
                             "tools": [
@@ -439,6 +442,11 @@ def _run_offline(output_root: Path, headed: bool) -> Result:
                     "01-prompt-before-response.png",
                 )
                 page.screenshot(path=str(run_root / "02-live-final.png"))
+                # One provider session, served by the one fixture model.
+                expected_feeds = [frozenset({_MODEL})]
+                topology_problems, _ = graph_topology.inspect(
+                    page, run_root, "live", expect_feeds=expected_feeds
+                )
 
                 # The live snapshot comes from the live state's real projection.
                 # Do not materialize an intentionally unfinished runtime stream.
@@ -509,6 +517,20 @@ def _run_offline(output_root: Path, headed: bool) -> Result:
                     "03-finished.png",
                 )
                 page.screenshot(path=str(run_root / "03-finished.png"))
+                finished_problems, _ = graph_topology.inspect(
+                    page, run_root, "finished", expect_feeds=expected_feeds
+                )
+                topology_problems += finished_problems
+                result.check(
+                    "Graph topology",
+                    not topology_problems,
+                    "Live and finished dashboards draw root -> model -> session as one connected "
+                    "left-to-right flow with no isolated node, stray or duplicate edge, or overlap"
+                    if not topology_problems
+                    else "; ".join(graph_topology.summary(topology_problems)),
+                    "graph-topology-live.json",
+                    "graph-topology-finished.json",
+                )
                 assert diagnostics is not None
                 console_ok = diagnostics.finish(page, run_root)
                 result.check(
@@ -537,6 +559,7 @@ def _run_offline(output_root: Path, headed: bool) -> Result:
             "/root",
             "Live update",
             "Finished viewer",
+            "Graph topology",
             "JS console",
         ):
             if feature not in result.checks:

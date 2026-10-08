@@ -24,6 +24,7 @@ from typing import Any
 from uuid import uuid4
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from acceptance import graph_topology  # noqa: E402
 from acceptance.browser_diagnostics import BrowserDiagnostics  # noqa: E402
 from acceptance.processes import CleanupReport, OwnedProcessTracker  # noqa: E402
 from acceptance.reporting import FEATURES, Result, Status, write_report  # noqa: E402
@@ -278,6 +279,7 @@ def _run_native(
     _skip(result, "/root", "Plain Python has no provider conversation root by design")
     _skip(result, "Multi-agent", "Plain Python OS-only scenario has no provider agents")
     _skip(result, "Fold state", "No semantic conversation history exists in this OS-only scenario")
+    _skip(result, "Model switch", "Plain Python OS-only scenario uses no model")
 
     tracker = OwnedProcessTracker(poll_interval=0.02)
     process: subprocess.Popen[str] | None = None
@@ -391,6 +393,7 @@ def _run_native(
             "Process/file/network evidence grew in the same live document without reload",
         )
         page.screenshot(path=str(run_root / "01-native-live.png"), full_page=True)
+        topology_problems, live_feeds = graph_topology.inspect(page, run_root, "live")
 
         exit_code = process.wait(timeout=max(timeout, 30))
         if exit_code != 0:
@@ -471,6 +474,25 @@ def _run_native(
             "Finished viewer",
             True,
             "Finished viewer rendered and actual Process/File/Network inspectors were clickable",
+        )
+        finished_problems, finished_feeds = graph_topology.inspect(page, run_root, "finished")
+        topology_problems += finished_problems
+        topology_problems += [
+            f"{surface}: a session is fed by a model in a run that used none: {sorted(feed)}"
+            for surface, feeds in (("live", live_feeds), ("finished", finished_feeds))
+            for feed in feeds
+            if feed != {graph_topology.ROOT}
+        ]
+        _check(
+            result,
+            "Graph topology",
+            not topology_problems,
+            "Live and finished dashboards draw one connected left-to-right flow from the root "
+            "with no isolated node, stray or duplicate edge, model node, or overlap"
+            if not topology_problems
+            else "; ".join(graph_topology.summary(topology_problems)),
+            "graph-topology-live.json",
+            "graph-topology-finished.json",
         )
         assert diagnostics is not None
         console_ok = diagnostics.finish(page, run_root)

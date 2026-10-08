@@ -35,6 +35,7 @@ from uuid import uuid4
 import psutil
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from acceptance import graph_topology  # noqa: E402
 from acceptance.browser_diagnostics import BrowserDiagnostics  # noqa: E402
 from acceptance.processes import (  # noqa: E402
     CleanupReport,
@@ -501,6 +502,7 @@ def _run_visible(
         "Single real Ollama root conversation; multi-agent belongs to provider-specific later gates",
     )
     _skip(result, "Fold state", "Single-round visible G4 scenario; fold persistence belongs to G5")
+    _skip(result, "Model switch", "Single-model visible G4 scenario; the model switch belongs to G5")
 
     public_port = _free_loopback_port()
     public_endpoint = f"http://127.0.0.1:{public_port}"
@@ -669,6 +671,11 @@ def _run_visible(
             f"Same document updated without reload; nodes {initial_nodes}->{final_nodes}",
         )
         page.screenshot(path=str(run_root / "02-live-final.png"))
+        # One provider session served by the one model the client asked for.
+        expected_feeds = [frozenset({model})]
+        topology_problems, _ = graph_topology.inspect(
+            page, run_root, "live", expect_feeds=expected_feeds, timeout=timeout * 1000
+        )
 
         if not _interrupt(live_process):
             raise AssertionError("could not stop the harness-owned Ollama serve descendant")
@@ -733,6 +740,21 @@ def _run_visible(
             "03-finished.png",
         )
         page.screenshot(path=str(run_root / "03-finished.png"))
+        finished_problems, _ = graph_topology.inspect(
+            page, run_root, "finished", expect_feeds=expected_feeds, timeout=timeout * 1000
+        )
+        topology_problems += finished_problems
+        _check(
+            result,
+            "Graph topology",
+            not topology_problems,
+            "Live and finished graphs draw root -> model -> session with every node reachable, "
+            "no isolated node, no stray edge and no path or label through a node"
+            if not topology_problems
+            else "; ".join(graph_topology.summary(topology_problems)),
+            "graph-topology-live.json",
+            "graph-topology-finished.json",
+        )
         assert diagnostics is not None
         console_ok = diagnostics.finish(page, run_root)
         _check(
@@ -762,6 +784,7 @@ def _run_visible(
             "Process",
             "Network",
             "Finished viewer",
+            "Graph topology",
             "JS console",
         ):
             if feature not in result.checks:
