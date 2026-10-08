@@ -516,7 +516,7 @@ def run_top(
     port: int = 0,
     open_browser: bool = False,
     linger_seconds: float = 2.0,
-    content_capture: str = "metadata_only",
+    content_capture: str = "full",
     stream: TextIO | None = None,
 ) -> LiveResult:
     if not command:

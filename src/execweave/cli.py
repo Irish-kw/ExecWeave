@@ -21,6 +21,7 @@ from .graph_ops import (
 )
 from .live import run_live
 from .private_io import private_artifact_path, write_private_json
+from .privacy import add_content_capture_arguments
 from .semantic import merge_semantic_sidecar
 from .sink import JsonlSink
 from .validate import validate_event_stream
@@ -97,11 +98,7 @@ def _add_live_arguments(parser: argparse.ArgumentParser) -> None:
         dest="open_browser",
         help="Open the live graph in the default browser",
     )
-    parser.add_argument(
-        "--capture-content",
-        action="store_true",
-        help="Explicitly opt in to full provider/model plaintext capture (default: metadata only)",
-    )
+    add_content_capture_arguments(parser)
 
 
 def _add_viewer_limit_arguments(parser: argparse.ArgumentParser) -> None:
@@ -586,7 +583,7 @@ def main(argv: list[str] | None = None) -> int:
                 port=args.port,
                 open_browser=args.open_browser,
                 linger_seconds=args.linger,
-                content_capture="full" if args.capture_content else "metadata_only",
+                content_capture=args.content_capture,
                 announce=lambda url: print(f"ExecWeave live: {url}", flush=True),
                 announce_pairing_code=lambda code: print(
                     f"ExecWeave pairing code: {code}", flush=True

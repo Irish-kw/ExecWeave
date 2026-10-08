@@ -94,7 +94,7 @@ See [observation integrity and the negative example](docs/observation-integrity.
 
 **Live privacy and authentication (unreleased 0.8.35 work)**
 
-`execweave live` and `execweave top` default provider/model plaintext capture to **metadata only**. Use `--capture-content` only when you explicitly want complete exposed prompts, responses, tool values, and other provider content stored in the run. Invalid capture-policy values fail closed to metadata-only at automatic recorder boundaries.
+`execweave live` and `execweave top` record the complete provider/model content an integration exposes (prompts, responses, tool values) by default, because the run stays on your own machine for you to inspect. Add `--metadata-only` when a run must not store that plaintext; `--capture-content` remains accepted and selects the default explicitly. Invalid capture-policy values fail closed to metadata-only at automatic recorder boundaries.
 
 The live dashboard no longer puts its API credential in `?t=...`. The announced URL contains no credential. Browser access uses a one-time pairing code submitted in a POST body and then an `HttpOnly; SameSite=Strict` cookie; non-browser API clients use the private `X-ExecWeave-Token` header.
 
@@ -134,7 +134,7 @@ execweave live --open -- ollama run deepseek-r1:1.5b
 
 This mode does not start an Ollama server. A reachable upstream server is still required.
 
-In both modes the relay forwards every request, but under the default metadata-only policy it does not record the inference exchanges, so no prompt or response is stored in the run. Add `--capture-content` (for example, `execweave live --capture-content --open -- ollama serve`) only when you explicitly want the conversation recorded.
+In both modes the relay forwards every request and, by default, records each inference exchange so the prompts and responses appear in the run and on the dashboard. Add `--metadata-only` (for example, `execweave live --metadata-only --open -- ollama serve`) when the conversation must not be stored.
 
 ## Dashboard
 
@@ -299,7 +299,7 @@ Raw observations remain separate from derived semantic and correlation outputs.
 - **Failure ownership cleanup:** if the portable collector fails unexpectedly after launching a managed workload, it terminates the workload it owns before recording terminal session state. A filesystem observer that only partially starts is also torn down before the startup error propagates.
 - Linux also provides a `strace` reference backend with stronger syscall-attributed evidence for supported executions.
 - Provider semantics depend on what each integration actually exposes. Missing prompts, hidden reasoning, remote provider internals, and unexposed routing cannot be reconstructed reliably.
-- Full-fidelity provider content may contain credentials, secrets, source code, prompts, tool values, model responses, shell output, and file contents. `live`/`top` therefore default to metadata-only; complete provider/model plaintext requires explicit `--capture-content`.
+- Full-fidelity provider content may contain credentials, secrets, source code, prompts, tool values, model responses, shell output, and file contents. `live`/`top` store it by default because the run stays on the local machine; the run directory is owner-private, and `--metadata-only` keeps that plaintext out of the run entirely.
 - Run artifacts are written through owner-private primitives. POSIX permissions are established before sensitive bytes are published; the Windows path applies a protected owner DACL. Final Windows guarantees still depend on the release CI matrix and are not inferred from Linux tests.
 - Conversation isolation is an attribution rule, not a redaction boundary. Explicitly routed content may legitimately appear at more than one participant.
 - A local integrity manifest detects changes relative to the manifest; it is not an adversary-resistant trusted logging system if both evidence and manifest remain inside the same writable trust boundary.

@@ -18,9 +18,46 @@ from typing import Any
 from uuid import uuid4
 
 import _ollama_interactive_acceptance_impl as impl
+from acceptance import graph_topology
 from acceptance.browser_diagnostics import BrowserDiagnostics
 from acceptance.processes import OwnedProcessTracker
 from acceptance.reporting import Result, redact
+
+# A second local model the journey switches to with the REPL's /load command.
+SWITCH_MODEL_ENV = "EXECWEAVE_OLLAMA_SWITCH_MODEL"
+
+
+def _requested_models(sidecar: Path) -> dict[str, set[str]]:
+    """The model each recorded inference request asked for, keyed by request identity."""
+    requested: dict[str, set[str]] = {}
+    for record in impl._read_jsonl(sidecar):
+        if record.get("relation") != "REQUESTED_MODEL":
+            continue
+        source_id = impl._source_id(record)
+        target = record.get("target")
+        name = target.get("name") if isinstance(target, dict) else None
+        if source_id is not None and isinstance(name, str) and name:
+            requested.setdefault(source_id, set()).add(graph_topology.model_name(name))
+    return requested
+
+
+def _wait_model_loaded(sidecar: Path, model: str, *, timeout: float) -> str:
+    """Wait for the request /load sends to load ``model`` and for its response."""
+    wanted = graph_topology.model_name(model)
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        records = impl._read_jsonl(sidecar)
+        answered = {
+            source_id
+            for record in records
+            if record.get("relation") == impl._RESPONSE_RELATION
+            and (source_id := impl._source_id(record)) is not None
+        }
+        for source_id, names in _requested_models(sidecar).items():
+            if wanted in names and source_id in answered:
+                return source_id
+        time.sleep(0.1)
+    raise AssertionError(f"/load {model} never reached the recorded Ollama relay")
 
 
 def run_interactive(
@@ -30,10 +67,15 @@ def run_interactive(
     execweave_bin: str,
     ollama_bin: str,
     timeout: float,
+    switch_model: str | None = None,
 ) -> Result:
+    if switch_model is None:
+        switch_model = os.environ.get(SWITCH_MODEL_ENV, "")
+    switch_model = switch_model.strip()
     marker = "EW-INTERACTIVE-" + uuid4().hex[:10].upper()
     prompt_one = f"{marker}-ROUND1 What is 2+3? Answer briefly."
     prompt_two = f"{marker}-ROUND2 What is 3+4? Answer briefly."
+    prompt_three = f"{marker}-ROUND3 What is 4+5? Answer briefly."
     run_root = (
         output_root
         / f"ollama-interactive-{platform.system().lower()}-{uuid4().hex[:8]}"
@@ -66,6 +108,20 @@ def run_interactive(
         "Interactive Ollama does not intentionally mutate the harness workspace; "
         "native file evidence belongs to G6",
     )
+    if not switch_model:
+        impl._skip(
+            result,
+            "Model switch",
+            f"No second local model was named in {SWITCH_MODEL_ENV}; "
+            "the journey runs one model",
+        )
+    elif graph_topology.model_name(switch_model) == graph_topology.model_name(model):
+        impl._check(
+            result,
+            "Model switch",
+            False,
+            f"{SWITCH_MODEL_ENV} names the model the journey already runs: {switch_model}",
+        )
 
     tracker = OwnedProcessTracker(poll_interval=0.02)
     live_process: subprocess.Popen[str] | None = None
@@ -80,6 +136,8 @@ def run_interactive(
     cleanup_errors: list[str] = []
     started_at = time.monotonic()
     completed_live_details = ""
+    switching = False
+    rounds = [prompt_one, prompt_two]
 
     try:
         terminal_reason = impl._terminal_backend_reason()
@@ -107,7 +165,7 @@ def run_interactive(
             execweave_bin,
             "live",
             # The journey verifies recorded prompts/responses, so it opts in explicitly;
-            # `live` records no provider plaintext under its metadata-only default.
+            # Request full capture explicitly so this journey never depends on the default.
             "--capture-content",
             "--watch-root",
             str(watch_root),
@@ -168,6 +226,19 @@ def run_interactive(
             unavailable_reason = f"Local Ollama model is unavailable: {model}"
             impl._mark_unavailable(result, unavailable_reason)
             return result
+        if switch_model and "Model switch" not in result.checks:
+            if impl.visible._local_model_present(tags, switch_model):
+                switching = True
+                rounds.append(prompt_three)
+            else:
+                impl._skip(
+                    result,
+                    "Model switch",
+                    f"Local Ollama model is unavailable: {switch_model}",
+                )
+        # One provider session; a model switched to inside it enters from the root
+        # as its own model node and feeds that same session.
+        expected_feeds = [frozenset({model, switch_model} if switching else {model})]
 
         try:
             from playwright.sync_api import Error as PlaywrightError
@@ -302,9 +373,55 @@ def run_interactive(
             "Older history open/closed state persisted through polling and selection switches",
         )
 
+        requested_ok = True
+        if switching:
+            # The REPL's own model switch: /load replaces the model and starts a new
+            # message history in the same client, recording and provider session.
+            terminal.write(f"/load {switch_model}\r")
+            print("G5 model switch:", f"/load {switch_model}", flush=True)
+            _wait_model_loaded(sidecar, switch_model, timeout=timeout)
+            terminal.write(prompt_three + "\r")
+            print("G5 prompt 3:", prompt_three, flush=True)
+            source_three, response_three = impl._wait_marker_exchange(
+                sidecar,
+                session_root,
+                prompt_three,
+                timeout=timeout,
+            )
+            if source_three is None:
+                raise AssertionError("prompt after the model switch was not captured")
+            if source_three in {source_one, source_two}:
+                raise AssertionError("the switched round reused an earlier inference-request identity")
+            if not response_three:
+                raise AssertionError(
+                    "prompt after the model switch never produced a response on its request identity"
+                )
+            requested = _requested_models(sidecar)
+            wanted = {
+                source_one: graph_topology.model_name(model),
+                source_two: graph_topology.model_name(model),
+                source_three: graph_topology.model_name(switch_model),
+            }
+            requested_ok = all(
+                requested.get(source_id) == {name} for source_id, name in wanted.items()
+            )
+            page.wait_for_function(
+                "value=>(document.getElementById('details')?.innerText||'').includes(value)",
+                arg=prompt_three,
+                timeout=int(timeout * 1000),
+            )
+            impl.visible._wait_agent_card_observed(page, "Final response", timeout=timeout)
+
         page.screenshot(
             path=str(run_root / "01-interactive-live.png"),
             full_page=True,
+        )
+        topology_problems, live_feeds = graph_topology.inspect(
+            page,
+            run_root,
+            "live",
+            expect_feeds=expected_feeds,
+            timeout=timeout * 1000,
         )
         terminal.interrupt()
         if not terminal.wait(min(timeout, 8.0)):
@@ -340,20 +457,20 @@ def run_interactive(
         impl._check(
             result,
             "/root",
-            prompt_one in prompts and prompt_two in prompts,
-            "Both PTY/ConPTY prompts belong to one Ollama /root conversation",
+            all(value in prompts for value in rounds),
+            f"All {len(rounds)} PTY/ConPTY prompts belong to one Ollama /root conversation",
         )
         impl._check(
             result,
             "Prompt",
-            prompt_one in prompts and prompt_two in prompts,
-            "Both interactive prompts are preserved in the finished conversation",
+            all(value in prompts for value in rounds),
+            f"All {len(rounds)} interactive prompts are preserved in the finished conversation",
         )
         impl._check(
             result,
             "Final",
-            len([value for value in finals if value.strip()]) >= 2,
-            "Both interactive rounds have non-empty assistant final evidence",
+            len([value for value in finals if value.strip()]) >= len(rounds),
+            f"All {len(rounds)} interactive rounds have non-empty assistant final evidence",
         )
 
         owned = tracker.identities()
@@ -375,7 +492,7 @@ def run_interactive(
         impl._click_root(page, timeout)
         page.wait_for_function(
             "value=>(document.getElementById('details')?.innerText||'').includes(value)",
-            arg=prompt_two,
+            arg=rounds[-1],
             timeout=int(timeout * 1000),
         )
         finished_details = page.locator("#details").inner_text()
@@ -385,6 +502,52 @@ def run_interactive(
             finished_details == completed_live_details,
             "Finished viewer details equal the synchronized terminal live root details",
         )
+        finished_problems, finished_feeds = graph_topology.inspect(
+            page,
+            run_root,
+            "finished",
+            expect_feeds=expected_feeds,
+            timeout=timeout * 1000,
+        )
+        topology_problems += finished_problems
+        impl._check(
+            result,
+            "Graph topology",
+            not topology_problems,
+            "Live and finished graphs draw root -> model -> session with every node reachable, "
+            "no isolated node, no stray edge and no path or label through a node"
+            if not topology_problems
+            else "; ".join(graph_topology.summary(topology_problems)),
+            "graph-topology-live.json",
+            "graph-topology-finished.json",
+        )
+        if switching:
+            drawn_ok = all(
+                graph_topology.feeds_match(feeds, expected_feeds)
+                for feeds in (live_feeds, finished_feeds)
+            )
+            impl._check(
+                result,
+                "Model switch",
+                requested_ok and drawn_ok,
+                f"/load {switch_model} inside the running client: rounds 1-2 requested {model}, "
+                f"round 3 requested {switch_model}, and the live and finished graphs draw both "
+                "models from the root into the one session"
+                if requested_ok and drawn_ok
+                else (
+                    ("" if requested_ok else "recorded requests did not name the expected models; ")
+                    + (
+                        ""
+                        if drawn_ok
+                        else f"sessions are fed by {graph_topology.describe_feeds(live_feeds)} live and "
+                        f"{graph_topology.describe_feeds(finished_feeds)} finished, expected "
+                        f"{graph_topology.describe_feeds(expected_feeds)}"
+                    )
+                ),
+                "semantic.jsonl",
+                "graph-topology-live.json",
+                "graph-topology-finished.json",
+            )
         assert diagnostics is not None
         console_ok = diagnostics.finish(page, run_root)
         impl._check(
@@ -418,10 +581,12 @@ def run_interactive(
             "Final",
             "/root",
             "Fold state",
+            "Model switch",
             "Live update",
             "Process",
             "Network",
             "Finished viewer",
+            "Graph topology",
             "JS console",
         ):
             if feature not in result.checks:

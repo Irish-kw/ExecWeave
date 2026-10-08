@@ -28,9 +28,11 @@ FEATURES = (
     "Network",
     "/root",
     "Multi-agent",
+    "Model switch",
     "Fold state",
     "Live update",
     "Finished viewer",
+    "Graph topology",
     "JS console",
     "Cleanup",
 )
@@ -48,6 +50,7 @@ _REQUIRED_FEATURES_BY_SCENARIO: dict[tuple[str, str], frozenset[str]] = {
             "/root",
             "Live update",
             "Finished viewer",
+            "Graph topology",
             "JS console",
             "Cleanup",
         }
@@ -65,6 +68,7 @@ _REQUIRED_FEATURES_BY_SCENARIO: dict[tuple[str, str], frozenset[str]] = {
             "/root",
             "Live update",
             "Finished viewer",
+            "Graph topology",
             "JS console",
             "Cleanup",
         }
@@ -83,6 +87,7 @@ _REQUIRED_FEATURES_BY_SCENARIO: dict[tuple[str, str], frozenset[str]] = {
             "Fold state",
             "Live update",
             "Finished viewer",
+            "Graph topology",
             "JS console",
             "Cleanup",
         }
@@ -101,6 +106,7 @@ _REQUIRED_FEATURES_BY_SCENARIO: dict[tuple[str, str], frozenset[str]] = {
             "Network",
             "Live update",
             "Finished viewer",
+            "Graph topology",
             "JS console",
             "Cleanup",
         }

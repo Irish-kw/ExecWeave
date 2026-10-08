@@ -67,11 +67,12 @@ A syntactically recognizable sidecar record is not proof of semantic validity.
 ## Security and privacy hardening in this checkpoint
 
 `live` and `top` now set an explicit provider-content policy for every observed child.
-The default is `metadata_only`; `--capture-content` is the explicit opt-in to complete
-provider/model plaintext exposed by an integration. An invalid configured value resolves
-to metadata-only. The policy is enforced at automatic hook/proxy/callback/probe boundaries,
-not inside the low-level content store, so observability does not change an application's
-explicit SDK capture semantics.
+The default is `full`: complete provider/model plaintext exposed by an integration is
+recorded, because the run stays on the user's machine. `--metadata-only` is the explicit
+opt-out, and `--capture-content` selects the default explicitly. An invalid configured
+value resolves to metadata-only. The policy is enforced at automatic
+hook/proxy/callback/probe boundaries, not inside the low-level content store, so
+observability does not change an application's explicit SDK capture semantics.
 
 The browser no longer receives the API token through a query string. The announced live
 URL contains no credential. A one-time pairing code is POSTed to `/pair` and exchanged for

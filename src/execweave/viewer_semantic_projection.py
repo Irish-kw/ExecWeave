@@ -8,7 +8,7 @@ from typing import Any
 from .viewer_background_files import CACHE_FILES_NODE_ID, collapse_python_cache_files
 
 ORPHAN_FILES_NODE_ID = "viewer-cluster:orphan-files"
-MODEL_RELATIONS = {"USED_MODEL": 0, "INVOKED_MODEL": 1, "REQUESTED_MODEL": 2}
+MODEL_RELATIONS = {"USED_MODEL": 0, "ROUTED_TO_MODEL": 1, "INVOKED_MODEL": 2, "REQUESTED_MODEL": 3}
 
 
 def _attrs(node: dict[str, Any]) -> dict[str, Any]:
@@ -38,7 +38,7 @@ def _entries(graph: dict[str, Any]) -> list[dict[str, Any]]:
         return []
 
 
-def _roots(nodes: list[dict[str, Any]], entries: list[dict[str, Any]]) -> tuple[list[str], dict[str, list[str]]]:
+def _roots(nodes: list[dict[str, Any]], entries: list[dict[str, Any]], edges: list[dict[str, Any]] = ()) -> tuple[list[str], dict[str, list[str]]]:
     agents = {str(n["id"]): n for n in nodes if n.get("type") == "agent" and isinstance(n.get("id"), str)}
     roots: set[str] = set()
     by_provider: dict[str, set[str]] = defaultdict(set)
@@ -56,6 +56,16 @@ def _roots(nodes: list[dict[str, Any]], entries: list[dict[str, Any]]) -> tuple[
             by_provider[str(entry.get("provider") or _provider(agents[source_id])).lower()].add(source_id)
     if not roots and len(agents) == 1:
         roots.add(next(iter(agents)))
+    if not roots:
+        # Framework agents run inside the recorded program; the program that started
+        # the recording session is still the one process-level actor its wire calls belong to.
+        launchers = {
+            str(edge["source"]) for edge in edges
+            if edge.get("relation") == "STARTED_SESSION" and edge.get("source") in agents
+            and _attrs(agents[str(edge["source"])]).get("conversation_scope") != "framework_agent"
+        }
+        if len(launchers) == 1:
+            roots.update(launchers)
     for root in roots:
         provider = _provider(agents[root])
         if provider != "unknown":
@@ -143,10 +153,11 @@ def collapse_inference_requests(nodes: list[dict[str, Any]], edges: list[dict[st
     request_ids = {node_id for node_id, node in node_by_id.items() if node.get("type") == "inference_request"}
     if not request_ids:
         return nodes, edges, {"collapsed_request_count": 0, "logical_inference_count": 0, "direct_inference_edge_count": 0, "unresolved": []}
-    roots, roots_by_provider = _roots(nodes, entries)
+    roots, roots_by_provider = _roots(nodes, entries, edges)
     grouped: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     unresolved: list[dict[str, Any]] = []
     hidden_content: set[str] = set()
+    alias_candidates: set[str] = set()
     for component in _components(request_ids, edges):
         members = set(component)
         matches = _matching_entries(members, entries)
@@ -166,6 +177,19 @@ def collapse_inference_requests(nodes: list[dict[str, Any]], edges: list[dict[st
         if owner is None or model_id is None:
             unresolved.append({"request_ids": sorted(members), "reason": "missing_owner" if owner is None else "missing_model"})
             continue
+        # The served model is the inference target; an alias the caller asked for stays on the occurrence.
+        requested = sorted({str(edge["target"]) for edge in model_edges if str(edge["target"]) != model_id})
+        alias_candidates.update(requested)
+        served_by = sorted({
+            str(edge["source"]) for edge in edges
+            if edge.get("relation") == "SERVED_INFERENCE" and edge.get("target") in members and isinstance(edge.get("source"), str)
+            and edge["source"] in node_by_id
+        })
+        routed_providers = sorted({
+            str(edge["target"]) for edge in edges
+            if edge.get("relation") == "ROUTED_TO_PROVIDER" and edge.get("source") in members and isinstance(edge.get("target"), str)
+            and edge["target"] in node_by_id
+        })
         related = [edge for edge in edges if edge.get("source") in members or edge.get("target") in members]
         first_seen_values = [
             str(node_by_id[value].get("first_seen"))
@@ -189,8 +213,16 @@ def collapse_inference_requests(nodes: list[dict[str, Any]], edges: list[dict[st
             "model_id": model_id, "first_seen": first_seen, "last_seen": last_seen,
             "first_sequence": min(seqs) if seqs else None, "last_sequence": max(last_seqs) if last_seqs else None,
             "messages": _messages(matches), "content_references": refs,
+            **({"requested_model_ids": requested, "requested_model_names": [str(node_by_id[value].get("name") or value) for value in requested]} if requested else {}),
+            **({"served_by_ids": served_by} if served_by else {}),
+            **({"routed_provider_ids": routed_providers} if routed_providers else {}),
         })
     hidden = set(request_ids)
+    # A requested alias whose only evidence is hidden request evidence is shown on the served model's occurrence.
+    for model in alias_candidates:
+        incident = [edge for edge in edges if edge.get("source") == model or edge.get("target") == model]
+        if incident and all((edge.get("source") in request_ids or edge.get("target") in request_ids) for edge in incident):
+            hidden.add(model)
     # Content attached only to hidden request evidence is inspector evidence, not a main graph node.
     for content_id in list(hidden_content):
         incident = [edge for edge in edges if edge.get("source") == content_id or edge.get("target") == content_id]
@@ -212,6 +244,119 @@ def collapse_inference_requests(nodes: list[dict[str, Any]], edges: list[dict[st
         "collapsed_request_count": len(request_ids), "logical_inference_count": sum(len(v) for v in grouped.values()),
         "direct_inference_edge_count": len(grouped), "unresolved": unresolved,
     }
+
+
+RUNTIME_MODEL_RELATIONS = {"SERVES_MODEL", "LOADED_MODEL", "ADVERTISES_MODEL"}
+
+
+def _seen_bounds(items: list[dict[str, Any]]) -> dict[str, Any]:
+    firsts = [str(item["first_seen"]) for item in items if item.get("first_seen")]
+    lasts = [str(item.get("last_seen") or item["first_seen"]) for item in items if item.get("last_seen") or item.get("first_seen")]
+    seqs = [item["first_sequence"] for item in items if isinstance(item.get("first_sequence"), int)]
+    last_seqs = [item["last_sequence"] for item in items if isinstance(item.get("last_sequence"), int)]
+    return {
+        "first_seen": min(firsts, default=None), "last_seen": max(lasts, default=None),
+        "first_sequence": min(seqs) if seqs else None, "last_sequence": max(last_seqs) if last_seqs else None,
+    }
+
+
+def link_inference_infrastructure(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
+    """Attach the gateway/API/runtime that served an inferred model, and the provider it was routed to.
+
+    Collapsing inference requests removes the request node that carried SERVED_INFERENCE and
+    ROUTED_TO_PROVIDER, so the occurrence keeps those ids and the served model links to them here.
+    A runtime is the same server when it shares the model's endpoint scope or reports that exact
+    model node; a runtime-namespace model with the same name or catalog id on that runtime is the
+    same model seen through the runtime's catalog, so it is folded into the served model.
+    """
+    node_by_id = {str(n["id"]): n for n in nodes if isinstance(n.get("id"), str)}
+    occurrences: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for edge in edges:
+        target = edge.get("target")
+        if edge.get("relation") == "INFERRED" and isinstance(target, str) and target in node_by_id:
+            occurrences[target].extend(item for item in edge.get("viewer_occurrences") or [] if isinstance(item, dict))
+    if not occurrences:
+        return nodes, edges, {"infrastructure_edge_count": 0, "folded_runtime_model_count": 0}
+    links: dict[tuple[str, str, str], dict[str, Any]] = {}
+
+    def link(model: str, other: str, relation: str, basis: str, evidence: list[dict[str, Any]], **extra: Any) -> None:
+        item = links.setdefault((model, other, relation), {"basis": set(), "evidence": [], "edge_ids": set(), "request_ids": set(), "relations": set(), "folded": []})
+        item["basis"].add(basis)
+        item["evidence"].extend(evidence)
+        item["edge_ids"].update(extra.get("edge_ids", ()))
+        item["request_ids"].update(extra.get("request_ids", ()))
+        item["relations"].update(extra.get("relations", ()))
+        item["folded"].extend(extra.get("folded", ()))
+
+    for model, items in occurrences.items():
+        for occurrence in items:
+            request_ids = [str(value) for value in occurrence.get("request_ids") or []]
+            for server in occurrence.get("served_by_ids") or []:
+                if server in node_by_id and server != model:
+                    link(model, server, "SERVED_BY", "served_inference", [occurrence], request_ids=request_ids)
+            for provider in occurrence.get("routed_provider_ids") or []:
+                if provider in node_by_id and provider != model:
+                    link(model, provider, "ROUTED_TO_PROVIDER", "routed_to_provider", [occurrence], request_ids=request_ids)
+
+    runtime_edges: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for edge in edges:
+        if edge.get("relation") in RUNTIME_MODEL_RELATIONS and node_by_id.get(str(edge.get("source")), {}).get("type") == "model_runtime" and edge.get("target") in node_by_id:
+            runtime_edges[str(edge["source"])].append(edge)
+    runtimes = [node_id for node_id, node in node_by_id.items() if node.get("type") == "model_runtime"]
+    replaced: set[str] = set()
+    folded: dict[str, str] = {}
+    for model in occurrences:
+        attrs = _attrs(node_by_id[model])
+        scope = attrs.get("endpoint_scope")
+        names = {str(value) for value in (node_by_id[model].get("name"), attrs.get("catalog_id")) if value}
+        for runtime in runtimes:
+            direct = [edge for edge in runtime_edges[runtime] if edge.get("target") == model]
+            scoped = bool(scope) and _attrs(node_by_id[runtime]).get("endpoint_scope") == scope
+            if not direct and not scoped:
+                continue
+            same = []
+            if scoped:
+                for edge in runtime_edges[runtime]:
+                    other = str(edge["target"])
+                    if other == model or other in occurrences or node_by_id[other].get("type") != "model":
+                        continue
+                    other_names = {str(value) for value in (node_by_id[other].get("name"), _attrs(node_by_id[other]).get("catalog_id")) if value}
+                    if names & other_names:
+                        same.append(edge)
+            for edge in direct + same:
+                replaced.add(str(edge["id"]))
+            for edge in same:
+                folded[str(edge["target"])] = model
+            link(
+                model, runtime, "SERVED_BY", "runtime_model" if direct else "endpoint_scope", direct + same,
+                edge_ids=[str(edge["id"]) for edge in direct + same], relations=[str(edge["relation"]) for edge in direct + same],
+                folded=[{"id": str(edge["target"]), "name": node_by_id[str(edge["target"])].get("name"), "relation": edge.get("relation"), "runtime_id": runtime} for edge in same],
+            )
+    # A folded catalog model is hidden only when its catalog edges are all it has.
+    for other in list(folded):
+        incident = [edge for edge in edges if edge.get("source") == other or edge.get("target") == other]
+        if not all(str(edge.get("id")) in replaced for edge in incident):
+            replaced.difference_update(str(edge.get("id")) for edge in incident)
+            del folded[other]
+    out_nodes = []
+    for node in nodes:
+        node_id = node.get("id")
+        if node_id in folded:
+            continue
+        absorbed = [item for (model, _, _), value in links.items() if model == node_id for item in value["folded"] if item["id"] in folded]
+        out_nodes.append({**node, "attributes": {**_attrs(node), "viewer_runtime_models": absorbed}} if absorbed else node)
+    out_edges = [edge for edge in edges if str(edge.get("id")) not in replaced]
+    for (model, other, relation), value in sorted(links.items()):
+        evidence = [item for item in value["evidence"] if isinstance(item, dict)]
+        out_edges.append({
+            "id": f"viewer:{model}--{relation}-->{other}", "source": model, "target": other, "relation": relation,
+            "count": max(1, len(value["request_ids"]) or len(evidence)), **_seen_bounds(evidence),
+            "causal": False, "inferred": "endpoint_scope" in value["basis"], "viewer_only": True,
+            "attributions": ["viewer_inference_infrastructure_projection"], "viewer_link_basis": sorted(value["basis"]),
+            **({"viewer_request_ids": sorted(value["request_ids"])} if value["request_ids"] else {}),
+            **({"evidence_edge_ids": sorted(value["edge_ids"]), "viewer_runtime_relations": sorted(value["relations"])} if value["edge_ids"] else {}),
+        })
+    return out_nodes, out_edges, {"infrastructure_edge_count": len(links), "folded_runtime_model_count": len(folded)}
 
 
 def _file_path(node: dict[str, Any]) -> str:
@@ -421,7 +566,8 @@ def project_provider_neutral_viewer_graph(graph: dict[str, Any]) -> dict[str, An
     entries = _entries(graph)
     nodes, edges, framework_tasks = collapse_framework_tasks(nodes, edges)
     nodes, edges, inference = collapse_inference_requests(nodes, edges, entries)
-    roots, _ = _roots(nodes, entries)
+    nodes, edges, infrastructure = link_inference_infrastructure(nodes, edges)
+    roots, _ = _roots(nodes, entries, edges)
     nodes, edges, cache = collapse_python_cache_files(nodes, edges, roots[0] if len(roots) == 1 else None)
     nodes, edges, files = collapse_orphan_files(nodes, edges, roots[0] if len(roots) == 1 else None)
     nodes, edges, local = collapse_local_endpoints(nodes, edges)
@@ -469,6 +615,8 @@ def project_provider_neutral_viewer_graph(graph: dict[str, Any]) -> dict[str, An
         "orphan_file_node_count": len(files.get("nodes") or []) if files else 0,
         "inference_request_count": inference["collapsed_request_count"], "logical_inference_count": inference["logical_inference_count"],
         "direct_inference_edge_count": inference["direct_inference_edge_count"], "unresolved_inference_requests": inference["unresolved"],
+        "inference_infrastructure_edge_count": infrastructure["infrastructure_edge_count"],
+        "folded_runtime_model_count": infrastructure["folded_runtime_model_count"],
         "framework_task_node_count": framework_tasks["framework_task_node_count"],
         "framework_task_content_node_count": framework_tasks["framework_task_content_node_count"],
         "framework_task_agent_count": framework_tasks["framework_task_agent_count"],

@@ -4,7 +4,9 @@ import http.client
 import itertools
 import json
 import os
+import socket
 import tempfile
+import threading
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -486,34 +488,73 @@ def relay_default(handler: _base.ExecWeaveHTTPProxyHandler) -> None:
         return
     finally:
         connection.close()
+
+    def record() -> None:
+        try:
+            if capture is not None:
+                capture.finish()
+                _record_capture(
+                    handler.server.proxy_config,
+                    exchange_id=exchange_id,
+                    request_body=body,
+                    response_content_type=response_type,
+                    method=handler.command,
+                    request_path=target,
+                    status=status,
+                    capture=capture,
+                )
+            else:
+                handler.server.recorder(
+                    handler.server.proxy_config,
+                    exchange_id=exchange_id,
+                    method=handler.command,
+                    request_path=target,
+                    request_body=body,
+                    request_content_type=handler.headers.get("Content-Type"),
+                    status=status,
+                    response_body=bytes(response_body),
+                    response_content_type=response_type,
+                    request_recorded=request_recorded,
+                )
+        except Exception as exc:
+            print(f"ExecWeave HTTP proxy recorder warning: {exc}", file=_base.sys.stderr)
+        finally:
+            if capture is not None:
+                capture.cleanup()
+
+    _record_after_response(handler, record)
+
+
+# Recording normally finishes in well under this, so the client still sees the end
+# of the response only once its evidence is on disk. A slow disk, lock or scanner
+# must not hold the user's program, though: past this point the response is ended
+# while recording finishes, and closing the server waits for it.
+_CLIENT_RELEASE_SECONDS = 2.0
+
+
+def _record_after_response(handler: _base.ExecWeaveHTTPProxyHandler, record) -> None:
+    server = handler.server
+    server.begin_recording()
+
+    def run() -> None:
+        try:
+            record()
+        finally:
+            server.end_recording()
+
+    worker = threading.Thread(target=run, name="execweave-proxy-record", daemon=True)
     try:
-        if capture is not None:
-            capture.finish()
-            _record_capture(
-                handler.server.proxy_config,
-                exchange_id=exchange_id,
-                request_body=body,
-                response_content_type=response_type,
-                method=handler.command,
-                request_path=target,
-                status=status,
-                capture=capture,
-            )
-        else:
-            handler.server.recorder(
-                handler.server.proxy_config,
-                exchange_id=exchange_id,
-                method=handler.command,
-                request_path=target,
-                request_body=body,
-                request_content_type=handler.headers.get("Content-Type"),
-                status=status,
-                response_body=bytes(response_body),
-                response_content_type=response_type,
-                request_recorded=request_recorded,
-            )
-    except Exception as exc:
-        print(f"ExecWeave HTTP proxy recorder warning: {exc}", file=_base.sys.stderr)
-    finally:
-        if capture is not None:
-            capture.cleanup()
+        worker.start()
+    except RuntimeError:
+        run()
+        return
+    worker.join(_CLIENT_RELEASE_SECONDS)
+    if worker.is_alive():
+        # HTTP/1.0 with Connection: close and no Content-Length, so the client
+        # treats the end of the stream as the end of the response.
+        try:
+            handler.wfile.flush()
+            handler.connection.shutdown(socket.SHUT_WR)
+        except OSError:
+            pass
+        worker.join()

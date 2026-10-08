@@ -363,6 +363,7 @@ function execweaveNodeCardsBase(node){
     add('Calls',occurrences.length?String(occurrences.length):(traffic.count?String(traffic.count):''));
     add('Requested by',traffic.agents.join('\n'));
   }else if(kind==='session'){
+    add('Provider session',a.provider_session_id);
     add('Command',a.command);
     add('Working directory',a.cwd);
     add('Backend',a.backend);

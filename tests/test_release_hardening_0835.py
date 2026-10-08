@@ -466,15 +466,21 @@ def test_automatic_capture_policy_fails_closed_without_breaking_explicit_sdk_cap
 
 
 def test_live_defaults_metadata_only_and_requires_explicit_full_opt_in(tmp_path: Path) -> None:
+    """The node ID predates the full-capture default and is kept for history.
+
+    `live` now records full provider/model content by default because the run
+    stays on the user's machine; metadata-only is the explicit opt-out. Both
+    paths must still stamp an explicit, auditable policy state on the session.
+    """
     import sys
 
     from execweave.live import run_live
 
-    for name, requested in (("default", "metadata_only"), ("full", "full")):
+    for name, requested in (("default", "full"), ("metadata-only", "metadata_only")):
         root = tmp_path / name
         work = root / "work"
         work.mkdir(parents=True)
-        kwargs = {} if requested == "metadata_only" else {"content_capture": "full"}
+        kwargs = {} if name == "default" else {"content_capture": "metadata_only"}
         result = run_live(
             [sys.executable, "-c", "pass"],
             watch_root=work,
