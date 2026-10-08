@@ -801,7 +801,7 @@ def run_live(
     port: int = 0,
     open_browser: bool = True,
     linger_seconds: float = 2.0,
-    content_capture: str = "metadata_only",
+    content_capture: str = "full",
     announce: Callable[[str], None] | None = None,
     announce_pairing_code: Callable[[str], None] | None = None,
     announce_api_token: Callable[[str], None] | None = None,

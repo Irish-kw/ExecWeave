@@ -14,7 +14,7 @@ function nodeColor(type){const value=String(type||'').toLowerCase();if(value.inc
 function nodeCategory(node){const value=String(node?.type||'').toLowerCase();if(value.includes('process')||value.includes('shell'))return'process';if(value.includes('file')||value.includes('path'))return'file';if(value.includes('network')||value.includes('socket')||value.includes('endpoint')||value.includes('host'))return'network';if(value.includes('tool'))return'tool';if(value.includes('model')||value.includes('inference')||value.includes('llm'))return'model';return'other'}
 function graphCounts(data){const nodes=Number(data.node_count)||((data.nodes||[]).length),edges=Number(data.edge_count)||((data.edges||[]).length);return{nodes,edges,estimated:nodes*4+edges*3}}
 function withinRenderBudget(data){const counts=graphCounts(data);return counts.nodes<=ACTIVE_MAX_NODES&&counts.edges<=ACTIVE_MAX_EDGES&&counts.estimated<=ACTIVE_MAX_DOM_ELEMENTS}
-function updateStats(data){stats.innerHTML=`<strong>${Number(data.node_count)||0}</strong> nodes · <strong>${Number(data.edge_count)||0}</strong> edges · <strong>${Number(data.event_count)||0}</strong> events`}
+function updateStats(data){stats.innerHTML=`<strong>${Number(data.node_count)||0}</strong> nodes · <strong>${Number(data.edge_count)||0}</strong> edges · <strong>${Number(data.event_count)||0}</strong> events`;stats.title=stats.textContent}
 function updateEvidence(data){
   const raw=window.__execweaveCore?.getGraph?.()||window.__execweaveStaticGraph||{},counts=data.live_evidence_counts||data.evidence_counts||raw.evidence_counts||{};
   const count=value=>typeof value==='number'&&Number.isInteger(value)&&value>=0?String(value):'—';
@@ -23,10 +23,12 @@ function updateEvidence(data){
   evidence.innerHTML=`OS <strong>${count(counts.os_runtime)}</strong> · ${specializedMarkup}${provisional?' · provisional':''}`;
   evidence.classList.toggle('provisional',provisional);evidence.title='Observed event counts. — means unavailable, not zero.';
   const outcome=data.session_outcome||raw.session_outcome||{},labels={observation_incomplete:'OBSERVATION INCOMPLETE',succeeded:'PROCESS EXITED 0',failed:'FAILED',interrupted:'INTERRUPTED',collector_failed:'COLLECTOR FAILED',unknown:'UNKNOWN'};
-  let badge=document.getElementById('workload-outcome');if(!badge){badge=document.createElement('span');badge.id='workload-outcome';evidence.after(badge)}
+  let badge=document.getElementById('workload-outcome');if(!badge){badge=document.createElement('span');badge.id='workload-outcome';badge.className='metric-pill';evidence.after(badge)}
   const finished=outcome.recorder_finished||data.live_finished||window.__execweaveStaticMode;
-  badge.textContent=finished?` · Workload: ${labels[outcome.state]||'UNKNOWN'}${Number.isInteger(outcome.return_code)?' · exit '+outcome.return_code:''}`:'';
-  badge.dataset.state=outcome.state||'unknown';badge.title='Workload result is separate from recorder FINISHED status.';
+  const state=finished?labels[outcome.state]||'UNKNOWN':'',exit=Number.isInteger(outcome.return_code)?' · exit '+outcome.return_code:'';
+  badge.replaceChildren();if(state){const label=document.createElement('span'),value=document.createElement('strong');label.className='workload-label';label.textContent='Workload: ';value.textContent=state;badge.append(label,value,exit)}
+  const workload=state?`Workload: ${state}${exit}`:'';badge.hidden=!workload;
+  badge.dataset.state=outcome.state||'unknown';badge.title=`${workload?workload+'. ':''}Workload result is separate from recorder FINISHED status.`;
 }
 function setStatus(label,kind=''){statusLabel.textContent=label;status.className=kind}
 function enterProtectiveMode(data){const counts=graphCounts(data);edgeLayer.replaceChildren();labelLayer.replaceChildren();nodeLayer.replaceChildren();positions=new Map();nodeElements=new Map();edgeElements=new Map();svg.style.display='none';protective.hidden=false;protectiveSummary.textContent=`${counts.nodes} nodes · ${counts.edges} edges · about ${counts.estimated} SVG elements exceeds the live safety budget.`;setStatus('PROTECTED','reconnecting');protectedMode=true}

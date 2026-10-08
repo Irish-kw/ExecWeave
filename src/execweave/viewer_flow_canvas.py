@@ -110,15 +110,17 @@ function execweaveFlowPreference(id){
   return{layer:a.viewer_layer,row:Number.isFinite(row)?row:null};
 }
 // The edges between the nodes on the canvas, as one entry per ordered pair. Two nodes
-// joined by several relations are one constraint on the layout, not several.
+// joined by several relations are one constraint on the layout, not several. A pair is
+// a return only when the session projection marked every one of its edges as one.
 function execweaveFlowEdgePairs(){
   const pairs=new Map();
   if(typeof edgeById==='undefined')return pairs;
   for(const edge of edgeById.values()){
     const source=String(edge.source),target=String(edge.target);
     if(source===target||!nodeById.has(source)||!nodeById.has(target))continue;
-    const key=source+'|'+target;
-    if(!pairs.has(key))pairs.set(key,{source,target});
+    const key=source+'|'+target,returns=edge.viewer_flow_feedback===true;
+    if(!pairs.has(key))pairs.set(key,{source,target,returns});
+    else if(!returns)pairs.get(key).returns=false;
   }
   return pairs;
 }
@@ -169,9 +171,11 @@ function execweaveFlowSolve(){
   const feedback=new Set(),state=new Map(ids.map(id=>[id,0]));
   // A recorded reply remains a return even if the dispatch was outside this
   // recording; do not move the main agent behind its received message history.
+  // The session projection names its own returns (a child reporting back, an actor
+  // replying into its session); folding those keeps root, model and session leftmost.
   for(const pair of pairs){
     const source=nodeById.get(pair.source),target=nodeById.get(pair.target);
-    if(target?.attributes?.viewer_session_flow&&(source?.attributes?.viewer_framework_messages||source?.attributes?.viewer_return_message))feedback.add(pair.source+'|'+pair.target);
+    if(pair.returns||target?.attributes?.viewer_session_flow&&(source?.attributes?.viewer_framework_messages||source?.attributes?.viewer_return_message))feedback.add(pair.source+'|'+pair.target);
   }
   // With a viewer_flow payload, prefer the projection's layer order when choosing the
   // DFS roots. Without one (the dashboard shell also accepts a raw static graph), keep
@@ -272,24 +276,107 @@ function execweaveFlowSolve(){
       solved.set(id,{layer:value,row});floor=row;
     }
   }
-  // Communication is not a temporal dependency between agents. For a framework
-  // conversation, a longest-path chain through every routed message makes a
-  // shallow team several screens wide. Keep the root/session/context spine and
-  // place peer actors, messages and resources in adjacent columns instead. All
-  // original nodes, directed edges and evidence remain; return/cross-peer edges
-  // are routed against these actual coordinates by execweaveFlowSyncSpec.
-  const framework=ids.some(id=>nodeById.get(id)?.attributes?.viewer_framework_messages);
-  if(framework&&ids.length<=200){
-    const compact=new Map();
-    for(const id of ids){
-      const n=nodeById.get(id),a=n.attributes||{};
-      const column=a.viewer_session_flow?0:n.type==='session'?1:a.viewer_model_context?2:n.type==='agent'?3:n.type==='message'||a.viewer_framework_messages||n.type==='process'?4:5;
-      if(!compact.has(column))compact.set(column,[]);compact.get(column).push(id);
+  // Order each column so the drawn links cross as few times as the columns allow: sweep by
+  // the mean row of each node's neighbours, keep the order that crosses the fewest links,
+  // then swap neighbours wherever that alone removes a crossing. A tie keeps the order it
+  // was given. Sessions keep their own order among themselves, because their names count
+  // up in it. A link back into an earlier column is drawn between the same two columns as
+  // one forward, so it is counted as one: leaving it out ordered a reply as if it were not
+  // there, and it crossed everything its sender sent below it.
+  const untangle=(layerOf,members)=>{
+    const values=[...members.keys()].sort((a,b)=>a-b);
+    const links=[];
+    for(const pair of pairs){
+      const l0=layerOf.get(pair.source),l1=layerOf.get(pair.target);
+      if(l0===undefined||l1===undefined||l0===l1)continue;
+      links.push(l0<l1?{source:pair.source,target:pair.target}:{source:pair.target,target:pair.source});
     }
-    for(const [column,members] of compact){
-      members.sort((a,b)=>(solved.get(a)?.row||0)-(solved.get(b)?.row||0)||a.localeCompare(b));
-      members.forEach((id,row)=>solved.set(id,{layer:column,row}));
+    const peers=new Map([...layerOf.keys()].map(id=>[id,{back:[],fore:[]}]));
+    for(const pair of links){peers.get(pair.target).back.push(pair.source);peers.get(pair.source).fore.push(pair.target)}
+    const at=new Map(),place=()=>{for(const list of members.values())list.forEach((id,row)=>at.set(id,row))};
+    // A link that skips columns passes the columns between as well, at the height a straight
+    // line between its ends has there, which is where the router draws it unless a box
+    // stands in the way. Two links cross between two adjacent columns when their order
+    // there flips; counting only links between the same pair of columns would order a
+    // column as if the long links through it were not there. A box in the way is counted
+    // as well: the router has to bend the link around it, over or under the links that box
+    // sends on, and an order that leaves the line clear is the one that reads.
+    const index=new Map(values.map((value,i)=>[value,i]));
+    const crossings=()=>{
+      const gaps=new Map();let total=0;
+      for(const pair of links){
+        const l0=layerOf.get(pair.source),l1=layerOf.get(pair.target),r0=at.get(pair.source),r1=at.get(pair.target);
+        const height=i=>r0+(r1-r0)*(values[i]-l0)/(l1-l0);
+        for(let i=index.get(l0);i<index.get(l1);i++){
+          if(!gaps.has(i))gaps.set(i,[]);
+          gaps.get(i).push([height(i),height(i+1)]);
+          const y=height(i+1);
+          if(i+1<index.get(l1)&&y>-.4&&y<members.get(values[i+1]).length-.6&&Math.abs(y-Math.round(y))<.4)total++;
+        }
+      }
+      for(const list of gaps.values())for(let i=0;i<list.length;i++)for(let j=i+1;j<list.length;j++){
+        if((list[i][0]-list[j][0])*(list[i][1]-list[j][1])<0)total++;
+      }
+      return total;
+    };
+    const isSession=id=>nodeById.get(id)?.type==='session';
+    const arrange=(list,side)=>{
+      const mean=new Map(list.map((id,row)=>{
+        const near=peers.get(id)[side];
+        return[id,near.length?near.reduce((sum,peer)=>sum+at.get(peer),0)/near.length:row];
+      }));
+      const next=[...list].sort((a,b)=>mean.get(a)-mean.get(b));
+      const sessions=list.filter(isSession);let k=0;
+      return next.map(id=>isSession(id)?sessions[k++]:id);
+    };
+    place();
+    let best=new Map([...members].map(([value,list])=>[value,[...list]]));
+    let fewest=links.length<=1500?crossings():0;
+    for(let round=0;round<4&&fewest>0;round++){
+      for(const [sweep,side] of [[values.slice(1),'back'],[values.slice(0,-1).reverse(),'fore']]){
+        for(const value of sweep){members.set(value,arrange(members.get(value),side));place()}
+        const now=crossings();
+        if(now<fewest){fewest=now;best=new Map([...members].map(([value,list])=>[value,[...list]]))}
+      }
     }
+    // Means tie whenever two nodes hang off the same neighbour, and the sweep cannot tell
+    // them apart then. Swap two neighbours in a column wherever that alone removes a
+    // crossing, until no swap does.
+    for(const [value,list] of best)members.set(value,[...list]);
+    place();
+    if(links.length<=250){
+      for(let pass=0,improved=true;improved&&fewest>0&&pass<8;pass++){
+        improved=false;
+        for(const list of members.values())for(let i=0;i+1<list.length&&fewest>0;i++){
+          if(isSession(list[i])&&isSession(list[i+1]))continue;
+          [list[i],list[i+1]]=[list[i+1],list[i]];place();
+          const now=crossings();
+          if(now<fewest){fewest=now;improved=true}else{[list[i],list[i+1]]=[list[i+1],list[i]];place()}
+        }
+      }
+    }
+    return members;
+  };
+  // The session projection ranks its nodes into columns and leaves their order within a
+  // column to the canvas, where every node had row 0 and ties fell to the id: a model the
+  // run switched to sorted above the one it started with, and their edges into the
+  // session crossed for no reason. Start each column in the order its nodes first took
+  // part in the run and untangle from there; a tie keeps the earlier order, so time
+  // decides wherever the structure does not.
+  if(ids.some(id=>nodeById.get(id)?.attributes?.viewer_session_flow)&&ids.length<=400){
+    const pointOf=item=>({seq:item?.first_sequence,stamp:item?.first_seen});
+    const cmp=(p,q)=>Number.isInteger(p.seq)&&Number.isInteger(q.seq)?p.seq-q.seq
+      :!p.stamp-!q.stamp||String(p.stamp||'').localeCompare(String(q.stamp||''));
+    const first=new Map(ids.map(id=>[id,pointOf(nodeById.get(id))]));
+    for(const edge of edgeById.values()){
+      const point=pointOf(edge);
+      for(const id of [String(edge.source),String(edge.target)])if(first.has(id)&&cmp(point,first.get(id))<0)first.set(id,point);
+    }
+    const values=[...new Set(ids.map(id=>layer.get(id)))].sort((a,b)=>a-b);
+    const members=new Map(values.map(value=>[value,ids.filter(id=>layer.get(id)===value)
+      .sort((a,b)=>cmp(first.get(a),first.get(b))||a.localeCompare(b))]));
+    untangle(layer,members);
+    for(const [value,list] of members)list.forEach((id,row)=>solved.set(id,{layer:value,row}));
   }
   return solved;
 }
@@ -421,8 +508,6 @@ function execweaveFlowAvoid(edge,base){
   if(!execweaveFlowCoords(edge.source)||!execweaveFlowCoords(edge.target))return null
   const sp=positions.get(edge.source),tp=positions.get(edge.target);
   if(!sp||!tp)return null;
-  const id=edgeId(edge),topo=execweaveTopology;
-  const sx=sp.x+execweaveWidthOf(edge.source),tx=tp.x;
   // Two nodes in one column have no room between them for a line: drawn from the right
   // edge of one to the left edge of the other it runs down the column and through every
   // box on the way, and even a near-vertical curve leans far enough to clip its
@@ -433,16 +518,279 @@ function execweaveFlowAvoid(edge,base){
     const sourceEdge=edgeOf(edge.source),targetEdge=edgeOf(edge.target);
     const side=Math.max(sourceEdge,targetEdge);
     const centre=id=>positions.get(id).y+execweaveFlowBoxHeight(id)/2;
-    const a=centre(edge.source),z=centre(edge.target);
+    const a=execweaveFlowPortAt(edge,'s',centre(edge.source)),z=execweaveFlowPortAt(edge,'t',centre(edge.target));
     const rail=side+EXECWEAVE_FLOW_COL_GAP*.45;
     return Object.assign({},base,{d:`M ${sourceEdge} ${a} C ${rail} ${a}, ${rail} ${z}, ${targetEdge} ${z}`,
       labelX:side+EXECWEAVE_FLOW_COL_GAP*.45,labelY:(a+z)/2-8});
   }
-  if(!(tx-sx>1))return null
-  const sy=execweavePortY(sp,topo.sourcePort.get(id),edge.source);
-  const ty=execweavePortY(tp,topo.targetPort.get(id),edge.target);
+  const run=execweaveFlowRunOf(edge);
+  if(!run)return null;
+  execweaveFlowLaneApply(edge,run);
+  const points=run.back?run.points.slice().reverse():run.points;
+  return Object.assign({},base,{d:execweaveFlowSpline(points),labelX:run.labelX,labelY:run.labelY});
+}
+// The run an edge between two columns takes, solved left to right; `back` is set on one
+// drawn the other way. Null when the edge is not this layout's to draw.
+function execweaveFlowRunOf(edge){
+  if(!execweaveFlowHolds(edge.source)||!execweaveFlowHolds(edge.target))return null;
+  const fromAt=execweaveFlowCoords(edge.source),toAt=execweaveFlowCoords(edge.target);
+  if(!fromAt||!toAt||fromAt.layer===toAt.layer)return null;
+  const sp=positions.get(edge.source),tp=positions.get(edge.target);
+  if(!sp||!tp)return null;
+  const id=edgeId(edge),topo=execweaveTopology;
+  const sx=sp.x+execweaveWidthOf(edge.source),tx=tp.x;
+  const sy=execweaveFlowPortAt(edge,'s',execweavePortY(sp,topo.sourcePort.get(id),edge.source));
+  const ty=execweaveFlowPortAt(edge,'t',execweavePortY(tp,topo.targetPort.get(id),edge.target));
+  if(tx-sx>1)return execweaveFlowRun(edge,sx,sy,tx,ty,tp.x);
+  // An edge into a column further left -- a reply routed back to the agent it answers --
+  // leaves the left side of its source and enters the right side of its target. Solved
+  // left to right as the run between those two sides and drawn the other way, it clears
+  // the same boxes a forward edge would, and its arrow still faces its target.
+  const back=tp.x+execweaveWidthOf(edge.target),front=sp.x;
+  if(!(front-back>1))return null;
+  return Object.assign(execweaveFlowRun(edge,back,ty,front,sy,sp.x,true),{back:true});
+}
+// Where on its box each line leaves and arrives. A box's left side takes the lines that
+// come into it and the ones that go back out of it to a column further left; its right
+// side takes the lines that leave it, the ones that come back into it, and the ones drawn
+// beside its own column. Counted apart, an arrow coming in and a line going out of the
+// same side are both put at its middle, and one line arriving where another leaves reads
+// as a single line with its arrow at the wrong end.
+// A side is shared out top to bottom in the order its lines head off in. That is not the
+// order of the boxes at their other ends: a line to a box level with this one that has to
+// go over the boxes between heads up, and given the lower port it cuts across the line
+// that runs straight. So the runs are laid out once with the sides shared out by the
+// boxes at the other ends, and the sides shared out again by the height each run turns
+// to first. Lines of one kind, drawn alike, that come together at the same turn before
+// reaching this box already run as one line from there, so they are given one port and
+// end in one arrow instead of a row of arrows splitting off the last few pixels.
+let execweaveFlowPorts=null;
+function execweaveFlowPortPlan(){
+  if(typeof edgeById==='undefined')return null;
+  const key=execweaveFlowLaneKey();
+  if(execweaveFlowPorts&&execweaveFlowPorts.key===key&&execweaveFlowPorts.edges===edgeById)return execweaveFlowPorts;
+  const plan={key,edges:edgeById,at:new Map()};
+  execweaveFlowPorts=plan;
+  if(edgeById.size>400)return plan;
+  const sides=new Map();
+  const add=(node,side,end,other,edge)=>{
+    if(!sides.has(node))sides.set(node,{left:[],right:[]});
+    sides.get(node)[side].push({end,other,kind:`${String(edge.relation||'')}\0${edge.causal===true?'c':edge.causal===false?'n':''}${edge.inferred===true?'i':''}`});
+  };
+  const drawn=[];
+  for(const edge of edgeById.values()){
+    if(!execweaveFlowHolds(edge.source)||!execweaveFlowHolds(edge.target))continue;
+    const fromAt=execweaveFlowCoords(edge.source),toAt=execweaveFlowCoords(edge.target);
+    if(!fromAt||!toAt)continue;
+    const sp=positions.get(edge.source),tp=positions.get(edge.target);
+    if(!sp||!tp)continue;
+    const id=edgeId(edge);
+    let from,to;
+    if(fromAt.layer===toAt.layer){from='right';to='right'}
+    else if(tp.x-(sp.x+execweaveWidthOf(edge.source))>1){from='right';to='left'}
+    else if(sp.x-(tp.x+execweaveWidthOf(edge.target))>1){from='left';to='right'}
+    else continue;
+    add(edge.source,from,id+'>s',edge.target,edge);
+    add(edge.target,to,id+'>t',edge.source,edge);
+    if(fromAt.layer!==toAt.layer)drawn.push(edge);
+  }
+  const centre=id=>positions.get(id).y+execweaveFlowBoxHeight(id)/2;
+  const share=(at,towards,turn)=>{
+    for(const [node,both] of sides){
+      const box=positions.get(node),height=execweaveFlowBoxHeight(node);
+      for(const list of [both.left,both.right]){
+        list.sort((a,b)=>towards(a)-towards(b)||centre(a.other)-centre(b.other)||positions.get(a.other).x-positions.get(b.other).x||(a.end<b.end?-1:a.end>b.end?1:0));
+        const slots=new Map(),slotOf=list.map(entry=>{
+          const at=turn&&turn.get(entry.end),key=at==null?entry.end:`${entry.kind}\0${at}`;
+          if(!slots.has(key))slots.set(key,slots.size);
+          return slots.get(key);
+        });
+        list.forEach((entry,index)=>at.set(entry.end,slots.size<2?box.y+height/2:box.y+10+(height-20)*slotOf[index]/(slots.size-1)));
+      }
+    }
+  };
+  share(plan.at,entry=>centre(entry.other));
+  // The height a run first turns to, away from the port at one end of it: the first
+  // stop at another height after the start, or the last one before the end. Where that
+  // stop is a bend on the way rather than the far end, it is also the turn the line
+  // comes from.
+  const heads=new Map(),turns=new Map();
+  for(const edge of drawn){
+    let run=null;
+    try{run=execweaveFlowRunOf(edge)}catch(_){run=null}
+    if(!run||run.points.length<2)continue;
+    const points=run.points,last=points.length-1,id=edgeId(edge);
+    let firstAt=last,finalAt=0;
+    for(let i=1;i<=last;i++)if(Math.abs(points[i].y-points[0].y)>.5){firstAt=i;break}
+    for(let i=last-1;i>=0;i--)if(Math.abs(points[i].y-points[last].y)>.5){finalAt=i;break}
+    heads.set(id+(run.back?'>t':'>s'),Math.round(points[firstAt].y));
+    heads.set(id+(run.back?'>s':'>t'),Math.round(points[finalAt].y));
+    if(firstAt<last)turns.set(id+(run.back?'>t':'>s'),`${Math.round(points[firstAt].x)},${Math.round(points[firstAt].y)}`);
+    if(finalAt>0)turns.set(id+(run.back?'>s':'>t'),`${Math.round(points[finalAt].x)},${Math.round(points[finalAt].y)}`);
+  }
+  const at=new Map();
+  share(at,entry=>heads.has(entry.end)?heads.get(entry.end):Math.round(centre(entry.other)),turns);
+  plan.at=at;
+  return plan;
+}
+// The height this edge leaves its source ('s') or enters its target ('t') at; `fallback`
+// where the plan has none: a canvas too large to plan, or a line this layout does not draw.
+function execweaveFlowPortAt(edge,end,fallback){
+  let plan=null;
+  try{plan=execweaveFlowPortPlan()}catch(_){plan=null}
+  const at=plan&&plan.at.get(edgeId(edge)+'>'+end);
+  return Number.isFinite(at)?at:fallback;
+}
+// Runs that clear the same boxes the same way are sent to the same height, and where
+// their level stretches meet they are drawn as one line: nothing on the canvas says which
+// end belongs to which. Two runs that share an end and are drawn alike may merge, since
+// they meet at that box anyway; a solid line laid over a dashed one would read as neither,
+// so those, and any other two that would run along one height, are put on lanes a few pixels
+// apart. The shorter stretch keeps the height it was given, nearest the boxes, and the
+// longer is moved out past it, so a stretch lying inside another is not crossed by it.
+// A lane depends on every other run at that height, so all runs are laid out together
+// and the lanes kept until something moves or the graph changes.
+const EXECWEAVE_FLOW_LANE=8;
+let execweaveFlowLanes=null;
+function execweaveFlowLaneKey(){
+  let key=Math.imul(edgeById.size+1,0x9e3779b1)^nodeById.size;
+  for(const p of positions.values()){
+    key=Math.imul(key^Math.round(p.x*2),0x85ebca6b);
+    key=Math.imul(key^Math.round(p.y*2),0xc2b2ae35);
+  }
+  return key;
+}
+function execweaveFlowLevels(points){
+  const levels=[];
+  for(let i=1;i+2<points.length;i++){
+    const a=points[i],b=points[i+1];
+    if(Math.abs(a.y-b.y)>.5||Math.abs(a.x-b.x)<4)continue;
+    const last=levels[levels.length-1];
+    if(last&&last.to===i&&Math.abs(last.y-a.y)<=.5){last.to=i+1;last.hi=Math.max(last.hi,b.x);continue}
+    levels.push({from:i,to:i+1,y:a.y,lo:Math.min(a.x,b.x),hi:Math.max(a.x,b.x)});
+  }
+  return levels;
+}
+function execweaveFlowLanePlan(){
+  if(typeof edgeById==='undefined')return null;
+  const key=execweaveFlowLaneKey();
+  if(execweaveFlowLanes&&execweaveFlowLanes.key===key&&execweaveFlowLanes.edges===edgeById)return execweaveFlowLanes;
+  const plan={key,edges:edgeById,shift:new Map()};
+  execweaveFlowLanes=plan;
+  if(edgeById.size>400)return plan;
+  const levels=[];
+  for(const edge of edgeById.values()){
+    let run=null;
+    try{run=execweaveFlowRunOf(edge)}catch(_){run=null}
+    if(!run)continue;
+    for(const level of execweaveFlowLevels(run.points))levels.push(Object.assign(level,{edge,id:edgeId(edge),points:run.points}));
+  }
+  const look=edge=>`${edge.causal===true?'c':edge.causal===false?'n':''}${edge.inferred===true?'i':''}`;
+  const near=24,meets=(a,b)=>(a.edge.source===b.edge.source||a.edge.target===b.edge.target)&&look(a.edge)===look(b.edge);
+  const groups=new Map();
+  for(const level of levels){const at=Math.round(level.y);if(!groups.has(at))groups.set(at,[]);groups.get(at).push(level)}
+  for(const group of groups.values()){
+    if(group.length<2)continue;
+    group.sort((a,b)=>(a.hi-a.lo)-(b.hi-b.lo)||(a.id<b.id?-1:a.id>b.id?1:a.from-b.from));
+    const lane=new Map();
+    for(const level of group){
+      const used=new Set();
+      for(const [other,value] of lane){
+        if(meets(level,other))continue;
+        if(level.lo<other.hi+near&&other.lo<level.hi+near)used.add(value);
+      }
+      let value=0;while(used.has(value))value++;
+      lane.set(level,value);
+    }
+    for(const [level,value] of lane){
+      if(!value)continue;
+      // Out towards whichever side has the more room above or below this stretch.
+      const pad=EXECWEAVE_FLOW_CLEARANCE;let up=Infinity,down=Infinity;
+      for(const other of nodeById.keys()){
+        const box=positions.get(other);if(!box)continue;
+        if(box.x+execweaveWidthOf(other)+pad<=level.lo||box.x-pad>=level.hi)continue;
+        const top=box.y-pad,bottom=box.y+execweaveFlowBoxHeight(other)+pad;
+        if(bottom<=level.y)up=Math.min(up,level.y-bottom);
+        else if(top>=level.y)down=Math.min(down,top-level.y);
+      }
+      const room=Math.max(up,down),offset=value*EXECWEAVE_FLOW_LANE;
+      if(offset>room-2)continue;
+      const moved=level.points.map((p,i)=>i>=level.from&&i<=level.to?{x:p.x,y:p.y+(up>=down?-offset:offset)}:p);
+      if(execweaveFlowBoxHits(level.edge,moved)>execweaveFlowBoxHits(level.edge,level.points))continue;
+      if(!plan.shift.has(level.id))plan.shift.set(level.id,[]);
+      plan.shift.get(level.id).push({from:level.from,to:level.to,y:level.y,by:up>=down?-offset:offset});
+    }
+  }
+  return plan;
+}
+// Move this run's level stretches onto the lanes the plan gave them, but only where the
+// run is still the one the plan was made from.
+function execweaveFlowLaneApply(edge,run){
+  let plan=null;
+  try{plan=execweaveFlowLanePlan()}catch(_){plan=null}
+  const moves=plan&&plan.shift.get(edgeId(edge));
+  if(!moves)return run;
+  for(const move of moves){
+    const span=run.points.slice(move.from,move.to+1);
+    if(span.length!==move.to-move.from+1||span.some(p=>Math.abs(p.y-move.y)>.5))continue;
+    const lo=Math.min(...span.map(p=>p.x)),hi=Math.max(...span.map(p=>p.x));
+    for(let i=move.from;i<=move.to;i++)run.points[i]={x:run.points[i].x,y:run.points[i].y+move.by};
+    if(Math.abs(run.labelY+8-move.y)<=.5&&run.labelX>=lo&&run.labelX<=hi)run.labelY+=move.by;
+  }
+  return run;
+}
+// What a run would cost to draw: first every box its straight pieces pass through, since
+// clearing one column can aim the rest of the run into a box further on; then how many
+// of the other links it would cross, each link taken as the straight line from the side
+// of its source it leaves to the side of its target it enters. A link within one column,
+// or one that shares an end with this one, is left out: the first is drawn beside its
+// column, and the second meets this run at a box, not across it.
+function execweaveFlowBoxHits(edge,points){
+  const pad=EXECWEAVE_FLOW_CLEARANCE;
+  let total=0;
+  for(const other of nodeById.keys()){
+    if(other===edge.source||other===edge.target)continue;
+    const box=positions.get(other);if(!box)continue;
+    const left=box.x-pad,right=box.x+execweaveWidthOf(other)+pad;
+    const top=box.y-pad,bottom=box.y+execweaveFlowBoxHeight(other)+pad;
+    for(let i=0;i+1<points.length;i++){
+      const a=points[i],b=points[i+1];
+      const lo=Math.max(Math.min(a.x,b.x),left),hi=Math.min(Math.max(a.x,b.x),right);
+      if(!(hi>lo))continue;
+      const at=x=>b.x===a.x?a.y:a.y+(b.y-a.y)*(x-a.x)/(b.x-a.x);
+      const ya=at(lo),yb=at(hi);
+      if(Math.max(ya,yb)>top&&Math.min(ya,yb)<bottom){total++;break}
+    }
+  }
+  return total;
+}
+function execweaveFlowCrossings(edge,points){
+  let total=execweaveFlowBoxHits(edge,points)*1000;
+  if(typeof edgeById==='undefined'||edgeById.size>400)return total;
+  const cut=(a,b,c,d)=>{
+    const side=(p,q,r)=>(q.x-p.x)*(r.y-p.y)-(q.y-p.y)*(r.x-p.x);
+    return side(a,b,c)*side(a,b,d)<0&&side(c,d,a)*side(c,d,b)<0;
+  };
+  for(const other of edgeById.values()){
+    if(other===edge)continue;
+    if(other.source===edge.source||other.source===edge.target||other.target===edge.source||other.target===edge.target)continue;
+    const sp=positions.get(other.source),tp=positions.get(other.target);
+    if(!sp||!tp)continue;
+    const from=execweaveFlowCoords(other.source),to=execweaveFlowCoords(other.target);
+    if(from&&to&&from.layer===to.layer)continue;
+    const sw=execweaveWidthOf(other.source),tw=execweaveWidthOf(other.target);
+    const sm=sp.y+execweaveFlowBoxHeight(other.source)/2,tm=tp.y+execweaveFlowBoxHeight(other.target)/2;
+    const chord=sp.x+sw<=tp.x?[{x:sp.x+sw,y:sm},{x:tp.x,y:tm}]:[{x:tp.x+tw,y:tm},{x:sp.x,y:sm}];
+    for(let i=0;i+1<points.length;i++)if(cut(points[i],points[i+1],chord[0],chord[1])){total++;break}
+  }
+  return total;
+}
+// The run from (sx,sy) to (tx,ty), left to right, stepped around every box between. The
+// box whose column the run ends in starts at endX. A returning run starts at the box it
+// returns to.
+function execweaveFlowRun(edge,sx,sy,tx,ty,endX,returning){
   const runY=x=>sy+(ty-sy)*(x-sx)/(tx-sx);
-  const waypoints=[];let approach=false;
+  const waypoints=[],blocked=[];let approach=false;
   for(const other of nodeById.keys()){
     if(other===edge.source||other===edge.target)continue;
     // Any box on the canvas is in the way, whether or not this layout placed it.
@@ -458,12 +806,49 @@ function execweaveFlowAvoid(edge,base){
     // A blocker standing in the target's own column cannot be stepped over inside that
     // column: the run has nowhere left to go before the port. What clears it is to reach
     // the port's height while there is still room, and come in level.
-    if(box.x>=tp.x-1){approach=true;continue}
-    // Clear the box for its whole width, not only at its middle: one waypoint in the
-    // centre lets the curve back in on the way to it. Two, one at each side, carry the
-    // run level past the box.
-    const mid=(lo+hi)/2,here=runY(mid);
-    const clear=Math.abs(here-top)<=Math.abs(here-bottom)?top-10:bottom+10;
+    if(box.x>=endX-1){approach=true;continue}
+    blocked.push({lo,hi});
+  }
+  // Clear a column for its whole width, not only at its middle: one waypoint in the
+  // centre lets the curve back in on the way to it. Two, one at each side, carry the run
+  // level past it. Every box in the column is cleared at once, through whichever opening
+  // lies nearest the line -- above the column, below it, or the gap between two boxes --
+  // since clearing them one at a time sends the run over one box and under the next, and
+  // two such stops in one column can only be resolved by leaving the column altogether.
+  blocked.sort((a,b)=>a.lo-b.lo);
+  const columns=[];
+  for(const span of blocked){
+    const last=columns[columns.length-1];
+    if(last&&span.lo<last.hi)last.hi=Math.max(last.hi,span.hi);else columns.push({...span});
+  }
+  for(const {lo,hi} of columns){
+    const pad=EXECWEAVE_FLOW_CLEARANCE,here=runY((lo+hi)/2),taken=[];
+    for(const other of nodeById.keys()){
+      if(other===edge.source||other===edge.target)continue;
+      const box=positions.get(other);if(!box)continue;
+      if(box.x+execweaveWidthOf(other)+pad<=lo||box.x-pad>=hi)continue;
+      taken.push([box.y-pad-10,box.y+execweaveFlowBoxHeight(other)+pad+10]);
+    }
+    taken.sort((a,b)=>a[0]-b[0]);
+    // The nearest opening above the line and the nearest below it are both short ways
+    // round; of the two, take the one that runs into fewer boxes and crosses fewer of the
+    // other links, and the nearer only when they cost the same.
+    let above=null,below=null,floor=-Infinity;
+    const open=(from,to)=>{
+      if(!(to>=from))return;
+      const y=Math.min(to,Math.max(from,here));
+      if(y<=here&&(above===null||y>above))above=y;
+      if(y>=here&&(below===null||y<below))below=y;
+    };
+    for(const [top,bottom] of taken){open(floor,top);floor=Math.max(floor,bottom)}
+    open(floor,Infinity);
+    const options=[above,below].filter(y=>y!==null);
+    const cost=y=>execweaveFlowCrossings(edge,[{x:sx,y:sy},{x:lo,y},{x:hi,y},{x:tx,y:ty}]);
+    let clear=options[0];
+    if(options.length>1&&above!==below){
+      const up=cost(above),down=cost(below);
+      clear=up<down?above:down<up?below:Math.abs(above-here)<=Math.abs(below-here)?above:below;
+    }
     waypoints.push({x:lo,y:clear},{x:hi,y:clear});
   }
   if(approach)waypoints.push({x:tx-Math.min(44,(tx-sx)*.45),y:ty});
@@ -474,33 +859,35 @@ function execweaveFlowAvoid(edge,base){
   // clear horizontal band before the first middle box, cross the full middle span, then
   // come back to the port level after the last one; stopping at the midpoint would leave
   // the final horizontal run cutting through that last box.
-  if(waypoints.length>3){
-    const middle=[];
-    for(const other of nodeById.keys()){
-      if(other===edge.source||other===edge.target)continue;
-      const box=positions.get(other);if(!box)continue;
-      if(box.x>sx+1&&box.x+execweaveFlowWidth(other)<tx-1){
-        middle.push({box,width:execweaveFlowWidth(other),height:execweaveFlowBoxHeight(other)});
-      }
+  // A run back across columns with anything in its way takes the band as well, and the
+  // side is chosen by the box it returns to alone: every return into one box then shares
+  // a single trunk, rather than some passing over the graph and the rest under it.
+  const middle=[];
+  for(const other of nodeById.keys()){
+    if(other===edge.source||other===edge.target)continue;
+    const box=positions.get(other);if(!box)continue;
+    if(box.x>sx+1&&box.x+execweaveFlowWidth(other)<tx-1){
+      middle.push({box,width:execweaveFlowWidth(other),height:execweaveFlowBoxHeight(other)});
     }
+  }
+  if(waypoints.length>3||returning&&waypoints.length&&middle.length){
     const firstLeft=Math.min(...middle.map(item=>item.box.x))-EXECWEAVE_FLOW_CLEARANCE;
     const middleRight=Math.max(...middle.map(item=>item.box.x+item.width));
     const middleTop=Math.min(...middle.map(item=>item.box.y-EXECWEAVE_FLOW_CLEARANCE));
     const middleBottom=Math.max(...middle.map(item=>item.box.y+item.height+EXECWEAVE_FLOW_CLEARANCE));
     const above=middleTop-10,below=middleBottom+10;
-    const safeY=Math.abs(sy-above)+Math.abs(ty-above)<=Math.abs(sy-below)+Math.abs(ty-below)?above:below;
+    const safeY=returning?(Math.abs(sy-above)<=Math.abs(sy-below)?above:below)
+      :Math.abs(sy-above)+Math.abs(ty-above)<=Math.abs(sy-below)+Math.abs(ty-below)?above:below;
     const entry=Math.max(sx+EXECWEAVE_FLOW_CLEARANCE+2,Math.min(firstLeft-10,(sx+firstLeft)/2));
     const exit=Math.min(tx-EXECWEAVE_FLOW_CLEARANCE-2,Math.max(middleRight+10,(tx+middleRight)/2));
     if(exit>entry+2){
-      return Object.assign({},base,{d:execweaveFlowSpline([
-        {x:sx,y:sy},{x:entry,y:sy},{x:entry,y:safeY},
-        {x:exit,y:safeY},{x:exit,y:ty},{x:tx,y:ty}]),
-        labelX:(entry+exit)/2,labelY:safeY-8});
+      return{points:[{x:sx,y:sy},{x:entry,y:sy},{x:entry,y:safeY},
+        {x:exit,y:safeY},{x:exit,y:ty},{x:tx,y:ty}],
+        labelX:(entry+exit)/2,labelY:safeY-8};
     }
     const corridor=(sx+tx)/2;
-    return Object.assign({},base,{d:execweaveFlowSpline([
-      {x:sx,y:sy},{x:corridor,y:sy},{x:corridor,y:ty},{x:tx,y:ty}]),
-      labelX:corridor,labelY:(sy+ty)/2-8});
+    return{points:[{x:sx,y:sy},{x:corridor,y:sy},{x:corridor,y:ty},{x:tx,y:ty}],
+      labelX:corridor,labelY:(sy+ty)/2-8};
   }
   // A waypoint that clears one box can land inside the next one along. Walk each of them
   // out of whatever it is standing in, in the direction it was already heading.
@@ -530,8 +917,7 @@ function execweaveFlowAvoid(edge,base){
     if(last&&Math.abs(last.x-stop.x)<2){if(Math.abs(stop.y-runY(stop.x))>Math.abs(last.y-runY(last.x)))last.y=stop.y;continue}
     stops.push(stop);
   }
-  return Object.assign({},base,{d:execweaveFlowSpline([{x:sx,y:sy},...stops,{x:tx,y:ty}]),
-    labelX:(sx+tx)/2,labelY:(sy+ty)/2-8});
+  return{points:[{x:sx,y:sy},...stops,{x:tx,y:ty}],labelX:(sx+tx)/2,labelY:(sy+ty)/2-8};
 }
 // The router is reassigned several times as the page builds, so wrap whatever is current
 // at the first paint rather than at load, and wrap it only once.
@@ -596,9 +982,96 @@ function execweaveApplyFlowPositions(){
   try{if(typeof execweaveRecomputePorts==='function')execweaveRecomputePorts(execweaveTopology)}catch(_){}
   try{for(const id of nodeById.keys()){const node=nodeById.get(id);if(node)updateNodeElement(node)}}catch(_){}
   try{for(const edge of edgeById.values())updateEdgeElement(edge)}catch(_){}
+  try{execweaveFlowSpreadLabels()}catch(_){}
   return applied;
 }
-try{window.__execweaveFlow={payload:execweaveFlowPayload,columns:execweaveFlowColumns,solve:execweaveFlowSolve,apply:execweaveApplyFlowPositions}}catch(_){}
+// Edges that share a gap between two columns put their labels at the same midpoint, and
+// two relation names written over each other read as neither. A label that lands on one
+// already placed moves to the nearest seat that is clear of every placed label and covers
+// no more of the boxes than where the router put it: a point further along its own edge,
+// or a few pixels above or below. With no such seat it stays where it was.
+//
+// Returns into one box share one trunk, so the router puts all of their labels on the same
+// point. Those labels name one relation into one target; the first stands for all of them
+// with their total count, and the rest are folded behind it.
+//
+// Each pass first undoes what the previous one did, so running it again over labels the
+// edges have not redrawn since leaves them where one pass would.
+function execweaveFlowSpreadLabels(){
+  if(typeof edgeElements==='undefined'||edgeElements.size>600)return;
+  for(const els of edgeElements.values()){
+    const label=els.label;if(!label)continue;
+    if(label.dataset.execweaveFolded==='1'){label.style.display='';delete label.dataset.execweaveFolded}
+    const text=label.dataset.execweaveFoldedText;
+    if(text!==undefined){
+      const [from,to]=JSON.parse(text);if(label.textContent===to)label.textContent=from;
+      delete label.dataset.execweaveFoldedText;
+    }
+    const moved=label.dataset.execweaveSpread;
+    if(moved!==undefined){
+      const [x0,y0,x,y]=moved.split(',').map(Number);
+      if(Number(label.getAttribute('x'))===x&&Number(label.getAttribute('y'))===y){label.setAttribute('x',x0);label.setAttribute('y',y0)}
+      delete label.dataset.execweaveSpread;
+    }
+  }
+  const stacks=new Map();
+  for(const [id,els] of edgeElements){
+    const label=els.label,edge=edgeById.get(id);
+    if(!label||!edge||label.getAttribute('aria-hidden')==='true'||label.style.display==='none')continue;
+    const x=Number(label.getAttribute('x')),y=Number(label.getAttribute('y'));
+    if(!Number.isFinite(x)||!Number.isFinite(y))continue;
+    const key=[edge.target,edge.relation,Math.round(x),Math.round(y)].join('\u0000');
+    if(!stacks.has(key))stacks.set(key,[]);stacks.get(key).push({label,edge});
+  }
+  for(const stack of stacks.values()){
+    if(stack.length<2)continue;
+    const keep=stack[0].label,from=keep.textContent;
+    const total=stack.reduce((sum,{edge})=>sum+Math.max(1,Number(edge.count)||1),0);
+    const to=`${stack[0].edge.relation} ×${total}`;
+    keep.textContent=to;keep.dataset.execweaveFoldedText=JSON.stringify([from,to]);
+    for(const {label} of stack.slice(1)){label.style.display='none';label.dataset.execweaveFolded='1'}
+  }
+  const boxes=[];
+  for(const [id,p] of positions)if(nodeById.has(id))boxes.push({x:p.x,y:p.y,w:execweaveWidthOf(id),h:execweaveFlowBoxHeight(id)});
+  const clashes=(box,list)=>list.some(other=>box.x<other.x+other.w+1&&box.x+box.w+1>other.x&&box.y<other.y+other.h+1&&box.y+box.h+1>other.y);
+  const covered=box=>boxes.reduce((sum,other)=>sum
+    +Math.max(0,Math.min(box.x+box.w,other.x+other.w)-Math.max(box.x,other.x))
+    *Math.max(0,Math.min(box.y+box.h,other.y+other.h)-Math.max(box.y,other.y)),0);
+  const placed=[];
+  for(const els of edgeElements.values()){
+    const label=els.label,path=els.visible;
+    if(!label||!path||label.getAttribute('aria-hidden')==='true'||label.style.display==='none')continue;
+    let box;try{box=label.getBBox()}catch(_){continue}
+    if(!(box.width>0&&box.height>0))continue;
+    const x0=Number(label.getAttribute('x')),y0=Number(label.getAttribute('y'));
+    if(!Number.isFinite(x0)||!Number.isFinite(y0))continue;
+    const at=(x,y)=>({x:box.x-x0+x,y:box.y-y0+y,w:box.width,h:box.height});
+    let x=x0,y=y0;
+    if(clashes(at(x0,y0),placed)){
+      const limit=covered(at(x0,y0)),seats=[];
+      for(let dy=1;dy<=3*box.height;dy++)seats.push([x0,y0-dy],[x0,y0+dy]);
+      let length=0;try{length=path.getTotalLength()}catch(_){}
+      if(length>0)for(let share=.1;share<.95;share+=.05){
+        const point=path.getPointAtLength(length*share);
+        seats.push([point.x,point.y-4],[point.x,point.y+box.height+2]);
+      }
+      seats.sort((a,b)=>Math.hypot(a[0]-x0,a[1]-y0)-Math.hypot(b[0]-x0,b[1]-y0));
+      for(const [sx,sy] of seats){
+        const seat=at(sx,sy);
+        if(!clashes(seat,placed)&&covered(seat)<=limit){x=sx;y=sy;break}
+      }
+      if(x!==x0||y!==y0){label.setAttribute('x',x);label.setAttribute('y',y);label.dataset.execweaveSpread=[x0,y0,x,y].join(',')}
+    }
+    placed.push(at(x,y));
+  }
+}
+if(typeof refreshEdgeLabels==='function'){
+  // The snapshot draws every edge, then refreshes their labels; only after that pass does
+  // every label have a place to be spread from.
+  const refreshBase=refreshEdgeLabels;
+  refreshEdgeLabels=function(){refreshBase();try{execweaveFlowSpreadLabels()}catch(_){}};
+}
+try{window.__execweaveFlow={payload:execweaveFlowPayload,columns:execweaveFlowColumns,solve:execweaveFlowSolve,apply:execweaveApplyFlowPositions,spreadLabels:execweaveFlowSpreadLabels}}catch(_){}
 """.strip()
 
 _FINAL_LAYOUT_SEAM = "function execweaveInstallFinalLayout(priorY){"

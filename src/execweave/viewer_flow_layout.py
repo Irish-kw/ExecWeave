@@ -6,10 +6,14 @@ the relation vocabulary every adapter already emits.
 
 **Folding** removes nodes that carry no flow of their own. A content leaf is evidence
 about the entity it hangs off, not a step; a ``tool_call`` is one occurrence of the tool
-that defines it; a file the OS watcher merely saw change was never read or written by an
-actor. Every folded node keeps its identity in ``viewer_member_ids`` and its span in
-``viewer_folded_members``, the same contract the existing endpoint and file clusters use,
-so raw-log inspection, conversation ownership and time ranges all still resolve.
+that defines it. Every folded node keeps its identity in ``viewer_member_ids`` and its span
+in ``viewer_folded_members``, the same contract the existing endpoint and file clusters
+use, so raw-log inspection, conversation ownership and time ranges all still resolve.
+
+A path the OS watcher saw change is not folded, even when no actor touched it. It is a
+change on the user's disk during the run, which is what the reader came to see, and the
+canvas draws it; folding it as well listed the same file both as a box and as a member of
+the session that observed it.
 
 **Layering** replaces lane-by-node-type with longest-path layering over the graph itself.
 Because a node's column is one past its furthest predecessor, every edge points right by
@@ -67,24 +71,6 @@ DEFINING_RELATIONS = frozenset({
     "REQUESTED_MODEL",
     "VIA_MCP",
 })
-
-# Something that can perform a read or a write. A session is a container, not an actor:
-# an edge from the session is the OS watcher reporting what it saw, not the agent acting.
-ACTOR_TYPES = frozenset({
-    "agent",
-    "agent_execution",
-    "agent_operation",
-    "agent_turn",
-    "command",
-    "model",
-    "process",
-    "provider_session",
-    "subtask",
-    "tool",
-    "tool_call",
-})
-
-PATH_TYPES = frozenset({"file", "directory", "file_cluster"})
 
 # Types the dashboard withholds from its canvas. Anything left here after folding is
 # still a node of the graph and still reachable from every panel, but it takes no column,
@@ -337,38 +323,6 @@ class _Folder:
 
 
 # ----------------------------------------------------------------------- the rules
-
-
-def _rule_os_only_paths(folder: _Folder, protected: set[str]) -> None:
-    """A path node earns a box only when an actor is on one end of one of its edges.
-
-    A file the OS watcher merely saw change was not read, written, created or deleted by
-    the agent: the session reporting it is a container, not an actor. Rather than being
-    discarded, such a file folds into whatever observed it, so it stays off the canvas
-    but remains listed, with its span, on that observer's detail panel.
-    """
-    out, inc = folder.outgoing(), folder.incoming()
-    remap: dict[str, str] = {}
-    for node_id, node in folder.nodes.items():
-        if node_id in protected or node.get("type") not in PATH_TYPES:
-            continue
-        edges = (*out[node_id], *inc[node_id])
-        observers: list[str] = []
-        touched_by_actor = False
-        for edge in edges:
-            other = edge["target"] if edge["source"] == node_id else edge["source"]
-            peer = folder.nodes.get(other)
-            if peer is None or other == node_id:
-                continue
-            if peer.get("type") in ACTOR_TYPES:
-                touched_by_actor = True
-                break
-            observers.append(other)
-        if touched_by_actor or not observers:
-            continue
-        remap[node_id] = sorted(observers)[0]
-    if remap:
-        folder.collapse(remap, "os_only_path")
 
 
 def _rule_content_leaves(folder: _Folder, protected: set[str]) -> None:
@@ -863,7 +817,6 @@ def flow_layout_graph(
     original_ids = list(folder.nodes)
 
     protected = folder.conversation_sources()
-    _rule_os_only_paths(folder, protected)
     _rule_content_leaves(folder, protected)
     _rule_occurrences(folder, protected)
     _rule_mirror_identity(folder, protected)

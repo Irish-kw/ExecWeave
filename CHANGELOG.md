@@ -19,9 +19,11 @@ Observation-integrity and release-hardening work from PR #112:
 - Replace live query-token bootstrap with one-time POST pairing and an HttpOnly,
   SameSite=Strict cookie. API clients still use the private header token; no live credential
   is printed inside the announced URL.
-- Default `live`/`top` provider/model plaintext capture to metadata-only. Full content now
-  requires explicit `--capture-content`; invalid policy values fail closed at automatic
-  recorder boundaries without changing the observed workload's explicit SDK behavior.
+- Give `live`/`top` an explicit provider/model plaintext policy. Full content is recorded by
+  default because the run stays on the user's machine; `--metadata-only` opts out and
+  `--capture-content` selects the default explicitly. Invalid policy values fail closed to
+  metadata-only at automatic recorder boundaries without changing the observed workload's
+  explicit SDK behavior.
 - Write run evidence through private-file primitives: POSIX owner-only mode is established
   before sensitive bytes are published, Windows uses a protected owner DACL, and final
   component symlink/reparse, hardlink, and non-regular targets are rejected. Event streams,

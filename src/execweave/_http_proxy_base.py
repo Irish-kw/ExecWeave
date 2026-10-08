@@ -4,6 +4,7 @@ import http.client
 import ipaddress
 import json
 import sys
+import threading
 import uuid
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -389,7 +390,29 @@ class ExecWeaveHTTPProxyServer(ThreadingHTTPServer):
         self.proxy_config = config
         self.upstream = _parse_upstream(config.upstream)
         self.recorder = recorder
+        # Handler threads are daemonic, so ThreadingMixIn.server_close() does not
+        # join them. A response can reach the client before its recording finishes,
+        # so closing the server waits for those recordings explicitly instead.
+        self._recordings = 0
+        self._recordings_done = threading.Condition()
         super().__init__(address, ExecWeaveHTTPProxyHandler)
+
+    def begin_recording(self) -> None:
+        with self._recordings_done:
+            self._recordings += 1
+
+    def end_recording(self) -> None:
+        with self._recordings_done:
+            self._recordings -= 1
+            self._recordings_done.notify_all()
+
+    def wait_for_recordings(self, timeout: float | None = None) -> bool:
+        with self._recordings_done:
+            return self._recordings_done.wait_for(lambda: self._recordings == 0, timeout)
+
+    def server_close(self) -> None:
+        super().server_close()
+        self.wait_for_recordings()
 
 
 class ExecWeaveHTTPProxyHandler(BaseHTTPRequestHandler):
