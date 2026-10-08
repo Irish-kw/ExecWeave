@@ -460,6 +460,72 @@ def _ollama_interactive_switch(sidecar: Path) -> None:
     )
 
 
+def _ollama_serve_clients(sidecar: Path) -> None:
+    """`ollama serve` under ExecWeave; the user's own script calls the managed endpoint.
+
+    The script uses the Ollama API on llama3.2 (chat, then generate) and switches to
+    qwen3 through the OpenAI SDK pointed at Ollama's /v1 endpoint.
+    """
+    config = ProxyConfig(upstream="http://127.0.0.1:11434", sidecar=sidecar, mode="ollama")
+    exchanges = [
+        (
+            "/api/chat",
+            {"model": "llama3.2", "messages": [{"role": "user", "content": "2+3?"}], "stream": False},
+            {
+                "model": "llama3.2",
+                "created_at": _now(),
+                "message": {"role": "assistant", "content": "5"},
+                "done": True,
+                "done_reason": "stop",
+            },
+        ),
+        (
+            "/api/generate",
+            {"model": "llama3.2", "prompt": "3+4?", "stream": False},
+            {"model": "llama3.2", "created_at": _now(1), "response": "7", "done": True, "done_reason": "stop"},
+        ),
+        (
+            "/v1/chat/completions",
+            {"model": "qwen3", "messages": [{"role": "user", "content": "4+5?"}]},
+            {
+                "id": "chatcmpl-1",
+                "object": "chat.completion",
+                "model": "qwen3",
+                "choices": [{"index": 0, "message": {"role": "assistant", "content": "9"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 5, "completion_tokens": 1, "total_tokens": 6},
+            },
+        ),
+    ]
+    for index, (path, request, response) in enumerate(exchanges):
+        common = dict(
+            exchange_id=f"ex-{index}",
+            request_body=json.dumps(request).encode(),
+            request_content_type="application/json",
+            method="POST",
+            request_path=path,
+        )
+        recorded = record_exchange_fail_open(
+            config, **common, status=None, response_body=b"", response_content_type=None, request_only=True
+        )
+        answered = record_exchange_fail_open(
+            config,
+            **common,
+            status=200,
+            response_body=json.dumps(response).encode(),
+            response_content_type="application/json",
+            request_recorded=recorded,
+        )
+        assert recorded and answered, f"relay did not record {path}"
+    _append(
+        sidecar,
+        model_runtime.ollama_ps_to_events(
+            {"models": [{"name": name, "model": name, "size": 1} for name in ("llama3.2", "qwen3")]},
+            endpoint="http://127.0.0.1:11434",
+            timestamp=_now(3),
+        ),
+    )
+
+
 def _anthropic_sdk(sidecar: Path) -> None:
     records: list[dict[str, Any]] = []
     for index, model in enumerate(["claude-opus-4-1", "claude-sonnet-4-5"]):
@@ -741,6 +807,13 @@ CASES: tuple[ProviderCase, ...] = (
         "ollama_interactive_switch",
         ["ollama", "run", "llama3.2"],
         _ollama_interactive_switch,
+        [_f("llama3.2", "qwen3")],
+        [("model_runtime", "ollama")],
+    ),
+    _case(
+        "ollama_serve_clients",
+        ["ollama", "serve"],
+        _ollama_serve_clients,
         [_f("llama3.2", "qwen3")],
         [("model_runtime", "ollama")],
     ),
