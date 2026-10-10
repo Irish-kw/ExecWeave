@@ -135,3 +135,70 @@ def test_unknown_writer_inspector_never_silently_hides_attribution() -> None:
     assert "a.writer_identity==='unknown'" in _AGENT_PANEL_JS
     assert "add('Writer','unknown" in _AGENT_PANEL_JS
     assert "a.snapshot_state==='not_captured'" in _AGENT_PANEL_JS
+
+
+def test_exact_framework_model_request_preview_from_recorded_content(tmp_path: Path) -> None:
+    """The exact Reviewer MODEL_REQUEST must enter the conversation index."""
+    import hashlib
+
+    from execweave.conversation_records import conversation_index_payload
+
+    prompt = "You are a code reviewer. The handoff content is absent."
+    payload = prompt.encode("utf-8")
+    digest = hashlib.sha256(payload).hexdigest()
+    relative = f"content/sha256/{digest}.txt"
+    archive = tmp_path / relative
+    archive.parent.mkdir(parents=True)
+    archive.write_bytes(payload)
+    agent = "agent:rolesdemo:session:Reviewer"
+    content_id = "observed-content:model:sha256:" + digest
+    graph = {
+        "graph_schema_version": "0.2",
+        "session_id": "session",
+        "source_path": str(tmp_path / "semantic.jsonl"),
+        "nodes": [
+            {"id": agent, "type": "agent", "name": "Reviewer",
+             "attributes": {"framework": "rolesdemo", "session_id": "session"}},
+            {"id": content_id, "type": "observed_content",
+             "name": "rolesdemo.model_request",
+             "attributes": {
+                 "path": relative, "sha256": digest, "size_bytes": len(payload),
+                 "content_kind": "rolesdemo.model_request",
+                 "media_type": "text/plain; charset=utf-8",
+                 "representation": "text",
+                 "complete_from_source": True,
+             }},
+        ],
+        "edges": [
+            {"id": "request", "source": agent, "target": content_id,
+             "relation": "HAS_MODEL_CONTENT", "first_sequence": 1,
+             "first_seen": "2026-10-10T17:57:54Z"},
+        ],
+    }
+    result = conversation_index_payload(graph, tmp_path)
+    exact = [
+        entry for entry in result["entries"]
+        if entry["source_id"] == agent
+        and entry["relation"] == "HAS_MODEL_CONTENT"
+        and entry["content_kind"] == "rolesdemo.model_request"
+    ]
+    assert len(exact) == 1
+    messages = exact[0]["conversation_preview"]["messages"]
+    assert any(
+        msg["kind"] == "model_request" and msg["phase"] == "request"
+        and msg["text"] == prompt
+        for msg in messages
+    )
+    assert "String(entry?.source_id||'')===String(node.id||'')" in _AGENT_PANEL_JS
+    assert "message?.kind==='model_request'" in _AGENT_PANEL_JS
+
+
+def test_file_history_uses_canonical_node_counts_not_shared_edge_counts() -> None:
+    """The original #111 Dashboard read ×11 from an edge against file node count 5."""
+    assert "const node=rawNode(id)||nodeNamed(id)" in _AGENT_PANEL_JS
+    assert "node.event_count" in _AGENT_PANEL_JS
+    history = _AGENT_PANEL_JS.split("function fileHistory(id){", 1)[1].split(
+        "function reachedBy(id){", 1
+    )[0]
+    assert "edge?.count" not in history
+    assert "edge?.first_seen" not in history
