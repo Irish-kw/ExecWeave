@@ -348,6 +348,9 @@ function execweaveNodeCardsBase(node){
     add('Ran',occurrenceList(a));
   }else if(kind==='file'){
     add('Path',node?.name);
+    if(a.writer_identity==='unknown')add('Writer','unknown — attribution not established');
+    else if(typeof a.writer_identity==='string'&&a.writer_identity)add('Writer',a.writer_identity);
+    if(a.snapshot_state==='not_captured')add('Snapshot','not captured');
     add('Observed',fileHistory(String(node?.id||'')));
   }else if(kind==='tool_call'){
     add('Tool',a.tool_name||node?.name);
