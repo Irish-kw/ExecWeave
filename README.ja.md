@@ -63,21 +63,47 @@ python -m pip install -e ".[dev]"
 
 ## クイックスタート
 
+最初に sudo を使わず、通常ユーザーの仮想環境を作成します：
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -U execweave
+```
+
+Windows PowerShell: `.venv\Scripts\Activate.ps1`.
+
+Hook を設定する前に、組み込みの観測不足の反例を実行します：
+
+```bash
+python -m execweave.observation_demo --output-dir ./observation-negative
+```
+
+`observation-negative/graph.json` and `finalization.json`: `execution_state=succeeded` does not prove observation completeness or task validation.
+
+次に Provider hook を明示的に承認・設定します（sudo 不要）：
+
+```bash
+execweave hooks install antigravity
+execweave hooks status antigravity
+```
+
+
 任意のローカル command を `execweave live` で包みます：
 
 ```bash
 execweave live --open -- claude
 execweave live --open -- codex
-execweave live --open -- antigravity
+execweave live --open -- agy
 execweave live --open -- cursor
 execweave live --open -- opencode
-execweave live --open -- python my_agent.py
+execweave live --open -- codex
 ```
 
 完了済み artifact を主に残したい場合：
 
 ```bash
-execweave record --open -- python my_agent.py
+execweave record --open -- codex
 ```
 
 Agent を現在の terminal で対話的に使いながら別の overview を開く場合：

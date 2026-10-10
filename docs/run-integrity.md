@@ -54,3 +54,9 @@ For a stronger guarantee, copy `manifest_body_sha256` or the complete manifest t
 ## Operational rules
 
 Seal only a completed run. Verify before relying on archived or transferred evidence. Treat any verification error as a signal that the directory no longer exactly matches the sealed inventory, not as proof of malicious activity. If more artifacts must be generated after sealing, create them first and then seal a new finalized copy rather than silently rewriting the original manifest.
+
+## Optional external digest publication
+
+A local seal is **unanchored** by default. After the observed workload has exited, a separately controlled GitHub Issue can store only the manifest digest: set `EXECWEAVE_INTEGRITY_GITHUB_TOKEN` for this sealing command (not in the observed agent's environment), then use `execweave-integrity seal RUN_DIR --anchor-github OWNER/REPO#ISSUE`. On a network failure the local manifest remains sealed but unanchored; retry without resealing using `execweave-integrity anchor RUN_DIR --github-target OWNER/REPO#ISSUE`. Publication uses HTTPS without redirects and sends no raw event, prompt, file body, or local path.
+
+The resulting `submitted_not_independently_verified` state is a **submission receipt, not an independently verified anchor**. A separate reviewer must retrieve the comment from a domain the observed workload could not edit and compare its SHA-256 with `execweave-integrity verify --expected-manifest-body-sha256 DIGEST`. If that write-permission boundary does not exist, the digest is not an independent trust anchor.

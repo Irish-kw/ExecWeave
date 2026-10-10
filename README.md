@@ -63,28 +63,53 @@ python -m pip install -e ".[dev]"
 
 ## Quick start
 
-Wrap any local command with `execweave live`:
+First create an isolated, user-owned virtual environment (no sudo):
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -U execweave
+```
+
+On Windows PowerShell, activate with `.venv\Scripts\Activate.ps1` instead.
+
+Reproduce the built-in negative example **before** enabling any provider hook:
+
+```bash
+python -m execweave.observation_demo --output-dir ./observation-negative
+```
+
+The example's workload can succeed while evidence remains incomplete. Inspect
+`observation-negative/graph.json` and `observation-negative/finalization.json`;
+`execution_state=succeeded` is not the same as complete observation.
+
+If you need provider-specific lifecycle evidence, explicitly approve and install
+its hook in this user environment; **do not use sudo**:
+
+```bash
+execweave hooks install antigravity
+execweave hooks status antigravity
+```
+
+Now launch a real provider (Antigravity's CLI is `agy`, if installed):
+
+```bash
+execweave live --open -- agy
+```
+
+Other available client commands can be wrapped the same way:
 
 ```bash
 execweave live --open -- claude
 execweave live --open -- codex
-execweave live --open -- antigravity
 execweave live --open -- cursor
 execweave live --open -- opencode
-execweave live --open -- python my_agent.py
-```
-
-Use `record` when you mainly want finalized artifacts:
-
-```bash
-execweave record --open -- python my_agent.py
-```
-
-Use `top` when you want a detached overview while keeping the launched program interactive in the current terminal:
-
-```bash
+execweave record --open -- codex
 execweave top -- codex
 ```
+
+Provider-specific hooks require their own explicit installation/approval.
+An exit code of zero does not establish recording completeness or task validity.
 
 ### Provider integration approval
 

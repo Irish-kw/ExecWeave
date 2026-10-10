@@ -50,3 +50,9 @@ Local digest полезен для обнаружения accidental corruption,
 ## Эксплуатационные правила
 
 Seal следует выполнять только для завершённого run. Перед использованием archived или transferred evidence выполните verify. Любая verification error означает, что directory больше не совпадает точно с sealed inventory; сама по себе она не доказывает злонамеренную активность. Если после seal необходимо создать новые artifacts, сначала создайте их, затем seal новую finalized copy вместо скрытой перезаписи исходного manifest.
+
+## Необязательная внешняя публикация дайджеста
+
+Локальный seal по умолчанию имеет состояние **unanchored**. После завершения наблюдаемой программы можно отправить только хеш манифеста в GitHub Issue под независимым управлением. Устанавливайте `EXECWEAVE_INTEGRITY_GITHUB_TOKEN` только для команды seal, не передавайте его наблюдаемому Agent. Команда: `execweave-integrity seal RUN_DIR --anchor-github OWNER/REPO#ISSUE`. Если сеть недоступна, локальная запись останется без внешнего якоря; повторите отправку через `execweave-integrity anchor RUN_DIR --github-target OWNER/REPO#ISSUE`. Содержимое файлов, prompts и локальные пути не передаются.
+
+Статус `submitted_not_independently_verified` подтверждает лишь ответ GitHub, не независимую верификацию. Отдельный проверяющий должен получить digest из области доверия, недоступной для записи наблюдаемым процессом, и сравнить его с помощью `execweave-integrity verify --expected-manifest-body-sha256 DIGEST`. Без этой границы прав доступа внешний якорь доверия не существует.

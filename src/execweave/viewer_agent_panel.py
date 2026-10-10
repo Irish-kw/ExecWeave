@@ -270,15 +270,17 @@ function commandText(value){
   return value==null?'':String(value);
 }
 function fileHistory(id){
-  const rows=[];
-  for(const edge of edgesTouching(id)){
-    for(const kind of (edge?.event_types||[])){
-      const what=String(kind).replace(/^filesystem\./,'');
-      const count=Number(edge?.count||0);
-      rows.push(`${moment(edge?.first_seen)}  ${what}${count>1?`  \u00d7${count}`:''}`);
-    }
-  }
-  return rows.sort().join('\n');
+  // An edge may be shared by many logical events and its first_seen can precede
+  // this file's actual observation. The canonical FILE NODE owns the interval
+  // and event_count; an edge.count is never a per-event-type histogram.
+  const node=rawNode(id)||nodeNamed(id);
+  if(!node||node.type!=='file')return '';
+  const count=Number.isSafeInteger(node.event_count)&&node.event_count>=0?node.event_count:null;
+  const interval=span(node),types=Array.isArray(node.event_types)?
+    node.event_types.filter(kind=>typeof kind==='string'&&kind.startsWith('filesystem.')).map(kind=>kind.slice(11)).sort():[];
+  return [interval,count===null?'':'Node events: '+count,
+    types.length?'Observed event types: '+[...new Set(types)].join(', '):'']
+    .filter(Boolean).join(' · ');
 }
 function reachedBy(id){
   const names=new Set();
@@ -384,6 +386,11 @@ function execweaveNodeCardsBase(node){
     add('Provider',a.provider);
     add('Session',a.session_id);
   }
+  if(kind==='file'){
+    if(a.writer_identity==='unknown')add('Writer','unknown — attribution not established');
+    else if(typeof a.writer_identity==='string'&&a.writer_identity)add('Writer',a.writer_identity);
+    if(a.snapshot_state==='not_captured')add('Snapshot','not captured');
+  }
   add('Observed at',span(node));
   return rows;
 }
@@ -464,23 +471,48 @@ function agentCommunicationHistory(node,messages){
     String(message?.kind||'')==='agent_message'||
     (String(message?.sender||'').startsWith('/')&&String(message?.recipient||'').startsWith('/')&&message.sender!==message.recipient)
   ));
-  const byMessage=new Map();
+  const byMessage=new Map(),phases=new Map();
   for(const message of candidates){
-    const key=message.message_id?JSON.stringify([message.message_id,message.sender,message.recipient,message.text]):messageKey(message);
-    const previous=byMessage.get(key);
+    // Receipt bodies need not be byte-identical to sent bodies. Match only
+    // explicit message occurrence identity and the exact direction.
+    const key=message.message_id?JSON.stringify([message.message_id,message.sender,message.recipient]):messageKey(message);
+    const previous=byMessage.get(key),state=phases.get(key)||new Set();
+    if(message.phase==='received'||message.phase==='sent')state.add(message.phase);
+    phases.set(key,state);
     if(!previous||message.phase==='received')byMessage.set(key,message);
   }
-  const routed=[...byMessage.values()];
+  const gaps=rawGraph()?.observation_assessment?.message_delivery?.unconfirmed||[];
+  const unconfirmedRows=Array.isArray(gaps)?gaps:[];
+  const agentNodes=(rawGraph()?.nodes||[]).filter(candidate=>String(candidate?.type||'')==='agent');
+  // Presentation names are evidence only if exactly one graph agent owns them.
+  const gapAgentIds=new Set(unconfirmedRows.flatMap(row=>[row?.sender_id,row?.recipient_id]).filter(Boolean));
+  const canonicalAgentId=value=>{
+    const label=String(value||'').trim();if(!label)return null;
+    if(gapAgentIds.has(label))return label;
+    const matches=agentNodes.filter(candidate=>
+      String(candidate?.name||'').trim()===label||nodePath(candidate)===label);
+    return matches.length===1?String(matches[0].id):null;
+  };
+  const unconfirmedIds=new Set(unconfirmedRows.map(row=>
+    JSON.stringify([row?.message_id,row?.sender_id,row?.recipient_id])));
+  const gapKey=message=>{
+    if(!message?.message_id)return null;
+    const sender=canonicalAgentId(message.sender),recipient=canonicalAgentId(message.recipient);
+    return sender&&recipient?JSON.stringify([message.message_id,sender,recipient]):null;
+  };
+  const routed=[...byMessage.entries()];
   if(!routed.length)return null;
   const section=document.createElement('section');section.className='execweave-agent-communication';
   section.dataset.agentId=String(node.id);
   const title=document.createElement('div');title.className='execweave-communication-label';title.textContent='Agent communication';section.appendChild(title);
   const state=foldStateFor(node);
-  for(const message of [...routed].reverse()){
+  for(const [identity,message] of [...routed].reverse()){
     const fold=document.createElement('details');fold.className='execweave-message-history';
     const key='message:'+messageKey(message);fold.open=state.get(key)===true;bindFold(fold,state,key);
     const summary=document.createElement('summary');
-    summary.textContent=[moment(message.timestamp),`${message.sender||'Unknown sender'} → ${message.recipient||'Recipient not recorded'}`].filter(Boolean).join(' · ');
+    const delivery=gapKey(message)&&unconfirmedIds.has(gapKey(message))?'Receive not observed':
+      phases.get(identity)?.has('received')?'Receive event observed':'Delivery not verified';
+    summary.textContent=[moment(message.timestamp),`${message.sender||'Unknown sender'} → ${message.recipient||'Recipient not recorded'}`,delivery].filter(Boolean).join(' · ');
     const body=document.createElement('pre');body.className='execweave-message-body';body.textContent=displayText(message);
     fold.append(summary,body);section.appendChild(fold);
   }
@@ -507,12 +539,29 @@ function render(node){
   const record=recordFor(node),preview=record?.conversation_preview||{},path=String(preview.agent_path||nodePath(node)||'').trim(),messages=Array.isArray(preview.messages)?preview.messages:[];
   historyBrowser.nodeChanged(node);
   details.appendChild(historyBrowser.buttonFor(node));
+  const delivery=rawGraph()?.observation_assessment?.message_delivery;
+  const unconfirmed=Array.isArray(delivery?.unconfirmed)?delivery.unconfirmed.filter(row=>row?.recipient_id===node.id):[];
+  if(unconfirmed.length)details.appendChild(card('Incoming handoff — receive not observed',
+    unconfirmed.map(row=>`${row.sender_id} → ${row.recipient_id} · ${row.message_id}`).join('\n')+
+    '\nThis is missing receive telemetry, not proof of failed delivery.'));
   const isRoot=nodeHasRootAuthority(node)||previewUsesRootRenderer(preview);
+  // Restrict this fallback to the selected agent's exact raw content edge.
+  // A provider may publish an explicit MODEL_REQUEST without a user-message
+  // round or framework_agent decoration; neither absence is evidence of no prompt.
+  const requestMessages=entries.filter(entry=>
+    String(entry?.source_id||'')===String(node.id||''))
+    .flatMap(entry=>Array.isArray(entry?.conversation_preview?.messages)?
+      entry.conversation_preview.messages:[])
+    .filter(message=>isObserved(message)&&!isInjected(message)&&
+      message?.kind==='model_request'&&message?.phase==='request'&&
+      commandText(message?.text));
+  const observedPrompt=requestMessages.length?displayText(requestMessages.at(-1)):'';
   const rounds=(isRoot?rootRounds(messages,path||'/root'):childRounds(messages,path)).map(round=>execweaveFillAssignedTask(round,node,isRoot));
+  if(observedPrompt)details.appendChild(card('Prompt',observedPrompt));
   const tools=toolCallsFor(String(node.id||''));
   const communication=agentCommunicationHistory(node,messages);
   const appendTools=()=>{if(communication)details.appendChild(communication);if(tools)details.appendChild(card('Tools',tools))};
-  if(!rounds.length){const fallback={cards:isRoot?[['Prompt',''],['Final response','']]:[['Task',''],['Thinking',''],['Response','']]};details.appendChild(roundView(rounds[0]||execweaveFillAssignedTask(fallback,node,isRoot)));appendTools();return true}
+  if(!rounds.length){const fallback={cards:isRoot?[['Prompt',observedPrompt],['Final response','']]:[['Task',''],['Thinking',''],['Response','']]};details.appendChild(roundView(rounds[0]||execweaveFillAssignedTask(fallback,node,isRoot)));appendTools();return true}
   // A subagent borrows the moment and the wording of the unique canonical root round
   // it belongs to. If root identity is ambiguous, the child keeps its own timestamp.
   const runs=isRoot?rounds:runRounds();
