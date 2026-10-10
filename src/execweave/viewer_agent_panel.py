@@ -348,9 +348,6 @@ function execweaveNodeCardsBase(node){
     add('Ran',occurrenceList(a));
   }else if(kind==='file'){
     add('Path',node?.name);
-    if(a.writer_identity==='unknown')add('Writer','unknown — attribution not established');
-    else if(typeof a.writer_identity==='string'&&a.writer_identity)add('Writer',a.writer_identity);
-    if(a.snapshot_state==='not_captured')add('Snapshot','not captured');
     add('Observed',fileHistory(String(node?.id||'')));
   }else if(kind==='tool_call'){
     add('Tool',a.tool_name||node?.name);
@@ -386,6 +383,11 @@ function execweaveNodeCardsBase(node){
     add('Name',node?.name);
     add('Provider',a.provider);
     add('Session',a.session_id);
+  }
+  if(kind==='file'){
+    if(a.writer_identity==='unknown')add('Writer','unknown — attribution not established');
+    else if(typeof a.writer_identity==='string'&&a.writer_identity)add('Writer',a.writer_identity);
+    if(a.snapshot_state==='not_captured')add('Snapshot','not captured');
   }
   add('Observed at',span(node));
   return rows;
