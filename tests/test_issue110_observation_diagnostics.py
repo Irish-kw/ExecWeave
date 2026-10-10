@@ -273,8 +273,6 @@ def test_integrity_cli_explicitly_reports_unanchored_state(
 
 
 def test_github_external_digest_publisher_checks_target_and_acknowledgement() -> None:
-    import urllib.error
-
     from execweave.external_anchor import publish_github_anchor, github_anchor_text
 
     digest = "a" * 64
