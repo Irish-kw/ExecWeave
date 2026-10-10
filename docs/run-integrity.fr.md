@@ -50,3 +50,9 @@ Pour une garantie plus forte, copiez `manifest_body_sha256` ou le manifest compl
 ## Règles opérationnelles
 
 Ne scellez qu’un run terminé. Vérifiez les archived ou transferred evidence avant de vous y fier. Toute verification error indique que le directory ne correspond plus exactement au sealed inventory ; elle ne prouve pas une activité malveillante. Si de nouveaux artifacts doivent être produits après le seal, créez-les d’abord puis scellez une nouvelle finalized copy au lieu de réécrire silencieusement le manifest original.
+
+## Publication facultative du digest externe
+
+Le sceau local est **unanchored** par défaut. Après l'arrêt du programme observé, stockez uniquement le digest du manifeste dans une GitHub Issue contrôlée séparément. Configurez `EXECWEAVE_INTEGRITY_GITHUB_TOKEN` uniquement pour cette opération, jamais dans l'environnement de l'agent observé, puis utilisez `execweave-integrity seal RUN_DIR --anchor-github OWNER/REPO#ISSUE`. Si l'envoi échoue, le sceau local reste intact mais non ancré ; relancez avec `execweave-integrity anchor RUN_DIR --github-target OWNER/REPO#ISSUE`. Aucun prompt, contenu de fichier ou chemin local n'est transmis.
+
+Le statut `submitted_not_independently_verified` atteste seulement l'envoi. Un vérificateur indépendant doit relire le commentaire depuis un domaine de confiance inaccessible en écriture au programme observé, puis comparer le digest via `execweave-integrity verify --expected-manifest-body-sha256 DIGEST`. Sans séparation des droits d'écriture, il ne s'agit pas d'une ancre de confiance.
