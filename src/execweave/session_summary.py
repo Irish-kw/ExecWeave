@@ -73,7 +73,22 @@ class SessionSummary:
         if kind in {"MESSAGE_SENT", "MESSAGE_RECEIVED"}:
             source, target = event.get("source"), event.get("target")
             message_id = attributes.get("message_id")
-            if (isinstance(message_id, str) and 0 < len(message_id) <= 2048
+            # Inferred/viewer-only routing cannot establish a native send or
+            # receipt, even when it happens to carry an occurrence-like ID.
+            scopes = (event, attributes, source, target)
+            native = all(
+                scope.get(flag) is None or scope.get(flag) is False
+                for scope in scopes if isinstance(scope, dict)
+                for flag in ("inferred", "viewer_only")
+            )
+            for entity in (source, target):
+                entity_attributes = entity.get("attributes") if isinstance(entity, dict) else None
+                if isinstance(entity_attributes, dict):
+                    native = native and all(
+                        entity_attributes.get(flag) is None or entity_attributes.get(flag) is False
+                        for flag in ("inferred", "viewer_only")
+                    )
+            if (native and isinstance(message_id, str) and 0 < len(message_id) <= 2048
                     and isinstance(source, dict) and source.get("type") == "agent"
                     and isinstance(target, dict) and target.get("type") == "agent"):
                 sender, recipient = source.get("id"), target.get("id")
