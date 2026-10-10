@@ -50,3 +50,9 @@ local digest는 accidental corruption, 불완전한 copy, seal 시점 이후의 
 ## 운영 규칙
 
 완료된 run만 seal하십시오. archived 또는 transferred evidence에 의존하기 전에 verify하십시오. verification error는 directory가 sealed inventory와 더 이상 정확히 일치하지 않는다는 신호이지 악의적 행위를 입증하는 것은 아닙니다. seal 이후 새 artifact가 필요하다면 먼저 생성한 뒤 새로운 finalized copy를 seal하고 기존 manifest를 조용히 다시 쓰지 마십시오.
+
+## 선택적 외부 다이제스트 게시
+
+로컬 seal은 기본적으로 **unanchored** 상태입니다. 관측 대상 작업이 끝난 뒤, 별도로 관리되는 GitHub Issue에 manifest 해시만 게시할 수 있습니다. `EXECWEAVE_INTEGRITY_GITHUB_TOKEN`은 seal 명령을 실행할 때에만 설정하고 관측 Agent에게 전달하지 마세요. `execweave-integrity seal RUN_DIR --anchor-github OWNER/REPO#ISSUE`를 사용합니다. 전송 실패 시 로컬 seal은 유지되며 `execweave-integrity anchor RUN_DIR --github-target OWNER/REPO#ISSUE`로 재시도할 수 있습니다. 원본 이벤트, Prompt, 파일 내용 및 로컬 경로는 보내지 않습니다.
+
+`submitted_not_independently_verified`는 전송 확인일 뿐 독립 검증을 의미하지 않습니다. 관측 프로세스가 수정할 수 없는 별도의 신뢰 영역에서 검토자가 게시물을 다시 읽고 `execweave-integrity verify --expected-manifest-body-sha256 DIGEST`로 확인해야 합니다. 권한 격리가 없다면 외부 신뢰 앵커로 간주할 수 없습니다.
