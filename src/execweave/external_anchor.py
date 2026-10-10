@@ -12,6 +12,7 @@ import os
 import re
 import urllib.error
 import urllib.request
+from urllib.parse import urlsplit
 from typing import Any, Callable
 
 _TARGET = re.compile(r"^([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))/([A-Za-z0-9_.-]{1,100})#([1-9][0-9]{0,8})$")
@@ -95,17 +96,23 @@ def publish_github_anchor(
     if not isinstance(value, dict):
         raise ValueError("invalid GitHub anchor acknowledgement")
     comment_id = value.get("id")
-    expected_link = (
-        f"https://github.com/{owner}/{repo}/issues/{number}#issuecomment-{comment_id}"
-    )
-    if (not isinstance(comment_id, int) or isinstance(comment_id, bool)
-            or comment_id < 1 or value.get("body") != body
-            or value.get("html_url") != expected_link):
+    comment_url = value.get("html_url")
+    # GitHub canonicalizes owner/repository casing in URLs. Compare path segments
+    # case-insensitively while requiring the exact issue and comment identity.
+    if not isinstance(comment_id, int) or isinstance(comment_id, bool) or comment_id < 1:
+        raise ValueError("GitHub anchor acknowledgement target/body mismatch")
+    parsed = urlsplit(comment_url) if isinstance(comment_url, str) else None
+    expected_path = f"/{owner}/{repo}/issues/{number}"
+    if (parsed is None or parsed.scheme != "https"
+            or parsed.netloc != "github.com"
+            or parsed.path.casefold() != expected_path.casefold()
+            or parsed.query or parsed.fragment != f"issuecomment-{comment_id}"
+            or value.get("body") != body):
         raise ValueError("GitHub anchor acknowledgement target/body mismatch")
     return {
         "state": "submitted_not_independently_verified",
         "target": target,
         "manifest_body_sha256": digest,
         "comment_id": comment_id,
-        "comment_url": expected_link,
+        "comment_url": comment_url,
     }
