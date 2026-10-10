@@ -240,3 +240,33 @@ def test_framework_group_must_not_promote_partial_delivery_to_delivered() -> Non
     ]
     assert len(routed) == 1
     assert routed[0]["relation"] == "ADDRESSED_TO"
+
+
+def test_integrity_cli_explicitly_reports_unanchored_state(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    from execweave.integrity_cli import main as integrity_main
+
+    run = tmp_path / "run"
+    run.mkdir()
+    (run / "graph.json").write_text('{"nodes":[],"edges":[]}', encoding="utf-8")
+    assert integrity_main(["seal", str(run)]) == 0
+    sealed = json.loads(capsys.readouterr().out)
+    assert sealed["external_anchor_state"] == "unanchored"
+    assert sealed["malicious_writer_resistance"] is False
+    assert integrity_main(["verify", str(run)]) == 0
+    verified = json.loads(capsys.readouterr().out)
+    assert verified["valid"] is True
+    assert verified["external_anchor_state"] == "unanchored"
+    assert verified["malicious_writer_resistance"] is False
+    assert integrity_main([
+        "verify", str(run), "--expected-manifest-body-sha256",
+        sealed["manifest_body_sha256"],
+    ]) == 0
+    matching = json.loads(capsys.readouterr().out)
+    assert matching["external_anchor_state"] == "external_digest_match"
+    assert integrity_main([
+        "verify", str(run), "--expected-manifest-body-sha256", "0" * 64,
+    ]) == 1
+    mismatching = json.loads(capsys.readouterr().out)
+    assert mismatching["external_anchor_state"] == "external_digest_mismatch_or_invalid"
