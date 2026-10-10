@@ -270,15 +270,17 @@ function commandText(value){
   return value==null?'':String(value);
 }
 function fileHistory(id){
-  const rows=[];
-  for(const edge of edgesTouching(id)){
-    for(const kind of (edge?.event_types||[])){
-      const what=String(kind).replace(/^filesystem\./,'');
-      const count=Number(edge?.count||0);
-      rows.push(`${moment(edge?.first_seen)}  ${what}${count>1?`  \u00d7${count}`:''}`);
-    }
-  }
-  return rows.sort().join('\n');
+  // An edge may be shared by many logical events and its first_seen can precede
+  // this file's actual observation. The canonical FILE NODE owns the interval
+  // and event_count; an edge.count is never a per-event-type histogram.
+  const node=rawNode(id)||nodeNamed(id);
+  if(!node||node.type!=='file')return '';
+  const count=Number.isSafeInteger(node.event_count)&&node.event_count>=0?node.event_count:null;
+  const interval=span(node),types=Array.isArray(node.event_types)?
+    node.event_types.filter(kind=>typeof kind==='string'&&kind.startsWith('filesystem.')).map(kind=>kind.slice(11)).sort():[];
+  return [interval,count===null?'':'Node events: '+count,
+    types.length?'Observed event types: '+[...new Set(types)].join(', '):'']
+    .filter(Boolean).join(' · ');
 }
 function reachedBy(id){
   const names=new Set();
@@ -471,14 +473,17 @@ function agentCommunicationHistory(node,messages){
   ));
   const byMessage=new Map(),phases=new Map();
   for(const message of candidates){
-    const key=message.message_id?JSON.stringify([message.message_id,message.sender,message.recipient,message.text]):messageKey(message);
+    // Receipt bodies need not be byte-identical to sent bodies. Match only
+    // explicit message occurrence identity and the exact direction.
+    const key=message.message_id?JSON.stringify([message.message_id,message.sender,message.recipient]):messageKey(message);
     const previous=byMessage.get(key),state=phases.get(key)||new Set();
     if(message.phase==='received'||message.phase==='sent')state.add(message.phase);
     phases.set(key,state);
     if(!previous||message.phase==='received')byMessage.set(key,message);
   }
   const gaps=rawGraph()?.observation_assessment?.message_delivery?.unconfirmed||[];
-  const unconfirmedIds=new Set(Array.isArray(gaps)?gaps.map(row=>row?.message_id).filter(Boolean):[]);
+  const unconfirmedIds=new Set(Array.isArray(gaps)?gaps.map(row=>
+    JSON.stringify([row?.message_id,row?.sender_id,row?.recipient_id])).filter(Boolean):[]);
   const routed=[...byMessage.entries()];
   if(!routed.length)return null;
   const section=document.createElement('section');section.className='execweave-agent-communication';
@@ -489,7 +494,7 @@ function agentCommunicationHistory(node,messages){
     const fold=document.createElement('details');fold.className='execweave-message-history';
     const key='message:'+messageKey(message);fold.open=state.get(key)===true;bindFold(fold,state,key);
     const summary=document.createElement('summary');
-    const delivery=unconfirmedIds.has(message.message_id)?'Receive not observed':
+    const delivery=unconfirmedIds.has(JSON.stringify([message.message_id,message.sender,message.recipient]))?'Receive not observed':
       phases.get(identity)?.has('received')?'Receive event observed':'Delivery not verified';
     summary.textContent=[moment(message.timestamp),`${message.sender||'Unknown sender'} → ${message.recipient||'Recipient not recorded'}`,delivery].filter(Boolean).join(' · ');
     const body=document.createElement('pre');body.className='execweave-message-body';body.textContent=displayText(message);
@@ -524,11 +529,19 @@ function render(node){
     unconfirmed.map(row=>`${row.sender_id} → ${row.recipient_id} · ${row.message_id}`).join('\n')+
     '\nThis is missing receive telemetry, not proof of failed delivery.'));
   const isRoot=nodeHasRootAuthority(node)||previewUsesRootRenderer(preview);
+  const requestMessages=attrs(node).conversation_scope==='framework_agent'?
+    messages.filter(message=>isObserved(message)&&!isInjected(message)&&
+      message?.kind==='model_request'&&message?.phase==='request'&&
+      message?.recipient===path&&commandText(message?.text)):[];
+  // A recorded MODEL_REQUEST is genuine prompt evidence even when the
+  // provider has no user-message opener and hence no generic "round".
+  const observedPrompt=requestMessages.length?displayText(requestMessages.at(-1)):'';
   const rounds=(isRoot?rootRounds(messages,path||'/root'):childRounds(messages,path)).map(round=>execweaveFillAssignedTask(round,node,isRoot));
+  if(observedPrompt)details.appendChild(card('Prompt',observedPrompt));
   const tools=toolCallsFor(String(node.id||''));
   const communication=agentCommunicationHistory(node,messages);
   const appendTools=()=>{if(communication)details.appendChild(communication);if(tools)details.appendChild(card('Tools',tools))};
-  if(!rounds.length){const fallback={cards:isRoot?[['Prompt',''],['Final response','']]:[['Task',''],['Thinking',''],['Response','']]};details.appendChild(roundView(rounds[0]||execweaveFillAssignedTask(fallback,node,isRoot)));appendTools();return true}
+  if(!rounds.length){const fallback={cards:isRoot?[['Prompt',observedPrompt],['Final response','']]:[['Task',''],['Thinking',''],['Response','']]};details.appendChild(roundView(rounds[0]||execweaveFillAssignedTask(fallback,node,isRoot)));appendTools();return true}
   // A subagent borrows the moment and the wording of the unique canonical root round
   // it belongs to. If root identity is ambiguous, the child keeps its own timestamp.
   const runs=isRoot?rounds:runRounds();
