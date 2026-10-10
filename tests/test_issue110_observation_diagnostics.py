@@ -202,3 +202,41 @@ def test_file_history_uses_canonical_node_counts_not_shared_edge_counts() -> Non
     )[0]
     assert "edge?.count" not in history
     assert "edge?.first_seen" not in history
+
+
+def test_framework_group_must_not_promote_partial_delivery_to_delivered() -> None:
+    from test_execution_flow_integrity import _edge, _project
+    from test_session_execution_flow import _graph
+
+    graph = _graph("camel")
+    for node in graph["nodes"]:
+        if node["type"] == "agent":
+            node["attributes"]["conversation_scope"] = "framework_agent"
+    graph["edges"] = [edge for edge in graph["edges"] if edge["id"] != "reply"]
+    graph["edges"].extend([
+        _edge("sent", "root", "child", "MESSAGE_SENT", 3),
+        _edge("recv", "root", "child", "MESSAGE_RECEIVED", 4),
+    ])
+    graph["observation_assessment"] = {
+        "message_delivery": {
+            "unconfirmed": [
+                {"message_id": "second", "sender_id": "root",
+                 "recipient_id": "child", "state": "receive_not_observed"}
+            ]
+        }
+    }
+    projected = _project(graph)
+    message = next(
+        node for node in projected["nodes"]
+        if node.get("attributes", {}).get("viewer_framework_messages")
+        and node["attributes"].get("sender_agent_id") == "root"
+        and node["attributes"].get("recipient_agent_id") == "child"
+    )
+    assert message["attributes"]["viewer_message_delivery_state"] == "receive_not_observed"
+    assert message["attributes"]["viewer_message_unconfirmed_count"] == 1
+    routed = [
+        edge for edge in projected["edges"]
+        if edge["source"] == message["id"] and edge["target"] == "child"
+    ]
+    assert len(routed) == 1
+    assert routed[0]["relation"] == "ADDRESSED_TO"
