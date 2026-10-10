@@ -41,6 +41,7 @@ def main(argv: list[str] | None = None) -> int:
             json.dumps(
                 {
                     "status": "sealed",
+                    "external_anchor_state": "unanchored",
                     "run_dir": str(args.run_dir.expanduser().resolve()),
                     "sealed_file_count": manifest["sealed_file_count"],
                     "manifest_body_sha256": manifest["manifest_body_sha256"],
@@ -55,7 +56,15 @@ def main(argv: list[str] | None = None) -> int:
         args.run_dir,
         expected_manifest_body_sha256=args.expected_manifest_body_sha256,
     )
-    print(json.dumps(result.to_dict(), sort_keys=True))
+    report = result.to_dict()
+    report["external_anchor_state"] = (
+        "unanchored" if not result.external_anchor_checked
+        else "external_digest_match" if result.external_anchor_match is True
+        else "external_digest_mismatch_or_invalid"
+    )
+    # Local consistency verification is not proof against a malicious writer.
+    report["malicious_writer_resistance"] = False
+    print(json.dumps(report, sort_keys=True))
     return 0 if result.valid else 1
 
 
