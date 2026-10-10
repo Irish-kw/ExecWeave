@@ -20,18 +20,46 @@ class SessionSummary:
         self._warning_codes: set[str] = set()
         self._short_lived_loss_possible: bool | None = None
         self._filesystem_enabled: bool | None = None
+        # Bounded occurrence-level delivery telemetry; absence of a receive event
+        # is not proof that the recipient did not actually receive the message.
+        self._message_phases: dict[tuple[str, str, str], set[str]] = {}
+        self._message_overflow = False
 
     @property
     def observation(self) -> dict[str, Any]:
-        return assess_observation(
+        finished = self.outcome.get("recorder_finished") is True
+        unconfirmed = sorted(
+            (message_id, sender, recipient)
+            for (message_id, sender, recipient), phases in self._message_phases.items()
+            if "sent" in phases and "received" not in phases
+        )
+        warnings = set(self._warning_codes)
+        if finished and unconfirmed:
+            warnings.add("message_receive_not_observed")
+        if self._message_overflow:
+            warnings.add("message_delivery_inventory_truncated")
+        assessment = assess_observation(
             specialized=self.counts["specialized"],
-            finished=self.outcome.get("recorder_finished") is True,
+            finished=finished,
             unknown_files=len(self._unknown_files),
             missing_snapshots=len(self._missing_snapshots),
             short_lived_loss_possible=self._short_lived_loss_possible,
             filesystem_enabled=self._filesystem_enabled,
-            warning_codes=self._warning_codes,
+            warning_codes=warnings,
         )
+        if self._message_phases or self._message_overflow:
+            assessment["message_delivery"] = {
+                "basis": "explicit_message_sent_and_received_events",
+                "unconfirmed_count": len(unconfirmed),
+                "unconfirmed": [
+                    {"message_id": mid, "sender_id": sender,
+                     "recipient_id": recipient, "state": "receive_not_observed"}
+                    for mid, sender, recipient in unconfirmed[:20]
+                ],
+                "truncated": self._message_overflow or len(unconfirmed) > 20,
+                "delivery_failure_proven": False,
+            }
+        return assessment
 
     def observe(self, event: dict[str, Any]) -> None:
         attributes = event.get("attributes")
@@ -42,6 +70,27 @@ class SessionSummary:
                     or (isinstance(backend, str) and backend in {"semantic", "model_runtime"})
                     or attributes.get("attribution") == "semantic_sidecar")
         self.counts["specialized" if semantic else "os_runtime"] += 1
+        if kind in {"MESSAGE_SENT", "MESSAGE_RECEIVED"}:
+            source, target = event.get("source"), event.get("target")
+            message_id = attributes.get("message_id")
+            if (isinstance(message_id, str) and 0 < len(message_id) <= 2048
+                    and isinstance(source, dict) and source.get("type") == "agent"
+                    and isinstance(target, dict) and target.get("type") == "agent"):
+                sender, recipient = source.get("id"), target.get("id")
+                if (isinstance(sender, str) and 0 < len(sender) <= 2048
+                        and isinstance(recipient, str) and 0 < len(recipient) <= 2048
+                        and sender != recipient
+                        and attributes.get("sender_agent_id", sender) == sender
+                        and attributes.get("recipient_agent_id", recipient) == recipient
+                        and attributes.get("session_id", event.get("session_id")) == event.get("session_id")
+                        and not attributes.get("inferred") and not attributes.get("viewer_only")):
+                    key = (message_id, sender, recipient)
+                    if key in self._message_phases:
+                        self._message_phases[key].add("sent" if kind == "MESSAGE_SENT" else "received")
+                    elif len(self._message_phases) < 10_000:
+                        self._message_phases[key] = {"sent" if kind == "MESSAGE_SENT" else "received"}
+                    else:
+                        self._message_overflow = True
         if kind == "observation.warning":
             reason = attributes.get("reason")
             if isinstance(reason, str) and reason:
