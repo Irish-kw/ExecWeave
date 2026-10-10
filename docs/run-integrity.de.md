@@ -50,3 +50,9 @@ Für eine stärkere Garantie muss `manifest_body_sha256` oder das vollständige 
 ## Betriebsregeln
 
 Versiegeln Sie nur einen abgeschlossenen run. Verifizieren Sie archived oder transferred evidence, bevor Sie sich darauf verlassen. Eine verification error bedeutet, dass das directory nicht mehr exakt dem sealed inventory entspricht; sie ist kein Beweis für bösartige Aktivität. Müssen nach dem Seal weitere artifacts erzeugt werden, erstellen Sie diese zuerst und versiegeln Sie anschließend eine neue finalized copy, statt das ursprüngliche Manifest still zu überschreiben.
+
+## Optionale externe Digest-Veröffentlichung
+
+Eine lokale Versiegelung bleibt zunächst **unanchored**. Nach Ende des beobachteten Programms kann der Manifest-Digest in einer unabhängig verwalteten GitHub Issue veröffentlicht werden. Setzen Sie `EXECWEAVE_INTEGRITY_GITHUB_TOKEN` ausschließlich für diesen Vorgang, niemals in der Agent-Umgebung; verwenden Sie `execweave-integrity seal RUN_DIR --anchor-github OWNER/REPO#ISSUE`. Nach einem Übertragungsfehler bleibt die lokale Versiegelung bestehen, aber unankert. Ein erneuter Versuch erfolgt über `execweave-integrity anchor RUN_DIR --github-target OWNER/REPO#ISSUE`. Es werden keine Prompts, Dateien oder lokalen Pfade übertragen.
+
+Der Zustand `submitted_not_independently_verified` belegt nur eine bestätigte Veröffentlichung, keine unabhängige Prüfung. Ein Prüfer muss den Kommentar aus einem vom beobachteten Programm nicht beschreibbaren Vertrauensbereich abrufen und den Digest mit `execweave-integrity verify --expected-manifest-body-sha256 DIGEST` vergleichen. Ohne diese Berechtigungsgrenze ist kein unabhängiger Vertrauensanker gegeben.
