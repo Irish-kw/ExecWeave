@@ -529,12 +529,18 @@ function render(node){
     unconfirmed.map(row=>`${row.sender_id} → ${row.recipient_id} · ${row.message_id}`).join('\n')+
     '\nThis is missing receive telemetry, not proof of failed delivery.'));
   const isRoot=nodeHasRootAuthority(node)||previewUsesRootRenderer(preview);
-  const requestMessages=attrs(node).conversation_scope==='framework_agent'?
-    messages.filter(message=>isObserved(message)&&!isInjected(message)&&
+  // Restrict this fallback to the selected agent's exact raw content edge.
+  // A provider may publish an explicit MODEL_REQUEST without a user-message
+  // round or framework_agent decoration; neither absence is evidence of no prompt.
+  const requestMessages=entries.filter(entry=>
+    String(entry?.source_id||'')===String(node.id||'')&&
+    String(entry?.relation||'')==='HAS_MODEL_CONTENT'&&
+    /\.model_request$/i.test(String(entry?.content_kind||'')))
+    .flatMap(entry=>Array.isArray(entry?.conversation_preview?.messages)?
+      entry.conversation_preview.messages:[])
+    .filter(message=>isObserved(message)&&!isInjected(message)&&
       message?.kind==='model_request'&&message?.phase==='request'&&
-      message?.recipient===path&&commandText(message?.text)):[];
-  // A recorded MODEL_REQUEST is genuine prompt evidence even when the
-  // provider has no user-message opener and hence no generic "round".
+      commandText(message?.text));
   const observedPrompt=requestMessages.length?displayText(requestMessages.at(-1)):'';
   const rounds=(isRoot?rootRounds(messages,path||'/root'):childRounds(messages,path)).map(round=>execweaveFillAssignedTask(round,node,isRoot));
   if(observedPrompt)details.appendChild(card('Prompt',observedPrompt));
