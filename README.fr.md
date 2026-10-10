@@ -63,21 +63,47 @@ python -m pip install -e ".[dev]"
 
 ## Démarrage rapide
 
+Créez d'abord un environnement virtuel isolé, sans sudo :
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -U execweave
+```
+
+Windows PowerShell: `.venv\Scripts\Activate.ps1`.
+
+Avant les hooks, exécutez l'exemple intégré :
+
+```bash
+python -m execweave.observation_demo --output-dir ./observation-negative
+```
+
+`observation-negative/graph.json` and `finalization.json`: `execution_state=succeeded` does not prove observation completeness or task validation.
+
+Autorisez ensuite explicitement le hook du provider, toujours sans sudo :
+
+```bash
+execweave hooks install antigravity
+execweave hooks status antigravity
+```
+
+
 Encapsulez n’importe quelle commande locale avec `execweave live` :
 
 ```bash
 execweave live --open -- claude
 execweave live --open -- codex
-execweave live --open -- antigravity
+execweave live --open -- agy
 execweave live --open -- cursor
 execweave live --open -- opencode
-execweave live --open -- python my_agent.py
+execweave live --open -- codex
 ```
 
 Pour produire surtout des artifacts finalisés :
 
 ```bash
-execweave record --open -- python my_agent.py
+execweave record --open -- codex
 ```
 
 Pour garder le programme interactif dans le terminal courant tout en ouvrant une vue séparée :
