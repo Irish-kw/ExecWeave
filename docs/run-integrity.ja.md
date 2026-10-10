@@ -50,3 +50,9 @@ local digest は accidental corruption、不完全な copy、seal 時点から�
 ## 運用ルール
 
 完了した run だけを seal してください。archive または transfer された evidence を利用する前に verify してください。verification error は directory が sealed inventory と完全一致しなくなったことを示すだけで、悪意ある行為そのものを証明しません。seal 後に新しい artifact が必要な場合は、それらを先に生成し、finalized copy を新たに seal してください。元の manifest を黙って書き換えてはいけません。
+
+## 外部ダイジェスト送信（任意）
+
+ローカル seal はデフォルトで **unanchored** です。観測対象の処理が終了した後、別の権限で管理する GitHub Issue に manifest のハッシュのみ送信できます。`EXECWEAVE_INTEGRITY_GITHUB_TOKEN` は seal を実行するプロセスだけに設定し、観測対象の Agent には渡さないでください。`execweave-integrity seal RUN_DIR --anchor-github OWNER/REPO#ISSUE` を使用します。送信失敗時もローカル封印は保持され、`execweave-integrity anchor RUN_DIR --github-target OWNER/REPO#ISSUE` で再試行できます。元のイベントや Prompt、ファイル内容は送信しません。
+
+`submitted_not_independently_verified` は送信応答であり、独立検証ではありません。観測対象が変更できない信頼領域から別の検証者がコメントを取得し、`execweave-integrity verify --expected-manifest-body-sha256 DIGEST` で照合する必要があります。権限分離がなければ信頼できる外部アンカーとは呼べません。
