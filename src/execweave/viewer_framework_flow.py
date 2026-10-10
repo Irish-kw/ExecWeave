@@ -13,6 +13,10 @@ FRAMEWORK_FLOW_SCRIPT = r"""
       groups.get(key).edges.push(e);
     }
     if(!groups.size)return display;
+    function listUnconfirmed(graph){
+      const rows=graph?.observation_assessment?.message_delivery?.unconfirmed;
+      return Array.isArray(rows)?rows:[];
+    }
     let nodes=display.nodes.map(n=>({...n,attributes:{...a(n)}}));
     const hidden=new Set(),hiddenNodes=new Set(),added=[];
     // Stream-only messages and callback logs remain in their owner's inspector.
@@ -29,18 +33,28 @@ FRAMEWORK_FLOW_SCRIPT = r"""
       hiddenNodes.add(n.id);
     }
     nodes=nodes.filter(n=>!hiddenNodes.has(n.id));
+    const missing=listUnconfirmed(raw);
     for(const group of groups.values()){
       const id=`viewer:messages:${encodeURIComponent(group.source)}:${encodeURIComponent(group.target)}`;
       const receiver=agents.get(group.target);
       const evidence=group.edges.map(e=>e.id).filter(Boolean);
+      const unconfirmed=missing.filter(row=>row?.sender_id===group.source&&row?.recipient_id===group.target);
+      const receiveObserved=group.edges.some(e=>r(e)==='MESSAGE_RECEIVED');
+      // An aggregate route cannot certify the delivery of every message. In
+      // particular, one received message must not certify another sent-only one.
+      const deliveryState=unconfirmed.length?'receive_not_observed':
+        receiveObserved?'receive_event_observed':'send_only';
       for(const eid of evidence)hidden.add(eid);
       nodes.push({id,type:'message',name:`Messages → ${receiver.name||group.target}`,attributes:{
         viewer_only:true,viewer_framework_messages:true,provider:a(receiver).provider,
         sender_agent_id:group.source,recipient_agent_id:group.target,
+        viewer_message_delivery_state:deliveryState,
+        viewer_message_unconfirmed_count:unconfirmed.length,
         viewer_message_observations:group.edges.map(e=>({relation:e.relation,count:e.count||1,first_seen:e.first_seen,last_seen:e.last_seen,evidence_edge_id:e.id})),
         evidence_edge_ids:evidence,
       }});
-      const delivery=group.edges.some(e=>r(e)==='MESSAGE_RECEIVED')?'DELIVERED_AGENT_MESSAGE':'ADDRESSED_TO';
+      const delivery=unconfirmed.length?'ADDRESSED_TO':
+        receiveObserved?'DELIVERED_AGENT_MESSAGE':'ADDRESSED_TO';
       for(const [source,target,relation] of [[group.source,id,'MESSAGE_SENT'],[id,group.target,delivery]]){
         added.push({id:`viewer:${source}--${relation}-->${target}`,source,target,relation,count:1,viewer_only:true,causal:false,inferred:false,
           first_sequence:Math.min(...group.edges.map(e=>e.first_sequence).filter(Number.isInteger)),
