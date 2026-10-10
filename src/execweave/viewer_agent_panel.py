@@ -467,23 +467,29 @@ function agentCommunicationHistory(node,messages){
     String(message?.kind||'')==='agent_message'||
     (String(message?.sender||'').startsWith('/')&&String(message?.recipient||'').startsWith('/')&&message.sender!==message.recipient)
   ));
-  const byMessage=new Map();
+  const byMessage=new Map(),phases=new Map();
   for(const message of candidates){
     const key=message.message_id?JSON.stringify([message.message_id,message.sender,message.recipient,message.text]):messageKey(message);
-    const previous=byMessage.get(key);
+    const previous=byMessage.get(key),state=phases.get(key)||new Set();
+    if(message.phase==='received'||message.phase==='sent')state.add(message.phase);
+    phases.set(key,state);
     if(!previous||message.phase==='received')byMessage.set(key,message);
   }
-  const routed=[...byMessage.values()];
+  const gaps=rawGraph()?.observation_assessment?.message_delivery?.unconfirmed||[];
+  const unconfirmedIds=new Set(Array.isArray(gaps)?gaps.map(row=>row?.message_id).filter(Boolean):[]);
+  const routed=[...byMessage.entries()];
   if(!routed.length)return null;
   const section=document.createElement('section');section.className='execweave-agent-communication';
   section.dataset.agentId=String(node.id);
   const title=document.createElement('div');title.className='execweave-communication-label';title.textContent='Agent communication';section.appendChild(title);
   const state=foldStateFor(node);
-  for(const message of [...routed].reverse()){
+  for(const [identity,message] of [...routed].reverse()){
     const fold=document.createElement('details');fold.className='execweave-message-history';
     const key='message:'+messageKey(message);fold.open=state.get(key)===true;bindFold(fold,state,key);
     const summary=document.createElement('summary');
-    summary.textContent=[moment(message.timestamp),`${message.sender||'Unknown sender'} → ${message.recipient||'Recipient not recorded'}`].filter(Boolean).join(' · ');
+    const delivery=unconfirmedIds.has(message.message_id)?'Receive not observed':
+      phases.get(identity)?.has('received')?'Receive event observed':'Delivery not verified';
+    summary.textContent=[moment(message.timestamp),`${message.sender||'Unknown sender'} → ${message.recipient||'Recipient not recorded'}`,delivery].filter(Boolean).join(' · ');
     const body=document.createElement('pre');body.className='execweave-message-body';body.textContent=displayText(message);
     fold.append(summary,body);section.appendChild(fold);
   }
@@ -510,6 +516,11 @@ function render(node){
   const record=recordFor(node),preview=record?.conversation_preview||{},path=String(preview.agent_path||nodePath(node)||'').trim(),messages=Array.isArray(preview.messages)?preview.messages:[];
   historyBrowser.nodeChanged(node);
   details.appendChild(historyBrowser.buttonFor(node));
+  const delivery=rawGraph()?.observation_assessment?.message_delivery;
+  const unconfirmed=Array.isArray(delivery?.unconfirmed)?delivery.unconfirmed.filter(row=>row?.recipient_id===node.id):[];
+  if(unconfirmed.length)details.appendChild(card('Incoming handoff — receive not observed',
+    unconfirmed.map(row=>`${row.sender_id} → ${row.recipient_id} · ${row.message_id}`).join('\n')+
+    '\nThis is missing receive telemetry, not proof of failed delivery.'));
   const isRoot=nodeHasRootAuthority(node)||previewUsesRootRenderer(preview);
   const rounds=(isRoot?rootRounds(messages,path||'/root'):childRounds(messages,path)).map(round=>execweaveFillAssignedTask(round,node,isRoot));
   const tools=toolCallsFor(String(node.id||''));
