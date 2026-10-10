@@ -369,3 +369,30 @@ def test_external_anchor_cli_requires_local_integrity_and_supports_retry(
     assert integrity_main(["anchor", str(root), "--github-target", "trusted/repo#7"]) == 1
     refused = json.loads(capsys.readouterr().out)
     assert refused["local_integrity_valid"] is False
+
+
+@pytest.mark.parametrize("location", [
+    "event", "event_attributes", "source", "source_attributes",
+    "target", "target_attributes",
+])
+@pytest.mark.parametrize("marker", ["inferred", "viewer_only"])
+def test_non_native_pseudo_handoffs_never_count_as_receipts(
+    location: str, marker: str,
+) -> None:
+    import copy
+
+    session = SessionSummary()
+    fake = copy.deepcopy(_handoff("message-fake", "MESSAGE_SENT"))
+    scope = {
+        "event": fake,
+        "event_attributes": fake["attributes"],
+        "source": fake["source"],
+        "source_attributes": fake["source"].setdefault("attributes", {}),
+        "target": fake["target"],
+        "target_attributes": fake["target"].setdefault("attributes", {}),
+    }[location]
+    scope[marker] = True
+    session.observe(fake)
+    session.observe(_finish())
+    assert "message_receive_not_observed" not in session.observation["reasons"]
+    assert session.observation.get("message_delivery", {}).get("unconfirmed_count", 0) == 0
