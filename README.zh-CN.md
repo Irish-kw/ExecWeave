@@ -63,21 +63,47 @@ python -m pip install -e ".[dev]"
 
 ## 快速开始
 
+首先在普通用户权限下创建隔离的虚拟环境，不使用 sudo：
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -U execweave
+```
+
+Windows PowerShell: `.venv\Scripts\Activate.ps1`.
+
+安装 Hook 前先运行内置的观察不完整反例：
+
+```bash
+python -m execweave.observation_demo --output-dir ./observation-negative
+```
+
+`observation-negative/graph.json` and `finalization.json`: `execution_state=succeeded` does not prove observation completeness or task validation.
+
+然后由用户明确安装并检查 Provider Hook，不使用 sudo：
+
+```bash
+execweave hooks install antigravity
+execweave hooks status antigravity
+```
+
+
 将任意本地命令放在 `execweave live` 后面：
 
 ```bash
 execweave live --open -- claude
 execweave live --open -- codex
-execweave live --open -- antigravity
+execweave live --open -- agy
 execweave live --open -- cursor
 execweave live --open -- opencode
-execweave live --open -- python my_agent.py
+execweave live --open -- codex
 ```
 
 主要想生成完成后的 artifacts 时：
 
 ```bash
-execweave record --open -- python my_agent.py
+execweave record --open -- codex
 ```
 
 希望程序继续在当前 terminal 交互，同时另外查看概览时：
