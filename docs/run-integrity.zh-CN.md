@@ -50,3 +50,9 @@ local digest 可用于检测 accidental corruption、不完整复制，或相对
 ## 操作规则
 
 只对已完成的 run 执行 seal。在依赖 archived 或 transferred evidence 前先 verify。任何 verification error 只表示目录已不再精确匹配 sealed inventory，并不等于已经证明存在恶意行为。如果 seal 后仍需生成新的 artifact，应先生成这些 artifact，然后对新的 finalized copy 执行 seal，而不是静默重写原 manifest。
+
+## 可选的外部摘要提交
+
+本地 seal 默认处于 **unanchored（未锚定）** 状态。观测结束后，可将 manifest 摘要发送到独立账户控制的 GitHub Issue。仅在 seal 进程中设置 `EXECWEAVE_INTEGRITY_GITHUB_TOKEN`，不要交给被观测 Agent；使用 `execweave-integrity seal RUN_DIR --anchor-github OWNER/REPO#ISSUE`。失败后本地封存仍存在且未锚定，可运行 `execweave-integrity anchor RUN_DIR --github-target OWNER/REPO#ISSUE` 重试。仅传摘要，不发送原始事件、Prompt、文件内容或本地路径。
+
+`submitted_not_independently_verified` 仅表示接收端确认提交，并非独立验证。审查者须从被观测程序无法修改的外部系统取得摘要，再用 `execweave-integrity verify --expected-manifest-body-sha256 DIGEST` 校验。没有独立的权限边界，就不能称为可信外部锚点。
