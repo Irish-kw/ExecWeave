@@ -482,8 +482,24 @@ function agentCommunicationHistory(node,messages){
     if(!previous||message.phase==='received')byMessage.set(key,message);
   }
   const gaps=rawGraph()?.observation_assessment?.message_delivery?.unconfirmed||[];
-  const unconfirmedIds=new Set(Array.isArray(gaps)?gaps.map(row=>
-    JSON.stringify([row?.message_id,row?.sender_id,row?.recipient_id])).filter(Boolean):[]);
+  const unconfirmedRows=Array.isArray(gaps)?gaps:[];
+  const agentNodes=(rawGraph()?.nodes||[]).filter(candidate=>String(candidate?.type||'')==='agent');
+  // Presentation names are evidence only if exactly one graph agent owns them.
+  const gapAgentIds=new Set(unconfirmedRows.flatMap(row=>[row?.sender_id,row?.recipient_id]).filter(Boolean));
+  const canonicalAgentId=value=>{
+    const label=String(value||'').trim();if(!label)return null;
+    if(gapAgentIds.has(label))return label;
+    const matches=agentNodes.filter(candidate=>
+      String(candidate?.name||'').trim()===label||nodePath(candidate)===label);
+    return matches.length===1?String(matches[0].id):null;
+  };
+  const unconfirmedIds=new Set(unconfirmedRows.map(row=>
+    JSON.stringify([row?.message_id,row?.sender_id,row?.recipient_id])));
+  const gapKey=message=>{
+    if(!message?.message_id)return null;
+    const sender=canonicalAgentId(message.sender),recipient=canonicalAgentId(message.recipient);
+    return sender&&recipient?JSON.stringify([message.message_id,sender,recipient]):null;
+  };
   const routed=[...byMessage.entries()];
   if(!routed.length)return null;
   const section=document.createElement('section');section.className='execweave-agent-communication';
@@ -494,7 +510,7 @@ function agentCommunicationHistory(node,messages){
     const fold=document.createElement('details');fold.className='execweave-message-history';
     const key='message:'+messageKey(message);fold.open=state.get(key)===true;bindFold(fold,state,key);
     const summary=document.createElement('summary');
-    const delivery=unconfirmedIds.has(JSON.stringify([message.message_id,message.sender,message.recipient]))?'Receive not observed':
+    const delivery=gapKey(message)&&unconfirmedIds.has(gapKey(message))?'Receive not observed':
       phases.get(identity)?.has('received')?'Receive event observed':'Delivery not verified';
     summary.textContent=[moment(message.timestamp),`${message.sender||'Unknown sender'} → ${message.recipient||'Recipient not recorded'}`,delivery].filter(Boolean).join(' · ');
     const body=document.createElement('pre');body.className='execweave-message-body';body.textContent=displayText(message);
@@ -533,9 +549,7 @@ function render(node){
   // A provider may publish an explicit MODEL_REQUEST without a user-message
   // round or framework_agent decoration; neither absence is evidence of no prompt.
   const requestMessages=entries.filter(entry=>
-    String(entry?.source_id||'')===String(node.id||'')&&
-    String(entry?.relation||'')==='HAS_MODEL_CONTENT'&&
-    /\.model_request$/i.test(String(entry?.content_kind||'')))
+    String(entry?.source_id||'')===String(node.id||''))
     .flatMap(entry=>Array.isArray(entry?.conversation_preview?.messages)?
       entry.conversation_preview.messages:[])
     .filter(message=>isObserved(message)&&!isInjected(message)&&

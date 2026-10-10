@@ -50,7 +50,9 @@ class SessionSummary:
         if self._message_phases or self._message_overflow:
             assessment["message_delivery"] = {
                 "basis": "explicit_message_sent_and_received_events",
-                "unconfirmed_count": len(unconfirmed),
+                "unconfirmed_count": None if self._message_overflow else len(unconfirmed),
+                "unconfirmed_count_lower_bound": len(unconfirmed),
+                "inventory_truncated": self._message_overflow,
                 "unconfirmed": [
                     {"message_id": mid, "sender_id": sender,
                      "recipient_id": recipient, "state": "receive_not_observed"}
