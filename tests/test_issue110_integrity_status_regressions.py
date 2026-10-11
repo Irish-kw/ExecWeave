@@ -16,8 +16,8 @@ from execweave.integrity_cli import main as integrity_main
 def _run_dir(tmp_path: Path) -> Path:
     root = tmp_path / "run"
     root.mkdir()
-    (root / "events.jsonl").write_text('{"event_type":"process_start"}\\n', encoding="utf-8")
-    (root / "graph.json").write_text('{"nodes":[],"edges":[]}\\n', encoding="utf-8")
+    (root / "events.jsonl").write_text('{"event_type":"process_start"}\n', encoding="utf-8")
+    (root / "graph.json").write_text('{"nodes":[],"edges":[]}\n', encoding="utf-8")
     return root
 
 
@@ -29,7 +29,7 @@ def test_local_checks_detect_changes_not_resealed(
     seal_run_integrity(root)
     events = root / "events.jsonl"
     if tamper == "edit_event":
-        events.write_text("rewritten\\n", encoding="utf-8")
+        events.write_text("rewritten\n", encoding="utf-8")
     elif tamper == "truncate":
         events.write_bytes(b"")
     else:
@@ -51,7 +51,7 @@ def test_resealing_locally_can_hide_rewrite_and_cannot_prove_resistance(
 ) -> None:
     root = _run_dir(tmp_path)
     original = seal_run_integrity(root)["manifest_body_sha256"]
-    (root / "events.jsonl").write_text("rewritten\\n", encoding="utf-8")
+    (root / "events.jsonl").write_text("rewritten\n", encoding="utf-8")
     (root / MANIFEST_FILENAME).unlink()
     new_digest = seal_run_integrity(root)["manifest_body_sha256"]
     assert new_digest != original
