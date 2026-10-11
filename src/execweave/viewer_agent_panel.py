@@ -347,6 +347,10 @@ function execweaveNodeCardsBase(node){
     add('Command',a.cmdline);
     add('Executable',a.exe);
     add('Process',[a.pid&&`pid ${a.pid}`,a.ppid&&`parent ${a.ppid}`].filter(Boolean).join('  \u00b7  '));
+    if(Number.isSafeInteger(a.exit_code))add('Observed exit code',a.exit_code);
+    else if(typeof a.exit_signal==='string'&&a.exit_signal)add('Observed exit signal',a.exit_signal);
+    else add('Exit status','Not observed (not proof of success)');
+    add('Exit observed at',a.exit_observed_at);
     add('Ran',occurrenceList(a));
   }else if(kind==='file'){
     add('Path',node?.name);
