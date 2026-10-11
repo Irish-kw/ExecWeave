@@ -29,6 +29,75 @@ function card(key,title,state,label,description){
   const n=make('div');n.className='run-assessment-card';n.dataset.axis=key;n.dataset.state=state;
   n.append(make('h3',title),make('strong',label),make('p',description));panel.append(n);return n;
 }
+const handoffHost=make('section');
+handoffHost.id='execweave-handoff-alerts';handoffHost.setAttribute('aria-label','Unconfirmed agent handoffs');
+const topEvidence=document.getElementById('evidence');
+const topContainer=topEvidence?.closest('header')||topEvidence?.parentElement;
+if(topContainer)topContainer.insertAdjacentElement('afterend',handoffHost);
+else host.prepend(handoffHost);
+function renderHandoffAlerts(packet){
+  const graph=graphNow(),assessment=graph.observation_assessment||
+    object(packet).observation_assessment||object(object(packet).graph).observation_assessment||{};
+  const delivery=object(assessment.message_delivery),outcome=graph.session_outcome||{};
+  const finished=outcome.recorder_finished===true||object(packet).live_finished===true||
+    window.__execweaveStaticMode===true;
+  const raw=finished&&Array.isArray(delivery.diagnostics)&&delivery.diagnostics.length?
+    delivery.diagnostics:(finished&&Array.isArray(delivery.unconfirmed)?delivery.unconfirmed:[]);
+  const rows=raw.filter(row=>row&&row.message_id&&row.recipient_id&&
+    row.sender_id&&row.delivery_failure_proven!==true&&
+    (row.delivery_status==='receive_not_observed'||row.state==='receive_not_observed'))
+    .slice(0,20).sort((a,b)=>[a.sender_id,a.recipient_id,a.message_id].join('\0')
+      .localeCompare([b.sender_id,b.recipient_id,b.message_id].join('\0')));
+  const nodes=Array.isArray(graph.nodes)?graph.nodes:[];
+  const resolve=id=>{
+    const exact=nodes.filter(n=>n.type==='agent'&&n.id===id);
+    if(exact.length===1)return exact[0];
+    const part=String(id).split(':').pop()?.toLowerCase();
+    const near=nodes.filter(n=>n.type==='agent'&&
+      (String(n.name||'').toLowerCase()===String(id).toLowerCase()||
+       String(n.name||'').toLowerCase()===part||
+       String(n.id||'').toLowerCase().endsWith(':'+part)));
+    return near.length===1?near[0]:null;
+  };
+  handoffHost.replaceChildren();handoffHost.hidden=!rows.length;
+  document.querySelectorAll('.node[data-warning="receive-not-observed"]').forEach(n=>{delete n.dataset.warning});
+  document.querySelectorAll('.edge.handoff-unconfirmed').forEach(e=>e.classList.remove('handoff-unconfirmed'));
+  for(const row of rows){
+    const sender=resolve(row.sender_id),recipient=resolve(row.recipient_id);
+    const label=id=>resolve(id)?.name||String(id).split(':').pop();
+    const line=make('button',label(row.sender_id)+' → '+label(row.recipient_id)+' — receive not observed');
+    line.type='button';line.className='execweave-handoff-alert';
+    line.dataset.messageId=row.message_id;line.dataset.recipientId=row.recipient_id;
+    line.onclick=()=>{
+      if(!recipient)return;
+      const api=window.__execweaveCore;
+      if(typeof api?.selectNode==='function'){
+        api.selectNode(recipient.id);api.focusNode?.(recipient.id);
+      }else{
+        const element=[...document.querySelectorAll('.node[data-id]')]
+          .find(n=>n.dataset.id===recipient.id);
+        element?.dispatchEvent(new MouseEvent('click',{bubbles:true}));
+      }
+    };
+    handoffHost.append(line);
+    if(!recipient)continue;
+    const nodeElement=[...document.querySelectorAll('.node[data-id]')]
+      .find(n=>n.dataset.id===recipient.id);
+    if(nodeElement)nodeElement.dataset.warning='receive-not-observed';
+    if(!sender)continue;
+    for(const edge of (graph.edges||[])){
+      if(edge.source!==sender.id||edge.target!==recipient.id)continue;
+      const relation=String(edge.relation||'').toUpperCase();
+      if(!['MESSAGE_SENT','ADDRESSED_TO','SENT_MESSAGE','SENT_TO'].includes(relation))continue;
+      const edgeMid=edge.message_id||edge.attributes?.message_id;
+      if(edgeMid&&edgeMid!==row.message_id)continue;
+      const edgeIdValue=edge.id||edge.source+':'+edge.relation+':'+edge.target;
+      for(const element of document.querySelectorAll('.edge[data-edge-id]')){
+        if(element.dataset.edgeId===edgeIdValue)element.classList.add('handoff-unconfirmed');
+      }
+    }
+  }
+}
 function render(value){
   const next=JSON.stringify(value);if(next===lastSignature)return;lastSignature=next;
   // Keep disclosure choice while updating facts; do not replace the selection inspector.
@@ -89,6 +158,7 @@ function refresh(packet){
   // Never infer success from a legacy label, absent fields, or a completed viewer.
   window.__execweaveDeliveryStatus?.accept(packet);
   render(latest);
+  renderHandoffAlerts(packet);
   window.__execweaveDeliveryStatus?.mount(panel);
 }
 const previous=window.__execweaveDashboard||{};
@@ -101,6 +171,13 @@ window.__execweaveRunAssessment={refresh};refresh();
 """.strip()
 
 RUN_ASSESSMENT_CSS = r"""
+
+#execweave-handoff-alerts{display:flex;flex-wrap:wrap;gap:8px;padding:6px 14px;border-bottom:1px solid var(--border,#888);background:var(--panel,#222);position:sticky;top:0;z-index:12}
+#execweave-handoff-alerts[hidden]{display:none}
+.execweave-handoff-alert{cursor:pointer;border:1px solid var(--noncausal,#b56a16);border-left:4px solid var(--noncausal,#b56a16);border-radius:5px;padding:7px 10px;background:transparent;color:inherit;font-size:13px;font-weight:600}
+.execweave-handoff-alert:hover,.execweave-handoff-alert:focus-visible{outline:2px solid var(--noncausal,#b56a16)}
+.node[data-warning="receive-not-observed"] rect{stroke:var(--noncausal,#b56a16)!important;stroke-width:3px!important;stroke-dasharray:7 3}
+.edge.handoff-unconfirmed{stroke:var(--noncausal,#b56a16)!important;stroke-width:3.5px!important;stroke-dasharray:7 3}
 #execweave-run-assessment{overflow-wrap:anywhere;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--border,#888)}
 #execweave-delivery-status{overflow-wrap:anywhere;margin:-8px 0 16px}
 #execweave-run-assessment h2{font-size:15px;margin:0 0 10px}
