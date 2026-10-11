@@ -62,7 +62,10 @@ function renderHandoffAlerts(packet){
        String(n.id||'').toLowerCase().endsWith(':'+part)));
     return near.length===1?near[0]:null;
   };
-  handoffHost.replaceChildren();handoffHost.hidden=!rows.length;
+  const failedProcesses=nodes.filter(n=>n.type==='process'&&
+    Number.isSafeInteger(n.attributes?.exit_code)&&n.attributes.exit_code!==0)
+    .slice(0,20);
+  handoffHost.replaceChildren();handoffHost.hidden=!rows.length&&!failedProcesses.length;
   // Re-rendered SVGs can replace the nodes/edges without a new run payload.
   // Only update changed markers, so class-attribute observers cannot loop.
   const markedNodes=new Set(),markedEdges=new Set();
@@ -101,6 +104,35 @@ function renderHandoffAlerts(packet){
       }
     }
   }
+  // These are observed child-process exits, not inferred overall run failures.
+  const failedNodeElements=new Set();
+  for(const process of failedProcesses){
+    const label=process.name||process.id;
+    const line=make('button',label+' — process exit '+process.attributes.exit_code);
+    line.type='button';line.className='execweave-handoff-alert execweave-process-exit-alert';
+    line.dataset.processId=process.id;
+    line.onclick=()=>{
+      const core=window.__execweaveCore;
+      if(typeof core?.selectNode==='function'){
+        core.selectNode(process.id);
+        core.focusNode?.(process.id);
+      }else{
+        document.querySelectorAll('.node[data-id]').forEach(n=>{
+          if(n.dataset.id===process.id)n.dispatchEvent(new MouseEvent('click',{bubbles:true}));
+        });
+      }
+    };
+    handoffHost.append(line);
+    document.querySelectorAll('.node[data-id]').forEach(n=>{
+      if(n.dataset.id===process.id)failedNodeElements.add(n);
+    });
+  }
+  document.querySelectorAll('.node[data-process-exit="nonzero"]').forEach(n=>{
+    if(!failedNodeElements.has(n))delete n.dataset.processExit;
+  });
+  failedNodeElements.forEach(n=>{
+    if(n.dataset.processExit!=='nonzero')n.dataset.processExit='nonzero';
+  });
   document.querySelectorAll('.node[data-warning="receive-not-observed"]').forEach(n=>{
     if(!markedNodes.has(n))delete n.dataset.warning;
   });
@@ -216,6 +248,8 @@ RUN_ASSESSMENT_CSS = r"""
 .execweave-handoff-alert:hover,.execweave-handoff-alert:focus-visible{outline:2px solid var(--noncausal,#b56a16)}
 .node[data-warning="receive-not-observed"] rect{stroke:var(--noncausal,#b56a16)!important;stroke-width:3px!important;stroke-dasharray:7 3}
 .edge.handoff-unconfirmed{stroke:var(--noncausal,#b56a16)!important;stroke-width:3.5px!important;stroke-dasharray:7 3}
+.node[data-process-exit="nonzero"] rect{stroke:var(--noncausal,#b56a16)!important;stroke-width:3px!important}
+.execweave-process-exit-alert{border-left-color:var(--noncausal,#b56a16)}
 #execweave-run-assessment{overflow-wrap:anywhere;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--border,#888)}
 #execweave-delivery-status{overflow-wrap:anywhere;margin:-8px 0 16px}
 #execweave-run-assessment h2{font-size:15px;margin:0 0 10px}
