@@ -39,26 +39,19 @@ execweave-integrity verify .execweave/runs/<run-id>
 | `manifest_body_sha256` | 排除本 digest 字段后 canonical manifest content 的 SHA-256。 |
 | `trust_model` | 明确说明此 local seal 能证明和不能证明的内容。 |
 
-manifest 固定记录 `malicious_writer_resistance: false` 和 `external_trust_anchor: false`。这些字段属于 schema contract，而不是可选的文档措辞。
 
-## Trust boundary
+## 仅限本地的一致性与信任边界
 
-local digest 可用于检测 accidental corruption、不完整复制，或相对于 seal 时刻发生的 post-seal changes。但它无法阻止一个同时可以改写 run evidence 与 `integrity.json` 的 process；该 process 可以重新计算 hashes，并构造新的、内部一致的 manifest。
+<!-- ew:trust:local-only -->
 
-如需更强保证，请把 `manifest_body_sha256` 或完整 manifest 复制到 observed process 无法写入的位置，或使用该 process 无法访问的 key 对其进行保护或签名。真正的 trust anchor 来自这个外部动作；ExecWeave 不声称同目录 manifest 本身能够建立 trust anchor。
+本地 `seal` / `verify` 可以检测意外损坏和未重新封存的修改。**具有写入权限的进程可以同时重写执行记录和 `integrity.json`，重新计算哈希后再次 seal。** `valid: true` 只表示本地一致性，并不意味着具有防篡改审计能力。
 
-## 操作规则
+<!-- ew:trust:privileged -->
 
-只对已完成的 run 执行 seal。在依赖 archived 或 transferred evidence 前先 verify。任何 verification error 只表示目录已不再精确匹配 sealed inventory，并不等于已经证明存在恶意行为。如果 seal 后仍需生成新的 artifact，应先生成这些 artifact，然后对新的 finalized copy 执行 seal，而不是静默重写原 manifest。
+具有 root、sudo 权限的 Agent，或任何可以写入输出目录的进程，都可能修改事件和 manifest。应使用操作系统权限和进程隔离保护数据；仅改变路径而保留同样权限并不构成隔离。
 
-## 可选的外部摘要提交
+<!-- ew:compat:no-downgrade -->
 
-本地 seal 默认处于 **unanchored（未锚定）** 状态。观测结束后，可将 manifest 摘要发送到独立账户控制的 GitHub Issue。仅在 seal 进程中设置 `EXECWEAVE_INTEGRITY_GITHUB_TOKEN`，不要交给被观测 Agent；使用 `execweave-integrity seal RUN_DIR --anchor-github OWNER/REPO#ISSUE`。失败后本地封存仍存在且未锚定，可运行 `execweave-integrity anchor RUN_DIR --github-target OWNER/REPO#ISSUE` 重试。仅传摘要，不发送原始事件、Prompt、文件内容或本地路径。
+**不支持使用 v0.8.34 reader 降级读取 v0.8.35 及更新版本的记录。** 旧版本可能在没有警告的情况下丢弃 `observation_assessment`，错误呈现观测完整性。只有 v0.8.35 及以上 reader 得出的结论才可信。回滚 recorder 并不意味着可以回滚 reader。
 
-`submitted_not_independently_verified` 仅表示接收端确认提交，并非独立验证。审查者须从被观测程序无法修改的外部系统取得摘要，再用 `execweave-integrity verify --expected-manifest-body-sha256 DIGEST` 校验。没有独立的权限边界，就不能称为可信外部锚点。
-
-## 日常使用建议
-
-请将录制证据保存在被监控 Agent **无法修改**的目录中，或在录制结束后移至受保护的归档副本。可以使用权限隔离的用户账户或真正限制写入的沙箱；仅更换目录，但仍允许 Agent 写入，并不构成隔离。记录存储和验证凭证应位于被监控进程无法写入或读取的权限范围之外。录制结束后再执行 seal，并由可信进程 verify。
-
-GitHub 外部摘要提交（`--anchor-github`）是**可选功能**，不是普通本地完整性检查的必要条件。没有独立控制的外部位置，就不能声称摘要已受到外部保护。如果外部提供的 manifest 摘要匹配，但本地封存文件验证失败，`verify` 会报告 `external_digest_match_local_integrity_failed` 并返回失败代码：**匹配的只是 manifest 摘要，并不代表文件完整。**
+只对已完成的 run 进行 seal，使用归档证据前先 verify。检查失败代表本地内容不一致，但不能单独证明恶意行为。工具不会上传执行内容或摘要，也不提供独立的权限边界。
