@@ -287,6 +287,11 @@ def test_integrity_cli_has_no_external_publication_or_anchor_arguments() -> None
         assert caught.value.code == 2
 
 
+@pytest.mark.parametrize("marker", ["inferred", "viewer_only"])
+@pytest.mark.parametrize("location", [
+    "event", "event_attributes", "source", "source_attributes",
+    "target", "target_attributes",
+])
 def test_non_native_pseudo_handoffs_never_count_as_receipts(
     location: str, marker: str,
 ) -> None:
