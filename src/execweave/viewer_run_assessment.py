@@ -31,9 +31,12 @@ function card(key,title,state,label,description){
 }
 const handoffHost=make('section');
 handoffHost.id='execweave-handoff-alerts';handoffHost.setAttribute('aria-label','Unconfirmed agent handoffs');
-const topEvidence=document.getElementById('evidence');
-const topContainer=topEvidence?.closest('header')||topEvidence?.parentElement;
-if(topContainer)topContainer.insertAdjacentElement('afterend',handoffHost);
+// Mount within the graph panel so the alert occupies the first viewport
+// instead of becoming an auto-placed bottom row in the #app grid.
+const graphPanel=document.getElementById('graph-panel');
+const panelBar=graphPanel?.querySelector('.panel-bar');
+if(panelBar)panelBar.insertAdjacentElement('afterend',handoffHost);
+else if(graphPanel)graphPanel.prepend(handoffHost);
 else host.prepend(handoffHost);
 function renderHandoffAlerts(packet){
   const graph=graphNow(),assessment=graph.observation_assessment||
@@ -172,6 +175,9 @@ window.__execweaveRunAssessment={refresh};refresh();
 
 RUN_ASSESSMENT_CSS = r"""
 
+#graph-panel:has(> #execweave-handoff-alerts){grid-template-rows:46px auto minmax(0,1fr)}
+#graph-panel > #execweave-handoff-alerts{grid-row:2;min-width:0;align-self:stretch}
+#graph-panel > #wrap{grid-row:3}
 #execweave-handoff-alerts{display:flex;flex-wrap:wrap;gap:8px;padding:6px 14px;border-bottom:1px solid var(--border,#888);background:var(--panel,#222);position:sticky;top:0;z-index:12}
 #execweave-handoff-alerts[hidden]{display:none}
 .execweave-handoff-alert{cursor:pointer;border:1px solid var(--noncausal,#b56a16);border-left:4px solid var(--noncausal,#b56a16);border-radius:5px;padding:7px 10px;background:transparent;color:inherit;font-size:13px;font-weight:600}
