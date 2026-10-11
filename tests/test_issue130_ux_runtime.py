@@ -78,7 +78,10 @@ def test_custom_framework_canonical_occurrences_are_indexed(tmp_path: Path) -> N
     ctx = AdapterContext(framework="handoff", run_id="s", session_id="s",
                          sidecar=tmp_path / "semantic.jsonl", content_root=tmp_path,
                          capture_policy=ContentCapturePolicy("metadata_only"))
-    adapter = CAMELAdapter(ctx)
+    class HandoffAdapter(CAMELAdapter):
+        framework_name = "handoff"
+
+    adapter = HandoffAdapter(ctx)
     sender = adapter.agent_created("eng", name="Engineer", role="engineer")
     receiver = adapter.agent_created("rev", name="Reviewer", role="reviewer")
     adapter.message("m2", sender, receiver, content="Review.")
