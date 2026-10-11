@@ -169,6 +169,7 @@ def test_openai_async_and_failure_no_exception_text(tmp_path, monkeypatch):
     chat_responses = [e for e in events if e["event_type"] == "MODEL_RESPONSE"
                       and e["target"] and e["target"].get("name") == "chat-success"]
     chat_failures = [e for e in events if e["event_type"] == "MODEL_FAILURE"
+                     and e["source"] and e["source"].get("name") == "ChatWorker"
                      and e["target"] and e["target"].get("name") == "fail"]
     assert len(chat_responses) == 1
     assert len(chat_failures) == 1
