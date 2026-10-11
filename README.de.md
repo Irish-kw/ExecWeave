@@ -26,6 +26,8 @@
 
 **Sehen Sie, was KI-Agenten auf Ihrem Rechner tatsächlich tun.**
 
+**In Multi-Rollen-Agentenabläufen markiert ExecWeave automatisch aufgezeichnete Übergaben, bei denen zu einem Sendeereignis kein passendes Empfangsereignis beobachtet wurde. Es benennt Absender und Empfänger und hält `message_receive_not_observed` in `graph.json` fest. Das ist eine Beobachtungslücke, kein Beweis für eine fehlgeschlagene Zustellung.**
+
 ExecWeave ist ein local-first Observability-Projekt für KI-Agenten und KI-gestützte Entwicklungswerkzeuge. Es verbindet Provider-Semantik mit Betriebssystem-Runtime-Evidence in einem interaktiven Execution Graph und hält die unterschiedlichen Evidenzebenen ausdrücklich getrennt.
 
 > **Events sind Evidence. Der Graph ist eine daraus materialisierte View.**
