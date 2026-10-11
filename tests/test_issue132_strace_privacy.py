@@ -19,8 +19,9 @@ def test_native_trace_directory_is_private_and_git_ignored_with_custom_output(
 
     project = tmp_path / "project"
     project.mkdir()
-    if shutil.which("git") is None:
-        pytest.skip("git not available")
+    assert shutil.which("git") is not None, (
+        "git is required to verify that private raw trace evidence cannot be staged"
+    )
     subprocess.run(["git", "init", "-q"], cwd=project, check=True)
     # Intentionally put graph output OUTSIDE the default .execweave run tree.
     output = project / "out_keep" / "events.jsonl"
