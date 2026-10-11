@@ -39,26 +39,19 @@ execweave-integrity verify .execweave/runs/<run-id>
 | `manifest_body_sha256` | digest field 自身を除いた canonical manifest content の SHA-256。 |
 | `trust_model` | local seal が証明する範囲と証明しない範囲を明記します。 |
 
-manifest は `malicious_writer_resistance: false` と `external_trust_anchor: false` を必ず記録します。これは任意の説明文ではなく schema contract の一部です。
 
-## Trust boundary
+## ローカル整合性検証の限界
 
-local digest は accidental corruption、不完全な copy、seal 時点からの post-seal change の検出に有用です。しかし run evidence と `integrity.json` の両方を書き換えられる process を防ぐことはできません。その process は hash を再計算し、内部的に整合する新しい manifest を作成できます。
+<!-- ew:trust:local-only -->
 
-より強い保証が必要な場合は、`manifest_body_sha256` または manifest 全体を observed process の書き込み境界外へコピーするか、その process が利用できない key で保護または署名してください。trust anchor はその外部操作によって成立します。ExecWeave は同一 directory 内の manifest だけで trust anchor が成立するとは主張しません。
+ローカルの `seal` / `verify` は偶発的な破損や、再 seal を伴わない変更を検知します。**記録と `integrity.json` を書き換えられる主体は、ハッシュを再計算して整合する記録を再 seal できます。** `valid: true` が示すのはローカルの整合性のみで、改ざん耐性の監査ではありません。
 
-## 運用ルール
+<!-- ew:trust:privileged -->
 
-完了した run だけを seal してください。archive または transfer された evidence を利用する前に verify してください。verification error は directory が sealed inventory と完全一致しなくなったことを示すだけで、悪意ある行為そのものを証明しません。seal 後に新しい artifact が必要な場合は、それらを先に生成し、finalized copy を新たに seal してください。元の manifest を黙って書き換えてはいけません。
+root、sudo 権限を持つ Agent、または出力ディレクトリに書き込めるプロセスは、記録と manifest の両方を変更できます。OS 権限とプロセス分離で保護してください。同じ権限のまま保存先だけ変えても分離にはなりません。
 
-## 外部ダイジェスト送信（任意）
+<!-- ew:compat:no-downgrade -->
 
-ローカル seal はデフォルトで **unanchored** です。観測対象の処理が終了した後、別の権限で管理する GitHub Issue に manifest のハッシュのみ送信できます。`EXECWEAVE_INTEGRITY_GITHUB_TOKEN` は seal を実行するプロセスだけに設定し、観測対象の Agent には渡さないでください。`execweave-integrity seal RUN_DIR --anchor-github OWNER/REPO#ISSUE` を使用します。送信失敗時もローカル封印は保持され、`execweave-integrity anchor RUN_DIR --github-target OWNER/REPO#ISSUE` で再試行できます。元のイベントや Prompt、ファイル内容は送信しません。
+**v0.8.35 以降の記録を v0.8.34 reader で開くダウングレードには対応しません。** 古い reader は `observation_assessment` を警告なく破棄し、観測の完全性を誤表示する場合があります。結論には v0.8.35 以降の reader を使用してください。recorder のロールバックは reader のロールバックを意味しません。
 
-`submitted_not_independently_verified` は送信応答であり、独立検証ではありません。観測対象が変更できない信頼領域から別の検証者がコメントを取得し、`execweave-integrity verify --expected-manifest-body-sha256 DIGEST` で照合する必要があります。権限分離がなければ信頼できる外部アンカーとは呼べません。
-
-## 通常利用で推奨する保護方法
-
-記録した証拠は、観測対象の Agent が**変更できない**ディレクトリ、または実行後に保護されたコピーへ保存してください。権限の異なるユーザーや書き込み範囲を制限した sandbox を使用してください。同じ書き込み権限のまま保存先パスだけ変更しても分離にはなりません。記録保存領域と検証用の認証情報は、観測対象プロセスから書き込み・取得できないようにしてください。記録完了後に seal し、信頼できるプロセスから verify します。
-
-GitHub への外部ダイジェスト送信（`--anchor-github`）は**任意**で、通常のローカル完全性検証には必須ではありません。独立管理された保存先がなければ、外部で保護されたアンカーとは呼べません。外部から与えた manifest のダイジェストが一致していてもローカルファイルの検証に失敗した場合、`verify` は `external_digest_match_local_integrity_failed` を返して失敗します。**一致したのは manifest のダイジェストだけであり、ファイルの完全性ではありません。**
+完了した run のみ seal し、保存済みの証拠を使う前に verify してください。検証失敗はローカル不整合を示しますが、悪意の証明ではありません。本ツールは記録やダイジェストを送信せず、独立した権限境界も提供しません。
