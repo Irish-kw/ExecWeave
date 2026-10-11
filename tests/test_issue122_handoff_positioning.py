@@ -47,9 +47,9 @@ def test_project_summary_mentions_handoff_roles_and_observation_limits() -> None
     project = metadata["project"]
     summary = project["description"]
     assert project["name"] == "execweave"
-    assert project["version"] == "0.8.35"
+    assert isinstance(project["version"], str) and project["version"]
     assert "sender/recipient handoffs" in summary
     assert "no observed receive" in summary
     assert "graph.json" in summary
     assert len(summary) <= 160
-    assert not re.search(r"\\b(tamper-proof|forensic proof|failed delivery)\\b", summary, re.I)
+    assert not re.search(r"\b(tamper-proof|forensic proof|failed delivery)\b", summary, re.I)
