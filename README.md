@@ -26,6 +26,8 @@
 
 **See what AI agents actually do on your machine.**
 
+**In multi-role agent workflows, ExecWeave automatically flags recorded handoffs where a send event has no matching observed receive event, identifies the sender and recipient, and records `message_receive_not_observed` in `graph.json`. This is an observation gap, not proof of failed delivery.**
+
 ExecWeave is a local-first observability project for AI agents and AI-assisted development tools. It combines provider-level semantics with operating-system runtime evidence and presents them as one interactive execution graph.
 
 > **Events are evidence. The graph is a materialized view.**
