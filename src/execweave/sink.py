@@ -6,8 +6,25 @@ import stat
 import threading
 from pathlib import Path
 
-from .private_io import harden_private_file, private_file_security_state
+from .private_io import harden_private_file, private_file_security_state, write_private_text
 from .schema import RuntimeEvent
+
+
+def _protect_git_run_directory(path: Path) -> None:
+    """Keep default .execweave evidence out of accidental git add -A.
+
+    Never alter an existing ignore file. Git still tracks any already-tracked
+    evidence; users must untrack such files themselves.
+    """
+    for directory in path.parents:
+        if directory.name != ".execweave":
+            continue
+        ignore = directory / ".gitignore"
+        try:
+            write_private_text(ignore, "*\\n")
+        except FileExistsError:
+            pass
+        return
 
 
 class JsonlSink:
@@ -24,6 +41,7 @@ class JsonlSink:
             raise ValueError("event stream must not be a symlink")
         self.path = original
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        _protect_git_run_directory(self.path)
         if self.path.exists() and self.path.stat().st_size > 0:
             raise FileExistsError(f"ExecWeave event stream already exists: {self.path}")
         self._lock = threading.Lock()
