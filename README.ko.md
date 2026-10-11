@@ -26,6 +26,8 @@
 
 **AI Agent가 내 컴퓨터에서 실제로 무엇을 했는지 확인하세요.**
 
+**여러 역할의 Agent 워크플로에서 ExecWeave는 기록된 전송 이벤트에 대응하는 수신 이벤트가 관측되지 않은 핸드오프를 자동으로 표시하고, 발신자와 수신자 역할을 식별하여 `graph.json`에 `message_receive_not_observed`를 기록합니다. 이는 관측 공백이며 실제 전달 실패를 입증하지 않습니다.**
+
 ExecWeave는 AI Agent와 AI 개발 도구를 위한 local-first observability 프로젝트입니다. Provider 수준의 semantic evidence와 운영체제 runtime evidence를 하나의 인터랙티브 Execution Graph로 결합하면서도, 서로 다른 증거 계층을 명확하게 분리합니다.
 
 > **Event는 증거이고, Graph는 그 증거로부터 materialize된 view입니다.**
