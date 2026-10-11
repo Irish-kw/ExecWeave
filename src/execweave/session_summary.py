@@ -59,6 +59,13 @@ class SessionSummary:
                     for mid, sender, recipient in unconfirmed[:20]
                 ],
                 "truncated": self._message_overflow or len(unconfirmed) > 20,
+                "diagnostics": [
+                    {"kind": "message_receive_not_observed", "message_id": mid,
+                     "sender_id": sender, "recipient_id": recipient,
+                     "delivery_status": "receive_not_observed",
+                     "delivery_failure_proven": False}
+                    for mid, sender, recipient in unconfirmed[:20]
+                ] if finished else [],
                 "delivery_failure_proven": False,
             }
         return assessment
