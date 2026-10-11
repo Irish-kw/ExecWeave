@@ -64,14 +64,14 @@ def test_strace_exec_labels_pid_without_saving_arguments(tmp_path: Path) -> None
 def test_git_ignore_is_created_only_for_execweave_directory(tmp_path: Path) -> None:
     secret_run = tmp_path / ".execweave" / "runs" / "s" / "events.jsonl"
     JsonlSink(secret_run)
-    assert (tmp_path / ".execweave" / ".gitignore").read_text(encoding="utf-8") == "*\\n"
+    assert (tmp_path / ".execweave" / ".gitignore").read_text(encoding="utf-8") == "*\n"
     other = tmp_path / "ordinary" / "events.jsonl"
     JsonlSink(other)
     assert not (other.parent / ".gitignore").exists()
     existing = tmp_path / ".execweave" / ".gitignore"
-    existing.write_text("# custom\\n", encoding="utf-8")
+    existing.write_text("# custom\n", encoding="utf-8")
     JsonlSink(tmp_path / ".execweave" / "runs" / "two" / "events.jsonl")
-    assert existing.read_text(encoding="utf-8") == "# custom\\n"
+    assert existing.read_text(encoding="utf-8") == "# custom\n"
 
 
 def test_custom_framework_canonical_occurrences_are_indexed(tmp_path: Path) -> None:
