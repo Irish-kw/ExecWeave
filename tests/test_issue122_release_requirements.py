@@ -40,6 +40,26 @@ def test_issue122_missing_schema_is_rejected(tmp_path: Path) -> None:
     assert any("unsupported_schema_version" in err for err in result.errors)
 
 
+def test_issue122_viewer_rejects_graph_with_future_source_schema(tmp_path: Path) -> None:
+    from execweave.graph_ops import load_graph
+
+    graph = {
+        "graph_schema_version": "0.2",
+        "session_id": "fixed",
+        "source_schema_versions": ["0.3"],
+        "nodes": [{"id": "agent:reviewer", "type": "agent"}],
+        "edges": [],
+    }
+    path = tmp_path / "graph.json"
+    path.write_text(json.dumps(graph), encoding="utf-8")
+    with pytest.raises(ValueError, match="unsupported_schema_version"):
+        load_graph(path)
+
+    graph["source_schema_versions"] = ["0.2"]
+    path.write_text(json.dumps(graph), encoding="utf-8")
+    assert load_graph(path)["source_schema_versions"] == ["0.2"]
+
+
 def test_issue122_reader_metadata_exists_even_when_invalid(tmp_path: Path) -> None:
     invalid = validate_event_stream(tmp_path / "missing.jsonl")
     assert invalid.to_dict()["reader"] == {"name": "execweave", "version": version("execweave")}
