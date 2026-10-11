@@ -21,7 +21,7 @@ def _protect_git_run_directory(path: Path) -> None:
             continue
         ignore = directory / ".gitignore"
         try:
-            write_private_text(ignore, "*\\n")
+            write_private_text(ignore, "*\n")
         except FileExistsError:
             pass
         return
