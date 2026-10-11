@@ -628,11 +628,11 @@ class StraceRuntimeCollector:
         _protect_git_run_directory(self.trace_root / "trace")
         raw_ignore = self.trace_root / ".gitignore"
         try:
-            write_private_text(raw_ignore, "*\\n")
+            write_private_text(raw_ignore, "*\n")
         except FileExistsError:
             # A custom ignore file that does not protect the raw trace is
             # insufficient: fail closed rather than retaining stageable argv.
-            if raw_ignore.read_text(encoding="utf-8") != "*\\n":
+            if raw_ignore.read_text(encoding="utf-8") != "*\n":
                 raise ValueError("native strace directory must ignore all raw traces")
         trace_prefix = self.trace_root / "trace"
         agent_name = infer_agent_name(command)
