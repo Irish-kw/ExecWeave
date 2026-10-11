@@ -63,8 +63,9 @@ function renderHandoffAlerts(packet){
     return near.length===1?near[0]:null;
   };
   handoffHost.replaceChildren();handoffHost.hidden=!rows.length;
-  document.querySelectorAll('.node[data-warning="receive-not-observed"]').forEach(n=>{delete n.dataset.warning});
-  document.querySelectorAll('.edge.handoff-unconfirmed').forEach(e=>e.classList.remove('handoff-unconfirmed'));
+  // Re-rendered SVGs can replace the nodes/edges without a new run payload.
+  // Only update changed markers, so class-attribute observers cannot loop.
+  const markedNodes=new Set(),markedEdges=new Set();
   for(const row of rows){
     const sender=resolve(row.sender_id),recipient=resolve(row.recipient_id);
     const label=id=>resolve(id)?.name||String(id).split(':').pop();
@@ -86,7 +87,7 @@ function renderHandoffAlerts(packet){
     if(!recipient)continue;
     const nodeElement=[...document.querySelectorAll('.node[data-id]')]
       .find(n=>n.dataset.id===recipient.id);
-    if(nodeElement)nodeElement.dataset.warning='receive-not-observed';
+    if(nodeElement)markedNodes.add(nodeElement);
     if(!sender)continue;
     for(const edge of (graph.edges||[])){
       if(edge.source!==sender.id||edge.target!==recipient.id)continue;
@@ -96,10 +97,18 @@ function renderHandoffAlerts(packet){
       if(edgeMid&&edgeMid!==row.message_id)continue;
       const edgeIdValue=edge.id||edge.source+':'+edge.relation+':'+edge.target;
       for(const element of document.querySelectorAll('.edge[data-edge-id]')){
-        if(element.dataset.edgeId===edgeIdValue)element.classList.add('handoff-unconfirmed');
+        if(element.dataset.edgeId===edgeIdValue)markedEdges.add(element);
       }
     }
   }
+  document.querySelectorAll('.node[data-warning="receive-not-observed"]').forEach(n=>{
+    if(!markedNodes.has(n))delete n.dataset.warning;
+  });
+  document.querySelectorAll('.edge.handoff-unconfirmed').forEach(e=>{
+    if(!markedEdges.has(e))e.classList.remove('handoff-unconfirmed');
+  });
+  markedNodes.forEach(n=>{if(n.dataset.warning!=='receive-not-observed')n.dataset.warning='receive-not-observed'});
+  markedEdges.forEach(e=>{if(!e.classList.contains('handoff-unconfirmed'))e.classList.add('handoff-unconfirmed')});
 }
 function render(value){
   const next=JSON.stringify(value);if(next===lastSignature)return;lastSignature=next;
@@ -170,6 +179,24 @@ window.__execweaveDashboard={...previous,
   onFinished(...args){previous.onFinished?.(...args);refresh()}
 };
 window.__execweaveRunAssessment={refresh};refresh();
+// Workflow filters, selection, replay, and layout controls replace SVG DOM
+// without necessarily delivering a new run snapshot. Restore markers after
+// each replacement, using a coalesced frame and idempotent DOM writes.
+const renderRoots=['nodes','edges'].map(id=>document.getElementById(id)).filter(Boolean);
+if(renderRoots.length){
+  let pending=false;
+  const schedule=()=>{
+    if(pending)return;
+    pending=true;
+    requestAnimationFrame(()=>{pending=false;renderHandoffAlerts()});
+  };
+  const observer=new MutationObserver(schedule);
+  for(const root of renderRoots){
+    observer.observe(root,{subtree:true,childList:true,
+      attributes:true,attributeFilter:['class','data-warning']});
+  }
+}
+
 })();
 """.strip()
 
