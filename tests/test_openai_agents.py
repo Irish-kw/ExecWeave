@@ -29,6 +29,17 @@ class _AsyncResponses:
         return {"id": "async-test", "model": kwargs.get("model"), "output": []}
 
 
+class _AwaitableChat:
+    """SDK-like callable that returns a coroutine but is not async def."""
+    def create(self, **kwargs):
+        async def request():
+            await asyncio.sleep(0)
+            if kwargs.get("model") == "fail":
+                raise RuntimeError("PRIVATE_BAD_REQUEST_DETAILS")
+            return {"id": "chat-async", "model": kwargs.get("model"), "result": "real"}
+        return request()
+
+
 class _Client:
     def __init__(self):
         self.responses = _Responses()
@@ -38,7 +49,7 @@ class _Client:
 class _AsyncClient:
     def __init__(self):
         self.responses = _AsyncResponses()
-        self.chat = SimpleNamespace(completions=_AsyncResponses())
+        self.chat = SimpleNamespace(completions=_AwaitableChat())
 
 
 def _environment(monkeypatch, tmp_path):
@@ -136,6 +147,34 @@ def test_openai_async_and_failure_no_exception_text(tmp_path, monkeypatch):
                e["attributes"]["error_type"] == "RuntimeError" for e in events)
     assert any(e["event_type"] == "MODEL_RESPONSE" for e in events)
     assert "DUMMY_SECRET_DO_NOT_LOG" not in (tmp_path / "semantic.jsonl").read_text()
+
+    # AsyncOpenAI.chat.completions.create is NOT necessarily declared async.
+    # Never materialize its coroutine as a successful MODEL_RESPONSE.
+    async def check_chat():
+        async_client = recorder.wrap(_AsyncClient())
+        with recorder.agent("ChatWorker"):
+            success = await async_client.chat.completions.create(model="chat-success")
+            assert success["id"] == "chat-async"
+            try:
+                await async_client.chat.completions.create(model="fail")
+            except RuntimeError:
+                pass
+            else:
+                raise AssertionError("an awaited chat HTTP failure must propagate")
+    asyncio.run(check_chat())
+    events = _read(tmp_path)
+    chat_requests = [e for e in events if e["event_type"] == "MODEL_REQUEST"
+                     and e["attributes"].get("sdk_surface") == "chat.completions"]
+    assert len(chat_requests) == 2
+    chat_responses = [e for e in events if e["event_type"] == "MODEL_RESPONSE"
+                      and e["target"] and e["target"].get("name") == "chat-success"]
+    chat_failures = [e for e in events if e["event_type"] == "MODEL_FAILURE"
+                     and e["target"] and e["target"].get("name") == "fail"]
+    assert len(chat_responses) == 1
+    assert len(chat_failures) == 1
+    assert chat_failures[0]["attributes"]["error_type"] == "RuntimeError"
+    assert "PRIVATE_BAD_REQUEST_DETAILS" not in (tmp_path / "semantic.jsonl").read_text()
+
 
 
 def test_non_execweave_python_is_noop(monkeypatch):
