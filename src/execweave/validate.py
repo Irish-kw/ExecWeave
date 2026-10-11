@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .schema import SCHEMA_VERSION
+from .reader_identity import reader_identity
 
 
 @dataclass(frozen=True)
@@ -28,6 +29,7 @@ class ValidationResult:
             "warnings": self.warnings,
             "session_ids": self.session_ids,
             "schema_versions": self.schema_versions,
+            "reader": reader_identity(),
         }
 
 
@@ -108,11 +110,11 @@ def validate_event_stream(
             # Both 0.8.34 and 0.8.35 emit event stream schema 0.2.
             if schema_version != SCHEMA_VERSION:
                 errors.append(
-                    f"line {line_number}: unsupported stream schema version: "
+                    f"line {line_number}: unsupported_schema_version: unsupported stream schema version: "
                     f"{schema_version}; supported: {SCHEMA_VERSION}"
                 )
         else:
-            errors.append(f"line {line_number}: schema_version must be a string")
+            errors.append(f"line {line_number}: unsupported_schema_version: schema_version must be a string (supported: {SCHEMA_VERSION})")
 
         event_id = payload.get("event_id")
         if not isinstance(event_id, str) or not event_id:
