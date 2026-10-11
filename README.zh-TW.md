@@ -361,3 +361,7 @@ Paper context: Li et al., *CAMEL: Communicative Agents for "Mind" Exploration of
 from execweave.framework_adapters import AdapterContext, CAMELAdapter
 adapter = CAMELAdapter(AdapterContext.from_environment("camel"))
 ```
+
+## 自訂 Python 與 OpenAI API Key
+
+以 `execweave record -- python my_agent.py` 或 `execweave live --open -- python my_agent.py` 記錄執行時證據。需要**單／多 Agent 的 OpenAI 模型呼叫與交接語義**時，請以 `OpenAIAgentRecorder` 包裝官方 SDK，並明確記錄各 Agent 的發送及接收事件。Adapter 不讀取 API Key，也不能從 HTTPS 自動推斷 Agent 角色。詳見 [OpenAI Python 整合指南](docs/openai-python.md)。
