@@ -242,7 +242,7 @@ def test_framework_group_must_not_promote_partial_delivery_to_delivered() -> Non
     assert routed[0]["relation"] == "ADDRESSED_TO"
 
 
-def test_integrity_cli_explicitly_reports_unanchored_state(
+def test_integrity_cli_only_checks_local_consistency(
     tmp_path: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
     from execweave.integrity_cli import main as integrity_main
@@ -252,130 +252,41 @@ def test_integrity_cli_explicitly_reports_unanchored_state(
     (run / "graph.json").write_text('{"nodes":[],"edges":[]}', encoding="utf-8")
     assert integrity_main(["seal", str(run)]) == 0
     sealed = json.loads(capsys.readouterr().out)
-    assert sealed["external_anchor_state"] == "unanchored"
+    assert sealed["status"] == "sealed"
     assert sealed["malicious_writer_resistance"] is False
+    assert "external_anchor_state" not in sealed
+
     assert integrity_main(["verify", str(run)]) == 0
     verified = json.loads(capsys.readouterr().out)
     assert verified["valid"] is True
-    assert verified["external_anchor_state"] == "unanchored"
+    assert verified["local_integrity_valid"] is True
     assert verified["malicious_writer_resistance"] is False
-    assert integrity_main([
-        "verify", str(run), "--expected-manifest-body-sha256",
-        sealed["manifest_body_sha256"],
-    ]) == 0
-    matching = json.loads(capsys.readouterr().out)
-    assert matching["external_anchor_state"] == "external_digest_match"
-    assert integrity_main([
-        "verify", str(run), "--expected-manifest-body-sha256", "0" * 64,
-    ]) == 1
-    mismatching = json.loads(capsys.readouterr().out)
-    assert mismatching["external_anchor_state"] == "external_digest_mismatch_or_invalid"
+    assert "external_digest_match" not in verified
+    assert verified["reader"]["name"] == "execweave"
+
+    (run / "graph.json").write_text('{"nodes":[{"id":"altered"}]}', encoding="utf-8")
+    assert integrity_main(["verify", str(run)]) == 1
+    tampered = json.loads(capsys.readouterr().out)
+    assert tampered["valid"] is False
+    assert tampered["local_integrity_valid"] is False
 
 
-def test_github_external_digest_publisher_checks_target_and_acknowledgement() -> None:
-    from execweave.external_anchor import publish_github_anchor, github_anchor_text
+def test_integrity_cli_has_no_external_publication_or_anchor_arguments() -> None:
+    from execweave.integrity_cli import build_parser
 
-    digest = "a" * 64
-    body = github_anchor_text(digest)
-    destination = "https://github.com/Irish-kw/ChatGPT2GrokBot/issues/110#issuecomment-12345"
-    captured = {}
-
-    class Response:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb):
-            return False
-
-        def getcode(self):
-            return 201
-
-        def read(self, size):
-            return json.dumps({
-                "id": 12345, "html_url": destination, "body": body,
-            }).encode("utf-8")
-
-    def opener(request, *, timeout):
-        captured["url"] = request.full_url
-        captured["method"] = request.get_method()
-        captured["payload"] = json.loads(request.data)
-        captured["timeout"] = timeout
-        captured["authorization"] = request.get_header("Authorization")
-        return Response()
-
-    result = publish_github_anchor(
-        "Irish-kw/ChatGPT2GrokBot#110", digest, token="test-isolated-token",
-        opener=opener,
-    )
-    assert result["state"] == "submitted_not_independently_verified"
-    assert result["comment_url"] == destination
-    assert captured["method"] == "POST"
-    assert captured["url"] == (
-        "https://api.github.com/repos/Irish-kw/ChatGPT2GrokBot/issues/110/comments"
-    )
-    assert captured["payload"] == {"body": body}
-    assert captured["authorization"] == "Bearer test-isolated-token"
-    assert "test-isolated-token" not in json.dumps(result)
-
-    for target in (
-        "http://github.com/evil", "owner/repo#0", "owner/repo#1/path",
-        "owner/repo#1\nAuthorization: secret",
+    parser = build_parser()
+    help_text = parser.format_help()
+    assert "anchor" not in help_text.lower()
+    for argv in (
+        ["anchor", "run", "--github-target", "owner/repo#1"],
+        ["seal", "run", "--anchor-github", "owner/repo#1"],
+        ["verify", "run", "--expected-manifest-body-sha256", "0" * 64],
     ):
-        with pytest.raises(ValueError):
-            publish_github_anchor(target, digest, token="test-isolated-token", opener=opener)
-
-    class WrongAck(Response):
-        def read(self, size):
-            return json.dumps({
-                "id": 12345, "html_url": destination, "body": "different",
-            }).encode("utf-8")
-
-    with pytest.raises(ValueError, match="target/body mismatch"):
-        publish_github_anchor(
-            "Irish-kw/ChatGPT2GrokBot#110", digest, token="test-isolated-token",
-            opener=lambda request, *, timeout: WrongAck(),
-        )
+        with pytest.raises(SystemExit) as caught:
+            parser.parse_args(argv)
+        assert caught.value.code == 2
 
 
-def test_external_anchor_cli_requires_local_integrity_and_supports_retry(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from execweave.integrity_cli import main as integrity_main
-
-    root = tmp_path / "run"
-    root.mkdir()
-    graph = root / "graph.json"
-    graph.write_text('{"nodes":[],"edges":[]}', encoding="utf-8")
-
-    def submitted(target, digest):
-        assert target == "trusted/repo#7"
-        assert len(digest) == 64
-        return {
-            "state": "submitted_not_independently_verified",
-            "comment_url": "https://github.com/trusted/repo/issues/7#issuecomment-9",
-        }
-
-    monkeypatch.setattr("execweave.integrity_cli.publish_github_anchor", submitted)
-    assert integrity_main(["seal", str(root), "--anchor-github", "trusted/repo#7"]) == 0
-    sealed = json.loads(capsys.readouterr().out)
-    assert sealed["external_anchor_state"] == "submitted_not_independently_verified"
-    assert sealed["malicious_writer_resistance"] is False
-    assert integrity_main(["anchor", str(root), "--github-target", "trusted/repo#7"]) == 0
-    retried = json.loads(capsys.readouterr().out)
-    assert retried["status"] == "submitted"
-
-    graph.write_text("tampered", encoding="utf-8")
-    assert integrity_main(["anchor", str(root), "--github-target", "trusted/repo#7"]) == 1
-    refused = json.loads(capsys.readouterr().out)
-    assert refused["local_integrity_valid"] is False
-
-
-@pytest.mark.parametrize("location", [
-    "event", "event_attributes", "source", "source_attributes",
-    "target", "target_attributes",
-])
-@pytest.mark.parametrize("marker", ["inferred", "viewer_only"])
 def test_non_native_pseudo_handoffs_never_count_as_receipts(
     location: str, marker: str,
 ) -> None:
