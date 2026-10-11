@@ -13,6 +13,7 @@ from typing import Iterable
 
 from .auto_specialized import auto_specialized_launch
 from .collector import infer_agent_name
+from .command_privacy import public_command
 from .schema import Entity, RuntimeEvent
 from .sink import JsonlSink
 
@@ -141,7 +142,8 @@ class StraceParser:
             id=f"session:{session_id}",
             name=session_id,
             attributes={
-                "command": command,
+                "command": public_command(command),
+                "argv_redacted": True,
                 "cwd": str(self.watch_root),
                 "backend": "strace",
             },
@@ -626,7 +628,8 @@ class StraceRuntimeCollector:
             id=f"session:{self.session_id}",
             name=self.session_id,
             attributes={
-                "command": command,
+                "command": public_command(command),
+                "argv_redacted": True,
                 "cwd": str(self.watch_root),
                 "backend": self.backend_name,
             },
