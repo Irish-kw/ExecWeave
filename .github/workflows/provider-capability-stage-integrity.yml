@@ -287,4 +287,14 @@ jobs:
             fi
             args+=(--allow-test-change "$flow_test=The dashboard spine is root -> model -> session: a session is entered through the model the root used, and a model switch adds a second model from the root into the same session. The historical assertions pinned the session drawn straight off the root with the model contexts after it, which is the reported defect, so only those direction assertions are inverted. Test node IDs are unchanged; the root-to-session RECORDED_IN_SESSION membership assertions move unchanged to the new test_session_without_an_observed_model_is_recorded_from_the_root, where no model is observed and that edge is still correct; every child-model, reply, uniqueness, endpoint and message-history assertion is kept. Cross-provider browser invariants live in tests/test_dashboard_graph_invariants_e2e.py. The complete test file hash is pinned above.")
           fi
+          # Owner #125 retires external anchoring; preserve the historical test ID
+          # and pin the exact migrated test-file blob, without disabling Stage Integrity.
+          if [[ "$HEAD_REF" == "fix/issue110-observation-diagnostics" ]]; then
+            fixture="tests/test_release_hardening_0835.py"
+            if [[ "$(git hash-object --no-filters "$fixture")" != "78c94f6efe324155c9fea9cc9f65ed4d8968dfb1" ]]; then
+              echo "Unexpected #125 historical test migration change; inspect the full diff." >&2
+              exit 1
+            fi
+            args+=(--allow-test-change "$fixture=Owner #125 explicitly removes external anchor functionality. The historical single external-digest test keeps its exact pytest ID and is migrated to assert clean local verification, detection of unresealed modification, the documented rewrite-and-reseal weakness, and rejection of the retired CLI flag. No other historical tests, skips, version metadata, or stage integrity guards changed. Exact test file blob pinned above.")
+          fi
           python scripts/check_release_stage_integrity.py "${args[@]}"
