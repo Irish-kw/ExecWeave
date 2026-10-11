@@ -34,7 +34,7 @@ def test_issue122_missing_schema_is_rejected(tmp_path: Path) -> None:
     _stream(path, ["0.2", "0.2"])
     lines = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
     del lines[0]["schema_version"]
-    path.write_text("".join(json.dumps(line) + "\\n" for line in lines), encoding="utf-8")
+    path.write_text("".join(json.dumps(line) + "\n" for line in lines), encoding="utf-8")
     result = validate_event_stream(path)
     assert result.valid is False
     assert any("unsupported_schema_version" in err for err in result.errors)
@@ -110,7 +110,7 @@ def test_issue122_local_only_docs_and_downgrade_parity(suffix: str) -> None:
         "<!-- ew:compat:no-downgrade -->",
     ):
         assert marker in body
-        tail = body.split(marker, 1)[1].split("\\n", 3)[0:3]
+        tail = body.split(marker, 1)[1].split("\n", 3)[0:3]
         assert any(part.strip() for part in tail)
     assert "v0.8.34" in body
     assert "v0.8.35" in body
