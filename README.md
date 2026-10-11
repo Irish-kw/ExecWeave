@@ -380,3 +380,7 @@ the adapter automatically joins that run and the finished Dashboard is built
 from the merged runtime plus framework evidence. Task prompts and routed
 messages remain local content references and are visible from their task and
 agent nodes.
+
+## Custom OpenAI Python scripts
+
+Use `execweave record -- python my_agent.py` or `execweave live --open -- python my_agent.py` to observe the runtime. For **OpenAI API-key single-/multi-Agent semantic evidence**, wrap the official SDK with `OpenAIAgentRecorder` and explicitly record each Agent's send/receive handoffs. No API key is read by the adapter, and HTTPS cannot reveal roles by itself. See [OpenAI Python integration](docs/openai-python.md) for synchronous/async calls, privacy and limitations.
