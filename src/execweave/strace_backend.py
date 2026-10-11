@@ -615,20 +615,20 @@ class StraceRuntimeCollector:
 
     def _prepare_trace_directory(self) -> None:
         """Guard private, potentially secret-bearing native trace evidence."""
-    # Native syscall traces can include entire execve argv and are much more
-    # sensitive than projected event/graph evidence. Protect the dedicated
-    # directory even when the caller sends graph output elsewhere.
-    self.trace_root.mkdir(parents=True, exist_ok=True, mode=0o700)
-    self.trace_root.chmod(0o700)
-    _protect_git_run_directory(self.trace_root / "trace")
-    raw_ignore = self.trace_root / ".gitignore"
-    try:
-        write_private_text(raw_ignore, "*\n")
-    except FileExistsError:
-        # A custom ignore file that does not protect the raw trace is
-        # insufficient: fail closed rather than retaining stageable argv.
-        if raw_ignore.read_text(encoding="utf-8") != "*\n":
-            raise ValueError("native strace directory must ignore all raw traces")
+        # Native syscall traces can include entire execve argv and are much more
+        # sensitive than projected event/graph evidence. Protect the dedicated
+        # directory even when the caller sends graph output elsewhere.
+        self.trace_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        self.trace_root.chmod(0o700)
+        _protect_git_run_directory(self.trace_root / "trace")
+        raw_ignore = self.trace_root / ".gitignore"
+        try:
+            write_private_text(raw_ignore, "*\n")
+        except FileExistsError:
+            # A custom ignore file that does not protect the raw trace is
+            # insufficient: fail closed rather than retaining stageable argv.
+            if raw_ignore.read_text(encoding="utf-8") != "*\n":
+                raise ValueError("native strace directory must ignore all raw traces")
 
     def run(self, command: list[str]) -> int:
         if not command:
