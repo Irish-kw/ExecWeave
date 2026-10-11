@@ -175,9 +175,14 @@ window.__execweaveRunAssessment={refresh};refresh();
 
 RUN_ASSESSMENT_CSS = r"""
 
-#graph-panel:has(> #execweave-handoff-alerts){grid-template-rows:46px auto minmax(0,1fr)}
-#graph-panel > #execweave-handoff-alerts{grid-row:2;min-width:0;align-self:stretch}
-#graph-panel > #wrap{grid-row:3}
+/* The workflow toolbar is injected after this alert. Both must occupy
+   explicit rows; otherwise CSS Grid auto-places one below the canvas. */
+#graph-panel:has(> #execweave-handoff-alerts:not([hidden])){grid-template-rows:46px auto auto minmax(0,1fr)}
+#graph-panel > #execweave-handoff-alerts:not([hidden]){grid-row:2;min-width:0;align-self:stretch}
+#graph-panel:has(> #execweave-handoff-alerts:not([hidden])) > #execweave-workflow-controls{grid-row:3}
+#graph-panel:has(> #execweave-handoff-alerts:not([hidden])) > #wrap{grid-row:4}
+#graph-panel:has(> #execweave-handoff-alerts[hidden]) > #execweave-workflow-controls{grid-row:2}
+#graph-panel:has(> #execweave-handoff-alerts[hidden]) > #wrap{grid-row:3}
 #execweave-handoff-alerts{display:flex;flex-wrap:wrap;gap:8px;padding:6px 14px;border-bottom:1px solid var(--border,#888);background:var(--panel,#222);position:sticky;top:0;z-index:12}
 #execweave-handoff-alerts[hidden]{display:none}
 .execweave-handoff-alert{cursor:pointer;border:1px solid var(--noncausal,#b56a16);border-left:4px solid var(--noncausal,#b56a16);border-radius:5px;padding:7px 10px;background:transparent;color:inherit;font-size:13px;font-weight:600}
