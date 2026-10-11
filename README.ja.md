@@ -26,6 +26,8 @@
 
 **AI Agent があなたのマシン上で実際に何をしたのかを見る。**
 
+**複数ロールの Agent ワークフローでは、ExecWeave は記録された送信イベントに対応する受信イベントが観測されない引き継ぎを自動的に検出し、送信元と受信先のロールを特定して `graph.json` に `message_receive_not_observed` を記録します。これは観測上の欠落を示すものであり、配送失敗の証明ではありません。**
+
 ExecWeave は、AI Agent と AI 支援開発ツール向けの local-first observability プロジェクトです。Provider 側のセマンティクスと OS runtime の証拠を 1 つのインタラクティブな Execution Graph に統合しつつ、証拠レイヤーの違いを明示的に保ちます。
 
 > **Event は証拠です。Graph は証拠から materialize された view です。**
