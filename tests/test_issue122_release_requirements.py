@@ -137,3 +137,62 @@ def test_issue122_local_only_docs_and_downgrade_parity(suffix: str) -> None:
     for removed in ("--anchor-github", "--expected-manifest-body-sha256",
                     "EXECWEAVE_INTEGRITY_GITHUB_TOKEN"):
         assert removed not in body
+
+
+@pytest.mark.viewer_e2e
+def test_issue126_receive_alert_is_in_first_view_below_graph_toolbar() -> None:
+    """Catch #126's bug where the alert auto-placed below the Live Logs."""
+    import os
+    from playwright.sync_api import sync_playwright
+
+    from execweave.dashboard_shell import render_static_dashboard_html
+
+    engineer = "agent:rolesdemo:session:Engineer"
+    reviewer = "agent:rolesdemo:session:Reviewer"
+    graph = {
+        "graph_schema_version": "0.2",
+        "session_id": "rolesdemo",
+        "nodes": [
+            {"id": engineer, "type": "agent", "name": "Engineer"},
+            {"id": reviewer, "type": "agent", "name": "Reviewer"},
+        ],
+        "edges": [
+            {"id": "send", "source": engineer, "target": reviewer,
+             "relation": "MESSAGE_SENT", "attributes": {"message_id": "m2"}},
+        ],
+        "session_outcome": {"state": "observation_incomplete", "recorder_finished": True},
+        "observation_assessment": {
+            "message_delivery": {
+                "unconfirmed_count": 1, "delivery_failure_proven": False,
+                "unconfirmed": [
+                    {"message_id": "m2", "sender_id": engineer,
+                     "recipient_id": reviewer, "state": "receive_not_observed"}
+                ],
+            },
+        },
+    }
+    with sync_playwright() as playwright:
+        executable = os.environ.get("EXECWEAVE_E2E_CHROMIUM")
+        browser = playwright.chromium.launch(
+            **({"executable_path": executable} if executable else {})
+        )
+        try:
+            page = browser.new_page(viewport={"width": 1440, "height": 1000})
+            errors: list[str] = []
+            page.on("pageerror", lambda err: errors.append(str(err)))
+            page.set_content(render_static_dashboard_html(graph))
+            alert = page.locator("#execweave-handoff-alerts .execweave-handoff-alert")
+            alert.wait_for()
+            toolbar = page.locator("#graph-panel > .panel-bar").bounding_box()
+            graph_wrap = page.locator("#wrap").bounding_box()
+            alert_box = alert.bounding_box()
+            assert toolbar and graph_wrap and alert_box
+            assert alert_box["y"] >= toolbar["y"] + toolbar["height"] - 1
+            assert alert_box["y"] + alert_box["height"] <= graph_wrap["y"] + 1
+            assert alert_box["y"] < 200  # visible without scrolling at 1440x1000
+            assert "Engineer → Reviewer — receive not observed" in alert.inner_text()
+            alert.click()
+            assert "Reviewer" in page.locator("#details").inner_text()
+            assert errors == []
+        finally:
+            browser.close()
