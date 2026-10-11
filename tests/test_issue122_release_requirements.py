@@ -201,6 +201,18 @@ def test_issue127_handoff_and_workflow_controls_keep_first_view_position(
                 assert "Reviewer" in page.locator("#details").inner_text()
                 assert page.locator('.node[data-warning="receive-not-observed"]').count() == 1
                 assert page.locator(".edge.handoff-unconfirmed").count() == 1
+                # Switch modes and redraw the SVG without new telemetry; the
+                # banner and graph warnings must remain synchronized.
+                for mode in ("workflow", "all"):
+                    page.locator("#execweave-workflow-controls select").select_option(mode)
+                    page.wait_for_function(
+                        "() => document.querySelectorAll('.node[data-warning=\\\"receive-not-observed\\\"]').length===1 && "
+                        "document.querySelectorAll('.edge.handoff-unconfirmed').length===1"
+                    )
+                page.locator("#file-graph-filter").select_option("all")
+                page.wait_for_function(
+                    "() => document.querySelectorAll('.edge.handoff-unconfirmed').length===1"
+                )
             else:
                 assert alert.count() == 0
                 assert page.locator('#execweave-handoff-alerts').is_hidden()
