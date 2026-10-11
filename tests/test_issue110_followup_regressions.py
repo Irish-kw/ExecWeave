@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 import pytest
@@ -168,16 +169,21 @@ _ISSUE110_LOCALE_CLAIMS = {
         "Live dashboard 不再把 API credential 放進 `?t=...`。",
     ),
     "README.de.md": (
+        "es installiert oder überschreibt keine Hooks.",
+        "ohne sudo.",
         "`execution_state=succeeded` beweist weder eine vollständige Beobachtung noch eine unabhängige Aufgabenvalidierung.",
         "**Konfiguriert bedeutet nicht, dass Beobachtungsdaten eingegangen sind.**",
         "Das Live-Dashboard überträgt keine API-Zugangsdaten mehr über `?t=...`.",
     ),
     "README.fr.md": (
+        "Une politique de capture invalide déclenche un repli sécurisé vers metadata-only aux frontières des enregistreurs automatiques.",
+        "L’absence de preuve de réception et l’observation incomplète sont enregistrées indépendamment du code de sortie.",
         "`execution_state=succeeded` ne prouve ni une observation complète ni une validation indépendante de la tâche.",
         "**Un hook configuré ne prouve pas la réception des preuves.**",
         "Le dashboard Live ne place plus d’identifiant API dans `?t=...`.",
     ),
     "README.ja.md": (
+        "表示される URL に credential は含まれません。",
         "`execution_state=succeeded` は観測の完全性やタスクの独立した検証を証明しません。",
         "**設定済みであることは証拠が届いたことを意味しません。**",
         "Live dashboard の URL に API credential を `?t=...` として含めることはありません。",
@@ -188,6 +194,7 @@ _ISSUE110_LOCALE_CLAIMS = {
         "Live dashboard URL에는 더 이상 API credential이 `?t=...` 형태로 포함되지 않습니다.",
     ),
     "README.ru.md": (
+        "Браузер отправляет одноразовый pairing code в теле POST",
         "`execution_state=succeeded` не доказывает полноту наблюдения или независимую проверку задачи.",
         "**Настроенный hook не доказывает получение данных наблюдения.**",
         "Live dashboard больше не передаёт API credential через `?t=...`.",
@@ -204,6 +211,8 @@ _ISSUE110_LOCALE_CLAIMS = {
 def test_issue110_readme_provider_privacy_parity(locale: str) -> None:
     """Catch security-guide omissions and untranslated fallback across locales."""
     readme = (Path(__file__).resolve().parents[1] / locale).read_text(encoding="utf-8")
+    # Ignore HTML comments: invisible guidance must not satisfy security checks.
+    readme = re.sub(r"<!--.*?-->", "", readme, flags=re.DOTALL)
     assert readme.count("execweave live --open -- codex") == 1, locale
     for claim in _ISSUE110_LOCALE_CLAIMS[locale]:
         assert claim in readme, (locale, claim)
