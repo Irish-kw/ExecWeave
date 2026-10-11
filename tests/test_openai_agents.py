@@ -151,3 +151,34 @@ def test_streaming_does_not_fake_completed_response(tmp_path, monkeypatch):
     events = _read(tmp_path)
     assert any(e["event_type"] == "MODEL_REQUEST" for e in events)
     assert not any(e["event_type"] == "MODEL_RESPONSE" for e in events)
+
+
+def test_record_command_merges_custom_python_openai_semantics(tmp_path):
+    """Run a real child interpreter through the ordinary record command."""
+    import sys
+    from execweave.workflow import record_to_viewer
+
+    program = tmp_path / "custom_agent.py"
+    program.write_text(
+        "from execweave.openai_agents import OpenAIAgentRecorder\n"
+        "class Responses:\n"
+        "    def create(self, **kwargs):\n"
+        "        return {'id': 'mock-response', 'output': 'ok'}\n"
+        "class Client:\n"
+        "    responses = Responses()\n"
+        "record = OpenAIAgentRecorder()\n"
+        "client = record.wrap(Client())\n"
+        "with record.agent('Planner'):\n"
+        "    client.responses.create(model='dummy-local-model', input='hello')\n"
+        "record.sent('handoff-1', 'Planner', 'Reviewer')\n"
+        "record.received('handoff-1', 'Planner', 'Reviewer')\n",
+        encoding="utf-8",
+    )
+    result = record_to_viewer([sys.executable, str(program)],
+                              watch_root=tmp_path, backend="portable")
+    assert result.return_code == 0
+    assert result.semantic_event_count >= 5
+    graph = json.loads(result.graph.read_text(encoding="utf-8"))
+    kinds = {kind for node in graph.get("nodes", []) for kind in node.get("event_types", [])}
+    assert {"MESSAGE_SENT", "MESSAGE_RECEIVED", "MODEL_REQUEST", "MODEL_RESPONSE"} <= kinds
+    assert "api_key" not in result.event_stream.read_text(encoding="utf-8")
