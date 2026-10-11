@@ -26,6 +26,8 @@
 
 **看清楚 AI Agent 在你的電腦上實際做了什麼。**
 
+**在多角色 Agent 工作流程中，ExecWeave 會自動標示已記錄發送事件、卻未觀察到對應接收事件的交接，指出發送者與接收角色，並將 `message_receive_not_observed` 寫入 `graph.json`。這代表觀測缺口，不等於證明訊息傳送失敗。**
+
 ExecWeave 是一個 local-first 的 AI Agent 與 AI 開發工具可觀測性專案。它把 Provider 層的語意資訊與作業系統層的執行證據整合到同一個互動式 Execution Graph 中，同時保留不同證據層級之間的界線。
 
 > **Event 是證據；Graph 是由證據物化出的檢視。**
