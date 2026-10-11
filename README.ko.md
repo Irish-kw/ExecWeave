@@ -79,7 +79,7 @@ Hook 설치 전에 내장된 관측 누락 반례를 실행합니다.
 python -m execweave.observation_demo --output-dir ./observation-negative
 ```
 
-`observation-negative/graph.json` and `finalization.json`: `execution_state=succeeded` does not prove observation completeness or task validation.
+이 예제는 작업이 성공해도 관측 증거가 불완전할 수 있습니다. `observation-negative/graph.json`과 `observation-negative/finalization.json`을 확인하세요. `execution_state=succeeded`는 관측의 완전성이나 작업의 독립적인 검증을 의미하지 않습니다.
 
 이후 sudo 없이 Provider hook을 명시적으로 설치하고 확인합니다.
 
@@ -97,7 +97,6 @@ execweave live --open -- codex
 execweave live --open -- agy
 execweave live --open -- cursor
 execweave live --open -- opencode
-execweave live --open -- codex
 ```
 
 완료 후 artifact 생성이 주목적이라면:
@@ -114,7 +113,15 @@ execweave top -- codex
 
 ### Provider integration 승인
 
-일부 Agent와 IDE는 로컬 hook 또는 plugin을 처음 활성화할 때 권한을 요청합니다. Prompt, Response, Tool, Model, Conversation 같은 Provider-level evidence가 필요하다면 ExecWeave integration을 승인하세요. 승인하지 않아도 OS runtime 관측은 가능할 수 있지만 semantic coverage는 줄어듭니다.
+0.8.35부터 `live`는 hook 구성을 확인만 하며 설치하거나 수정하지 않습니다. 사용자 소유 환경에서 sudo 없이 `execweave hooks install antigravity`(또는 `claude`, `codex`, `cursor`, `opencode`)를 명시적으로 실행하세요. `execweave hooks status antigravity`는 구성을 변경하지 않고 확인합니다. Provider 승인이 추가로 필요할 수도 있습니다. **구성 완료가 증거 전달을 의미하지는 않습니다.** 수신 증거 누락과 관측 불완전성은 프로세스 종료 코드와 별도로 기록됩니다.
+
+세 가지 결과 축과 그 한계는 [관측 무결성과 반례](docs/observation-integrity.md)를 참고하세요. 이 변경은 0.8.35부터 제공되며 이전 버전에는 없습니다.
+
+**Live 개인정보 보호 및 인증(0.8.35)**
+
+`execweave live`와 `execweave top`은 integration이 노출하는 Provider/Model 내용(prompt, response, tool 값)을 기본적으로 모두 기록합니다. 실행 데이터는 사용자가 검토할 수 있도록 자신의 컴퓨터에 남습니다. 일반 텍스트를 저장하면 안 되는 경우 `--metadata-only`를 사용하세요. `--capture-content`는 기본 동작을 명시적으로 선택합니다. 잘못된 capture policy는 자동 recorder 경계에서 안전하게 metadata-only로 전환됩니다.
+
+Live dashboard URL에는 더 이상 API credential이 `?t=...` 형태로 포함되지 않습니다. 표시되는 URL에는 인증 정보가 없습니다. 브라우저는 POST body로 일회성 pairing code를 보내 `HttpOnly; SameSite=Strict` cookie를 받으며, API client는 비공개 `X-ExecWeave-Token` header를 사용합니다.
 
 Google Antigravity의 실제 CLI command는 현재 `agy`입니다. ExecWeave는 기억하기 쉬운 alias로 `antigravity`도 허용합니다.
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import pytest
 
@@ -54,7 +55,10 @@ def test_bounded_inventory_retains_known_unconfirmed_lower_bound() -> None:
 
 @pytest.mark.viewer_e2e
 @pytest.mark.parametrize("ambiguous_name", [False, True])
-def test_browser_response_preview_prompt_and_unambiguous_handoff(ambiguous_name: bool) -> None:
+@pytest.mark.parametrize("prompt_present", [True, False])
+def test_browser_response_preview_prompt_and_unambiguous_handoff(
+    ambiguous_name: bool, prompt_present: bool
+) -> None:
     from playwright.sync_api import sync_playwright
 
     engineer = "agent:rolesdemo:session:Engineer"
@@ -91,7 +95,7 @@ def test_browser_response_preview_prompt_and_unambiguous_handoff(ambiguous_name:
          "conversation_preview": None},
         {"source_id": reviewer, "provider": "rolesdemo",
          "relation": "HAS_MODEL_CONTENT", "content_kind": "rolesdemo.model_response",
-         "conversation_preview": {"agent_path": "Reviewer", "messages": [
+         "conversation_preview": {"agent_path": "/root", "is_root": True, "messages": [
              {"kind": "model_request", "phase": "request", "text": prompt,
               "observed": None, "timestamp": "2026-10-10T18:00:00Z"},
              {"kind": "agent_message", "phase": "sent", "message_id": "msg-2",
@@ -105,6 +109,12 @@ def test_browser_response_preview_prompt_and_unambiguous_handoff(ambiguous_name:
               "text": "SIBLING PRIVATE PROMPT", "timestamp": "2026-10-10T18:00:00Z"},
          ]}},
     ]
+    if not prompt_present:
+        # A genuinely absent prompt must stay absent, even if another agent has one.
+        entries[1]["conversation_preview"]["messages"] = [
+            item for item in entries[1]["conversation_preview"]["messages"]
+            if item.get("kind") != "model_request"
+        ]
     with sync_playwright() as playwright:
         executable = os.environ.get("EXECWEAVE_E2E_CHROMIUM")
         browser = playwright.chromium.launch(
@@ -118,7 +128,17 @@ def test_browser_response_preview_prompt_and_unambiguous_handoff(ambiguous_name:
             page.wait_for_selector(".node")
             page.evaluate("(id) => window.__execweaveCore.selectNode(id)", reviewer)
             panel = page.locator("#details").inner_text()
-            assert prompt in panel
+            round_prompt = page.locator(
+                ".execweave-agent-rounds .execweave-agent-round "
+                ".execweave-agent-body"
+            ).first.inner_text()
+            if prompt_present:
+                assert round_prompt == prompt
+                assert panel.count(prompt) == 1
+                assert "PROMPT\\nNot observed." not in panel
+            else:
+                assert round_prompt == "Not observed."
+                assert prompt not in panel
             assert "SIBLING PRIVATE PROMPT" not in panel
             assert "incoming handoff" in panel.lower()
             summaries = page.locator(".execweave-message-history summary").all_inner_texts()
@@ -131,3 +151,19 @@ def test_browser_response_preview_prompt_and_unambiguous_handoff(ambiguous_name:
             assert errors == []
         finally:
             browser.close()
+
+@pytest.mark.parametrize("locale", [
+    "README.md", "README.zh-TW.md", "README.de.md", "README.fr.md",
+    "README.ja.md", "README.ko.md", "README.ru.md", "README.zh-CN.md",
+])
+def test_issue110_readme_provider_privacy_parity(locale: str) -> None:
+    """Do not silently drop security/observation guidance from translations."""
+    readme = (Path(__file__).resolve().parents[1] / locale).read_text(encoding="utf-8")
+    assert readme.count("execweave live --open -- codex") == 1
+    assert "docs/observation-integrity.md" in readme
+    for required in ("--metadata-only", "--capture-content", "X-ExecWeave-Token",
+                     "SameSite=Strict", "0.8.35",
+                     "execweave hooks install antigravity",
+                     "execweave hooks status antigravity"):
+        assert required in readme, (locale, required)
+    assert "execution_state=succeeded does not prove observation completeness" not in readme

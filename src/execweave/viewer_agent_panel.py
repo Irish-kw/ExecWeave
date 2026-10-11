@@ -557,7 +557,15 @@ function render(node){
       commandText(message?.text));
   const observedPrompt=requestMessages.length?displayText(requestMessages.at(-1)):'';
   const rounds=(isRoot?rootRounds(messages,path||'/root'):childRounds(messages,path)).map(round=>execweaveFillAssignedTask(round,node,isRoot));
-  if(observedPrompt)details.appendChild(card('Prompt',observedPrompt));
+  // An exact-agent request may be stored in a sibling response preview.
+  // Bind it to a single root round only when that round has no opener;
+  // never attribute one request to multiple rounds or a different agent.
+  const soleRootRound=isRoot&&rounds.length===1?rounds[0]:null;
+  const roundNeedsPrompt=!!observedPrompt&&!!soleRootRound?.cards?.some(
+    ([label,text])=>label==='Prompt'&&!text);
+  if(roundNeedsPrompt)soleRootRound.cards=soleRootRound.cards.map(
+    ([label,text])=>label==='Prompt'&&!text?[label,observedPrompt]:[label,text]);
+  if(observedPrompt&&!roundNeedsPrompt)details.appendChild(card('Prompt',observedPrompt));
   const tools=toolCallsFor(String(node.id||''));
   const communication=agentCommunicationHistory(node,messages);
   const appendTools=()=>{if(communication)details.appendChild(communication);if(tools)details.appendChild(card('Tools',tools))};

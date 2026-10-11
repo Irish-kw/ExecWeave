@@ -79,7 +79,7 @@ Windows PowerShell: `.venv\Scripts\Activate.ps1`.
 python -m execweave.observation_demo --output-dir ./observation-negative
 ```
 
-`observation-negative/graph.json` and `finalization.json`: `execution_state=succeeded` does not prove observation completeness or task validation.
+Задача в примере может завершиться успешно, даже если данные наблюдения неполные. Проверьте `observation-negative/graph.json` и `observation-negative/finalization.json`: `execution_state=succeeded` не доказывает полноту наблюдения или независимую проверку задачи.
 
 Затем явно установите и проверьте hook провайдера без sudo:
 
@@ -97,7 +97,6 @@ execweave live --open -- codex
 execweave live --open -- agy
 execweave live --open -- cursor
 execweave live --open -- opencode
-execweave live --open -- codex
 ```
 
 Если нужны в основном финализированные artifacts:
@@ -114,7 +113,15 @@ execweave top -- codex
 
 ### Разрешение Provider integration
 
-Некоторые Agents и IDE запрашивают разрешение перед включением локального hook или plugin. Разрешите интеграцию ExecWeave, если нужны Provider-level evidence для Prompt, Response, Tool, Model и Conversation. Без разрешения OS runtime observation всё ещё может работать, но semantic coverage может быть меньше.
+Начиная с 0.8.35 команда `live` только проверяет настройки hook и не устанавливает и не изменяет их автоматически. Явно запустите `execweave hooks install antigravity` (или `claude`, `codex`, `cursor`, `opencode`) в пользовательской среде без sudo. `execweave hooks status antigravity` проверяет конфигурацию без записи. Дополнительно может потребоваться разрешение провайдера. **Настроенный hook не доказывает получение данных наблюдения.** Отсутствие подтверждения получения и неполнота наблюдения фиксируются независимо от кода завершения процесса.
+
+См. [целостность наблюдений и отрицательный пример](docs/observation-integrity.md), где описаны три оси результата и их ограничения. Эти изменения доступны начиная с 0.8.35 и отсутствуют в более ранних версиях.
+
+**Конфиденциальность и аутентификация Live (0.8.35)**
+
+По умолчанию `execweave live` и `execweave top` сохраняют всё содержимое Provider/Model, раскрываемое интеграцией (prompts, responses, значения tools), поскольку результаты запуска остаются на компьютере пользователя. Если нельзя сохранять открытый текст, используйте `--metadata-only`. `--capture-content` явно выбирает стандартное поведение. Недопустимая политика захвата на границах автоматических рекордеров безопасно переводится в режим metadata-only.
+
+Live dashboard больше не передаёт API credential через `?t=...`. Отображаемый URL не содержит credential. Браузер отправляет одноразовый pairing code в теле POST и получает cookie `HttpOnly; SameSite=Strict`; API-клиенты используют закрытый заголовок `X-ExecWeave-Token`.
 
 Google Antigravity сейчас использует CLI-команду `agy`. ExecWeave также принимает `antigravity` как более понятный alias.
 

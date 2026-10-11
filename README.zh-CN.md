@@ -79,7 +79,7 @@ Windows PowerShell: `.venv\Scripts\Activate.ps1`.
 python -m execweave.observation_demo --output-dir ./observation-negative
 ```
 
-`observation-negative/graph.json` and `finalization.json`: `execution_state=succeeded` does not prove observation completeness or task validation.
+此示例的任务即使成功，观察证据也可能不完整。请检查 `observation-negative/graph.json` 和 `observation-negative/finalization.json`；`execution_state=succeeded` 不代表观察完整，也不等于经过独立的任务验证。
 
 然后由用户明确安装并检查 Provider Hook，不使用 sudo：
 
@@ -97,7 +97,6 @@ execweave live --open -- codex
 execweave live --open -- agy
 execweave live --open -- cursor
 execweave live --open -- opencode
-execweave live --open -- codex
 ```
 
 主要想生成完成后的 artifacts 时：
@@ -114,7 +113,15 @@ execweave top -- codex
 
 ### Provider integration 授权
 
-部分 Agent 或 IDE 第一次启用本地 hook / plugin 时会要求授权。如果你希望看到 Prompt、Response、Tool、Model 与 Conversation 等 Provider-level evidence，请允许 ExecWeave integration。若不允许，OS runtime 观察仍可能工作，但 Provider 语义覆盖会减少。
+从 0.8.35 起，`live` 只检查 hook 配置，不会自动安装或修改。请在用户自己的环境中明确执行 `execweave hooks install antigravity`（也支持 `claude`、`codex`、`cursor`、`opencode`），不要使用 sudo。`execweave hooks status antigravity` 只读取配置，Provider 本身仍可能要求授权。**完成配置不等于已收到证据。** 缺少接收证据与观察不完整，会独立于进程退出状态进行记录。
+
+[观察完整性与反例](docs/observation-integrity.md)说明进程结果、独立任务验证、观察完整性三个维度及其限制。这些更改从 0.8.35 开始提供，旧版不包含。
+
+**Live 隐私与身份验证（0.8.35）**
+
+`execweave live` 和 `execweave top` 默认保存 integration 实际暴露的完整 Provider/Model 内容（prompt、response、tool 值），因为运行记录留在用户自己的机器上供检查。如果不能保存明文，请使用 `--metadata-only`；`--capture-content` 仍可显式选择默认行为。无效的 capture policy 会在自动 recorder 边界安全地降级为 metadata-only。
+
+Live dashboard 不再将 API credential 放在 `?t=...` 中。显示的 URL 不含 credential；浏览器通过 POST body 提交一次性 pairing code，换取 `HttpOnly; SameSite=Strict` cookie；非浏览器 API client 使用私有的 `X-ExecWeave-Token` header。
 
 Google Antigravity 当前实际 CLI 命令为 `agy`；ExecWeave 也接受 `antigravity` 作为易记 alias。
 

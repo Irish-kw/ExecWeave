@@ -79,7 +79,7 @@ Avant les hooks, exécutez l'exemple intégré :
 python -m execweave.observation_demo --output-dir ./observation-negative
 ```
 
-`observation-negative/graph.json` and `finalization.json`: `execution_state=succeeded` does not prove observation completeness or task validation.
+La tâche de l’exemple peut réussir alors que les preuves d’observation restent incomplètes. Vérifiez `observation-negative/graph.json` et `observation-negative/finalization.json` : `execution_state=succeeded` ne prouve ni une observation complète ni une validation indépendante de la tâche.
 
 Autorisez ensuite explicitement le hook du provider, toujours sans sudo :
 
@@ -97,7 +97,6 @@ execweave live --open -- codex
 execweave live --open -- agy
 execweave live --open -- cursor
 execweave live --open -- opencode
-execweave live --open -- codex
 ```
 
 Pour produire surtout des artifacts finalisés :
@@ -114,7 +113,15 @@ execweave top -- codex
 
 ### Autorisation de l’intégration Provider
 
-Certains agents et IDE demandent une autorisation avant d’activer un hook ou un plugin local. Autorisez l’intégration ExecWeave si vous souhaitez obtenir des preuves Provider-level sur les Prompt, Response, Tool, Model et Conversation. Sans cette autorisation, l’observation OS runtime peut toujours fonctionner, mais la couverture sémantique peut être réduite.
+Depuis la version 0.8.35, `live` vérifie uniquement la configuration des hooks : il ne les installe ni ne les modifie. Exécutez explicitement `execweave hooks install antigravity` (ou `claude`, `codex`, `cursor`, `opencode`) dans votre environnement utilisateur, sans sudo. `execweave hooks status antigravity` contrôle la configuration sans écriture. Une autorisation supplémentaire du provider peut rester nécessaire. **Un hook configuré ne prouve pas la réception des preuves.** L’absence de preuve de réception et l’observation incomplète sont enregistrées indépendamment du code de sortie.
+
+Consultez [l’intégrité des observations et l’exemple négatif](docs/observation-integrity.md) pour les trois axes de résultat et leurs limites. Ces changements sont disponibles depuis la version 0.8.35, pas dans les versions précédentes.
+
+**Confidentialité et authentification Live (0.8.35)**
+
+Par défaut, `execweave live` et `execweave top` enregistrent l’intégralité du contenu provider/modèle exposé par l’intégration (prompts, réponses, valeurs des outils), car l’exécution reste sur votre machine. Pour éviter de conserver ce texte en clair, utilisez `--metadata-only`. `--capture-content` sélectionne explicitement le comportement par défaut. Une politique de capture invalide déclenche un repli sécurisé vers metadata-only aux frontières des enregistreurs automatiques.
+
+Le dashboard Live ne place plus d’identifiant API dans `?t=...`. L’URL affichée ne contient aucun identifiant. Le navigateur échange un code d’association à usage unique envoyé dans le corps POST contre un cookie `HttpOnly; SameSite=Strict` ; les clients API utilisent l’en-tête privé `X-ExecWeave-Token`.
 
 Google Antigravity utilise actuellement la commande CLI `agy`. ExecWeave accepte aussi `antigravity` comme alias plus lisible.
 

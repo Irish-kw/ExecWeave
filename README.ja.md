@@ -79,7 +79,7 @@ Hook を設定する前に、組み込みの観測不足の反例を実行しま
 python -m execweave.observation_demo --output-dir ./observation-negative
 ```
 
-`observation-negative/graph.json` and `finalization.json`: `execution_state=succeeded` does not prove observation completeness or task validation.
+この例では処理自体が成功しても、観測証拠が不完全な場合があります。`observation-negative/graph.json` と `observation-negative/finalization.json` を確認してください。`execution_state=succeeded` は観測の完全性やタスクの独立した検証を証明しません。
 
 次に Provider hook を明示的に承認・設定します（sudo 不要）：
 
@@ -97,7 +97,6 @@ execweave live --open -- codex
 execweave live --open -- agy
 execweave live --open -- cursor
 execweave live --open -- opencode
-execweave live --open -- codex
 ```
 
 完了済み artifact を主に残したい場合：
@@ -114,7 +113,15 @@ execweave top -- codex
 
 ### Provider integration の許可
 
-一部の Agent / IDE は、ローカル hook や plugin を初めて有効にするときに許可を求めます。Prompt、Response、Tool、Model、Conversation などの Provider-level evidence を見たい場合は ExecWeave integration を許可してください。許可しなくても OS runtime 観測は利用できる場合がありますが、semantic coverage は減ります。
+0.8.35 以降、`live` は hook 設定を確認するだけで、自動インストールや書き換えを行いません。ユーザー自身の環境で `execweave hooks install antigravity`（または `claude`、`codex`、`cursor`、`opencode`）を明示的に実行してください。sudo は使用しません。`execweave hooks status antigravity` は設定を変更せず確認します。Provider 側の承認が必要な場合もあります。**設定済みであることは証拠が届いたことを意味しません。** 受信証拠の欠落と観測の不完全性は、プロセスの終了コードとは独立して記録されます。
+
+3 種類の結果とその限界については、[観測の完全性と反例](docs/observation-integrity.md)を参照してください。これらの変更は 0.8.35 以降に含まれ、旧バージョンにはありません。
+
+**Live のプライバシーと認証（0.8.35）**
+
+`execweave live` と `execweave top` は、integration が公開する Provider／Model の内容（prompt、response、tool 値）を既定で完全に記録します。実行結果は確認のため利用者のマシンに保存されます。平文を保存できない場合は `--metadata-only` を指定してください。`--capture-content` は既定の動作を明示的に選択します。不正な capture policy は自動 recorder の境界で安全側の metadata-only に切り替わります。
+
+Live dashboard の URL に API credential を `?t=...` として含めることはありません。表示される URL に credential は含まれません。ブラウザーは POST body で一度限りの pairing code を送信し、`HttpOnly; SameSite=Strict` cookie を取得します。API client は非公開の `X-ExecWeave-Token` header を使います。
 
 Google Antigravity の実際の CLI command は現在 `agy` です。ExecWeave は覚えやすい alias として `antigravity` も受け付けます。
 
