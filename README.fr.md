@@ -26,6 +26,8 @@
 
 **Voyez ce que les agents IA font réellement sur votre machine.**
 
+**Dans les flux d’agents à plusieurs rôles, ExecWeave signale automatiquement les transmissions enregistrées dont l’événement d’envoi n’a pas d’événement de réception correspondant observé. Il identifie l’émetteur et le destinataire et consigne `message_receive_not_observed` dans `graph.json`. Il s’agit d’une lacune d’observation, non d’une preuve d’échec de livraison.**
+
 ExecWeave est un projet d’observabilité local-first pour les agents IA et les outils de développement assistés par IA. Il combine la sémantique fournie par les providers avec les preuves d’exécution observées au niveau du système d’exploitation, puis les présente dans un Execution Graph interactif sans confondre les différents niveaux de preuve.
 
 > **Les events sont les preuves. Le graph est une vue matérialisée à partir de ces preuves.**
