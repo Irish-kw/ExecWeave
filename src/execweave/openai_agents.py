@@ -71,18 +71,6 @@ class _ResourceProxy:
             return _ResourceProxy(value, self._recorder, next_path)
         if key != "create" or self._path not in _ALLOWED_RESOURCES:
             return value
-        if inspect.iscoroutinefunction(value):
-            async def invoke(*args: Any, **kwargs: Any) -> Any:
-                call_id = self._recorder._begin(self._path, kwargs)
-                try:
-                    result = await value(*args, **kwargs)
-                except BaseException as exc:
-                    self._recorder._failed(call_id, type(exc).__name__)
-                    raise
-                self._recorder._done(call_id, result, streamed=kwargs.get("stream") is True)
-                return result
-            return invoke
-
         def invoke(*args: Any, **kwargs: Any) -> Any:
             call_id = self._recorder._begin(self._path, kwargs)
             try:
@@ -90,6 +78,24 @@ class _ResourceProxy:
             except BaseException as exc:
                 self._recorder._failed(call_id, type(exc).__name__)
                 raise
+
+            # OpenAI's AsyncAPIResource may return an awaitable from an
+            # ordinary callable (not an inspect.iscoroutinefunction).
+            # A coroutine is NOT a successful response: await it before
+            # emitting MODEL_RESPONSE, and classify HTTP errors accurately.
+            if inspect.isawaitable(result):
+                async def finish() -> Any:
+                    try:
+                        resolved = await result
+                    except BaseException as exc:
+                        self._recorder._failed(call_id, type(exc).__name__)
+                        raise
+                    self._recorder._done(
+                        call_id, resolved, streamed=kwargs.get("stream") is True,
+                    )
+                    return resolved
+                return finish()
+
             self._recorder._done(call_id, result, streamed=kwargs.get("stream") is True)
             return result
         return invoke
