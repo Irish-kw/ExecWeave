@@ -94,6 +94,12 @@ def test_openai_multi_agent_handoff_and_content_redaction(tmp_path, monkeypatch)
     text = (tmp_path / "semantic.jsonl").read_text(encoding="utf-8")
     assert "DUMMY_KEY_SHOULD_REDACT" not in text
     assert "HIDE_ME" not in text
+    # Credential filtering must also apply to opt-in content-store artifacts.
+    for artifact in (tmp_path / "content").rglob("*"):
+        if artifact.is_file():
+            value = artifact.read_bytes()
+            assert b"DUMMY_KEY_SHOULD_REDACT" not in value
+            assert b"HIDE_ME" not in value
     accumulator = GraphAccumulator(
         session_id="custom-openai", source_path=tmp_path / "events.jsonl",
     )
