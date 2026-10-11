@@ -39,26 +39,19 @@ execweave-integrity verify .execweave/runs/<run-id>
 | `manifest_body_sha256` | SHA-256 des canonical manifest content ohne dieses Digest-Feld. |
 | `trust_model` | Explizite Aussage darüber, was das local seal beweist und nicht beweist. |
 
-Das Manifest enthält zwingend `malicious_writer_resistance: false` und `external_trust_anchor: false`. Diese Werte sind Bestandteil des schema contract und keine optionale Formulierung der Dokumentation.
 
-## Trust boundary
+## Grenzen der ausschließlich lokalen Prüfung
 
-Ein local digest ist nützlich, um accidental corruption, unvollständige Kopien oder post-seal changes relativ zum Zeitpunkt des Seal zu erkennen. Er verhindert jedoch nicht, dass ein process mit Schreibzugriff auf sowohl run evidence als auch `integrity.json` beide neu schreibt. Ein solcher process kann die hashes neu berechnen und ein neues intern konsistentes Manifest erzeugen.
+<!-- ew:trust:local-only -->
 
-Für eine stärkere Garantie muss `manifest_body_sha256` oder das vollständige Manifest an einen Ort außerhalb der write boundary des observed process kopiert oder mit einem für diesen process nicht verfügbaren key geschützt bzw. signiert werden. Erst diese externe Maßnahme erzeugt den trust anchor; ExecWeave behauptet nicht, dass ein Manifest im selben directory allein einen solchen Anker schafft.
+Lokales `seal` / `verify` erkennt unbeabsichtigte Beschädigungen und Änderungen ohne erneutes Versiegeln. **Wer die Aufzeichnungen und `integrity.json` schreiben darf, kann Hashes neu berechnen und konsistente Daten erneut versiegeln.** `valid: true` bestätigt nur lokale Konsistenz, nicht ein manipulationssicheres Audit.
 
-## Betriebsregeln
+<!-- ew:trust:privileged -->
 
-Versiegeln Sie nur einen abgeschlossenen run. Verifizieren Sie archived oder transferred evidence, bevor Sie sich darauf verlassen. Eine verification error bedeutet, dass das directory nicht mehr exakt dem sealed inventory entspricht; sie ist kein Beweis für bösartige Aktivität. Müssen nach dem Seal weitere artifacts erzeugt werden, erstellen Sie diese zuerst und versiegeln Sie anschließend eine neue finalized copy, statt das ursprüngliche Manifest still zu überschreiben.
+Root, sudo-berechtigte Agents sowie alle Prozesse mit Schreibzugriff auf das Ausgabeverzeichnis können Aufzeichnungen und Manifest gemeinsam ändern. Betriebssystemrechte und Prozessisolation sind erforderlich; ein anderer Pfad mit denselben Rechten ist keine Isolation.
 
-## Optionale externe Digest-Veröffentlichung
+<!-- ew:compat:no-downgrade -->
 
-Eine lokale Versiegelung bleibt zunächst **unanchored**. Nach Ende des beobachteten Programms kann der Manifest-Digest in einer unabhängig verwalteten GitHub Issue veröffentlicht werden. Setzen Sie `EXECWEAVE_INTEGRITY_GITHUB_TOKEN` ausschließlich für diesen Vorgang, niemals in der Agent-Umgebung; verwenden Sie `execweave-integrity seal RUN_DIR --anchor-github OWNER/REPO#ISSUE`. Nach einem Übertragungsfehler bleibt die lokale Versiegelung bestehen, aber unankert. Ein erneuter Versuch erfolgt über `execweave-integrity anchor RUN_DIR --github-target OWNER/REPO#ISSUE`. Es werden keine Prompts, Dateien oder lokalen Pfade übertragen.
+**Das Downgrade des Readers von v0.8.35+ auf v0.8.34 wird nicht unterstützt.** Der ältere Reader kann `observation_assessment` unbemerkt verwerfen und Beobachtungen irreführend darstellen. Nur Schlussfolgerungen von Readern ab v0.8.35 sind maßgeblich. Ein Recorder-Rollback rechtfertigt keinen Reader-Rollback.
 
-Der Zustand `submitted_not_independently_verified` belegt nur eine bestätigte Veröffentlichung, keine unabhängige Prüfung. Ein Prüfer muss den Kommentar aus einem vom beobachteten Programm nicht beschreibbaren Vertrauensbereich abrufen und den Digest mit `execweave-integrity verify --expected-manifest-body-sha256 DIGEST` vergleichen. Ohne diese Berechtigungsgrenze ist kein unabhängiger Vertrauensanker gegeben.
-
-## Empfohlener Schutz im normalen Betrieb
-
-Speichern Sie aufgezeichnete Nachweise in einem Verzeichnis oder einer abgeschlossenen Kopie, die der beobachtete Agent **nicht verändern kann**. Verwenden Sie dafür ein separates Benutzerkonto mit eingeschränkten Rechten oder eine Sandbox mit tatsächlicher Schreibsperre; ein anderer Pfad bei unveränderten Schreibrechten ist keine Isolation. Aufzeichnungsspeicher und Prüfanmeldedaten müssen außerhalb des Zugriffsbereichs des beobachteten Prozesses liegen. Versiegeln Sie nach Abschluss der Aufzeichnung und prüfen Sie von einem vertrauenswürdigen Prozess aus.
-
-Die externe GitHub-Veröffentlichung (`--anchor-github`) ist **optional** und für die normale lokale Integritätsprüfung nicht erforderlich. Ohne unabhängig verwaltetes Ziel ist sie kein geschützter externer Anker. Stimmt ein extern bereitgestellter Manifest-Digest überein, schlagen aber die Prüfungen der versiegelten Dateien fehl, gibt `verify` `external_digest_match_local_integrity_failed` sowie einen Fehlercode aus: **Das Manifest stimmt überein, nicht die Dateien des Laufs.**
+Nur abgeschlossene Runs versiegeln und vor Nutzung archivierter Daten prüfen. Eine fehlgeschlagene Prüfung beweist eine lokale Inkonsistenz, nicht automatisch einen Angriff. Das Tool lädt weder Daten noch Digests hoch und schafft keine unabhängige Berechtigungsgrenze.
