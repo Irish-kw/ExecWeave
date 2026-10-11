@@ -618,7 +618,7 @@ def test_external_integrity_anchor_must_match_out_of_band_digest(tmp_path: Path)
     first_digest = seal_run_integrity(run)["manifest_body_sha256"]
 
     assert verify_run_integrity(run).valid is True
-    write_private_text(run / "evidence.txt", "rewritten")
+    write_private_text(run / "evidence.txt", "rewritten", replace=True)
     unsealed_change = verify_run_integrity(run)
     assert unsealed_change.valid is False
     assert any("mismatch for evidence.txt" in error for error in unsealed_change.errors)
