@@ -28,6 +28,7 @@ from .cursor_lifecycle import (
 from .filesystem import FileWatcher
 from .privacy import content_capture_policy
 from .schema import Entity, RuntimeEvent
+from .command_privacy import public_command
 from .sink import JsonlSink
 from .risk import privilege_process_trigger, risk_attributes
 
@@ -55,7 +56,8 @@ class ProcessSnapshot:
             attributes={
                 "pid": self.pid,
                 "ppid": self.ppid,
-                "cmdline": self.cmdline,
+                "cmdline": public_command(self.cmdline),
+                "argv_redacted": True,
                 "exe": self.exe,
                 "create_time": self.create_time,
             },
@@ -189,7 +191,8 @@ class RuntimeCollector:
             id=f"session:{self.session_id}",
             name=self.session_id,
             attributes={
-                "command": command,
+                "command": public_command(command),
+                "argv_redacted": True,
                 "cwd": str(self.watch_root),
                 "backend": self.backend_name,
                 "execweave_version": __version__,
