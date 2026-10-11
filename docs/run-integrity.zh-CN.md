@@ -56,3 +56,9 @@ local digest 可用于检测 accidental corruption、不完整复制，或相对
 本地 seal 默认处于 **unanchored（未锚定）** 状态。观测结束后，可将 manifest 摘要发送到独立账户控制的 GitHub Issue。仅在 seal 进程中设置 `EXECWEAVE_INTEGRITY_GITHUB_TOKEN`，不要交给被观测 Agent；使用 `execweave-integrity seal RUN_DIR --anchor-github OWNER/REPO#ISSUE`。失败后本地封存仍存在且未锚定，可运行 `execweave-integrity anchor RUN_DIR --github-target OWNER/REPO#ISSUE` 重试。仅传摘要，不发送原始事件、Prompt、文件内容或本地路径。
 
 `submitted_not_independently_verified` 仅表示接收端确认提交，并非独立验证。审查者须从被观测程序无法修改的外部系统取得摘要，再用 `execweave-integrity verify --expected-manifest-body-sha256 DIGEST` 校验。没有独立的权限边界，就不能称为可信外部锚点。
+
+## 日常使用建议
+
+请将录制证据保存在被监控 Agent **无法修改**的目录中，或在录制结束后移至受保护的归档副本。可以使用权限隔离的用户账户或真正限制写入的沙箱；仅更换目录，但仍允许 Agent 写入，并不构成隔离。记录存储和验证凭证应位于被监控进程无法写入或读取的权限范围之外。录制结束后再执行 seal，并由可信进程 verify。
+
+GitHub 外部摘要提交（`--anchor-github`）是**可选功能**，不是普通本地完整性检查的必要条件。没有独立控制的外部位置，就不能声称摘要已受到外部保护。如果外部提供的 manifest 摘要匹配，但本地封存文件验证失败，`verify` 会报告 `external_digest_match_local_integrity_failed` 并返回失败代码：**匹配的只是 manifest 摘要，并不代表文件完整。**

@@ -56,3 +56,9 @@ local digest는 accidental corruption, 불완전한 copy, seal 시점 이후의 
 로컬 seal은 기본적으로 **unanchored** 상태입니다. 관측 대상 작업이 끝난 뒤, 별도로 관리되는 GitHub Issue에 manifest 해시만 게시할 수 있습니다. `EXECWEAVE_INTEGRITY_GITHUB_TOKEN`은 seal 명령을 실행할 때에만 설정하고 관측 Agent에게 전달하지 마세요. `execweave-integrity seal RUN_DIR --anchor-github OWNER/REPO#ISSUE`를 사용합니다. 전송 실패 시 로컬 seal은 유지되며 `execweave-integrity anchor RUN_DIR --github-target OWNER/REPO#ISSUE`로 재시도할 수 있습니다. 원본 이벤트, Prompt, 파일 내용 및 로컬 경로는 보내지 않습니다.
 
 `submitted_not_independently_verified`는 전송 확인일 뿐 독립 검증을 의미하지 않습니다. 관측 프로세스가 수정할 수 없는 별도의 신뢰 영역에서 검토자가 게시물을 다시 읽고 `execweave-integrity verify --expected-manifest-body-sha256 DIGEST`로 확인해야 합니다. 권한 격리가 없다면 외부 신뢰 앵커로 간주할 수 없습니다.
+
+## 일반 사용 시 권장 보호 방법
+
+기록한 증거는 관측 대상 Agent가 **수정할 수 없는** 디렉터리 또는 기록이 끝난 뒤 보호된 사본에 보관하세요. 별도의 권한이 낮은 사용자 계정이나 쓰기 권한이 제한된 sandbox를 사용해야 합니다. 동일한 쓰기 권한을 유지하면서 경로만 바꾸는 것은 격리가 아닙니다. 기록 저장소와 검증 자격 증명은 관측 대상 프로세스가 수정하거나 읽을 수 없는 영역에 두세요. 기록이 종료된 뒤 seal하고 신뢰할 수 있는 프로세스에서 verify하세요.
+
+GitHub 외부 다이제스트 게시(`--anchor-github`)는 **선택 기능**이며 일반적인 로컬 무결성 검사에 필수 사항이 아닙니다. 독립적으로 관리되는 저장 대상이 없다면 보호된 외부 앵커라고 주장할 수 없습니다. 외부에서 받은 manifest 다이제스트가 일치하지만 로컬 파일 검증이 실패하면 `verify`는 `external_digest_match_local_integrity_failed` 상태와 실패 코드를 반환합니다. **일치한 것은 manifest 다이제스트이지 파일 무결성이 아닙니다.**

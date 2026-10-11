@@ -103,9 +103,14 @@ def main(argv: list[str] | None = None) -> int:
         expected_manifest_body_sha256=args.expected_manifest_body_sha256,
     )
     report = result.to_dict()
+    # A matching external digest authenticates the manifest body only.
+    # Never imply that the sealed files are intact when local checks failed.
     report["external_anchor_state"] = (
         "unanchored" if not result.external_anchor_checked
-        else "external_digest_match" if result.external_anchor_match is True
+        else (
+            "external_digest_match"
+            if result.valid else "external_digest_match_local_integrity_failed"
+        ) if result.external_anchor_match is True
         else "external_digest_mismatch_or_invalid"
     )
     # Local consistency verification is not proof against a malicious writer.

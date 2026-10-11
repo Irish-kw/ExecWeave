@@ -60,3 +60,9 @@ local digest 適合偵測 accidental corruption、不完整複製，或相對於
 本機 seal 預設為 **unanchored（未錨定）**。在被觀察的工作結束後，可以把 manifest 摘要提交到由其他帳號／權限獨立管理的 GitHub Issue。只在執行 seal 的程序設定 `EXECWEAVE_INTEGRITY_GITHUB_TOKEN`（不可傳入被觀察 Agent 的環境），再執行 `execweave-integrity seal RUN_DIR --anchor-github OWNER/REPO#ISSUE`。若網路提交失敗，本機封存仍存在但未錨定，可用 `execweave-integrity anchor RUN_DIR --github-target OWNER/REPO#ISSUE` 重新提交。系統只傳摘要，不傳原始事件、Prompt、檔案內容或本機路徑。
 
 `submitted_not_independently_verified` 只代表外部服務回報已接收，**不等於獨立驗證**。審查者必須透過被觀察 Agent 無權修改的信任來源重新取得摘要，並使用 `execweave-integrity verify --expected-manifest-body-sha256 DIGEST` 比對。若無法確立權限隔離，就不能稱為外部可信錨點。
+
+## 一般使用的建議防護方式
+
+請將錄製證據存放在受監控 Agent **無法修改**的目錄，或在錄製結束後移至受保護的封存副本。可以使用權限分離的使用者帳號或真正限制寫入的沙箱；只換資料夾名稱，但仍允許同一個 Agent 寫入，不構成隔離。記錄檔儲存位置與驗證憑證應位於受監控程序無法寫入或取得的範圍。錄製結束後才進行 seal，並由可信任的程序 verify。
+
+GitHub 外部摘要提交（`--anchor-github`）屬於**選用功能**，不是一般本機完整性檢查的必要條件。若沒有獨立控制的外部位置，就不能聲稱摘要受到外部保護。如果外部提供的 manifest 摘要相符，但本機封存檔案的驗證失敗，`verify` 會回報 `external_digest_match_local_integrity_failed` 並以失敗碼結束：**相符的是 manifest 摘要，不代表檔案完整。**

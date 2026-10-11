@@ -56,3 +56,9 @@ local digest は accidental corruption、不完全な copy、seal 時点から�
 ローカル seal はデフォルトで **unanchored** です。観測対象の処理が終了した後、別の権限で管理する GitHub Issue に manifest のハッシュのみ送信できます。`EXECWEAVE_INTEGRITY_GITHUB_TOKEN` は seal を実行するプロセスだけに設定し、観測対象の Agent には渡さないでください。`execweave-integrity seal RUN_DIR --anchor-github OWNER/REPO#ISSUE` を使用します。送信失敗時もローカル封印は保持され、`execweave-integrity anchor RUN_DIR --github-target OWNER/REPO#ISSUE` で再試行できます。元のイベントや Prompt、ファイル内容は送信しません。
 
 `submitted_not_independently_verified` は送信応答であり、独立検証ではありません。観測対象が変更できない信頼領域から別の検証者がコメントを取得し、`execweave-integrity verify --expected-manifest-body-sha256 DIGEST` で照合する必要があります。権限分離がなければ信頼できる外部アンカーとは呼べません。
+
+## 通常利用で推奨する保護方法
+
+記録した証拠は、観測対象の Agent が**変更できない**ディレクトリ、または実行後に保護されたコピーへ保存してください。権限の異なるユーザーや書き込み範囲を制限した sandbox を使用してください。同じ書き込み権限のまま保存先パスだけ変更しても分離にはなりません。記録保存領域と検証用の認証情報は、観測対象プロセスから書き込み・取得できないようにしてください。記録完了後に seal し、信頼できるプロセスから verify します。
+
+GitHub への外部ダイジェスト送信（`--anchor-github`）は**任意**で、通常のローカル完全性検証には必須ではありません。独立管理された保存先がなければ、外部で保護されたアンカーとは呼べません。外部から与えた manifest のダイジェストが一致していてもローカルファイルの検証に失敗した場合、`verify` は `external_digest_match_local_integrity_failed` を返して失敗します。**一致したのは manifest のダイジェストだけであり、ファイルの完全性ではありません。**
