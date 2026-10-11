@@ -15,7 +15,8 @@ from .auto_specialized import auto_specialized_launch
 from .collector import infer_agent_name
 from .command_privacy import public_command
 from .schema import Entity, RuntimeEvent
-from .sink import JsonlSink
+from .private_io import write_private_text
+from .sink import JsonlSink, _protect_git_run_directory
 
 _TIMESTAMP_RE = re.compile(r"^(?P<ts>\d+(?:\.\d+)?)\s+(?P<body>.*)$")
 _SYSCALL_RE = re.compile(r"^(?P<name>[a-zA-Z0-9_]+)\((?P<args>.*)\)\s+=\s+(?P<result>.*)$")
@@ -619,7 +620,20 @@ class StraceRuntimeCollector:
         if not sys.platform.startswith("linux") or executable is None:
             raise RuntimeError("The strace backend requires Linux and the strace executable")
 
-        self.trace_root.mkdir(parents=True, exist_ok=True)
+        # Native syscall traces can include entire execve argv and are much more
+        # sensitive than projected event/graph evidence. Protect the dedicated
+        # directory even when the caller sends graph output elsewhere.
+        self.trace_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        self.trace_root.chmod(0o700)
+        _protect_git_run_directory(self.trace_root / "trace")
+        raw_ignore = self.trace_root / ".gitignore"
+        try:
+            write_private_text(raw_ignore, "*\\n")
+        except FileExistsError:
+            # A custom ignore file that does not protect the raw trace is
+            # insufficient: fail closed rather than retaining stageable argv.
+            if raw_ignore.read_text(encoding="utf-8") != "*\\n":
+                raise ValueError("native strace directory must ignore all raw traces")
         trace_prefix = self.trace_root / "trace"
         agent_name = infer_agent_name(command)
         agent = Entity(type="agent", id=f"agent:{agent_name}", name=agent_name)
@@ -676,6 +690,7 @@ class StraceRuntimeCollector:
                     cwd=str(self.watch_root),
                     env=launch_environment,
                     check=False,
+                    umask=0o077,  # strace creates raw trace files mode 0600
                 )
             return_code = int(completed.returncode)
             records = read_trace_records(self.trace_root)
