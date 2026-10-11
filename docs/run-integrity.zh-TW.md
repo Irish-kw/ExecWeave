@@ -26,11 +26,7 @@ seal 應只在 capture 與所有需要的 derived artifacts 都完成後執行�
 ```text
 execweave-integrity seal .execweave/runs/<run-id>
 execweave-integrity verify .execweave/runs/<run-id>
-execweave-integrity verify .execweave/runs/<run-id> \
-  --expected-manifest-body-sha256 <存放在-run-之外的-digest>
 ```
-
-這個 expected digest 只有在其值真的來自 observed process 無法改寫的 trust domain 時才有外部錨點意義。比對成功會把 verifier 的 external-anchor check 標為 true，但不會反過來把 run 目錄內的 manifest 宣稱成 external anchor。
 
 `seal` 不會覆寫已存在的 integrity contract。`verify` 只有在 manifest schema 合法、manifest body digest 相符、每個 sealed file 的 size 與 SHA-256 都符合，而且 seal 後沒有額外 regular file 出現時才回傳成功。
 
@@ -43,26 +39,19 @@ execweave-integrity verify .execweave/runs/<run-id> \
 | `manifest_body_sha256` | 排除本 digest 欄位後，canonical manifest content 的 SHA-256。 |
 | `trust_model` | 明確陳述此 local seal 能證明與不能證明的內容。 |
 
-manifest 固定記錄 `malicious_writer_resistance: false` 與 `external_trust_anchor: false`。這些不是可省略的文件措辭，而是 schema contract 的一部分。
 
-## Trust boundary
+## 僅限本機的一致性與信任界限
 
-local digest 適合偵測 accidental corruption、不完整複製，或相對於 seal 時刻發生的 post-seal changes。但它無法阻止同時能改寫 run evidence 與 `integrity.json` 的 process；該 process 可以重新計算 hashes，建立一份新的、內部仍一致的 manifest。
+<!-- ew:trust:local-only -->
 
-若需要更強保證，請把 `manifest_body_sha256` 或完整 manifest 複製到 observed process 無法寫入的位置，或使用該 process 無法取得的 key 進行保護／簽章。真正的 trust anchor 來自這個外部動作；ExecWeave 不宣稱同目錄 manifest 本身能建立 trust anchor。
+本機 `seal` / `verify` 可偵測意外損壞，以及沒有重新封存的事後修改。**如果寫入者能改寫執行證據及 `integrity.json`，就能重新計算雜湊並重新 seal。** `valid: true` 只表示本機一致性，不等於具防竄改保證的稽核。
 
-## 操作規則
+<!-- ew:trust:privileged -->
 
-只對已完成的 run 執行 seal。在依賴 archived 或 transferred evidence 前先 verify。任何 verification error 都代表目錄已不再精確符合 sealed inventory，不代表已證明存在惡意行為。若 seal 後仍需產生新 artifact，應先完成那些 artifact，再對新的 finalized copy 執行 seal，而不是靜默重寫原 manifest。
+具有 root、sudo 權限的 Agent，或任何可寫入輸出目錄的程序，都可能同時改寫事件與 manifest。應使用作業系統權限與程序隔離保護資料；只換路徑但保留同樣寫入權限並不構成隔離。
 
-## 選用的外部摘要提交
+<!-- ew:compat:no-downgrade -->
 
-本機 seal 預設為 **unanchored（未錨定）**。在被觀察的工作結束後，可以把 manifest 摘要提交到由其他帳號／權限獨立管理的 GitHub Issue。只在執行 seal 的程序設定 `EXECWEAVE_INTEGRITY_GITHUB_TOKEN`（不可傳入被觀察 Agent 的環境），再執行 `execweave-integrity seal RUN_DIR --anchor-github OWNER/REPO#ISSUE`。若網路提交失敗，本機封存仍存在但未錨定，可用 `execweave-integrity anchor RUN_DIR --github-target OWNER/REPO#ISSUE` 重新提交。系統只傳摘要，不傳原始事件、Prompt、檔案內容或本機路徑。
+**不支援使用 v0.8.34 reader 降級讀取 v0.8.35 以上的紀錄。** 舊版可能無警告地捨棄 `observation_assessment`，並錯誤呈現觀測完整性。只有 v0.8.35 以上的 reader 結論才可信。回滾 recorder 不代表可回滾 reader。
 
-`submitted_not_independently_verified` 只代表外部服務回報已接收，**不等於獨立驗證**。審查者必須透過被觀察 Agent 無權修改的信任來源重新取得摘要，並使用 `execweave-integrity verify --expected-manifest-body-sha256 DIGEST` 比對。若無法確立權限隔離，就不能稱為外部可信錨點。
-
-## 一般使用的建議防護方式
-
-請將錄製證據存放在受監控 Agent **無法修改**的目錄，或在錄製結束後移至受保護的封存副本。可以使用權限分離的使用者帳號或真正限制寫入的沙箱；只換資料夾名稱，但仍允許同一個 Agent 寫入，不構成隔離。記錄檔儲存位置與驗證憑證應位於受監控程序無法寫入或取得的範圍。錄製結束後才進行 seal，並由可信任的程序 verify。
-
-GitHub 外部摘要提交（`--anchor-github`）屬於**選用功能**，不是一般本機完整性檢查的必要條件。若沒有獨立控制的外部位置，就不能聲稱摘要受到外部保護。如果外部提供的 manifest 摘要相符，但本機封存檔案的驗證失敗，`verify` 會回報 `external_digest_match_local_integrity_failed` 並以失敗碼結束：**相符的是 manifest 摘要，不代表檔案完整。**
+只對完成的 run 執行 seal，使用封存證據前先 verify。驗證失敗只代表本機資料不一致，並非直接證明惡意操作。本工具不會自動上傳執行資料或摘要，也不提供獨立的權限邊界。
