@@ -152,18 +152,78 @@ def test_browser_response_preview_prompt_and_unambiguous_handoff(
         finally:
             browser.close()
 
-@pytest.mark.parametrize("locale", [
-    "README.md", "README.zh-TW.md", "README.de.md", "README.fr.md",
-    "README.ja.md", "README.ko.md", "README.ru.md", "README.zh-CN.md",
-])
+
+# Locale-specific, security-critical statements are intentionally checked as
+# translated text. Token-only checks cannot detect a deleted trust-boundary
+# warning or an English fallback substituted into a translated README.
+_ISSUE110_LOCALE_CLAIMS = {
+    "README.md": (
+        "`execution_state=succeeded` is not the same as complete observation.",
+        "**Configured does not mean evidence was delivered.**",
+        "The live dashboard no longer puts its API credential in `?t=...`.",
+    ),
+    "README.zh-TW.md": (
+        "`execution_state=succeeded` 不代表完整觀測，也不等於經過獨立任務驗證。",
+        "**完成設定不等於已送出證據**",
+        "Live dashboard 不再把 API credential 放進 `?t=...`。",
+    ),
+    "README.de.md": (
+        "`execution_state=succeeded` beweist weder eine vollständige Beobachtung noch eine unabhängige Aufgabenvalidierung.",
+        "**Konfiguriert bedeutet nicht, dass Beobachtungsdaten eingegangen sind.**",
+        "Das Live-Dashboard überträgt keine API-Zugangsdaten mehr über `?t=...`.",
+    ),
+    "README.fr.md": (
+        "`execution_state=succeeded` ne prouve ni une observation complète ni une validation indépendante de la tâche.",
+        "**Un hook configuré ne prouve pas la réception des preuves.**",
+        "Le dashboard Live ne place plus d’identifiant API dans `?t=...`.",
+    ),
+    "README.ja.md": (
+        "`execution_state=succeeded` は観測の完全性やタスクの独立した検証を証明しません。",
+        "**設定済みであることは証拠が届いたことを意味しません。**",
+        "Live dashboard の URL に API credential を `?t=...` として含めることはありません。",
+    ),
+    "README.ko.md": (
+        "`execution_state=succeeded`는 관측의 완전성이나 작업의 독립적인 검증을 의미하지 않습니다.",
+        "**구성 완료가 증거 전달을 의미하지는 않습니다.**",
+        "Live dashboard URL에는 더 이상 API credential이 `?t=...` 형태로 포함되지 않습니다.",
+    ),
+    "README.ru.md": (
+        "`execution_state=succeeded` не доказывает полноту наблюдения или независимую проверку задачи.",
+        "**Настроенный hook не доказывает получение данных наблюдения.**",
+        "Live dashboard больше не передаёт API credential через `?t=...`.",
+    ),
+    "README.zh-CN.md": (
+        "`execution_state=succeeded` 不代表观察完整，也不等于经过独立的任务验证。",
+        "**完成配置不等于已收到证据。**",
+        "Live dashboard 不再将 API credential 放在 `?t=...` 中。",
+    ),
+}
+
+
+@pytest.mark.parametrize("locale", sorted(_ISSUE110_LOCALE_CLAIMS))
 def test_issue110_readme_provider_privacy_parity(locale: str) -> None:
-    """Do not silently drop security/observation guidance from translations."""
+    """Catch security-guide omissions and untranslated fallback across locales."""
     readme = (Path(__file__).resolve().parents[1] / locale).read_text(encoding="utf-8")
-    assert readme.count("execweave live --open -- codex") == 1
-    assert "docs/observation-integrity.md" in readme
-    for required in ("--metadata-only", "--capture-content", "X-ExecWeave-Token",
-                     "SameSite=Strict", "0.8.35",
-                     "execweave hooks install antigravity",
-                     "execweave hooks status antigravity"):
+    assert readme.count("execweave live --open -- codex") == 1, locale
+    for claim in _ISSUE110_LOCALE_CLAIMS[locale]:
+        assert claim in readme, (locale, claim)
+    for required in (
+        "docs/observation-integrity.md",
+        "--metadata-only",
+        "--capture-content",
+        "X-ExecWeave-Token",
+        "HttpOnly; SameSite=Strict",
+        "0.8.35",
+        "execweave hooks install antigravity",
+        "execweave hooks status antigravity",
+    ):
         assert required in readme, (locale, required)
-    assert "execution_state=succeeded does not prove observation completeness" not in readme
+
+    # The original unlocalized sentence includes Markdown code spans.
+    # Match the actual bytes so this guard cannot silently miss it again.
+    if locale not in ("README.md", "README.zh-TW.md"):
+        assert (
+            "`observation-negative/graph.json` and `finalization.json`: "
+            "`execution_state=succeeded` does not prove observation "
+            "completeness or task validation."
+        ) not in readme, locale
