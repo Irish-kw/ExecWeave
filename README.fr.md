@@ -360,3 +360,7 @@ Paper context: Li et al., *CAMEL: Communicative Agents for "Mind" Exploration of
 from execweave.framework_adapters import AdapterContext, CAMELAdapter
 adapter = CAMELAdapter(AdapterContext.from_environment("camel"))
 ```
+
+## Python personnalisé avec une clé API OpenAI
+
+Lancez `execweave record -- python my_agent.py` ou `execweave live --open -- python my_agent.py` pour observer l'exécution. Pour **enregistrer les appels modèle et transferts entre un ou plusieurs agents**, enveloppez le SDK officiel dans `OpenAIAgentRecorder` et déclarez explicitement les envois et réceptions. L'adaptateur ne lit pas la clé API et ne déduit pas les rôles d'une connexion HTTPS. Voir le [guide Python OpenAI](docs/openai-python.md).
