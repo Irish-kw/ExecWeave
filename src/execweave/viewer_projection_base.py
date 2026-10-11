@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .graph_ops import load_graph
+from .hook_command import _MODULES as _INSTALLED_HOOK_MODULES
 from .private_io import private_artifact_path, write_private_text
 from .viewer import (
     VIEWER_MAX_DOM_ELEMENTS as VIEWER_MAX_DOM_ELEMENTS,
@@ -25,7 +26,6 @@ from .viewer_content_inspector import (
 EPHEMERAL_PORT_MIN = 49152
 LOOPBACK_CLUSTER_THRESHOLD = 4
 _PROJECTION_SCHEMA_VERSION = "0.1"
-from .hook_command import _MODULES as _INSTALLED_HOOK_MODULES
 
 _INTERNAL_HOOK_TOKENS = (
     "execweave-claude-hook",
