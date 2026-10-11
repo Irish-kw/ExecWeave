@@ -291,7 +291,7 @@ jobs:
           # and pin the exact migrated test-file blob, without disabling Stage Integrity.
           if [[ "$HEAD_REF" == "fix/issue110-observation-diagnostics" ]]; then
             fixture="tests/test_release_hardening_0835.py"
-            if [[ "$(git hash-object --no-filters "$fixture")" != "78c94f6efe324155c9fea9cc9f65ed4d8968dfb1" ]]; then
+            if [[ "$(git hash-object --no-filters "$fixture")" != "421e25fbd55a601fdbab0bd54becd7edf322f7c1" ]]; then
               echo "Unexpected #125 historical test migration change; inspect the full diff." >&2
               exit 1
             fi
