@@ -226,8 +226,8 @@ def test_native_trace_directory_is_private_and_git_ignored_with_custom_output(
         keep_raw_trace=True,
     )
     collector._prepare_trace_directory()
-    assert (project / ".execweave" / ".gitignore").read_bytes() == b"*\\n"
-    assert (trace_dir / ".gitignore").read_bytes() == b"*\\n"
+    assert (project / ".execweave" / ".gitignore").read_bytes() == b"*\n"
+    assert (trace_dir / ".gitignore").read_bytes() == b"*\n"
     if os.name != "nt":
         assert stat.S_IMODE(trace_dir.stat().st_mode) == 0o700
     # Mimic a native trace containing full argv; ordinary git add must not stage it.
@@ -248,7 +248,7 @@ def test_native_trace_directory_is_private_and_git_ignored_with_custom_output(
 def test_native_trace_with_existing_unsafe_gitignore_fails_closed(tmp_path: Path) -> None:
     trace_dir = tmp_path / ".execweave" / "traces" / "s"
     trace_dir.mkdir(parents=True)
-    (trace_dir / ".gitignore").write_text("# does not ignore argv traces\\n")
+    (trace_dir / ".gitignore").write_text("# does not ignore argv traces\n")
     collector = StraceRuntimeCollector(
         session_id="s",
         sink=JsonlSink(tmp_path / "custom-output" / "events.jsonl"),
