@@ -25,6 +25,8 @@ from .viewer_content_inspector import (
 EPHEMERAL_PORT_MIN = 49152
 LOOPBACK_CLUSTER_THRESHOLD = 4
 _PROJECTION_SCHEMA_VERSION = "0.1"
+from .hook_command import _MODULES as _INSTALLED_HOOK_MODULES
+
 _INTERNAL_HOOK_TOKENS = (
     "execweave-claude-hook",
     "execweave-codex-hook",
@@ -129,9 +131,12 @@ def _is_internal_hook_process(entity: dict[str, Any]) -> bool:
                 break
         if basename in _INTERNAL_HOOK_TOKENS:
             return True
+        # Linux's 15-byte comm value may truncate native hook executables.
+        # Do not treat a truncated process name alone as proof of ownership.
 
     text = _entity_hook_text(entity)
-    return "--auto" in text and any(token in text for token in _INTERNAL_HOOK_TOKENS)
+    markers = (*_INTERNAL_HOOK_TOKENS, *_INSTALLED_HOOK_MODULES.values())
+    return "--auto" in text and any(token in text for token in markers)
 
 
 def internal_hook_process_ids_in_event(event: dict[str, object]) -> set[str]:
