@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 from pathlib import Path
 
 from execweave.framework_adapters import AdapterContext, CAMELAdapter, ContentCapturePolicy
@@ -56,7 +58,8 @@ def test_strace_exec_labels_pid_without_saving_arguments(tmp_path: Path) -> None
     assert "DO_NOT_STORE" not in raw
     events = [json.loads(line) for line in raw.splitlines()]
     exec_event = next(e for e in events if e["event_type"] == "process.exec")
-    assert exec_event["source"]["name"] == "python3 · 66"
+    assert exec_event["source"]["name"].startswith("python3")
+    assert exec_event["source"]["name"].endswith(" · 66")
     assert exec_event["attributes"]["argument_count"] == 3
     assert next(e for e in events if e["event_type"] == "process.exited")["attributes"]["exit_code"] == 3
 
@@ -72,6 +75,20 @@ def test_git_ignore_is_created_only_for_execweave_directory(tmp_path: Path) -> N
     existing.write_text("# custom\n", encoding="utf-8")
     JsonlSink(tmp_path / ".execweave" / "runs" / "two" / "events.jsonl")
     assert existing.read_text(encoding="utf-8") == "# custom\n"
+
+    if shutil.which("git"):
+        # A valid .gitignore must prevent ordinary accidental staging.
+        project = tmp_path / "git-project"
+        project.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=project, check=True)
+        private = project / ".execweave" / "runs" / "one" / "events.jsonl"
+        JsonlSink(private)
+        private.write_text("TOP_SECRET_PROMPT", encoding="utf-8")
+        subprocess.run(["git", "add", "-A"], cwd=project, check=True)
+        staged = subprocess.run(["git", "ls-files"], cwd=project,
+                                check=True, capture_output=True, text=True).stdout
+        assert ".execweave/runs/" not in staged
+
 
 
 def test_custom_framework_canonical_occurrences_are_indexed(tmp_path: Path) -> None:
@@ -94,6 +111,16 @@ def test_custom_framework_canonical_occurrences_are_indexed(tmp_path: Path) -> N
                for row in report["messages"])
     assert report["inspection"]["invalid_records"] == 0
 
+
+
+def test_root_command_redaction_avoids_api_key_arguments() -> None:
+    from execweave.command_privacy import public_command
+
+    assert public_command(["python", "user_agent.py", "--token", "ARGV-SECRET"]) == [
+        "python", "user_agent.py",
+    ]
+    assert public_command(["python", "-c", "print('SENSITIVE')"]) == ["python"]
+    assert public_command(["/venv/bin/python3", "my.py", "APIKEY"]) == ["python3", "my.py"]
 
 def test_handoff_reapplied_after_viewer_redraw() -> None:
     assert "new MutationObserver(schedule)" in RUN_ASSESSMENT_JS
