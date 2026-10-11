@@ -147,6 +147,9 @@ class StraceParser:
             },
         )
         self._known_processes: set[int] = set()
+        # Derive only the executable basename from execve; do not persist argv,
+        # which may contain passwords or tokens in ordinary agent commands.
+        self._executable_by_pid: dict[int, str] = {}
         self._cwd_by_pid: dict[int, Path] = {}
         self._parent_by_pid: dict[int, int] = {}
 
@@ -154,7 +157,8 @@ class StraceParser:
         return Entity(
             type="process",
             id=f"process:{self.session_id}:{pid}",
-            name=str(pid),
+            name=(f"{self._executable_by_pid[pid]} · {pid}"
+                  if pid in self._executable_by_pid else str(pid)),
             attributes={
                 "pid": pid,
                 "identity_scope": "session",
@@ -302,6 +306,7 @@ class StraceParser:
             return
         executable = quoted[0]
         target_path = self._resolve_path(record.pid, executable)
+        self._executable_by_pid[record.pid] = target_path.name
         target = Entity(
             type="executable",
             id=f"executable:{target_path}",
