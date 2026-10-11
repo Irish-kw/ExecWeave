@@ -30,7 +30,7 @@ function card(key,title,state,label,description){
   n.append(make('h3',title),make('strong',label),make('p',description));panel.append(n);return n;
 }
 const handoffHost=make('section');
-handoffHost.id='execweave-handoff-alerts';handoffHost.setAttribute('aria-label','Unconfirmed agent handoffs');
+handoffHost.id='execweave-handoff-alerts';handoffHost.setAttribute('aria-label','Observed process exit warnings and unconfirmed agent handoffs');
 // Mount within the graph panel so the alert occupies the first viewport
 // instead of becoming an auto-placed bottom row in the #app grid.
 const graphPanel=document.getElementById('graph-panel');
