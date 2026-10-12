@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.8.36 — handoff diagnostics and local-only integrity
+## Unreleased — issue #122 follow-up (candidate; not published)
 
 - Added explicit recipient-specific **receive not observed** diagnostics and a prominent Dashboard alert. Missing receive telemetry remains observation uncertainty, not proof of message delivery failure.
 - Removed the external GitHub integrity publication and expected-digest verification features by owner decision. `execweave-integrity seal` and `verify` now perform **local consistency checks only**. A writer with permission to rewrite and re-seal the run can defeat these checks. Both continue to return machine-readable JSON and the historical local exit-code contract.
