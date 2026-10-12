@@ -141,11 +141,12 @@ def _scan(root: Path, names: list[str], session: str | None,
                         report["invalid_records"] += 1
                         continue
                     framework = _id(a.get("framework")) or _id(_obj(source.get("attributes")).get("framework"))
-                    # Only the framework SDK emits these canonical event names.
-                    # Provider-native events remain available through the existing inspector.
-                    if framework not in {"camel", "autogen", "metagpt"}:
+                    # Canonical SDK events may declare user-defined framework names.
+                    # Trust the native event/participant/scope checks above rather than
+                    # a product-specific enum that rejects otherwise valid handoffs.
+                    if framework is None:
                         report["invalid_records"] += 1
-                        diagnostic("unsupported_canonical_emitter", name)
+                        diagnostic("missing_canonical_emitter", name)
                         continue
                     kind, state, native_key = phase
                     native_id = _id(a.get(native_key))

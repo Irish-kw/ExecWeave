@@ -127,11 +127,12 @@ provider run must be used where the verifier can guarantee that the provider can
 into privileged/system paths; an unsafe passwordless-sudo host remains BLOCKED rather than
 being treated as a passing test.
 
-The local `integrity.json` still truthfully declares `external_trust_anchor: false`.
-`execweave-integrity verify --expected-manifest-body-sha256 <digest>` can compare against a
-digest supplied from an external trust domain, but the digest only becomes an anchor when
-it is actually stored somewhere the observed process cannot rewrite (for example a CI or
-review record controlled outside the run). A same-UID home file is not such a boundary.
+The local `integrity.json` still truthfully declares the inert compatibility field
+`external_trust_anchor: false`. The external digest anchor and its CLI options have been
+removed by the owner decision in #125. `execweave-integrity seal` and `verify` check
+local consistency only: if a process can rewrite the evidence and `integrity.json`, including
+one with write permissions or root/sudo access, it can recompute the hashes and re-seal.
+A successful local `verify` is not proof of malicious-writer resistance.
 
 File-reader upgrade/rollback behavior and incomplete/environment-failure archives now have
 regression coverage. Hard-kill behavior still cannot be represented as a successful

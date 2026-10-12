@@ -26,11 +26,7 @@ The seal is intended to run only after capture and all desired derived artifacts
 ```text
 execweave-integrity seal .execweave/runs/<run-id>
 execweave-integrity verify .execweave/runs/<run-id>
-execweave-integrity verify .execweave/runs/<run-id> \
-  --expected-manifest-body-sha256 <digest-stored-outside-the-run>
 ```
-
-The optional expected digest is meaningful only when its value comes from a trust domain the observed process cannot rewrite. A match sets the verifier's external-anchor check to true; it does not retroactively make the in-directory manifest itself an external anchor.
 
 `seal` refuses to overwrite an existing non-empty integrity contract. `verify` returns success only when the manifest schema is valid, its body digest matches, every sealed file has the expected size and SHA-256 digest, and no additional regular file has appeared since sealing.
 
@@ -43,14 +39,19 @@ The optional expected digest is meaningful only when its value comes from a trus
 | `manifest_body_sha256` | SHA-256 of canonical manifest content excluding this digest field. |
 | `trust_model` | Explicit statement of what this local seal does and does not prove. |
 
-The manifest records `malicious_writer_resistance: false` and `external_trust_anchor: false`. These fields are part of the schema contract, not optional documentation language.
 
-## Trust boundary
+## Local-only trust boundary
 
-A local digest is useful for detecting accidental corruption, incomplete copies, or post-seal changes relative to the recorded seal. It does not stop a process that can rewrite both the run evidence and `integrity.json`: such a process can recompute hashes and construct a new internally consistent manifest.
+<!-- ew:trust:local-only -->
 
-For a stronger guarantee, copy `manifest_body_sha256` or the complete manifest to a location outside the observed process's write boundary, or protect/sign it with a key unavailable to that process. That external action creates the trust anchor; ExecWeave does not claim that an in-directory manifest creates one by itself.
+The local `seal` / `verify` pair detects accidental corruption and changes that were not re-sealed. It **does not prevent a writer who can rewrite run evidence and `integrity.json` from recomputing hashes and re-sealing a consistent run**. `valid: true` means only local consistency, never evidence of tamper-resistant auditing.
 
-## Operational rules
+<!-- ew:trust:privileged -->
 
-Seal only a completed run. Verify before relying on archived or transferred evidence. Treat any verification error as a signal that the directory no longer exactly matches the sealed inventory, not as proof of malicious activity. If more artifacts must be generated after sealing, create them first and then seal a new finalized copy rather than silently rewriting the original manifest.
+Root, sudo-capable agents, and any process able to write the output directory can rewrite the evidence and manifest. Protect the run directory with operating-system permissions and process isolation; another pathname with the same privileges is not isolation.
+
+<!-- ew:compat:no-downgrade -->
+
+**Downgrading the reader from v0.8.35+ to v0.8.34 is unsupported.** The older reader can silently omit `observation_assessment` and misrepresent observation completeness. Only conclusions produced by reader v0.8.35 or newer should be trusted. Rolling back a recorder does not justify rolling back the reader.
+
+Seal only completed runs. Verify before relying on archived evidence. A failed check is evidence of a local inconsistency, not by itself proof of malicious activity. The tool never uploads run data or digests; it provides no independent authorization boundary.

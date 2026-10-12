@@ -26,6 +26,8 @@
 
 **AI Agent가 내 컴퓨터에서 실제로 무엇을 했는지 확인하세요.**
 
+**여러 역할의 Agent 워크플로에서 ExecWeave는 기록된 전송 이벤트에 대응하는 수신 이벤트가 관측되지 않은 핸드오프를 자동으로 표시하고, 발신자와 수신자 역할을 식별하여 `graph.json`에 `message_receive_not_observed`를 기록합니다. 이는 관측 공백이며 실제 전달 실패를 입증하지 않습니다.**
+
 ExecWeave는 AI Agent와 AI 개발 도구를 위한 local-first observability 프로젝트입니다. Provider 수준의 semantic evidence와 운영체제 runtime evidence를 하나의 인터랙티브 Execution Graph로 결합하면서도, 서로 다른 증거 계층을 명확하게 분리합니다.
 
 > **Event는 증거이고, Graph는 그 증거로부터 materialize된 view입니다.**
@@ -63,21 +65,46 @@ python -m pip install -e ".[dev]"
 
 ## 빠른 시작
 
+먼저 sudo 없이 일반 사용자 소유의 격리된 가상 환경을 만듭니다.
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -U execweave
+```
+
+Windows PowerShell: `.venv\Scripts\Activate.ps1`.
+
+Hook 설치 전에 내장된 관측 누락 반례를 실행합니다.
+
+```bash
+python -m execweave.observation_demo --output-dir ./observation-negative
+```
+
+이 예제는 작업이 성공해도 관측 증거가 불완전할 수 있습니다. `observation-negative/graph.json`과 `observation-negative/finalization.json`을 확인하세요. `execution_state=succeeded`는 관측의 완전성이나 작업의 독립적인 검증을 의미하지 않습니다.
+
+이후 sudo 없이 Provider hook을 명시적으로 설치하고 확인합니다.
+
+```bash
+execweave hooks install antigravity
+execweave hooks status antigravity
+```
+
+
 어떤 로컬 command든 `execweave live` 뒤에 붙일 수 있습니다:
 
 ```bash
 execweave live --open -- claude
 execweave live --open -- codex
-execweave live --open -- antigravity
+execweave live --open -- agy
 execweave live --open -- cursor
 execweave live --open -- opencode
-execweave live --open -- python my_agent.py
 ```
 
 완료 후 artifact 생성이 주목적이라면:
 
 ```bash
-execweave record --open -- python my_agent.py
+execweave record --open -- codex
 ```
 
 현재 terminal에서 프로그램과 계속 상호작용하면서 별도 overview를 보고 싶다면:
@@ -88,7 +115,15 @@ execweave top -- codex
 
 ### Provider integration 승인
 
-일부 Agent와 IDE는 로컬 hook 또는 plugin을 처음 활성화할 때 권한을 요청합니다. Prompt, Response, Tool, Model, Conversation 같은 Provider-level evidence가 필요하다면 ExecWeave integration을 승인하세요. 승인하지 않아도 OS runtime 관측은 가능할 수 있지만 semantic coverage는 줄어듭니다.
+0.8.35부터 `live`는 hook 구성을 확인만 하며 설치하거나 수정하지 않습니다. 사용자 소유 환경에서 sudo 없이 `execweave hooks install antigravity`(또는 `claude`, `codex`, `cursor`, `opencode`)를 명시적으로 실행하세요. `execweave hooks status antigravity`는 구성을 변경하지 않고 확인합니다. Provider 승인이 추가로 필요할 수도 있습니다. **구성 완료가 증거 전달을 의미하지는 않습니다.** 수신 증거 누락과 관측 불완전성은 프로세스 종료 코드와 별도로 기록됩니다.
+
+세 가지 결과 축과 그 한계는 [관측 무결성과 반례](docs/observation-integrity.md)를 참고하세요. 이 변경은 0.8.35부터 제공되며 이전 버전에는 없습니다.
+
+**Live 개인정보 보호 및 인증(0.8.35)**
+
+`execweave live`와 `execweave top`은 integration이 노출하는 Provider/Model 내용(prompt, response, tool 값)을 기본적으로 모두 기록합니다. 실행 데이터는 사용자가 검토할 수 있도록 자신의 컴퓨터에 남습니다. 일반 텍스트를 저장하면 안 되는 경우 `--metadata-only`를 사용하세요. `--capture-content`는 기본 동작을 명시적으로 선택합니다. 잘못된 capture policy는 자동 recorder 경계에서 안전하게 metadata-only로 전환됩니다.
+
+Live dashboard URL에는 더 이상 API credential이 `?t=...` 형태로 포함되지 않습니다. 표시되는 URL에는 인증 정보가 없습니다. 브라우저는 POST body로 일회성 pairing code를 보내 `HttpOnly; SameSite=Strict` cookie를 받으며, API client는 비공개 `X-ExecWeave-Token` header를 사용합니다.
 
 Google Antigravity의 실제 CLI command는 현재 `agy`입니다. ExecWeave는 기억하기 쉬운 alias로 `antigravity`도 허용합니다.
 
@@ -325,3 +360,7 @@ Paper context: Li et al., *CAMEL: Communicative Agents for "Mind" Exploration of
 from execweave.framework_adapters import AdapterContext, CAMELAdapter
 adapter = CAMELAdapter(AdapterContext.from_environment("camel"))
 ```
+
+## 사용자 Python과 OpenAI API Key
+
+`execweave record -- python my_agent.py` 또는 `execweave live --open -- python my_agent.py` 로 런타임을 관찰할 수 있습니다. **단일/다중 Agent의 OpenAI 모델 호출 및 핸드오프**를 기록하려면 공식 SDK를 `OpenAIAgentRecorder`로 감싸고 전송/수신을 명시적으로 기록하세요. Adapter는 API Key를 읽지 않으며 HTTPS만으로 Agent 역할을 추론하지 않습니다. [OpenAI Python 안내서](docs/openai-python.md)를 참고하세요.

@@ -187,6 +187,7 @@ def build_parser() -> argparse.ArgumentParser:
         "validate", help="Validate one graph-ready ExecWeave JSONL event stream"
     )
     validate.add_argument("path", type=Path, help="Path to a .jsonl event stream")
+    validate.add_argument("--json", action="store_true", help="emit structured JSON (the default)")
     validate.add_argument(
         "--allow-incomplete",
         action="store_true",

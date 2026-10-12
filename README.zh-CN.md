@@ -26,6 +26,8 @@
 
 **看清 AI Agent 在你的机器上实际做了什么。**
 
+**在多角色 Agent 工作流中，ExecWeave 会自动标记已记录发送事件、但未观察到对应接收事件的交接，指出发送方和接收角色，并将 `message_receive_not_observed` 写入 `graph.json`。这表示观测存在缺口，并不能证明消息传递失败。**
+
 ExecWeave 是一个 local-first 的 AI Agent 与 AI 开发工具可观测性项目。它把 Provider 层语义与操作系统运行时证据整合到同一个交互式 Execution Graph 中，同时保留不同证据层级之间的边界。
 
 > **Event 是证据；Graph 是由证据物化出的视图。**
@@ -63,21 +65,46 @@ python -m pip install -e ".[dev]"
 
 ## 快速开始
 
+首先在普通用户权限下创建隔离的虚拟环境，不使用 sudo：
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -U execweave
+```
+
+Windows PowerShell: `.venv\Scripts\Activate.ps1`.
+
+安装 Hook 前先运行内置的观察不完整反例：
+
+```bash
+python -m execweave.observation_demo --output-dir ./observation-negative
+```
+
+此示例的任务即使成功，观察证据也可能不完整。请检查 `observation-negative/graph.json` 和 `observation-negative/finalization.json`；`execution_state=succeeded` 不代表观察完整，也不等于经过独立的任务验证。
+
+然后由用户明确安装并检查 Provider Hook，不使用 sudo：
+
+```bash
+execweave hooks install antigravity
+execweave hooks status antigravity
+```
+
+
 将任意本地命令放在 `execweave live` 后面：
 
 ```bash
 execweave live --open -- claude
 execweave live --open -- codex
-execweave live --open -- antigravity
+execweave live --open -- agy
 execweave live --open -- cursor
 execweave live --open -- opencode
-execweave live --open -- python my_agent.py
 ```
 
 主要想生成完成后的 artifacts 时：
 
 ```bash
-execweave record --open -- python my_agent.py
+execweave record --open -- codex
 ```
 
 希望程序继续在当前 terminal 交互，同时另外查看概览时：
@@ -88,7 +115,15 @@ execweave top -- codex
 
 ### Provider integration 授权
 
-部分 Agent 或 IDE 第一次启用本地 hook / plugin 时会要求授权。如果你希望看到 Prompt、Response、Tool、Model 与 Conversation 等 Provider-level evidence，请允许 ExecWeave integration。若不允许，OS runtime 观察仍可能工作，但 Provider 语义覆盖会减少。
+从 0.8.35 起，`live` 只检查 hook 配置，不会自动安装或修改。请在用户自己的环境中明确执行 `execweave hooks install antigravity`（也支持 `claude`、`codex`、`cursor`、`opencode`），不要使用 sudo。`execweave hooks status antigravity` 只读取配置，Provider 本身仍可能要求授权。**完成配置不等于已收到证据。** 缺少接收证据与观察不完整，会独立于进程退出状态进行记录。
+
+[观察完整性与反例](docs/observation-integrity.md)说明进程结果、独立任务验证、观察完整性三个维度及其限制。这些更改从 0.8.35 开始提供，旧版不包含。
+
+**Live 隐私与身份验证（0.8.35）**
+
+`execweave live` 和 `execweave top` 默认保存 integration 实际暴露的完整 Provider/Model 内容（prompt、response、tool 值），因为运行记录留在用户自己的机器上供检查。如果不能保存明文，请使用 `--metadata-only`；`--capture-content` 仍可显式选择默认行为。无效的 capture policy 会在自动 recorder 边界安全地降级为 metadata-only。
+
+Live dashboard 不再将 API credential 放在 `?t=...` 中。显示的 URL 不含 credential；浏览器通过 POST body 提交一次性 pairing code，换取 `HttpOnly; SameSite=Strict` cookie；非浏览器 API client 使用私有的 `X-ExecWeave-Token` header。
 
 Google Antigravity 当前实际 CLI 命令为 `agy`；ExecWeave 也接受 `antigravity` 作为易记 alias。
 
@@ -325,3 +360,7 @@ Paper context: Li et al., *CAMEL: Communicative Agents for "Mind" Exploration of
 from execweave.framework_adapters import AdapterContext, CAMELAdapter
 adapter = CAMELAdapter(AdapterContext.from_environment("camel"))
 ```
+
+## 自定义 Python 与 OpenAI API Key
+
+使用 `execweave record -- python my_agent.py` 或 `execweave live --open -- python my_agent.py` 记录运行时证据。如需**单／多 Agent 的 OpenAI 模型调用及交接语义**，请用 `OpenAIAgentRecorder` 包装官方 SDK，并明确记录各 Agent 的发送和接收事件。Adapter 不读取 API Key，也不能从 HTTPS 自动推断 Agent 身份。参阅 [OpenAI Python 集成指南](docs/openai-python.md)。

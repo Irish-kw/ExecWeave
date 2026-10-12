@@ -160,7 +160,17 @@ class GraphNode:
         *,
         logical: bool = True,
     ) -> None:
-        self.name = self.name or entity.get("name")
+        incoming_name = entity.get("name")
+        self.name = self.name or incoming_name
+        # Strace sees a PID at spawn time, and the executable only at execve.
+        # Upgrade this PID-only display name when syscall evidence arrives.
+        if (
+            self.type == "process"
+            and isinstance(self.name, str) and self.name.isdecimal()
+            and isinstance(incoming_name, str) and incoming_name != self.name
+            and incoming_name.endswith(" · " + self.name)
+        ):
+            self.name = incoming_name
         incoming = entity.get("attributes") or {}
         if isinstance(incoming, dict):
             for key, value in incoming.items():
@@ -171,6 +181,28 @@ class GraphNode:
                     self.attributes.setdefault(key, None)
                 elif self.attributes.get(key) is None:
                     self.attributes[key] = value
+        # Event-level exit status belongs to the *exiting process*, never to
+        # the run-level session outcome and never to an unrelated target node.
+        if (
+            self.type == "process"
+            and event.get("event_type") == "process.exited"
+            and isinstance(event.get("source"), dict)
+            and event["source"].get("id") == self.id
+        ):
+            exit_fields = event.get("attributes")
+            if isinstance(exit_fields, dict):
+                code = exit_fields.get("exit_code")
+                if type(code) is int:
+                    self.attributes["exit_code"] = code
+                    self.attributes["return_code"] = code
+                signal = exit_fields.get("signal")
+                if isinstance(signal, str) and signal:
+                    self.attributes["exit_signal"] = signal
+                if type(code) is int or (isinstance(signal, str) and signal):
+                    self.attributes["exit_observed"] = True
+                    when = event.get("timestamp")
+                    if isinstance(when, str):
+                        self.attributes["exit_observed_at"] = when
         timestamp = event.get("timestamp")
         if isinstance(timestamp, str):
             self.first_seen = min(self.first_seen, timestamp) if self.first_seen else timestamp

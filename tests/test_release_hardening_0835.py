@@ -604,29 +604,38 @@ def test_event_and_semantic_streams_use_private_append_policy(tmp_path: Path) ->
 
 
 def test_external_integrity_anchor_must_match_out_of_band_digest(tmp_path: Path) -> None:
-    from execweave.integrity import seal_run_integrity, verify_run_integrity
+    """Preserve the historical test ID; #125 retires all external anchor behavior.
+
+    Only local consistency is guaranteed. A writer who can change the run
+    and manifest can re-seal it, and must not be described as resisted.
+    """
+    from execweave.integrity import MANIFEST_FILENAME, seal_run_integrity, verify_run_integrity
+    from execweave.integrity_cli import build_parser
 
     run = tmp_path / "sealed-run"
     run.mkdir()
     write_private_text(run / "evidence.txt", "evidence")
-    manifest = seal_run_integrity(run)
-    digest = manifest["manifest_body_sha256"]
+    first_digest = seal_run_integrity(run)["manifest_body_sha256"]
 
-    anchored = verify_run_integrity(run, expected_manifest_body_sha256=digest)
-    assert anchored.valid is True
-    assert anchored.external_anchor_checked is True
-    assert anchored.external_anchor_match is True
+    assert verify_run_integrity(run).valid is True
+    write_private_text(run / "evidence.txt", "rewritten", replace=True)
+    unsealed_change = verify_run_integrity(run)
+    assert unsealed_change.valid is False
+    assert any("mismatch for evidence.txt" in error for error in unsealed_change.errors)
 
-    # The external value is not stored inside the writable run tree. A different
-    # externally supplied digest therefore makes verification fail even if the local
-    # manifest is internally self-consistent.
-    wrong = "0" * 64 if digest != "0" * 64 else "1" * 64
-    mismatch = verify_run_integrity(run, expected_manifest_body_sha256=wrong)
-    assert mismatch.valid is False
-    assert mismatch.external_anchor_checked is True
-    assert mismatch.external_anchor_match is False
-    assert "external anchor digest mismatch" in mismatch.errors
+    # A writer with permission to replace the manifest defeats the local-only
+    # consistency check. This is a documented limitation, not an anchor PASS.
+    (run / MANIFEST_FILENAME).unlink()
+    new_digest = seal_run_integrity(run)["manifest_body_sha256"]
+    assert new_digest != first_digest
+    assert verify_run_integrity(run).valid is True
 
+    # Retired options must be rejected; the public interface is local-only.
+    with pytest.raises(SystemExit) as rejected:
+        build_parser().parse_args([
+            "verify", str(run), "--expected-manifest-body-sha256", first_digest,
+        ])
+    assert rejected.value.code == 2
 
 _PAIRING_STEPS_LIVE_URL = "http://127.0.0.1:9/"
 

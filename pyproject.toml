@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "execweave"
 # ExecWeave v0.8.35 release metadata
 version = "0.8.35"
-description = "Turn AI-agent runtime behavior into a local interactive execution graph."
+description = "Local AI-agent execution graphs that identify sender/recipient handoffs with no observed receive in graph.json."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }

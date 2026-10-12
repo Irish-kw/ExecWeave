@@ -26,6 +26,8 @@
 
 **看清楚 AI Agent 在你的電腦上實際做了什麼。**
 
+**在多角色 Agent 工作流程中，ExecWeave 會自動標示已記錄發送事件、卻未觀察到對應接收事件的交接，指出發送者與接收角色，並將 `message_receive_not_observed` 寫入 `graph.json`。這代表觀測缺口，不等於證明訊息傳送失敗。**
+
 ExecWeave 是一個 local-first 的 AI Agent 與 AI 開發工具可觀測性專案。它把 Provider 層的語意資訊與作業系統層的執行證據整合到同一個互動式 Execution Graph 中，同時保留不同證據層級之間的界線。
 
 > **Event 是證據；Graph 是由證據物化出的檢視。**
@@ -63,28 +65,51 @@ python -m pip install -e ".[dev]"
 
 ## 快速開始
 
-任何本機指令都可以包在 `execweave live` 後面：
+先建立使用者擁有、與系統環境隔離的虛擬環境（不要使用 sudo）：
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -U execweave
+```
+
+Windows PowerShell 請改用 `.venv\Scripts\Activate.ps1` 啟用。
+
+**在安裝 Provider hook 前**，先執行內建的觀測反例：
+
+```bash
+python -m execweave.observation_demo --output-dir ./observation-negative
+```
+
+此反例的程式任務可能成功，但觀測證據不完整。請檢查
+`observation-negative/graph.json` 及 `observation-negative/finalization.json`。
+`execution_state=succeeded` 不代表完整觀測，也不等於經過獨立任務驗證。
+
+若要收集 Provider 專用的生命週期事件，請由使用者明確授權、安裝並檢查 hook，**不要使用 sudo**：
+
+```bash
+execweave hooks install antigravity
+execweave hooks status antigravity
+```
+
+接著啟動真實 Provider（已安裝時，Antigravity 的 CLI 為 `agy`）：
+
+```bash
+execweave live --open -- agy
+```
+
+其他已安裝的客戶端亦可使用：
 
 ```bash
 execweave live --open -- claude
 execweave live --open -- codex
-execweave live --open -- antigravity
 execweave live --open -- cursor
 execweave live --open -- opencode
-execweave live --open -- python my_agent.py
-```
-
-若主要目的是產生完成後的 artifacts：
-
-```bash
-execweave record --open -- python my_agent.py
-```
-
-若希望程式保留在目前 terminal 互動，同時另外開啟觀察介面：
-
-```bash
+execweave record --open -- codex
 execweave top -- codex
 ```
+
+不同 Provider 的 hook 需要個別安裝或授權；結束碼為 0 不代表觀測完整或任務通過驗證。
 
 ### Provider integration 授權
 
@@ -336,3 +361,7 @@ Paper context: Li et al., *CAMEL: Communicative Agents for "Mind" Exploration of
 from execweave.framework_adapters import AdapterContext, CAMELAdapter
 adapter = CAMELAdapter(AdapterContext.from_environment("camel"))
 ```
+
+## 自訂 Python 與 OpenAI API Key
+
+以 `execweave record -- python my_agent.py` 或 `execweave live --open -- python my_agent.py` 記錄執行時證據。需要**單／多 Agent 的 OpenAI 模型呼叫與交接語義**時，請以 `OpenAIAgentRecorder` 包裝官方 SDK，並明確記錄各 Agent 的發送及接收事件。Adapter 不讀取 API Key，也不能從 HTTPS 自動推斷 Agent 角色。詳見 [OpenAI Python 整合指南](docs/openai-python.md)。

@@ -26,6 +26,8 @@
 
 **See what AI agents actually do on your machine.**
 
+**In multi-role agent workflows, ExecWeave automatically flags recorded handoffs where a send event has no matching observed receive event, identifies the sender and recipient, and records `message_receive_not_observed` in `graph.json`. This is an observation gap, not proof of failed delivery.**
+
 ExecWeave is a local-first observability project for AI agents and AI-assisted development tools. It combines provider-level semantics with operating-system runtime evidence and presents them as one interactive execution graph.
 
 > **Events are evidence. The graph is a materialized view.**
@@ -63,28 +65,53 @@ python -m pip install -e ".[dev]"
 
 ## Quick start
 
-Wrap any local command with `execweave live`:
+First create an isolated, user-owned virtual environment (no sudo):
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -U execweave
+```
+
+On Windows PowerShell, activate with `.venv\Scripts\Activate.ps1` instead.
+
+Reproduce the built-in negative example **before** enabling any provider hook:
+
+```bash
+python -m execweave.observation_demo --output-dir ./observation-negative
+```
+
+The example's workload can succeed while evidence remains incomplete. Inspect
+`observation-negative/graph.json` and `observation-negative/finalization.json`;
+`execution_state=succeeded` is not the same as complete observation.
+
+If you need provider-specific lifecycle evidence, explicitly approve and install
+its hook in this user environment; **do not use sudo**:
+
+```bash
+execweave hooks install antigravity
+execweave hooks status antigravity
+```
+
+Now launch a real provider (Antigravity's CLI is `agy`, if installed):
+
+```bash
+execweave live --open -- agy
+```
+
+Other available client commands can be wrapped the same way:
 
 ```bash
 execweave live --open -- claude
 execweave live --open -- codex
-execweave live --open -- antigravity
 execweave live --open -- cursor
 execweave live --open -- opencode
-execweave live --open -- python my_agent.py
-```
-
-Use `record` when you mainly want finalized artifacts:
-
-```bash
-execweave record --open -- python my_agent.py
-```
-
-Use `top` when you want a detached overview while keeping the launched program interactive in the current terminal:
-
-```bash
+execweave record --open -- codex
 execweave top -- codex
 ```
+
+Provider-specific hooks require their own explicit installation/approval.
+An exit code of zero does not establish recording completeness or task validity.
 
 ### Provider integration approval
 
@@ -353,3 +380,7 @@ the adapter automatically joins that run and the finished Dashboard is built
 from the merged runtime plus framework evidence. Task prompts and routed
 messages remain local content references and are visible from their task and
 agent nodes.
+
+## Custom OpenAI Python scripts
+
+Use `execweave record -- python my_agent.py` or `execweave live --open -- python my_agent.py` to observe the runtime. For **OpenAI API-key single-/multi-Agent semantic evidence**, wrap the official SDK with `OpenAIAgentRecorder` and explicitly record each Agent's send/receive handoffs. No API key is read by the adapter, and HTTPS cannot reveal roles by itself. See [OpenAI Python integration](docs/openai-python.md) for synchronous/async calls, privacy and limitations.

@@ -87,8 +87,13 @@ function execweaveDashboardGraph(data){
   const internalStaging=node=>{
     const type=String(node?.type||'');
     if(type!=='file'&&type!=='directory')return false;
-    const attrs=node?.attributes||{},values=[node?.name,attrs.path,attrs.file_path,attrs.source_path,attrs.target_path,attrs.real_path];
-    return values.some(value=>/(^|[\\/])\.execweave-content-[^\\/]+$/.test(String(value||'')));
+    const attrs=node?.attributes||{},values=[node?.id,node?.name,attrs.path,attrs.file_path,attrs.source_path,attrs.target_path,attrs.real_path];
+    return values.some(value=>{
+      const path=String(value||'');
+      return /(^|[\\/])\.execweave-content-[^\\/]+$/.test(path)||
+        /(^|[\\/])\.execweave[\\/](?:runs|traces)(?:[\\/]|$)/.test(path)||
+        /(^|[\\/])\.execweave[\\/]\.gitignore$/.test(path);
+    });
   };
   const internalStagingIds=new Set(allNodes.filter(node=>node&&internalStaging(node)).map(node=>node.id).filter(Boolean));
   const hiddenIds=new Set([...hiddenDetailIds,...internalStagingIds]);

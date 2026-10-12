@@ -26,6 +26,8 @@
 
 **AI Agent があなたのマシン上で実際に何をしたのかを見る。**
 
+**複数ロールの Agent ワークフローでは、ExecWeave は記録された送信イベントに対応する受信イベントが観測されない引き継ぎを自動的に検出し、送信元と受信先のロールを特定して `graph.json` に `message_receive_not_observed` を記録します。これは観測上の欠落を示すものであり、配送失敗の証明ではありません。**
+
 ExecWeave は、AI Agent と AI 支援開発ツール向けの local-first observability プロジェクトです。Provider 側のセマンティクスと OS runtime の証拠を 1 つのインタラクティブな Execution Graph に統合しつつ、証拠レイヤーの違いを明示的に保ちます。
 
 > **Event は証拠です。Graph は証拠から materialize された view です。**
@@ -63,21 +65,46 @@ python -m pip install -e ".[dev]"
 
 ## クイックスタート
 
+最初に sudo を使わず、通常ユーザーの仮想環境を作成します：
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -U execweave
+```
+
+Windows PowerShell: `.venv\Scripts\Activate.ps1`.
+
+Hook を設定する前に、組み込みの観測不足の反例を実行します：
+
+```bash
+python -m execweave.observation_demo --output-dir ./observation-negative
+```
+
+この例では処理自体が成功しても、観測証拠が不完全な場合があります。`observation-negative/graph.json` と `observation-negative/finalization.json` を確認してください。`execution_state=succeeded` は観測の完全性やタスクの独立した検証を証明しません。
+
+次に Provider hook を明示的に承認・設定します（sudo 不要）：
+
+```bash
+execweave hooks install antigravity
+execweave hooks status antigravity
+```
+
+
 任意のローカル command を `execweave live` で包みます：
 
 ```bash
 execweave live --open -- claude
 execweave live --open -- codex
-execweave live --open -- antigravity
+execweave live --open -- agy
 execweave live --open -- cursor
 execweave live --open -- opencode
-execweave live --open -- python my_agent.py
 ```
 
 完了済み artifact を主に残したい場合：
 
 ```bash
-execweave record --open -- python my_agent.py
+execweave record --open -- codex
 ```
 
 Agent を現在の terminal で対話的に使いながら別の overview を開く場合：
@@ -88,7 +115,15 @@ execweave top -- codex
 
 ### Provider integration の許可
 
-一部の Agent / IDE は、ローカル hook や plugin を初めて有効にするときに許可を求めます。Prompt、Response、Tool、Model、Conversation などの Provider-level evidence を見たい場合は ExecWeave integration を許可してください。許可しなくても OS runtime 観測は利用できる場合がありますが、semantic coverage は減ります。
+0.8.35 以降、`live` は hook 設定を確認するだけで、自動インストールや書き換えを行いません。ユーザー自身の環境で `execweave hooks install antigravity`（または `claude`、`codex`、`cursor`、`opencode`）を明示的に実行してください。sudo は使用しません。`execweave hooks status antigravity` は設定を変更せず確認します。Provider 側の承認が必要な場合もあります。**設定済みであることは証拠が届いたことを意味しません。** 受信証拠の欠落と観測の不完全性は、プロセスの終了コードとは独立して記録されます。
+
+3 種類の結果とその限界については、[観測の完全性と反例](docs/observation-integrity.md)を参照してください。これらの変更は 0.8.35 以降に含まれ、旧バージョンにはありません。
+
+**Live のプライバシーと認証（0.8.35）**
+
+`execweave live` と `execweave top` は、integration が公開する Provider／Model の内容（prompt、response、tool 値）を既定で完全に記録します。実行結果は確認のため利用者のマシンに保存されます。平文を保存できない場合は `--metadata-only` を指定してください。`--capture-content` は既定の動作を明示的に選択します。不正な capture policy は自動 recorder の境界で安全側の metadata-only に切り替わります。
+
+Live dashboard の URL に API credential を `?t=...` として含めることはありません。表示される URL に credential は含まれません。ブラウザーは POST body で一度限りの pairing code を送信し、`HttpOnly; SameSite=Strict` cookie を取得します。API client は非公開の `X-ExecWeave-Token` header を使います。
 
 Google Antigravity の実際の CLI command は現在 `agy` です。ExecWeave は覚えやすい alias として `antigravity` も受け付けます。
 
@@ -325,3 +360,7 @@ Paper context: Li et al., *CAMEL: Communicative Agents for "Mind" Exploration of
 from execweave.framework_adapters import AdapterContext, CAMELAdapter
 adapter = CAMELAdapter(AdapterContext.from_environment("camel"))
 ```
+
+## 自作 Python と OpenAI API Key
+
+`execweave record -- python my_agent.py` または `execweave live --open -- python my_agent.py` でランタイムを観測できます。**単一／複数 Agent の OpenAI モデル呼び出しと引き継ぎ**を記録する場合は、公式 SDK を `OpenAIAgentRecorder` でラップし、送信・受信を明示的に記録してください。Adapter は API Key を読み取らず、HTTPS だけで Agent の役割を推測しません。[OpenAI Python ガイド](docs/openai-python.md)をご覧ください。

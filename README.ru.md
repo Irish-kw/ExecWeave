@@ -26,6 +26,8 @@
 
 **Смотрите, что AI-агенты действительно делают на вашей машине.**
 
+**В многоагентных сценариях с несколькими ролями ExecWeave автоматически отмечает зафиксированные передачи, для которых событие отправки есть, а соответствующее событие получения не наблюдалось. Он указывает отправителя и получателя и записывает `message_receive_not_observed` в `graph.json`. Это пробел в наблюдении, а не доказательство сбоя доставки.**
+
 ExecWeave — это local-first проект наблюдаемости для AI-агентов и инструментов разработки с ИИ. Он объединяет семантику, предоставляемую Provider, с runtime-evidence на уровне операционной системы и отображает их в одном интерактивном Execution Graph, не смешивая разные уровни доказательности.
 
 > **Events — это evidence. Graph — материализованное представление этих evidence.**
@@ -63,21 +65,46 @@ python -m pip install -e ".[dev]"
 
 ## Быстрый старт
 
+Сначала создайте изолированное окружение обычного пользователя (без sudo):
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -U execweave
+```
+
+Windows PowerShell: `.venv\Scripts\Activate.ps1`.
+
+Перед установкой hook запустите встроенный пример неполного наблюдения:
+
+```bash
+python -m execweave.observation_demo --output-dir ./observation-negative
+```
+
+Задача в примере может завершиться успешно, даже если данные наблюдения неполные. Проверьте `observation-negative/graph.json` и `observation-negative/finalization.json`: `execution_state=succeeded` не доказывает полноту наблюдения или независимую проверку задачи.
+
+Затем явно установите и проверьте hook провайдера без sudo:
+
+```bash
+execweave hooks install antigravity
+execweave hooks status antigravity
+```
+
+
 Оберните любую локальную команду в `execweave live`:
 
 ```bash
 execweave live --open -- claude
 execweave live --open -- codex
-execweave live --open -- antigravity
+execweave live --open -- agy
 execweave live --open -- cursor
 execweave live --open -- opencode
-execweave live --open -- python my_agent.py
 ```
 
 Если нужны в основном финализированные artifacts:
 
 ```bash
-execweave record --open -- python my_agent.py
+execweave record --open -- codex
 ```
 
 Если программа должна остаться интерактивной в текущем terminal, а обзор — открыться отдельно:
@@ -88,7 +115,15 @@ execweave top -- codex
 
 ### Разрешение Provider integration
 
-Некоторые Agents и IDE запрашивают разрешение перед включением локального hook или plugin. Разрешите интеграцию ExecWeave, если нужны Provider-level evidence для Prompt, Response, Tool, Model и Conversation. Без разрешения OS runtime observation всё ещё может работать, но semantic coverage может быть меньше.
+Начиная с 0.8.35 команда `live` только проверяет настройки hook и не устанавливает и не изменяет их автоматически. Явно запустите `execweave hooks install antigravity` (или `claude`, `codex`, `cursor`, `opencode`) в пользовательской среде без sudo. `execweave hooks status antigravity` проверяет конфигурацию без записи. Дополнительно может потребоваться разрешение провайдера. **Настроенный hook не доказывает получение данных наблюдения.** Отсутствие подтверждения получения и неполнота наблюдения фиксируются независимо от кода завершения процесса.
+
+См. [целостность наблюдений и отрицательный пример](docs/observation-integrity.md), где описаны три оси результата и их ограничения. Эти изменения доступны начиная с 0.8.35 и отсутствуют в более ранних версиях.
+
+**Конфиденциальность и аутентификация Live (0.8.35)**
+
+По умолчанию `execweave live` и `execweave top` сохраняют всё содержимое Provider/Model, раскрываемое интеграцией (prompts, responses, значения tools), поскольку результаты запуска остаются на компьютере пользователя. Если нельзя сохранять открытый текст, используйте `--metadata-only`. `--capture-content` явно выбирает стандартное поведение. Недопустимая политика захвата на границах автоматических рекордеров безопасно переводится в режим metadata-only.
+
+Live dashboard больше не передаёт API credential через `?t=...`. Отображаемый URL не содержит credential. Браузер отправляет одноразовый pairing code в теле POST и получает cookie `HttpOnly; SameSite=Strict`; API-клиенты используют закрытый заголовок `X-ExecWeave-Token`.
 
 Google Antigravity сейчас использует CLI-команду `agy`. ExecWeave также принимает `antigravity` как более понятный alias.
 
@@ -325,3 +360,7 @@ Paper context: Li et al., *CAMEL: Communicative Agents for "Mind" Exploration of
 from execweave.framework_adapters import AdapterContext, CAMELAdapter
 adapter = CAMELAdapter(AdapterContext.from_environment("camel"))
 ```
+
+## Собственный Python с ключом OpenAI API
+
+Используйте `execweave record -- python my_agent.py` или `execweave live --open -- python my_agent.py` для наблюдения за исполнением. Для **семантической записи OpenAI-вызовов и передач между одним или несколькими Agent** оберните официальный SDK через `OpenAIAgentRecorder` и явно регистрируйте отправку и получение. Адаптер не читает API Key и не выводит роли из HTTPS. См. [руководство OpenAI Python](docs/openai-python.md).

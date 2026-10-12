@@ -23,6 +23,18 @@ def validate_graph_payload(
     if not isinstance(version, str) or version not in supported_versions:
         shown = version if isinstance(version, str) else "missing"
         raise ValueError(f"unsupported graph schema version: {shown}")
+    # Reject graphs that explicitly declare a future/malformed source stream.
+    # Graph schema and event-stream schema are separate version namespaces.
+    source_versions = payload.get("source_schema_versions")
+    if source_versions is not None:
+        if not isinstance(source_versions, list) or any(
+            not isinstance(item, str) or item not in {"0.1", "0.2"}
+            for item in source_versions
+        ):
+            raise ValueError(
+                "unsupported_schema_version: graph declares an unsupported "
+                f"source event-stream schema {source_versions!r}; supported: 0.2"
+            )
     if not isinstance(payload.get("nodes"), list) or not isinstance(payload.get("edges"), list):
         raise ValueError("graph must contain nodes and edges arrays")
     return payload

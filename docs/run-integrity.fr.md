@@ -39,14 +39,19 @@ execweave-integrity verify .execweave/runs/<run-id>
 | `manifest_body_sha256` | SHA-256 du canonical manifest content sans ce champ de digest. |
 | `trust_model` | Déclaration explicite de ce que le local seal prouve et ne prouve pas. |
 
-Le manifest enregistre obligatoirement `malicious_writer_resistance: false` et `external_trust_anchor: false`. Ces valeurs font partie du schema contract et ne sont pas une simple réserve documentaire facultative.
 
-## Trust boundary
+## Limites de la vérification purement locale
 
-Un local digest est utile pour détecter une accidental corruption, une copie incomplète ou un post-seal change par rapport au moment du scellement. Il n’empêche pas un process capable de réécrire à la fois les run evidence et `integrity.json` : ce process peut recalculer les hashes et produire un nouveau manifest cohérent en interne.
+<!-- ew:trust:local-only -->
 
-Pour une garantie plus forte, copiez `manifest_body_sha256` ou le manifest complet vers un emplacement hors de la write boundary du observed process, ou protégez/signez la valeur avec une key indisponible à ce process. C’est cette action externe qui crée le trust anchor ; ExecWeave ne prétend pas qu’un manifest dans le même directory en constitue un à lui seul.
+Le couple local `seal` / `verify` détecte une corruption accidentelle ou une modification sans nouveau scellement. **Tout acteur pouvant réécrire le run et `integrity.json` peut recalculer les empreintes et resceller des données cohérentes.** `valid: true` atteste uniquement la cohérence locale, sans garantie d'audit inviolable.
 
-## Règles opérationnelles
+<!-- ew:trust:privileged -->
 
-Ne scellez qu’un run terminé. Vérifiez les archived ou transferred evidence avant de vous y fier. Toute verification error indique que le directory ne correspond plus exactement au sealed inventory ; elle ne prouve pas une activité malveillante. Si de nouveaux artifacts doivent être produits après le seal, créez-les d’abord puis scellez une nouvelle finalized copy au lieu de réécrire silencieusement le manifest original.
+Root, un Agent disposant de sudo et tout processus pouvant écrire dans le dossier de sortie peuvent modifier ensemble les données et le manifeste. Protégez-les par des droits système et l'isolation des processus ; déplacer des fichiers sans changer les droits n'isole rien.
+
+<!-- ew:compat:no-downgrade -->
+
+**Il n'est pas pris en charge de rétrograder le reader v0.8.35+ vers v0.8.34.** L'ancien reader peut supprimer silencieusement `observation_assessment` et fausser le jugement sur l'observation. Seules les conclusions des readers v0.8.35 et ultérieurs sont recevables. Revenir à un ancien recorder ne justifie pas la rétrogradation du reader.
+
+Ne scellez que les runs terminés et vérifiez les archives avant emploi. Un échec indique une incohérence locale, pas nécessairement une attaque. Cet outil ne publie ni données ni empreintes et ne fournit aucune frontière de permissions indépendante.

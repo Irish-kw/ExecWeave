@@ -39,14 +39,19 @@ execweave-integrity verify .execweave/runs/<run-id>
 | `manifest_body_sha256` | 이 digest field를 제외한 canonical manifest content의 SHA-256입니다. |
 | `trust_model` | local seal이 증명하는 범위와 증명하지 않는 범위를 명시합니다. |
 
-manifest에는 `malicious_writer_resistance: false`와 `external_trust_anchor: false`가 반드시 기록됩니다. 이는 선택적인 문서 표현이 아니라 schema contract의 일부입니다.
 
-## Trust boundary
+## 로컬 무결성 검사의 한계
 
-local digest는 accidental corruption, 불완전한 copy, seal 시점 이후의 post-seal change를 찾는 데 유용합니다. 그러나 run evidence와 `integrity.json`을 모두 다시 쓸 수 있는 process를 막지는 못합니다. 그런 process는 hash를 다시 계산하여 내부적으로 일관된 새 manifest를 만들 수 있습니다.
+<!-- ew:trust:local-only -->
 
-더 강한 보장이 필요하면 `manifest_body_sha256` 또는 전체 manifest를 observed process가 쓸 수 없는 위치로 복사하거나 해당 process가 접근할 수 없는 key로 보호 또는 서명해야 합니다. 실제 trust anchor는 그 외부 작업에서 만들어집니다. ExecWeave는 같은 directory의 manifest 자체가 trust anchor라고 주장하지 않습니다.
+로컬 `seal` / `verify`는 우발적인 손상과 다시 seal하지 않은 변경을 감지합니다. **기록과 `integrity.json`에 쓸 수 있는 프로세스는 해시를 재계산하고 일관된 기록을 다시 seal할 수 있습니다.** `valid: true`는 로컬 일관성만 의미하며 변조 방지 감사를 의미하지 않습니다.
 
-## 운영 규칙
+<!-- ew:trust:privileged -->
 
-완료된 run만 seal하십시오. archived 또는 transferred evidence에 의존하기 전에 verify하십시오. verification error는 directory가 sealed inventory와 더 이상 정확히 일치하지 않는다는 신호이지 악의적 행위를 입증하는 것은 아닙니다. seal 이후 새 artifact가 필요하다면 먼저 생성한 뒤 새로운 finalized copy를 seal하고 기존 manifest를 조용히 다시 쓰지 마십시오.
+root, sudo 권한을 가진 Agent 또는 출력 디렉터리에 쓸 수 있는 모든 프로세스는 기록과 manifest를 함께 변경할 수 있습니다. 운영체제 권한과 프로세스 격리로 보호하세요. 쓰기 권한이 같다면 경로만 바꾸어도 격리가 되지 않습니다.
+
+<!-- ew:compat:no-downgrade -->
+
+**v0.8.35 이상에서 작성한 기록을 v0.8.34 reader로 여는 다운그레이드는 지원하지 않습니다.** 이전 reader는 `observation_assessment`를 경고 없이 버리고 관측 완전성을 잘못 표시할 수 있습니다. v0.8.35 이상 reader의 결론만 사용하세요. recorder를 롤백했다고 reader를 롤백해서는 안 됩니다.
+
+완료된 run만 seal하고 보관된 자료를 사용하기 전에 verify하세요. 검증 실패는 로컬 불일치이지 악의적인 행동의 단독 증거가 아닙니다. 이 도구는 기록이나 다이제스트를 전송하지 않으며 별도의 권한 경계를 제공하지 않습니다.

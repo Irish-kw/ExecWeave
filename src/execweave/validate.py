@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .schema import SCHEMA_VERSION
+from .reader_identity import reader_identity
 
 
 @dataclass(frozen=True)
@@ -28,6 +29,7 @@ class ValidationResult:
             "warnings": self.warnings,
             "session_ids": self.session_ids,
             "schema_versions": self.schema_versions,
+            "reader": reader_identity(),
         }
 
 
@@ -104,8 +106,15 @@ def validate_event_stream(
         schema_version = payload.get("schema_version")
         if isinstance(schema_version, str):
             schema_versions.add(schema_version)
+            # Never reinterpret unknown event formats as the current graph schema.
+            # Both 0.8.34 and 0.8.35 emit event stream schema 0.2.
+            if schema_version != SCHEMA_VERSION:
+                errors.append(
+                    f"line {line_number}: unsupported_schema_version: unsupported stream schema version: "
+                    f"{schema_version}; supported: {SCHEMA_VERSION}"
+                )
         else:
-            errors.append(f"line {line_number}: schema_version must be a string")
+            errors.append(f"line {line_number}: unsupported_schema_version: schema_version must be a string (supported: {SCHEMA_VERSION})")
 
         event_id = payload.get("event_id")
         if not isinstance(event_id, str) or not event_id:
@@ -163,12 +172,6 @@ def validate_event_stream(
                 "sequence is not contiguous from 1; "
                 f"observed first/last={sequences[0]}/{sequences[-1]} count={len(sequences)}"
             )
-
-    if schema_versions and schema_versions != {SCHEMA_VERSION}:
-        warnings.append(
-            "stream schema differs from current ExecWeave schema "
-            f"{SCHEMA_VERSION}: {', '.join(sorted(schema_versions))}"
-        )
 
     if require_complete_session and event_count:
         starts = event_types.count("session.started")

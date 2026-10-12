@@ -23,8 +23,6 @@ class IntegrityResult:
     checked_file_count: int
     manifest_body_sha256: str | None
     errors: tuple[str, ...]
-    external_anchor_checked: bool = False
-    external_anchor_match: bool | None = None
 
     def to_dict(self) -> dict[str, object]:
         data = asdict(self)
@@ -134,8 +132,6 @@ def _load_manifest(path: Path) -> dict[str, Any]:
 
 def verify_run_integrity(
     run_root: str | Path,
-    *,
-    expected_manifest_body_sha256: str | None = None,
 ) -> IntegrityResult:
     root = Path(run_root).expanduser().resolve()
     manifest_path = _manifest_path(root)
@@ -143,16 +139,6 @@ def verify_run_integrity(
     body_digest: str | None = None
     sealed_count = 0
     checked_count = 0
-    external_anchor_checked = expected_manifest_body_sha256 is not None
-    external_anchor_match: bool | None = None
-    expected_anchor: str | None = None
-    if expected_manifest_body_sha256 is not None:
-        candidate = expected_manifest_body_sha256.strip().lower()
-        if len(candidate) != 64 or any(ch not in "0123456789abcdef" for ch in candidate):
-            errors.append("external anchor digest must be a 64-character SHA-256 hex value")
-        else:
-            expected_anchor = candidate
-
     try:
         manifest = _load_manifest(manifest_path)
         expected_keys = {
@@ -190,10 +176,6 @@ def verify_run_integrity(
         body_digest = _sha256_bytes(_canonical_bytes(body))
         if manifest["manifest_body_sha256"] != body_digest:
             errors.append("manifest body digest mismatch")
-        if expected_anchor is not None:
-            external_anchor_match = body_digest == expected_anchor
-            if not external_anchor_match:
-                errors.append("external anchor digest mismatch")
 
         expected_paths: set[str] = set()
         for entry in files:
@@ -250,6 +232,4 @@ def verify_run_integrity(
         checked_file_count=checked_count,
         manifest_body_sha256=body_digest,
         errors=tuple(errors),
-        external_anchor_checked=external_anchor_checked,
-        external_anchor_match=external_anchor_match,
     )

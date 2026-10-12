@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased — issue #122 follow-up (candidate; not published)
+
+- Added explicit recipient-specific **receive not observed** diagnostics and a prominent Dashboard alert. Missing receive telemetry remains observation uncertainty, not proof of message delivery failure.
+- Removed the external GitHub integrity publication and expected-digest verification features by owner decision. `execweave-integrity seal` and `verify` now perform **local consistency checks only**. A writer with permission to rewrite and re-seal the run can defeat these checks. Both continue to return machine-readable JSON and the historical local exit-code contract.
+- Added reader provenance to validation and integrity verification output. Future or missing stream schema versions are rejected explicitly; reader downgrade to 0.8.34 is unsupported for new observations.
+- Updated all eight Run Integrity locale guides. The integrity manifest schema retains its historical fixed `external_trust_anchor: false` field solely for archive compatibility; it is not an implemented external service or a security claim.
+- Historical baseline tests and Stage Integrity remain unchanged. The in-PR, unmerged external-anchor tests were replaced with local-only regressions; exact-SHA independent acceptance is still required.
+
 ## 0.8.35 — observation integrity and release hardening
 
 The `v0.8.35` tag, its GitHub Release, and the PyPI upload are the release record. Until
