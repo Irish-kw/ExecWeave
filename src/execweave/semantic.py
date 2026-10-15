@@ -35,6 +35,15 @@ class _ProcessCandidate:
     create_time: float | None
 
 
+# Semantic sidecars are writable by the observed process in ordinary same-UID runs.
+# Metadata supplied by a sidecar is a claim, never native sensor authority.
+_NATIVE_ATTRIBUTIONS = {"syscall", "polling", "process_polling", "session_observation"}
+_NATIVE_EFFECT_RELATIONS = {
+    "OPENED_READ", "OPENED_READ_WRITE", "OPENED_WRITE", "WROTE",
+    "CONNECTED_TO", "CONNECT_ATTEMPTED", "SPAWNED", "LAUNCHED",
+}
+
+
 def _parse_timestamp(value: object, *, context: str) -> datetime:
     if not isinstance(value, str) or not value:
         raise ValueError(f"{context}: timestamp must be a non-empty ISO-8601 string")
@@ -224,8 +233,23 @@ def _normalize_semantic_record(
         normalized_entities.append(normalized)
 
     normalized_attributes = deepcopy(attributes)
-    normalized_attributes.setdefault("backend", "semantic")
-    normalized_attributes.setdefault("attribution", "semantic_sidecar")
+    # Sidecar-authored labels cannot impersonate the native OS collector.
+    # Preserve the declarations for audit, separately from authoritative fields.
+    claimed_backend = normalized_attributes.get("backend")
+    if isinstance(claimed_backend, str) and claimed_backend and claimed_backend != "semantic":
+        normalized_attributes["sidecar_claimed_backend"] = claimed_backend
+    normalized_attributes["backend"] = "semantic"
+    claimed_attribution = normalized_attributes.get("attribution")
+    if isinstance(claimed_attribution, str) and claimed_attribution in _NATIVE_ATTRIBUTIONS:
+        normalized_attributes["sidecar_claimed_attribution"] = claimed_attribution
+        normalized_attributes["attribution"] = "semantic_sidecar"
+    else:
+        normalized_attributes.setdefault("attribution", "semantic_sidecar")
+    # Preserve real semantic tool-call causality, but do not infer native OS
+    # file, network or process effects from an agent-writable sidecar claim.
+    if relation in _NATIVE_EFFECT_RELATIONS and normalized_attributes.get("causal") is True:
+        normalized_attributes["sidecar_claimed_causal"] = True
+        normalized_attributes["causal"] = False
     if resolution_map:
         normalized_attributes["resolved_process_references"] = resolution_map
 
