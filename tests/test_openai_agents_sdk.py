@@ -269,3 +269,30 @@ def test_sdk_response_model_may_be_known_only_after_span_end(tmp_path, monkeypat
     assert result["target"]["name"] == "actual-model"
     assert result["attributes"]["sdk_initial_model"] == "unknown"
     assert result["attributes"]["model_identity_resolved_at_end"] is True
+
+
+def test_runner_task_turn_recorded_as_observed_without_success(tmp_path, monkeypatch):
+    import hashlib
+
+    _env(monkeypatch, tmp_path)
+    p = AgentsSDKTraceProcessor()
+    trace = NS(trace_id="trace-fixture", group_id="PRIVATE-GROUP-REF")
+    p.on_trace_start(trace)
+    agent = _span("a1", "agent", name="Worker")
+    task = _span("t1", "task", parent="a1", name="Runner")
+    turn = _span("u1", "turn", parent="t1", turn=2, agent_name="Worker")
+    for value in (agent, task, turn):
+        p.on_span_start(value)
+    for value in (turn, task, agent):
+        p.on_span_end(value)
+    p.on_trace_end(trace)
+    events = _records(tmp_path)
+    assert sum(x["event_type"] == "TASK_CREATED" for x in events) >= 2
+    assert any(x["relation"] == "SDK_TASK_STARTED" for x in events)
+    assert any(x["relation"] == "SDK_TASK_SPAN_ENDED" for x in events)
+    assert any(x["relation"] == "SDK_TURN_STARTED" for x in events)
+    assert any(x["relation"] == "SDK_TURN_ENDED" for x in events)
+    assert not any(x["event_type"] == "TASK_COMPLETED" for x in events)
+    raw = (tmp_path / "semantic.jsonl").read_text()
+    assert "PRIVATE-GROUP-REF" not in raw
+    assert hashlib.sha256(b"PRIVATE-GROUP-REF").hexdigest() in raw
