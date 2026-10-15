@@ -363,7 +363,7 @@ adapter = CAMELAdapter(AdapterContext.from_environment("camel"))
 
 ## OpenAI Agents SDK のネイティブ統合
 
-v0.8.37 候補では `Agent`、`Runner.run`、`@function_tool` 向けのトレースプロセッサを追加します。`execweave[agents]` を導入し、実行前に `install_agents_sdk_tracing(capture_mode="metadata_only")` を呼び出してください。ツールの戻り値はリモート OS の実行成功を保証しません。[統合ガイド](docs/openai-agents-sdk.md)。
+this integration 候補では `Agent`、`Runner.run`、`@function_tool` 向けのトレースプロセッサを追加します。`execweave[agents]` を導入し、実行前に `install_agents_sdk_tracing(capture_mode="metadata_only")` を呼び出してください。ツールの戻り値はリモート OS の実行成功を保証しません。[統合ガイド](docs/openai-agents-sdk.md)。
 
 ## 自作 Python と OpenAI API Key
 
