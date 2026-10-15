@@ -13,7 +13,7 @@ from tempfile import TemporaryDirectory
 
 def main() -> None:
     from agents.tracing import (
-        agent_span, function_span, generation_span, handoff_span,
+        agent_span, function_span, generation_span, handoff_span, response_span,
         set_trace_processors, trace,
     )
     from execweave.openai_agents_sdk import install_agents_sdk_tracing
@@ -31,6 +31,8 @@ def main() -> None:
         with trace("ExecWeave offline SDK compatibility smoke"):
             with agent_span("Tool_Selector", tools=["lookup"]):
                 with generation_span(model="gpt-fixture"):
+                    pass
+                with response_span(input="synthetic"):
                     pass
             with agent_span("Simulation_Agent", tools=["lookup"]):
                 with function_span("lookup", input="synthetic", output="synthetic"):
@@ -54,6 +56,7 @@ def main() -> None:
         assert counts["agent"] == 2
         assert counts["function"] == 1
         assert counts["generation"] == 1
+        assert counts["response"] == 1
         assert counts["handoff"] == 1
         assert coverage[0]["attributes"]["unclosed_spans"] == 0
         assert recorder.callback_errors == 0
