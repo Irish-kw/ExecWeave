@@ -5,12 +5,14 @@ The module remains importable without the optional openai-agents package.
 """
 from __future__ import annotations
 
+import hashlib
 import threading
 from collections import Counter
 from typing import Any
 
 from .framework_adapters.base import (
     AdapterContext, AgentRecord, ContentCapturePolicy, MessageRecord,
+    TaskRecord,
     ModelCallRecord, ToolCallRecord,
 )
 
@@ -86,7 +88,7 @@ class AgentsSDKTraceProcessor(TracingProcessor):
 
     def _state(self, trace_id: str) -> dict[str, Any]:
         return self._runs.setdefault(trace_id, {
-            "owners": {}, "parents": {}, "models": {}, "seen": set(),
+            "owners": {}, "parents": {}, "models": {}, "tasks": {}, "seen": set(),
             "started": set(), "ended": set(), "counts": Counter(),
             "unattributed": 0,
         })
@@ -133,9 +135,25 @@ class AgentsSDKTraceProcessor(TracingProcessor):
         self._guard(self._trace_start, trace)
 
     def _trace_start(self, trace: Any) -> None:
-        if self.enabled:
-            with self._lock:
-                self._state(str(trace.trace_id))
+        if not self.enabled:
+            return
+        assert self.context is not None
+        with self._lock:
+            trace_id = str(trace.trace_id)
+            self._state(trace_id)
+            task = self.context.entity("task", f"trace:{trace_id}", name="SDK trace")
+            group_id = getattr(trace, "group_id", None)
+            attrs = {
+                "sdk_trace_id": trace_id,
+                "evidence_source": "agents_sdk_tracing_callback",
+                "task_category": "sdk_trace",
+                "span_completion_is_not_task_success": True,
+            }
+            if isinstance(group_id, str) and group_id:
+                attrs["sdk_group_sha256"] = hashlib.sha256(
+                    group_id.encode("utf-8")
+                ).hexdigest()
+            self.context.record_task(TaskRecord(task, attributes=attrs))
 
     def on_trace_end(self, trace: Any) -> None:
         self._guard(self._trace_end, trace)
@@ -149,7 +167,7 @@ class AgentsSDKTraceProcessor(TracingProcessor):
             state = self._runs.pop(trace_id, None)
             if state is None:
                 return
-            task = self.context.entity("task", trace_id, name="SDK trace")
+            task = self.context.entity("task", f"trace:{trace_id}", name="SDK trace")
             self.context.emit(
                 "TASK_UPDATED", "OBSERVATION_COVERAGE", source=task,
                 attributes={
@@ -209,6 +227,35 @@ class AgentsSDKTraceProcessor(TracingProcessor):
                         },
                     )
             state["owners"][span_id] = owner
+            if kind == "task":
+                task = self.context.entity("task", f"{trace_id}:{span_id}", name="SDK Runner task")
+                parent_task = self.context.entity(
+                    "task", f"trace:{trace_id}", name="SDK trace"
+                )
+                self.context.record_task(TaskRecord(
+                    task, owner=owner, parent_task=parent_task,
+                    attributes={
+                        **self._identity(span),
+                        "task_category": "sdk_runner_invocation",
+                        "span_completion_is_not_task_success": True,
+                    },
+                ))
+                self.context.emit("TASK_STARTED", "SDK_TASK_STARTED",
+                                  source=owner or task, target=task,
+                                  attributes=self._identity(span))
+                state["tasks"][span_id] = task
+            elif kind == "turn":
+                self.context.emit(
+                    "TASK_UPDATED", "SDK_TURN_STARTED", source=owner,
+                    attributes={
+                        **self._identity(span),
+                        "sdk_turn_number": getattr(data, "turn", None),
+                        "sdk_turn_agent_name": _name(
+                            getattr(data, "agent_name", None), "unknown"
+                        ),
+                        "turn_completion_is_not_task_success": True,
+                    },
+                )
             if kind not in ("agent",) and owner is None:
                 state["unattributed"] += 1
             if kind in ("generation", "response"):
@@ -265,6 +312,19 @@ class AgentsSDKTraceProcessor(TracingProcessor):
                 self.context.emit(
                     "AGENT_STOPPED", "AGENT_STOPPED", source=owner,
                     attributes=evidence,
+                )
+            elif kind == "task":
+                task = state["tasks"].get(span_id)
+                if task is not None:
+                    self.context.emit(
+                        "TASK_UPDATED", "SDK_TASK_SPAN_ENDED",
+                        source=owner or task, target=task,
+                        attributes={**evidence, "task_success_verified": False},
+                    )
+            elif kind == "turn":
+                self.context.emit(
+                    "TASK_UPDATED", "SDK_TURN_ENDED", source=owner,
+                    attributes={**evidence, "turn_success_verified": False},
                 )
             elif kind in ("generation", "response"):
                 initial_model = state["models"].get(span_id, "unknown")
