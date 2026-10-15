@@ -88,6 +88,16 @@ def grade_edge(edge: dict[str, Any]) -> EdgeEvidenceGrade:
             "U": "attribution provenance is unknown, mixed, or not yet classified",
         }[grade]
 
+    # Prevent sidecar provenance from promoting an edge to native grade A/B.
+    source_backends = _strings(edge.get("backends"))
+    event_types = _strings(edge.get("event_types"))
+    semantic_present = "semantic" in source_backends or any(
+        kind.startswith("semantic.") for kind in event_types
+    )
+    if semantic_present and grade in {"A", "B"}:
+        grade = "U"
+        reason = "semantic provenance cannot authenticate native process or syscall attribution"
+
     return EdgeEvidenceGrade(
         edge_id=edge_id,
         grade=grade,
