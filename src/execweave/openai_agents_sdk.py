@@ -267,24 +267,34 @@ class AgentsSDKTraceProcessor(TracingProcessor):
                     attributes=evidence,
                 )
             elif kind in ("generation", "response"):
-                model_name = state["models"].get(span_id, "unknown")
-                model = self.context.entity("model", model_name, name=model_name)
+                initial_model = state["models"].get(span_id, "unknown")
                 call = self.context.entity("model_call", f"{trace_id}:{span_id}")
                 observed_response = (
                     getattr(data, "response", None) if kind == "response"
                     else getattr(data, "output", None)
                 )
+                # The SDK can fill in the final model identity only when the
+                # span ends. Preserve the initial unknown instead of claiming
+                # that the model was known at request time.
+                resolved_model = _name(
+                    getattr(data, "model", None)
+                    or getattr(observed_response, "model", None),
+                    initial_model,
+                )
+                model = self.context.entity("model", resolved_model, name=resolved_model)
                 response = (
                     _safe(observed_response)
                     if self.capture_mode == "prompt_and_response" else None
                 )
-                reported_model = _name(
-                    getattr(observed_response, "model", None), "unknown"
-                ) if kind == "response" else model_name
                 self.context.record_model_call(ModelCallRecord(
                     call, owner, model, response=response,
                     status="failure" if failed else "response",
-                    attributes={**evidence, "sdk_reported_model": reported_model},
+                    attributes={
+                        **evidence,
+                        "sdk_reported_model": resolved_model,
+                        "sdk_initial_model": initial_model,
+                        "model_identity_resolved_at_end": resolved_model != initial_model,
+                    },
                 ))
             elif kind == "function":
                 name = _name(getattr(data, "name", None), "unknown-tool")
