@@ -32,7 +32,7 @@ def main() -> None:
             with agent_span("Tool_Selector", tools=["lookup"]):
                 with generation_span(model="gpt-fixture"):
                     pass
-                with response_span(input="synthetic"):
+                with response_span():
                     pass
             with agent_span("Simulation_Agent", tools=["lookup"]):
                 with function_span("lookup", input="synthetic", output="synthetic"):
