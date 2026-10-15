@@ -363,7 +363,7 @@ adapter = CAMELAdapter(AdapterContext.from_environment("camel"))
 
 ## Intégration native du SDK OpenAI Agents
 
-La version candidate this integration fournit un processeur de traçage optionnel pour les applications utilisant `Agent`, `Runner.run` et `@function_tool`. Installez `execweave[agents]` et appelez `install_agents_sdk_tracing(capture_mode="metadata_only")` avant toute exécution. Les événements et leurs sources sont enregistrés sans assimiler un résultat d'outil à une preuve d'effet sur le système distant. Consultez [le guide du SDK](docs/openai-agents-sdk.md).
+ExecWeave fournit un processeur de traçage optionnel pour les applications utilisant `Agent`, `Runner.run` et `@function_tool`. Installez `execweave[agents]` et appelez `install_agents_sdk_tracing(capture_mode="metadata_only")` avant toute exécution. Les événements et leurs sources sont enregistrés sans assimiler un résultat d'outil à une preuve d'effet sur le système distant. Consultez [le guide du SDK](docs/openai-agents-sdk.md).
 
 ## Python personnalisé avec une clé API OpenAI
 
