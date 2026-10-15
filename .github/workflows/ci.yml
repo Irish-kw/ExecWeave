@@ -132,7 +132,7 @@ jobs:
         run: command -v strace >/dev/null || (sudo apt-get update && sudo apt-get install -y strace)
       - name: Install
         run: |
-          python -m pip install -e ".[dev,e2e]"
+          python -m pip install -e ".[dev,e2e,agents]"
           python -m playwright install --with-deps chromium
       - name: Capture exact acceptance source
         run: python scripts/acceptance_source_provenance.py --output acceptance-source-before.json
@@ -156,6 +156,8 @@ jobs:
       - name: Annotate pytest failures
         if: failure() && hashFiles('pytest-results.xml') != ''
         run: python scripts/annotate_pytest_failures.py pytest-results.xml
+      - name: OpenAI Agents SDK offline native trace smoke
+        run: python scripts/smoke_openai_agents_sdk.py
       - name: Claude hook command smoke
         run: python scripts/check_claude_hook.py
       - name: Claude run-bound semantic and correlation smoke
