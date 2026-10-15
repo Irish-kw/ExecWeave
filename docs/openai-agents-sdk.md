@@ -19,7 +19,7 @@ Add this setup **before the first** `Runner.run` or `trace` context:
 from agents import Agent, Runner, function_tool
 from execweave.openai_agents_sdk import install_agents_sdk_tracing
 
-recorder = install_agents_sdk_tracing(capture_mode="metadata_only")
+recorder = install_agents_sdk_tracing()  # local prompt/response capture is enabled by default
 
 @function_tool
 def local_status() -> str:
@@ -44,11 +44,22 @@ tracing is enabled. The install function is additive: it **does not disable**
 the SDK's default exporter or control any telemetry that the SDK may send to
 other destinations. Independently configure provider tracing/export privacy.
 
-To save exposed prompt and tool payloads locally, pass
-`capture_mode="prompt_and_response"`. The default `metadata_only` stores
-no prompt/tool input or response plaintext. Do not collect secrets; redaction
-filters credential-shaped keys and hidden reasoning keys, but **cannot reliably
-remove secrets within free-form strings**. Protect the run directory.
+The opt-in SDK processor defaults to `capture_mode="prompt_and_response"`:
+SDK-exposed model prompts, responses and tool content are saved as local,
+content-addressed files in the ExecWeave run directory. To keep **metadata
+only**, explicitly call `install_agents_sdk_tracing(capture_mode="metadata_only")`;
+this records model/tool events without saving those bodies. This default is
+specific to the opt-in Agents SDK integration and does not change OS or other
+provider capture defaults. The SDK may omit prompt or response fields, in
+which case ExecWeave cannot invent their contents.
+
+**Privacy:** local content files may contain raw user data, passwords or
+tokens embedded in free-form prompt text. The adapter filters credential-shaped
+dictionary keys and hidden-reasoning fields, but `_safe` **cannot reliably
+remove secrets from free-form strings**. Keep the run directory private,
+avoid collecting secrets, and inspect artifacts before any sharing. Installing
+the ExecWeave processor does not disable the Agents SDK's own telemetry
+exporter; configure external SDK tracing/privacy independently.
 
 ## Scope, provenance and coverage
 
