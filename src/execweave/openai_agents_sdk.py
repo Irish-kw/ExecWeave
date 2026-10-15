@@ -41,11 +41,18 @@ def _safe(value: Any, depth: int = 0) -> Any:
     if isinstance(value, (tuple, list)):
         return [_safe(item, depth + 1) for item in value[:100]]
     if isinstance(value, dict):
+        if value.get("type") in {"reasoning", "chain_of_thought", "hidden_reasoning"}:
+            return "[reasoning omitted]"
         return {
             str(k)[:128]: _safe(v, depth + 1)
             for k, v in list(value.items())[:100]
             if str(k).lower().replace("-", "_") not in _BLOCKED
         }
+    if hasattr(value, "model_dump"):
+        try:
+            return _safe(value.model_dump(mode="json"), depth + 1)
+        except (AttributeError, TypeError, ValueError):
+            return "[unserializable SDK value]"
     return "[unsupported content type]"
 
 
@@ -187,8 +194,13 @@ class AgentsSDKTraceProcessor(TracingProcessor):
             state["owners"][span_id] = owner
             if kind not in ("agent",) and owner is None:
                 state["unattributed"] += 1
-            if kind == "generation":
-                model_name = _name(getattr(data, "model", None), "unknown")
+            if kind in ("generation", "response"):
+                response_object = getattr(data, "response", None)
+                model_name = _name(
+                    getattr(data, "model", None)
+                    or getattr(response_object, "model", None),
+                    "unknown",
+                )
                 state["models"][span_id] = model_name
                 model = self.context.entity("model", model_name, name=model_name)
                 call = self.context.entity("model_call", f"{trace_id}:{span_id}")
@@ -237,17 +249,25 @@ class AgentsSDKTraceProcessor(TracingProcessor):
                     "AGENT_STOPPED", "AGENT_STOPPED", source=owner,
                     attributes=evidence,
                 )
-            elif kind == "generation":
+            elif kind in ("generation", "response"):
                 model_name = state["models"].get(span_id, "unknown")
                 model = self.context.entity("model", model_name, name=model_name)
                 call = self.context.entity("model_call", f"{trace_id}:{span_id}")
+                observed_response = (
+                    getattr(data, "response", None) if kind == "response"
+                    else getattr(data, "output", None)
+                )
                 response = (
-                    _safe(getattr(data, "output", None))
+                    _safe(observed_response)
                     if self.capture_mode == "prompt_and_response" else None
                 )
+                reported_model = _name(
+                    getattr(observed_response, "model", None), "unknown"
+                ) if kind == "response" else model_name
                 self.context.record_model_call(ModelCallRecord(
                     call, owner, model, response=response,
-                    status="failure" if failed else "response", attributes=evidence,
+                    status="failure" if failed else "response",
+                    attributes={**evidence, "sdk_reported_model": reported_model},
                 ))
             elif kind == "function":
                 name = _name(getattr(data, "name", None), "unknown-tool")
