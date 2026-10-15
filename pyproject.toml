@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "execweave"
-# ExecWeave v0.8.37 release metadata
+# ExecWeave v0.8.37 release metadata; OpenAI Agents SDK native tracing
 version = "0.8.37"
 description = "Local AI-agent execution graphs that identify sender/recipient handoffs with no observed receive in graph.json."
 readme = "README.md"
