@@ -15,7 +15,7 @@ from tempfile import TemporaryDirectory
 def main() -> None:
     from agents.tracing import (
         agent_span, function_span, generation_span, handoff_span, response_span,
-        set_trace_processors, trace,
+        task_span, turn_span, set_trace_processors, trace,
     )
     from execweave.openai_agents_sdk import install_agents_sdk_tracing
     from agents import Agent, Runner, function_tool
@@ -38,10 +38,12 @@ def main() -> None:
                 with response_span():
                     pass
             with agent_span("Simulation_Agent", tools=["lookup"]):
-                with function_span("lookup", input="synthetic", output="synthetic"):
-                    pass
-                with handoff_span(from_agent="Simulation_Agent", to_agent="Reviewer"):
-                    pass
+                with task_span("Simulation Stage"):
+                    with turn_span(turn=1, agent_name="Simulation_Agent"):
+                        with function_span("lookup", input="synthetic", output="synthetic"):
+                            pass
+                        with handoff_span(from_agent="Simulation_Agent", to_agent="Reviewer"):
+                            pass
         @function_tool
         def local_status() -> str:
             """Return a deterministic local value; no OS or network effects."""
@@ -84,6 +86,11 @@ def main() -> None:
         assert counts["generation"] == 1
         assert counts["response"] == 1
         assert counts["handoff"] == 1
+        assert counts["task"] == 1
+        assert counts["turn"] == 1
+        assert any(e["relation"] == "SDK_TASK_SPAN_ENDED" for e in events)
+        assert any(e["relation"] == "SDK_TURN_ENDED" for e in events)
+        assert not any(e["event_type"] == "TASK_COMPLETED" for e in events)
         assert all(row["attributes"]["unclosed_spans"] == 0 for row in coverage)
         assert any(x["attributes"]["span_counts"].get("agent", 0) >= 1 for x in coverage
                    if x["attributes"]["span_counts"].get("handoff", 0) == 0)
