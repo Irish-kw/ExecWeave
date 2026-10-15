@@ -384,7 +384,7 @@ agent nodes.
 ## Native OpenAI Agents SDK integration
 
 For Python applications built with `agents.Agent`, `Runner.run`, and
-`@function_tool`, ExecWeave this integration adds an optional native trace processor.
+`@function_tool`, ExecWeave provides an optional native trace processor.
 Install `execweave[agents]` and register
 `install_agents_sdk_tracing(capture_mode="metadata_only")` before running any
 agents. It records SDK Agent, generation, tool and handoff spans separately
