@@ -363,7 +363,7 @@ adapter = CAMELAdapter(AdapterContext.from_environment("camel"))
 
 ## Нативная интеграция OpenAI Agents SDK
 
-В кандидате v0.8.37 есть необязательный процессор трассировки для приложений с `Agent`, `Runner.run` и `@function_tool`. Установите `execweave[agents]` и вызовите `install_agents_sdk_tracing(capture_mode="metadata_only")` до запуска агента. События сохраняют идентификаторы источников; результат инструмента не является независимым доказательством действия на удалённой машине. См. [руководство](docs/openai-agents-sdk.md).
+В кандидате this integration есть необязательный процессор трассировки для приложений с `Agent`, `Runner.run` и `@function_tool`. Установите `execweave[agents]` и вызовите `install_agents_sdk_tracing(capture_mode="metadata_only")` до запуска агента. События сохраняют идентификаторы источников; результат инструмента не является независимым доказательством действия на удалённой машине. См. [руководство](docs/openai-agents-sdk.md).
 
 ## Собственный Python с ключом OpenAI API
 
