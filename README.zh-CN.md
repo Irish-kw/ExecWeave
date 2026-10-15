@@ -363,7 +363,7 @@ adapter = CAMELAdapter(AdapterContext.from_environment("camel"))
 
 ## OpenAI Agents SDK 原生集成
 
-this integration 候选版本提供可选的原生 TracingProcessor，用于 `Agent`、`Runner.run` 和 `@function_tool` 程序。安装 `execweave[agents]` 后，在运行 Agent 前调用 `install_agents_sdk_tracing(capture_mode="metadata_only")`。SDK 工具结果不等于独立验证的远程系统效果。参阅 [SDK 指南](docs/openai-agents-sdk.md)。
+ExecWeave 提供可选的原生 TracingProcessor，用于 `Agent`、`Runner.run` 和 `@function_tool` 程序。安装 `execweave[agents]` 后，在运行 Agent 前调用 `install_agents_sdk_tracing(capture_mode="metadata_only")`。SDK 工具结果不等于独立验证的远程系统效果。参阅 [SDK 指南](docs/openai-agents-sdk.md)。
 
 ## 自定义 Python 与 OpenAI API Key
 
