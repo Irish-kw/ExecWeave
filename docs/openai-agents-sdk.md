@@ -54,6 +54,7 @@ remove secrets within free-form strings**. Protect the run directory.
 
 | SDK source | Recorded observation | Boundary |
 | --- | --- | --- |
+| SDK trace and task/turn spans | Run task identity, phase/turn boundaries and coverage | Span end is not business-task success |
 | Agent span | Agent identity, start/stop, available tools | Available tools are **not** executed or selected tools |
 | Generation / Responses span | Model request/response/failure, model identity | Model output is provider evidence, not independent action proof |
 | Function span | Named tool call, result/failure, span identities | Function return is **not** an OS or remote-host success receipt |
@@ -97,3 +98,10 @@ workflow in a clean environment on all supported OSes, inspect `graph.json`,
 `semantic.jsonl`, `finalization.json`, and the generated conversation panels,
 and run the normal release gates. Re-run with content capture only in a
 synthetic-data environment to confirm redaction and source completeness.
+
+Trace-start records a canonical SDK trace task; Runner task/turn spans retain
+their own SDK identities and event boundaries. The SDK conversation group,
+when present, is recorded as a SHA-256 reference rather than cleartext.
+Neither SDK task-span end nor turn-span end is promoted to a successful
+business outcome. Nested task/turn spans inherit the nearest independently
+observed Agent parent; disconnected ancestry remains unattributed.
