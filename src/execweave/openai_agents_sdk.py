@@ -430,7 +430,7 @@ class AgentsSDKTraceProcessor(TracingProcessor):
         """No external resources or background worker to close."""
 
 
-def install_agents_sdk_tracing(*, capture_mode: str = "metadata_only") -> AgentsSDKTraceProcessor:
+def install_agents_sdk_tracing(*, capture_mode: str = "prompt_and_response") -> AgentsSDKTraceProcessor:
     """Register an additive processor before Runner.run.
 
     Does not disable the SDK's own tracing exporter or change its privacy policy.
