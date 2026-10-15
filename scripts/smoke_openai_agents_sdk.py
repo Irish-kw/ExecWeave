@@ -96,7 +96,32 @@ def main() -> None:
                    if x["attributes"]["span_counts"].get("handoff", 0) == 0)
         assert sum(x["event_type"] == "TOOL_RESULT" for x in events) >= 2
         assert recorder.callback_errors == 0
-        print("Native Agents SDK tracing and real Runner smoke: PASS (offline, metadata only)")
+
+        # Exercise the *actual* semantic merge and graph materialization path,
+        # not only the SDK callbacks and their sidecar event schema. The runtime
+        # fixture is explicitly synthetic: it cannot attest OS or remote effects.
+        from framework_dashboard_acceptance import _runtime_for_sidecar
+        from execweave.semantic import merge_semantic_sidecar
+        from execweave.graph import build_execution_graph
+
+        runtime_path = Path(folder) / "events.jsonl"
+        merged_path = Path(folder) / "events.semantic.jsonl"
+        _runtime_for_sidecar(sidecar, runtime_path)
+        merge_result = merge_semantic_sidecar(runtime_path, sidecar, merged_path)
+        assert merge_result.semantic_event_count == len(events)
+        graph = build_execution_graph(merged_path).to_dict()
+        nodes = [n for n in graph["nodes"] if isinstance(n, dict)]
+        edges = [e for e in graph["edges"] if isinstance(e, dict)]
+        observed_agents = {n.get("name") for n in nodes if n.get("type") == "agent"}
+        assert {"Tool_Selector", "Simulation_Agent", "OfflineSDKAgent"} <= observed_agents
+        observed_relations = {e.get("relation") for e in edges}
+        assert {"REQUESTS_TOOL_CALL", "TOOL_CALL_RETURNS", "MODEL_CALL_RESPONDS"} <= observed_relations
+        assert "MESSAGE_RECEIVED" not in observed_relations
+        assert not any(
+            e.get("relation") in {"OBSERVED_FILE_CHANGE", "HAS_RISK"}
+            for e in edges
+        ), "SDK tool return cannot invent independently verified host effects"
+        print("Native Agents SDK tracing, real Runner, and materialized graph smoke: PASS (offline)")
 
 
 if __name__ == "__main__":
