@@ -1,7 +1,8 @@
 """Real OpenAI Agents SDK span smoke without API keys or external requests.
 
-Only tracing primitives are executed. No Agent model request or tool side effect
-is performed. Run with the optional openai-agents extra installed.
+Runs SDK tracing primitives and a real Runner with a scripted offline model.
+A deterministic local tool is invoked; it performs no network or OS effect.
+Run with the optional openai-agents extra installed.
 """
 from __future__ import annotations
 
