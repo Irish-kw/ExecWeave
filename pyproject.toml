@@ -42,7 +42,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-agents = ["openai-agents>=0.2"]
+agents = ["openai-agents>=0.24,<0.25"]
 validation = ["cryptography>=44"]
 dev = [
   "cryptography>=44",
