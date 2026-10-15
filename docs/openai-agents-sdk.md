@@ -105,3 +105,15 @@ when present, is recorded as a SHA-256 reference rather than cleartext.
 Neither SDK task-span end nor turn-span end is promoted to a successful
 business outcome. Nested task/turn spans inherit the nearest independently
 observed Agent parent; disconnected ancestry remains unattributed.
+
+### Responses API late-content behavior
+
+The SDK may populate `ResponseSpanData.input` and the returned Response only
+at span completion. Metadata-only runs keep a single request event without
+content. In content-enabled runs, the earlier request remains intact and an
+additional `MODEL_REQUEST` record with the same `model_call_id` carries the
+available prompt reference, stamped `late_request_content=true` and
+`content_observed_at=sdk_span_end`. This is **not** a second API invocation.
+It documents when content became observable without inventing an earlier
+plaintext collection event. Content omitted by SDK tracing privacy settings
+remains unavailable to ExecWeave.
