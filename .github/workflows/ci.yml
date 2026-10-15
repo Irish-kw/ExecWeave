@@ -138,6 +138,8 @@ jobs:
         run: python scripts/acceptance_source_provenance.py --output acceptance-source-before.json
       - name: Ruff
         run: ruff check .
+      - name: OpenAI Agents SDK offline native trace smoke
+        run: python scripts/smoke_openai_agents_sdk.py
       - name: Tests
         shell: bash
         run: |
@@ -156,8 +158,6 @@ jobs:
       - name: Annotate pytest failures
         if: failure() && hashFiles('pytest-results.xml') != ''
         run: python scripts/annotate_pytest_failures.py pytest-results.xml
-      - name: OpenAI Agents SDK offline native trace smoke
-        run: python scripts/smoke_openai_agents_sdk.py
       - name: Claude hook command smoke
         run: python scripts/check_claude_hook.py
       - name: Claude run-bound semantic and correlation smoke
