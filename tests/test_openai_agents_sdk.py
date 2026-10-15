@@ -208,6 +208,7 @@ def test_response_span_maps_to_model_events_without_exposing_payload(tmp_path, m
     assert any(e["event_type"] == "MODEL_RESPONSE" for e in records)
     result = next(e for e in records if e["event_type"] == "MODEL_RESPONSE")
     assert result["attributes"]["sdk_reported_model"] == "gpt-test"
+    assert result["attributes"]["model_identity_resolved_at_end"] is False
     payload = " ".join(f.read_text() for f in (tmp_path / "content").rglob("*") if f.is_file())
     assert "VISIBLE_QUESTION" in payload
     assert "VISIBLE_REPLY" in payload
@@ -246,3 +247,25 @@ def test_cyclic_or_absent_sdk_parent_cannot_invent_an_agent(tmp_path, monkeypatc
     tool = next(row for row in events if row["event_type"] == "TOOL_CALL")
     assert tool["attributes"]["requesting_agent_id"] is None
     assert not any(row["event_type"] == "AGENT_CREATED" for row in events)
+
+
+def test_sdk_response_model_may_be_known_only_after_span_end(tmp_path, monkeypatch):
+    _env(monkeypatch, tmp_path)
+    p = AgentsSDKTraceProcessor()
+    trace = NS(trace_id="trace-fixture")
+    p.on_trace_start(trace)
+    agent = _span("a1", "agent", name="Worker")
+    response = _span("r1", "response", parent="a1", response=None)
+    p.on_span_start(agent)
+    p.on_span_start(response)
+    response.span_data.response = NS(model="actual-model")
+    p.on_span_end(response)
+    p.on_span_end(agent)
+    p.on_trace_end(trace)
+    events = _records(tmp_path)
+    request = next(e for e in events if e["event_type"] == "MODEL_REQUEST")
+    result = next(e for e in events if e["event_type"] == "MODEL_RESPONSE")
+    assert request["target"]["name"] == "unknown"
+    assert result["target"]["name"] == "actual-model"
+    assert result["attributes"]["sdk_initial_model"] == "unknown"
+    assert result["attributes"]["model_identity_resolved_at_end"] is True
