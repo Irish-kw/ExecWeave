@@ -36,6 +36,10 @@ def _entity_backend(entity: object) -> str | None:
 
 
 def _normalized_attribution(event_type: str, raw: object) -> str | None:
+    # Even self-declared native attributions on semantic records remain
+    # session-correlated until corroborated by the trusted native collector.
+    if event_type.startswith("semantic.") or raw == "semantic_sidecar":
+        return "session_correlated"
     if raw == "syscall":
         return "syscall_attributed"
     if raw in {"polling", "process_polling"}:
