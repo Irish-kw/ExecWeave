@@ -88,7 +88,8 @@ class AgentsSDKTraceProcessor(TracingProcessor):
 
     def _state(self, trace_id: str) -> dict[str, Any]:
         return self._runs.setdefault(trace_id, {
-            "owners": {}, "parents": {}, "models": {}, "tasks": {}, "seen": set(),
+            "owners": {}, "parents": {}, "models": {}, "model_input_at_start": {},
+            "tasks": {}, "seen": set(),
             "started": set(), "ended": set(), "counts": Counter(),
             "unattributed": 0,
         })
@@ -266,13 +267,18 @@ class AgentsSDKTraceProcessor(TracingProcessor):
                     "unknown",
                 )
                 state["models"][span_id] = model_name
+                observed_input = getattr(data, "input", None)
+                state["model_input_at_start"][span_id] = observed_input is not None
                 model = self.context.entity("model", model_name, name=model_name)
                 call = self.context.entity("model_call", f"{trace_id}:{span_id}")
                 self.context.record_model_call(ModelCallRecord(
                     call, owner, model,
-                    request=_safe(getattr(data, "input", None))
+                    request=_safe(observed_input)
                     if self.capture_mode != "metadata_only" else None,
-                    attributes=self._identity(span),
+                    attributes={
+                        **self._identity(span),
+                        "input_observed_at_start": observed_input is not None,
+                    },
                 ))
             elif kind == "function":
                 name = _name(getattr(data, "name", None), "unknown-tool")
@@ -342,6 +348,24 @@ class AgentsSDKTraceProcessor(TracingProcessor):
                     initial_model,
                 )
                 model = self.context.entity("model", resolved_model, name=resolved_model)
+                # The official Responses SDK populates span_data.input
+                # *after* the model call. Keep the original request boundary
+                # intact and append content with its true observation stage.
+                late_input = getattr(data, "input", None)
+                if (
+                    self.capture_mode != "metadata_only"
+                    and late_input is not None
+                    and not state["model_input_at_start"].get(span_id, False)
+                ):
+                    self.context.record_model_call(ModelCallRecord(
+                        call, owner, model, request=_safe(late_input),
+                        attributes={
+                            **evidence,
+                            "content_observed_at": "sdk_span_end",
+                            "late_request_content": True,
+                            "request_timestamp_not_inferred": True,
+                        },
+                    ))
                 response = (
                     _safe(observed_response)
                     if self.capture_mode == "prompt_and_response" else None
