@@ -296,3 +296,49 @@ def test_runner_task_turn_recorded_as_observed_without_success(tmp_path, monkeyp
     raw = (tmp_path / "semantic.jsonl").read_text()
     assert "PRIVATE-GROUP-REF" not in raw
     assert hashlib.sha256(b"PRIVATE-GROUP-REF").hexdigest() in raw
+
+
+def test_responses_input_arrives_at_end_and_captures_truthful_source_time(tmp_path, monkeypatch):
+    _env(monkeypatch, tmp_path)
+    p = AgentsSDKTraceProcessor(capture_mode="prompt_and_response")
+    trace = NS(trace_id="trace-fixture")
+    p.on_trace_start(trace)
+    agent = _span("a1", "agent", name="Worker")
+    response = _span("r1", "response", parent="a1", input=None, response=None)
+    p.on_span_start(agent)
+    p.on_span_start(response)
+    response.span_data.input = [{"role": "user", "content": "LATE_VISIBLE_PROMPT"}]
+    response.span_data.response = NS(
+        model="gpt-test",
+        model_dump=lambda **_: {"output": [{"type": "message", "text": "LATE_RESPONSE"}]},
+    )
+    p.on_span_end(response)
+    p.on_span_end(agent)
+    p.on_trace_end(trace)
+    events = _records(tmp_path)
+    requests = [e for e in events if e["event_type"] == "MODEL_REQUEST"]
+    assert len(requests) == 2
+    assert requests[0]["attributes"]["input_observed_at_start"] is False
+    assert requests[0]["attributes"]["content_available"] is False
+    assert requests[1]["attributes"]["late_request_content"] is True
+    assert requests[1]["attributes"]["content_observed_at"] == "sdk_span_end"
+    assert requests[1]["attributes"]["request_timestamp_not_inferred"] is True
+    payload = " ".join(x.read_text() for x in (tmp_path / "content").rglob("*") if x.is_file())
+    assert "LATE_VISIBLE_PROMPT" in payload
+    assert "LATE_RESPONSE" in payload
+
+
+def test_metadata_only_never_promotes_late_prompt_to_content(tmp_path, monkeypatch):
+    _env(monkeypatch, tmp_path)
+    p = AgentsSDKTraceProcessor(capture_mode="metadata_only")
+    trace = NS(trace_id="trace-fixture")
+    p.on_trace_start(trace)
+    response = _span("r1", "response", input=None, response=None)
+    p.on_span_start(response)
+    response.span_data.input = "PRIVATE_LATE_PROMPT"
+    p.on_span_end(response)
+    p.on_trace_end(trace)
+    events = _records(tmp_path)
+    assert sum(x["event_type"] == "MODEL_REQUEST" for x in events) == 1
+    assert "PRIVATE_LATE_PROMPT" not in (tmp_path / "semantic.jsonl").read_text()
+    assert not (tmp_path / "content").exists()
