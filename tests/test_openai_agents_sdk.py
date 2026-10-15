@@ -212,3 +212,37 @@ def test_response_span_maps_to_model_events_without_exposing_payload(tmp_path, m
     assert "VISIBLE_QUESTION" in payload
     assert "VISIBLE_REPLY" in payload
     assert "SECRET_THOUGHT" not in payload
+
+
+def test_nested_task_turn_parent_chain_preserves_actual_agent_owner(tmp_path, monkeypatch):
+    _env(monkeypatch, tmp_path)
+    p = AgentsSDKTraceProcessor(capture_mode="metadata_only")
+    _run_trace(p, [
+        _span("task-1", "task", name="Runner invocation"),
+        _span("agent-1", "agent", parent="task-1", name="Selector"),
+        _span("turn-1", "turn", parent="agent-1", agent_name="Selector", turn=1),
+        _span("tool-1", "function", parent="turn-1", name="status"),
+        _span("model-1", "response", parent="turn-1"),
+    ])
+    events = _records(tmp_path)
+    for event_type in ("TOOL_CALL", "TOOL_RESULT", "MODEL_REQUEST", "MODEL_RESPONSE"):
+        matches = [row for row in events if row["event_type"] == event_type]
+        assert len(matches) == 1
+        assert matches[0]["attributes"]["requesting_agent_id"] is not None
+        assert matches[0]["attributes"]["requesting_agent_id"].endswith(":Selector")
+    coverage = next(row for row in events if row["relation"] == "OBSERVATION_COVERAGE")
+    assert coverage["attributes"]["unattributed_spans"] == 1  # task alone has no Agent owner
+
+
+def test_cyclic_or_absent_sdk_parent_cannot_invent_an_agent(tmp_path, monkeypatch):
+    _env(monkeypatch, tmp_path)
+    p = AgentsSDKTraceProcessor(capture_mode="metadata_only")
+    _run_trace(p, [
+        _span("cycle-1", "turn", parent="cycle-2", agent_name="Unverified", turn=1),
+        _span("cycle-2", "task", parent="cycle-1", name="Loop"),
+        _span("orphan-tool", "function", parent="cycle-1", name="status"),
+    ])
+    events = _records(tmp_path)
+    tool = next(row for row in events if row["event_type"] == "TOOL_CALL")
+    assert tool["attributes"]["requesting_agent_id"] is None
+    assert not any(row["event_type"] == "AGENT_CREATED" for row in events)
