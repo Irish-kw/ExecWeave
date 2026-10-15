@@ -74,10 +74,13 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev,e2e,release]"
+          python -m pip install -e ".[agents]"
           python -m playwright install --with-deps chromium
       - name: Provision Linux collector
         if: runner.os == 'Linux'
         run: command -v strace >/dev/null || (sudo apt-get update && sudo apt-get install -y strace)
+      - name: Native OpenAI Agents SDK real Runner offline smoke
+        run: python scripts/smoke_openai_agents_sdk.py
       - name: Capture exact source before release verification
         run: python scripts/acceptance_source_provenance.py --output artifacts/release/source-before.json
       - name: Ruff and complete pytest including Chromium
@@ -166,10 +169,13 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev,e2e,release]"
+          python -m pip install -e ".[agents]"
           python -m playwright install --with-deps chromium
       - name: Provision Linux collector
         if: runner.os == 'Linux'
         run: command -v strace >/dev/null || (sudo apt-get update && sudo apt-get install -y strace)
+      - name: Native OpenAI Agents SDK real Runner offline smoke
+        run: python scripts/smoke_openai_agents_sdk.py
       - name: Capture exact source before minimum-version verification
         run: python scripts/acceptance_source_provenance.py --output artifacts/min-python/source-before.json
       - name: Ruff and complete pytest on Python 3.10

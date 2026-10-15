@@ -132,12 +132,14 @@ jobs:
         run: command -v strace >/dev/null || (sudo apt-get update && sudo apt-get install -y strace)
       - name: Install
         run: |
-          python -m pip install -e ".[dev,e2e]"
+          python -m pip install -e ".[dev,e2e,agents]"
           python -m playwright install --with-deps chromium
       - name: Capture exact acceptance source
         run: python scripts/acceptance_source_provenance.py --output acceptance-source-before.json
       - name: Ruff
         run: ruff check .
+      - name: OpenAI Agents SDK offline native trace smoke
+        run: python scripts/smoke_openai_agents_sdk.py
       - name: Tests
         shell: bash
         run: |

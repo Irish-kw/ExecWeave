@@ -361,6 +361,10 @@ from execweave.framework_adapters import AdapterContext, CAMELAdapter
 adapter = CAMELAdapter(AdapterContext.from_environment("camel"))
 ```
 
+## OpenAI Agents SDK 原生集成
+
+ExecWeave 提供可选的原生 TracingProcessor，用于 `Agent`、`Runner.run` 和 `@function_tool` 程序。安装 `execweave[agents]` 后，在运行 Agent 前调用 `install_agents_sdk_tracing(capture_mode="metadata_only")`。SDK 工具结果不等于独立验证的远程系统效果。参阅 [SDK 指南](docs/openai-agents-sdk.md)。
+
 ## 自定义 Python 与 OpenAI API Key
 
 使用 `execweave record -- python my_agent.py` 或 `execweave live --open -- python my_agent.py` 记录运行时证据。如需**单／多 Agent 的 OpenAI 模型调用及交接语义**，请用 `OpenAIAgentRecorder` 包装官方 SDK，并明确记录各 Agent 的发送和接收事件。Adapter 不读取 API Key，也不能从 HTTPS 自动推断 Agent 身份。参阅 [OpenAI Python 集成指南](docs/openai-python.md)。

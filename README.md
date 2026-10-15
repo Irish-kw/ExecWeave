@@ -381,6 +381,17 @@ from the merged runtime plus framework evidence. Task prompts and routed
 messages remain local content references and are visible from their task and
 agent nodes.
 
+## Native OpenAI Agents SDK integration
+
+For Python applications built with `agents.Agent`, `Runner.run`, and
+`@function_tool`, ExecWeave provides an optional native trace processor.
+Install `execweave[agents]` and register
+`install_agents_sdk_tracing(capture_mode="metadata_only")` before running any
+agents. It records SDK Agent, generation, tool and handoff spans separately
+from observed OS effects, including source IDs and trace coverage gaps.
+SDK results do not certify remote-host effects. See
+[the Agents SDK guide](docs/openai-agents-sdk.md).
+
 ## Custom OpenAI Python scripts
 
 Use `execweave record -- python my_agent.py` or `execweave live --open -- python my_agent.py` to observe the runtime. For **OpenAI API-key single-/multi-Agent semantic evidence**, wrap the official SDK with `OpenAIAgentRecorder` and explicitly record each Agent's send/receive handoffs. No API key is read by the adapter, and HTTPS cannot reveal roles by itself. See [OpenAI Python integration](docs/openai-python.md) for synchronous/async calls, privacy and limitations.

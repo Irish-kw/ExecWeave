@@ -361,6 +361,10 @@ from execweave.framework_adapters import AdapterContext, CAMELAdapter
 adapter = CAMELAdapter(AdapterContext.from_environment("camel"))
 ```
 
+## Native Integration des OpenAI Agents SDK
+
+ExecWeave bietet einen optionalen Tracing-Prozessor für Anwendungen mit `Agent`, `Runner.run` und `@function_tool`. Installieren Sie `execweave[agents]` und rufen Sie vor dem Start `install_agents_sdk_tracing(capture_mode="metadata_only")` auf. Ereignisse werden mit Quellbelegen erfasst. Tool-Rückgaben sind kein unabhängiger Beweis für entfernte Systemeffekte. Siehe [SDK-Anleitung](docs/openai-agents-sdk.md).
+
 ## Eigenes Python mit OpenAI API Key
 
 Mit `execweave record -- python my_agent.py` oder `execweave live --open -- python my_agent.py` können Runtime-Ereignisse beobachtet werden. Für **semantische OpenAI-Modellaufrufe und Übergaben einzelner oder mehrerer Agenten** den offiziellen SDK-Client mit `OpenAIAgentRecorder` umhüllen und Senden/Empfangen explizit protokollieren. Der Adapter liest keine API Keys und kann Agentenrollen nicht aus HTTPS ableiten. Siehe [OpenAI Python Guide](docs/openai-python.md).
