@@ -150,7 +150,10 @@ def test_repeated_end_does_not_duplicate_and_missing_start_is_reported(tmp_path,
     p.on_span_end(_span("unknown", "function", name="missing"))
     p.on_trace_end(trace)
     events = _records(tmp_path)
-    assert sum(e["event_type"] == "AGENT_STARTED" for e in events) == 1
+    # AdapterContext emits AGENT_STARTED also for a distinct OS-process
+    # correlation. That link is not a second SDK AgentSpan start.
+    assert sum(e["relation"] == "AGENT_STARTED" for e in events) == 1
+    assert sum(e["relation"] == "CORRELATED_WITH_PROCESS" for e in events) == 1
     assert sum(e["event_type"] == "AGENT_STOPPED" for e in events) == 1
     coverage = next(e for e in events if e["relation"] == "OBSERVATION_COVERAGE")
     assert coverage["attributes"]["span_counts"]["end_without_start"] == 1
