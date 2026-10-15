@@ -361,6 +361,10 @@ from execweave.framework_adapters import AdapterContext, CAMELAdapter
 adapter = CAMELAdapter(AdapterContext.from_environment("camel"))
 ```
 
+## OpenAI Agents SDK 네이티브 통합
+
+v0.8.37 후보는 `Agent`, `Runner.run`, `@function_tool` 기반 앱을 위한 선택적 추적 프로세서를 제공합니다. `execweave[agents]` 를 설치하고 실행 전에 `install_agents_sdk_tracing(capture_mode="metadata_only")` 를 호출하십시오. 도구 반환값만으로 원격 운영체제에서의 실행을 입증하지 않습니다. [가이드](docs/openai-agents-sdk.md).
+
 ## 사용자 Python과 OpenAI API Key
 
 `execweave record -- python my_agent.py` 또는 `execweave live --open -- python my_agent.py` 로 런타임을 관찰할 수 있습니다. **단일/다중 Agent의 OpenAI 모델 호출 및 핸드오프**를 기록하려면 공식 SDK를 `OpenAIAgentRecorder`로 감싸고 전송/수신을 명시적으로 기록하세요. Adapter는 API Key를 읽지 않으며 HTTPS만으로 Agent 역할을 추론하지 않습니다. [OpenAI Python 안내서](docs/openai-python.md)를 참고하세요.
