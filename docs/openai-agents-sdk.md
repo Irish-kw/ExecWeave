@@ -55,7 +55,7 @@ remove secrets within free-form strings**. Protect the run directory.
 | SDK source | Recorded observation | Boundary |
 | --- | --- | --- |
 | Agent span | Agent identity, start/stop, available tools | Available tools are **not** executed or selected tools |
-| Generation span | Model request/response/failure, model identity | Model output is provider evidence, not independent action proof |
+| Generation / Responses span | Model request/response/failure, model identity | Model output is provider evidence, not independent action proof |
 | Function span | Named tool call, result/failure, span identities | Function return is **not** an OS or remote-host success receipt |
 | Handoff span | Source/target of the reported handoff | No receive event is invented |
 | Trace completion | Observation coverage counts and missing spans | A complete trace is not complete OS/runtime observation |
