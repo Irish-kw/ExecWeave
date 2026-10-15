@@ -363,7 +363,7 @@ adapter = CAMELAdapter(AdapterContext.from_environment("camel"))
 
 ## OpenAI Agents SDK 네이티브 통합
 
-v0.8.37 후보는 `Agent`, `Runner.run`, `@function_tool` 기반 앱을 위한 선택적 추적 프로세서를 제공합니다. `execweave[agents]` 를 설치하고 실행 전에 `install_agents_sdk_tracing(capture_mode="metadata_only")` 를 호출하십시오. 도구 반환값만으로 원격 운영체제에서의 실행을 입증하지 않습니다. [가이드](docs/openai-agents-sdk.md).
+this integration 후보는 `Agent`, `Runner.run`, `@function_tool` 기반 앱을 위한 선택적 추적 프로세서를 제공합니다. `execweave[agents]` 를 설치하고 실행 전에 `install_agents_sdk_tracing(capture_mode="metadata_only")` 를 호출하십시오. 도구 반환값만으로 원격 운영체제에서의 실행을 입증하지 않습니다. [가이드](docs/openai-agents-sdk.md).
 
 ## 사용자 Python과 OpenAI API Key
 
