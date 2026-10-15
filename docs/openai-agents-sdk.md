@@ -61,7 +61,11 @@ remove secrets within free-form strings**. Protect the run directory.
 | Handoff span | Source/target of the reported handoff | No receive event is invented |
 | Trace completion | Observation coverage counts and missing spans | A complete trace is not complete OS/runtime observation |
 
-A model identity that becomes available only at span completion is explicitly\nmarked with `model_identity_resolved_at_end`; the earlier request record\nremains `unknown`, preserving the true observation boundary.\n\nEvery emitted model/tool observation includes `sdk_trace_id`,
+A model identity that becomes available only at span completion is explicitly
+marked with `model_identity_resolved_at_end`; the earlier request record
+remains `unknown`, preserving the true observation boundary.
+
+Every emitted model/tool observation includes `sdk_trace_id`,
 `sdk_span_id`, `sdk_parent_span_id` and
 `evidence_source=agents_sdk_tracing_callback`. SDK span IDs are used for
 stable run-local linking; raw content is stored only by explicit policy in
