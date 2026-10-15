@@ -73,7 +73,8 @@ jobs:
       - name: Install full release verification dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev,e2e,release,agents]"
+          python -m pip install -e ".[dev,e2e,release]"
+          python -m pip install -e ".[agents]"
           python -m playwright install --with-deps chromium
       - name: Provision Linux collector
         if: runner.os == 'Linux'
@@ -167,7 +168,8 @@ jobs:
       - name: Install minimum-version verification dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev,e2e,release,agents]"
+          python -m pip install -e ".[dev,e2e,release]"
+          python -m pip install -e ".[agents]"
           python -m playwright install --with-deps chromium
       - name: Provision Linux collector
         if: runner.os == 'Linux'
