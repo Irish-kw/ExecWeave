@@ -91,6 +91,23 @@ class AgentsSDKTraceProcessor(TracingProcessor):
             "unattributed": 0,
         })
 
+    @staticmethod
+    def _owner_from_ancestors(state: dict[str, Any], parent_id: str | None):
+        """Find the nearest SDK-observed agent through intermediate task/turn spans.
+
+        An unobserved parent stays unattributed; names in turn metadata are not
+        silently promoted into authoritative agent identities.
+        """
+        cursor = parent_id
+        seen: set[str] = set()
+        while cursor is not None and cursor not in seen:
+            seen.add(cursor)
+            owner = state["owners"].get(cursor)
+            if owner is not None:
+                return owner
+            cursor = state["parents"].get(cursor)
+        return None
+
     def _agent(self, trace_id: str, agent_name: str):
         assert self.context is not None
         return self.context.entity(
@@ -165,7 +182,7 @@ class AgentsSDKTraceProcessor(TracingProcessor):
             data = span.span_data
             kind = getattr(data, "type", "unknown")
             state["counts"][str(kind)] += 1
-            owner = state["owners"].get(parent_id)
+            owner = self._owner_from_ancestors(state, parent_id)
             if kind == "agent":
                 name = _name(getattr(data, "name", None), "unnamed-agent")
                 owner = self._agent(trace_id, name)
