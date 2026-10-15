@@ -187,3 +187,28 @@ def test_installer_requires_optional_sdk_or_registers_safely(tmp_path, monkeypat
         processor = install_agents_sdk_tracing()
         assert attached == [processor]
         assert isinstance(processor, sdk.TracingProcessor)
+
+
+def test_response_span_maps_to_model_events_without_exposing_payload(tmp_path, monkeypatch):
+    _env(monkeypatch, tmp_path)
+    p = AgentsSDKTraceProcessor(capture_mode="prompt_and_response")
+    response = NS(
+        model="gpt-test", model_dump=lambda **_: {
+            "model": "gpt-test", "output": [{"type": "reasoning", "text": "SECRET_THOUGHT"},
+                                            {"type": "message", "text": "VISIBLE_REPLY"}],
+        }
+    )
+    _run_trace(p, [
+        _span("a1", "agent", name="Agent"),
+        _span("response-1", "response", parent="a1",
+              input="VISIBLE_QUESTION", response=response),
+    ])
+    records = _records(tmp_path)
+    assert any(e["event_type"] == "MODEL_REQUEST" for e in records)
+    assert any(e["event_type"] == "MODEL_RESPONSE" for e in records)
+    result = next(e for e in records if e["event_type"] == "MODEL_RESPONSE")
+    assert result["attributes"]["sdk_reported_model"] == "gpt-test"
+    payload = " ".join(f.read_text() for f in (tmp_path / "content").rglob("*") if f.is_file())
+    assert "VISIBLE_QUESTION" in payload
+    assert "VISIBLE_REPLY" in payload
+    assert "SECRET_THOUGHT" not in payload
