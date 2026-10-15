@@ -69,7 +69,7 @@ class AgentsSDKTraceProcessor(TracingProcessor):
     A function-tool result is framework-reported and *not* proof of an OS effect.
     """
 
-    def __init__(self, *, capture_mode: str = "metadata_only") -> None:
+    def __init__(self, *, capture_mode: str = "prompt_and_response") -> None:
         import os
 
         ContentCapturePolicy(capture_mode)
