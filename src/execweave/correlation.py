@@ -393,10 +393,13 @@ def _candidate_processes(
             cmdline = attributes.get("cmdline")
             if isinstance(cmdline, list) and cmdline and all(isinstance(item, str) for item in cmdline):
                 cmdline_match = _same_executable_identity(cmdline[0], declaration)
+                # A tail of option flags alone (``-v``, ``--help``) says nothing
+                # about which program ran, so it cannot establish compatibility.
                 argv_tail_match = (
                     len(declaration.command_argv) > 1
                     and len(cmdline) == len(declaration.command_argv)
                     and tuple(cmdline[1:]) == declaration.command_argv[1:]
+                    and any(not token.startswith("-") for token in cmdline[1:])
                 )
             if not process_exe_match and not cmdline_match and not argv_tail_match:
                 continue
@@ -505,6 +508,7 @@ def correlate_tool_process(
     skipped_no_match = 0
     skipped_ambiguous = 0
 
+    candidate_sets: list[tuple[_Declaration, dict[str, _Candidate]]] = []
     for position, declaration in enumerate(declarations):
         if not declaration.command_head:
             skipped_unsupported += 1
@@ -517,27 +521,47 @@ def correlate_tool_process(
                 if result_time >= declaration.timestamp:
                     window_end = min(window_end, result_time)
                     break
-        if position + 1 < len(declarations):
-            next_time = declarations[position + 1].timestamp
-            if next_time > declaration.timestamp:
-                window_end = min(window_end, next_time)
+        # Declarations sharing a timestamp do not bound each other; the next
+        # strictly later declaration still does.
+        for later in declarations[position + 1 :]:
+            if later.timestamp > declaration.timestamp:
+                window_end = min(window_end, later.timestamp)
+                break
 
-        candidates = _candidate_processes(
-            events,
-            declaration=declaration,
-            start=declaration.timestamp,
-            end=window_end,
+        candidate_sets.append(
+            (
+                declaration,
+                _candidate_processes(
+                    events,
+                    declaration=declaration,
+                    start=declaration.timestamp,
+                    end=window_end,
+                ),
+            )
         )
+
+    # A process compatible with more than one declaration is ambiguous on the
+    # declaration side as well, so none of those declarations claims it.
+    claims: dict[str, int] = {}
+    for _, candidates in candidate_sets:
+        for process_id in candidates:
+            claims[process_id] = claims.get(process_id, 0) + 1
+
+    for declaration, candidates in candidate_sets:
         if not candidates:
             skipped_no_match += 1
             continue
         if len(candidates) != 1:
             skipped_ambiguous += 1
             continue
+        process_id, candidate = next(iter(candidates.items()))
+        if claims[process_id] != 1:
+            skipped_ambiguous += 1
+            continue
         derived.append(
             _derived_event(
                 declaration,
-                next(iter(candidates.values())),
+                candidate,
                 session_id=session_id,
                 max_window_ms=max_window_ms,
             )
