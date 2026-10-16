@@ -12,6 +12,12 @@ _SAMPLED_ATTRIBUTIONS = {"polling", "process_polling"}
 _SESSION_ATTRIBUTIONS = {"session_observation"}
 
 
+def _count(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return 0
+    return value
+
+
 def _strings(value: object) -> list[str]:
     if not isinstance(value, list):
         return []
@@ -36,6 +42,8 @@ class EdgeEvidenceGrade:
     attributions: list[str]
     backends: list[str]
     inference_methods: list[str]
+    causal_unannotated_count: int = 0
+    attribution_unannotated_count: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -51,7 +59,10 @@ def grade_edge(edge: dict[str, Any]) -> EdgeEvidenceGrade:
     D = explicitly inferred/heuristic evidence
     U = provenance is absent, mixed, or not yet classified
 
-    Unknown attribution vocabulary is never upgraded automatically.
+    Unknown attribution vocabulary is never upgraded automatically. An edge's
+    aggregate causal flag ignores observations that omit the flag, so support
+    observations without an explicit causal flag or attribution count as U
+    when the weakest attribution grade is taken.
     """
     edge_id = str(edge.get("id") or "")
     causal = edge.get("causal") if isinstance(edge.get("causal"), bool) else None
@@ -59,6 +70,8 @@ def grade_edge(edge: dict[str, Any]) -> EdgeEvidenceGrade:
     attributions = _strings(edge.get("attributions"))
     backends = _strings(edge.get("backends"))
     inference_methods = _strings(edge.get("inference_methods"))
+    causal_unannotated = _count(edge.get("causal_unannotated_count"))
+    attribution_unannotated = _count(edge.get("attribution_unannotated_count"))
 
     if inferred is True or inference_methods:
         grade = "D"
@@ -87,6 +100,9 @@ def grade_edge(edge: dict[str, Any]) -> EdgeEvidenceGrade:
             "C": "session-correlated or non-causal attribution",
             "U": "attribution provenance is unknown, mixed, or not yet classified",
         }[grade]
+        if grade != "U" and (causal_unannotated or attribution_unannotated):
+            grade = "U"
+            reason = "some supporting observations lack an explicit causal flag or attribution"
 
     return EdgeEvidenceGrade(
         edge_id=edge_id,
@@ -97,6 +113,8 @@ def grade_edge(edge: dict[str, Any]) -> EdgeEvidenceGrade:
         attributions=attributions,
         backends=backends,
         inference_methods=inference_methods,
+        causal_unannotated_count=causal_unannotated,
+        attribution_unannotated_count=attribution_unannotated,
     )
 
 

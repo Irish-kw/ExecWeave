@@ -239,6 +239,10 @@ class GraphEdge:
     causal_values: set[bool] = field(default_factory=set)
     inferred_values: set[bool] = field(default_factory=set)
     inference_methods: set[str] = field(default_factory=set)
+    # Observations that omit a flag are ignored by the Boolean sets above, so
+    # count them separately; evidence grading must not treat them as covered.
+    causal_unannotated_count: int = 0
+    attribution_unannotated_count: int = 0
     identity_exact_values: set[bool] = field(default_factory=set)
     identity_methods: set[str] = field(default_factory=set)
     identity_hashes: set[str] = field(default_factory=set)
@@ -276,6 +280,10 @@ class GraphEdge:
         if isinstance(event_type, str):
             self.event_types.add(event_type)
         attributes = event.get("attributes") or {}
+        if not isinstance(attributes, dict) or not isinstance(attributes.get("causal"), bool):
+            self.causal_unannotated_count += 1
+        if not isinstance(attributes, dict) or not isinstance(attributes.get("attribution"), str):
+            self.attribution_unannotated_count += 1
         if isinstance(attributes, dict):
             backend = attributes.get("backend")
             if isinstance(backend, str):
@@ -351,6 +359,8 @@ class GraphEdge:
             "backends": sorted(self.backends),
             "attributions": sorted(self.attributions),
             "causal": causal,
+            "causal_unannotated_count": self.causal_unannotated_count,
+            "attribution_unannotated_count": self.attribution_unannotated_count,
             "inferred": inferred,
             "inference_methods": sorted(self.inference_methods),
             "identity_exact": identity_exact,
