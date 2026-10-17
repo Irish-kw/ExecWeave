@@ -158,21 +158,77 @@ class StraceParser:
         self._parent_by_pid: dict[int, int] = {}
         # strace -ff uses TIDs as trace-file suffixes; CLONE_THREAD does not
         # create another process. Keep thread identity distinct from process.
-        self._thread_leader_by_tid: dict[int, int] = {}
+        # Identity mappings are lifetime-bounded: Linux may reuse a TID after
+        # a thread exits. An all-session TID map can misattribute later files
+        # and creates false grade-A native process edges.
+        self._thread_lifetimes: dict[int, list[tuple[float, float, int]]] = {}
+        self._uncertain_lifetimes: dict[int, list[tuple[float, float]]] = {}
+        self._record_timestamp = float("-inf")
         self._spawn_origin_tid: dict[int, int] = {}
 
-    def _process_pid(self, tid: int) -> int:
-        """Map a traced thread to the native thread-group leader (TGID)."""
+    def _process_pid(self, tid: int, timestamp: float | None = None) -> int:
+        """Resolve a TID to its TGID only within an observed thread lifetime."""
+        at = self._record_timestamp if timestamp is None else timestamp
         seen: set[int] = set()
-        while tid in self._thread_leader_by_tid and tid not in seen:
+        while tid not in seen:
             seen.add(tid)
-            tid = self._thread_leader_by_tid[tid]
+            lifetimes = self._thread_lifetimes.get(tid, [])
+            active = [(born, parent) for born, until, parent in lifetimes
+                      if born <= at <= until]
+            if len(active) != 1:
+                break
+            tid = active[0][1]
         return tid
 
+    def _is_thread_at(self, tid: int, timestamp: float) -> bool:
+        return any(start <= timestamp <= end for start, end, _
+                   in self._thread_lifetimes.get(tid, []))
+
+    def _is_uncertain_at(self, tid: int, timestamp: float) -> bool:
+        return any(start <= timestamp <= end for start, end
+                   in self._uncertain_lifetimes.get(tid, []))
+
     @staticmethod
-    def _is_thread_clone(name: str, args: str) -> bool:
-        # An unrecognized/numeric clone flag is *not* assumed to be a thread.
-        return name in {"clone", "clone3"} and _CLONE_THREAD_RE.search(args) is not None
+    def _clone_kind(name: str, args: str) -> str:
+        """Return thread, process or unknown without assuming undocumented flags."""
+        if name in {"fork", "vfork"}:
+            return "process"
+        if name not in {"clone", "clone3"}:
+            return "unknown"
+        # strace normally renders flags symbolically, but numeric kernel flag
+        # words also occur. CLONE_THREAD is bit 0x10000 in Linux clone flags.
+        match = re.search(r"\\bflags\\s*=\\s*([^,}\\s)]+)", args)
+        if not match:
+            return "unknown"
+        flags = match.group(1)
+        bits = 0
+        parts = flags.split("|")
+        for part in parts:
+            if part == "CLONE_THREAD":
+                return "thread"
+            if part.startswith(("0x", "0X", "0o", "0O", "0b", "0B")) or part.isdigit():
+                try:
+                    bits |= int(part, 0)
+                except ValueError:
+                    return "unknown"
+            elif part.startswith(("CLONE_", "SIG")):
+                continue
+            else:
+                return "unknown"
+        return "thread" if bits & 0x10000 else "process"
+
+    @classmethod
+    def _is_thread_clone(cls, name: str, args: str) -> bool:
+        return cls._clone_kind(name, args) == "thread"
+
+    def _uncertain_entity(self, tid: int) -> Entity:
+        return Entity(
+            type="unclassified_task",
+            id=f"unclassified-task:{self.session_id}:{tid}",
+            name=str(tid),
+            attributes={"tid": tid, "classification": "unknown",
+                        "backend": "strace"},
+        )
 
     def _thread_entity(self, tid: int) -> Entity:
         leader = self._process_pid(tid)
@@ -182,6 +238,8 @@ class StraceParser:
         )
 
     def process_entity(self, pid: int) -> Entity:
+        if self._is_uncertain_at(pid, self._record_timestamp):
+            return self._uncertain_entity(pid)
         pid = self._process_pid(pid)
         return Entity(
             type="process",
@@ -202,26 +260,64 @@ class StraceParser:
             self._parse_record(record)
 
     def _index_process_parents(self, records: Iterable[TraceRecord]) -> None:
-        """Index fork/clone relationships before emitting events.
+        """Pre-index thread lifetimes and native parents before timestamp ties.
 
-        strace timestamps can tie across per-PID trace files. Without a pre-pass,
-        a child record that sorts before its parent's clone() record can be mistaken
-        for a session root. The parent index makes process identity independent of
-        cross-file ordering at equal timestamps.
+        A traced TID can later be reused as a real child process. Time-bounded
+        identities prevent a stale thread map from claiming the new child.
         """
-        for record in records:
+        materialized = sorted(records, key=lambda r: (r.timestamp, r.pid))
+        births: dict[int, list[float]] = {}
+        thread_starts: list[tuple[int, float, int]] = []
+        uncertain_starts: list[tuple[int, float]] = []
+        real_starts: list[tuple[int, float, int]] = []
+        exits: dict[int, list[float]] = {}
+        for record in materialized:
+            if _EXIT_RE.match(record.body) or _KILLED_RE.match(record.body):
+                exits.setdefault(record.pid, []).append(record.timestamp)
+                continue
             syscall = _SYSCALL_RE.match(record.body)
-            if syscall is None or syscall.group("name") not in {"clone", "clone3", "fork", "vfork"}:
+            if syscall is None:
+                continue
+            name = syscall.group("name")
+            if name not in {"clone", "clone3", "fork", "vfork"}:
                 continue
             child_match = _CLONE_RESULT_RE.match(syscall.group("result"))
             if child_match is None:
                 continue
             child = int(child_match.group("pid"))
-            if self._is_thread_clone(syscall.group("name"), syscall.group("args")):
-                self._thread_leader_by_tid[child] = self._process_pid(record.pid)
+            births.setdefault(child, []).append(record.timestamp)
+            kind = self._clone_kind(name, syscall.group("args"))
+            if kind == "thread":
+                thread_starts.append((child, record.timestamp, record.pid))
+            elif kind == "process":
+                real_starts.append((child, record.timestamp, record.pid))
             else:
-                self._parent_by_pid[child] = self._process_pid(record.pid)
-                self._spawn_origin_tid[child] = record.pid
+                uncertain_starts.append((child, record.timestamp))
+
+        def limit_for(tid: int, born: float) -> float:
+            # A later successful clone that returns the same TID proves the
+            # prior instance has ended even if its exit trace was lost.
+            future_births = [t for t in births.get(tid, []) if t > born]
+            cutoff = min(future_births) if future_births else float("inf")
+            possible_exits = [t for t in exits.get(tid, [])
+                              if born <= t < cutoff]
+            if possible_exits:
+                return min(possible_exits)
+            if cutoff < float("inf"):
+                return cutoff - 0.000000001
+            return cutoff
+
+        for tid, born, parent_tid in thread_starts:
+            self._thread_lifetimes.setdefault(tid, []).append(
+                (born, limit_for(tid, born), parent_tid)
+            )
+        for tid, born in uncertain_starts:
+            self._uncertain_lifetimes.setdefault(tid, []).append(
+                (born, limit_for(tid, born))
+            )
+        for child, timestamp, parent_tid in real_starts:
+            self._parent_by_pid[child] = self._process_pid(parent_tid, timestamp)
+            self._spawn_origin_tid[child] = parent_tid
 
     def _ensure_process(
         self,
@@ -231,7 +327,9 @@ class StraceParser:
         parent_pid: int | None = None,
         relation: str | None = None,
     ) -> None:
-        pid = self._process_pid(pid)
+        if self._is_uncertain_at(pid, timestamp):
+            return
+        pid = self._process_pid(pid, timestamp)
         if parent_pid is not None:
             parent_pid = self._process_pid(parent_pid)
         if pid in self._known_processes:
@@ -263,9 +361,14 @@ class StraceParser:
         )
 
     def _parse_record(self, record: TraceRecord) -> None:
+        self._record_timestamp = record.timestamp
         exit_match = _EXIT_RE.match(record.body)
         if exit_match is not None:
-            if record.pid in self._thread_leader_by_tid:
+            self._record_timestamp = record.timestamp
+            if self._is_uncertain_at(record.pid, record.timestamp):
+                self._emit_uncertain_exit(record)
+                return
+            if self._is_thread_at(record.pid, record.timestamp):
                 self._emit_thread_exit(record, exit_code=int(exit_match.group("code")))
                 return
             self._ensure_process(record.pid, record.timestamp)
@@ -286,7 +389,11 @@ class StraceParser:
 
         killed_match = _KILLED_RE.match(record.body)
         if killed_match is not None:
-            if record.pid in self._thread_leader_by_tid:
+            self._record_timestamp = record.timestamp
+            if self._is_uncertain_at(record.pid, record.timestamp):
+                self._emit_uncertain_exit(record)
+                return
+            if self._is_thread_at(record.pid, record.timestamp):
                 self._emit_thread_exit(record, signal=killed_match.group("signal"))
                 return
             self._ensure_process(record.pid, record.timestamp)
@@ -330,6 +437,16 @@ class StraceParser:
         elif name == "connect":
             self._parse_connect(record, args, result)
 
+    def _emit_uncertain_exit(self, record: TraceRecord) -> None:
+        self.sink.emit(RuntimeEvent.create(
+            session_id=self.session_id, event_type="task.exited",
+            relation="UNCLASSIFIED_TASK_EXITED",
+            source=self._uncertain_entity(record.pid),
+            timestamp=_iso_timestamp(record.timestamp),
+            attributes={"backend": "strace", "classification": "unknown",
+                        "causal": False, "attribution": "syscall"},
+        ))
+
     def _emit_thread_exit(
         self, record: TraceRecord, *, exit_code: int | None = None,
         signal: str | None = None,
@@ -350,7 +467,23 @@ class StraceParser:
         if child_match is None:
             return
         child_pid = int(child_match.group("pid"))
-        if self._is_thread_clone(name, args):
+        kind = self._clone_kind(name, args)
+        if kind == "unknown":
+            # The syscall return exposes a task ID, but without readable
+            # clone flags the OS has not established process-vs-thread kind.
+            # Do not emit a native process SPAWNED or an A-grade ancestry edge.
+            self.sink.emit(RuntimeEvent.create(
+                session_id=self.session_id, event_type="task.started",
+                relation="CLONE_KIND_UNRESOLVED",
+                source=self.process_entity(record.pid),
+                target=self._uncertain_entity(child_pid),
+                timestamp=_iso_timestamp(record.timestamp),
+                attributes={"syscall": name, "backend": "strace",
+                            "attribution": "syscall", "causal": False,
+                            "classification": "unknown"},
+            ))
+            return
+        if kind == "thread":
             # CLONE_THREAD creates a task/TID in the same thread group, not a
             # new process. Retain the observed thread without inventing SPAWNED.
             self.sink.emit(RuntimeEvent.create(
