@@ -81,3 +81,64 @@ def test_failed_clone_does_not_invent_process_or_thread(tmp_path: Path) -> None:
     ])
     assert not any(e["event_type"] == "thread.started" for e in events)
     assert not any(e["relation"] == "SPAWNED" for e in events)
+
+
+def test_reused_tid_after_thread_exit_is_a_new_real_process(tmp_path: Path) -> None:
+    """A stale TID→TGID association must not misattribute a new child's write."""
+    events = _parse(tmp_path, [
+        TraceRecord(10.0, 401, "clone(flags=CLONE_VM|CLONE_THREAD|CLONE_SIGHAND) = 402"),
+        TraceRecord(10.1, 402, "+++ exited with 0 +++"),
+        TraceRecord(10.2, 401, "clone(flags=SIGCHLD) = 402"),
+        TraceRecord(10.3, 402, 'openat(AT_FDCWD, "m.txt", O_WRONLY|O_CREAT) = 3'),
+        TraceRecord(10.4, 402, "+++ exited with 0 +++"),
+    ])
+    starts = [e for e in events if e["event_type"] == "process.started"]
+    assert any(e["target"]["id"] == "process:thread-fixture:402"
+               and e["source"]["id"] == "process:thread-fixture:401"
+               and e["relation"] == "SPAWNED" for e in starts)
+    opened = next(e for e in events if e["event_type"] == "filesystem.open")
+    assert opened["source"]["id"] == "process:thread-fixture:402"
+    exits = [e for e in events if e["source"] and
+             e["source"]["id"] == "process:thread-fixture:402" and
+             e["event_type"] == "process.exited"]
+    assert len(exits) == 1
+
+
+@pytest.mark.parametrize("name,args", [
+    ("clone", "clone(child_stack=0x7f00, flags=0x3d0f00) = 502"),
+    ("clone3", "clone3({flags=0x3d0f00, exit_signal=0}, 88) = 502"),
+])
+def test_numeric_clone_thread_bit_is_not_a_process(tmp_path: Path, name: str, args: str) -> None:
+    events = _parse(tmp_path, [TraceRecord(20.0, 501, args)])
+    assert sum(e["event_type"] == "thread.started" for e in events) == 1
+    assert not any(e["event_type"] == "process.started" and e.get("target") and
+                   e["target"]["id"] == "process:thread-fixture:502" for e in events)
+
+
+def test_undecoded_clone3_is_unclassified_and_never_a_native_process(tmp_path: Path) -> None:
+    events = _parse(tmp_path, [
+        TraceRecord(30.0, 601, "clone3(0x7ffc0000, 88) = 602"),
+        TraceRecord(30.1, 602, 'openat(AT_FDCWD, "x.txt", O_WRONLY|O_CREAT) = 3'),
+        TraceRecord(30.2, 602, "+++ exited with 0 +++"),
+    ])
+    uncertain = next(e for e in events if e["relation"] == "CLONE_KIND_UNRESOLVED")
+    assert uncertain["attributes"]["causal"] is False
+    assert uncertain["target"]["type"] == "unclassified_task"
+    assert not any(e["event_type"] == "process.started" and e.get("target") and
+                   e["target"].get("attributes", {}).get("pid") == 602 for e in events)
+    opened = next(e for e in events if e["event_type"] == "filesystem.open")
+    assert opened["source"]["type"] == "unclassified_task"
+    assert not any(e["event_type"] == "process.exited" and e.get("source") and
+                   e["source"]["id"].endswith(":602") for e in events)
+
+
+def test_undecoded_clone_does_not_hide_future_known_process_with_same_tid(tmp_path: Path) -> None:
+    events = _parse(tmp_path, [
+        TraceRecord(40.0, 701, "clone3(0x7ffc0000, 88) = 702"),
+        TraceRecord(40.1, 702, "+++ exited with 0 +++"),
+        TraceRecord(40.2, 701, "fork() = 702"),
+        TraceRecord(40.3, 702, 'openat(AT_FDCWD, "new.txt", O_WRONLY|O_CREAT) = 3'),
+    ])
+    opened = next(e for e in events if e["relation"] == "OPENED_WRITE")
+    assert opened["source"]["type"] == "process"
+    assert opened["source"]["id"] == "process:thread-fixture:702"
