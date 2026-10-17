@@ -155,3 +155,34 @@ def test_failed_tool_result_does_not_fabricate_os_effect() -> None:
     events[2]["relation"] = "TOOL_CALL_FAILED"
     events[2]["attributes"]["effect_attestation"] = "not_provided"
     assert _links(events) == []
+
+
+def test_unclosed_competing_sdk_span_must_block_link() -> None:
+    events = _fixture()
+    competing = deepcopy(events[1])
+    competing["event_id"] = "unclosed-call"
+    competing["attributes"]["tool_call_id"] = "tool-call:unclosed"
+    competing["attributes"]["sdk_span_id"] = "span_unclosed"
+    events.append(competing)
+    assert _links(events) == []
+
+
+def test_distinct_nonoverlapping_sdk_spans_can_each_match_native_child() -> None:
+    events = _fixture()
+    second_start = deepcopy(events[1])
+    second_end = deepcopy(events[3])
+    second_spawn = deepcopy(events[2])
+    second_start["event_id"] = "call2"
+    second_end["event_id"] = "end2"
+    second_spawn["event_id"] = "spawn2"
+    second_start["timestamp"] = "2026-10-17T02:00:02Z"
+    second_spawn["timestamp"] = "2026-10-17T02:00:02.300Z"
+    second_end["timestamp"] = "2026-10-17T02:00:02.500Z"
+    second_spawn["target"] = _entity("process", "process:s1:201", pid=201)
+    for item in (second_start, second_end):
+        item["attributes"]["tool_call_id"] = "tool-call:2"
+        item["attributes"]["sdk_span_id"] = "span_2"
+    events.extend([second_start, second_end, second_spawn])
+    derived = _links(events)
+    assert len(derived) == 2
+    assert {e["source"]["id"] for e in derived} == {"tool-call:1", "tool-call:2"}
