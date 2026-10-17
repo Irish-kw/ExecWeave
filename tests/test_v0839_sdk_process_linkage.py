@@ -186,3 +186,20 @@ def test_distinct_nonoverlapping_sdk_spans_can_each_match_native_child() -> None
     derived = _links(events)
     assert len(derived) == 2
     assert {e["source"]["id"] for e in derived} == {"tool-call:1", "tool-call:2"}
+
+
+def test_duplicated_competing_span_still_blocks_unique_claim() -> None:
+    events = _fixture()
+    second_start = deepcopy(events[1])
+    second_end = deepcopy(events[3])
+    second_start["event_id"] = "call2"
+    second_end["event_id"] = "end2"
+    second_start["timestamp"] = "2026-10-17T02:00:01.100Z"
+    second_end["timestamp"] = "2026-10-17T02:00:01.400Z"
+    for entry in (second_start, second_end):
+        entry["attributes"]["tool_call_id"] = "tool-call:2"
+        entry["attributes"]["sdk_span_id"] = "span_2"
+    duplicate_start = deepcopy(second_start)
+    duplicate_start["event_id"] = "call2-duplicate"
+    events.extend([second_start, second_end, duplicate_start])
+    assert _links(events) == []
