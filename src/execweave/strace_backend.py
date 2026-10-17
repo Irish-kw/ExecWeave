@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import math
 import os
 import re
 import shutil
@@ -21,7 +22,6 @@ from .sink import JsonlSink, _protect_git_run_directory
 _TIMESTAMP_RE = re.compile(r"^(?P<ts>\d+(?:\.\d+)?)\s+(?P<body>.*)$")
 _SYSCALL_RE = re.compile(r"^(?P<name>[a-zA-Z0-9_]+)\((?P<args>.*)\)\s+=\s+(?P<result>.*)$")
 _CLONE_RESULT_RE = re.compile(r"^(?P<pid>\d+)(?:\s|$)")
-_CLONE_THREAD_RE = re.compile(r"\bCLONE_THREAD\b")
 _CONNECT_ERROR_RE = re.compile(r"^-1\s+(?P<errno>[A-Z0-9_]+)(?:\s|$)")
 _EXIT_RE = re.compile(r"^\+\+\+ exited with (?P<code>-?\d+) \+\+\+$")
 _KILLED_RE = re.compile(r"^\+\+\+ killed by (?P<signal>[A-Z0-9]+).*$")
@@ -197,7 +197,7 @@ class StraceParser:
             return "unknown"
         # strace normally renders flags symbolically, but numeric kernel flag
         # words also occur. CLONE_THREAD is bit 0x10000 in Linux clone flags.
-        match = re.search(r"\\bflags\\s*=\\s*([^,}\\s)]+)", args)
+        match = re.search(r"\bflags\s*=\s*([^,}\s)]+)", args)
         if not match:
             return "unknown"
         flags = match.group(1)
@@ -304,7 +304,7 @@ class StraceParser:
             if possible_exits:
                 return min(possible_exits)
             if cutoff < float("inf"):
-                return cutoff - 0.000000001
+                return math.nextafter(cutoff, float("-inf"))
             return cutoff
 
         for tid, born, parent_tid in thread_starts:
