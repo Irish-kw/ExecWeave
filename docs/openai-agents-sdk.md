@@ -109,9 +109,12 @@ agent→OS effect chain, and it does not promote a TOOL_RESULT to an OS receipt.
 The strace backend also distinguishes `CLONE_THREAD` from real process
 creation: traced thread IDs are represented as threads and their syscalls
 attributed to the thread-group process. Native `process.started` records
-retain the spawning TID separately to audit provenance. Unrecognized numeric
-clone flags remain a known limit; no process ancestry is invented from
-unverified thread identity. Remote hosts, Windows and macOS do not gain an
+retain the spawning TID separately to audit provenance. Numeric Linux clone flags are decoded for the CLONE_THREAD bit (0x10000).
+If clone or clone3 flags cannot be decoded at all, the observed task is
+classified as `unclassified_task`, not a native process or thread; its file
+activity retains the observed TID but cannot establish process ancestry.
+Thread-group mappings expire at observed thread exit (or confirmed TID reuse).
+These are observation safeguards, not a completeness or cryptographic guarantee. Remote hosts, Windows and macOS do not gain an
 SDK-to-OS verification guarantee from this change.
 
 SDK process references with an independently unverified process create-time
