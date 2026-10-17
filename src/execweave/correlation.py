@@ -582,11 +582,31 @@ def _sdk_native_spawn_correlations(
             continue
         candidates.append((start, end, matching[0]))
 
-    # Concurrent SDK spans can each claim the same process; neither may.
+    # A span missing TOOL_RESULT still competes for a spawn in its bounded
+    # window. Ignoring incomplete spans could falsely attribute its child to
+    # a different, completed span. Never use absence of a callback as proof
+    # that a tool was not active.
     process_claims: dict[str, int] = {}
-    for _, _, spawn in candidates:
-        pid_id = spawn["target"]["id"]
-        process_claims[pid_id] = process_claims.get(pid_id, 0) + 1
+    for spawn in spawns:
+        parent = (spawn["source"].get("attributes") or {}).get("pid")
+        spawn_time = _event_time(spawn, index=1)
+        for call_id, start in starts.items():
+            if not start or start["attributes"].get("sdk_host_pid") != parent:
+                continue
+            begin = _event_time(start, index=1)
+            limit = begin + timedelta(milliseconds=max_window_ms)
+            finish_event = ends.get(call_id)
+            if finish_event:
+                finish_attrs = finish_event.get("attributes") or {}
+                if (
+                    finish_attrs.get("sdk_host_pid") == parent
+                    and finish_attrs.get("sdk_span_id") == start["attributes"].get("sdk_span_id")
+                    and finish_attrs.get("sdk_trace_id") == start["attributes"].get("sdk_trace_id")
+                ):
+                    limit = min(limit, _event_time(finish_event, index=1))
+            if begin <= spawn_time <= limit:
+                pid_id = spawn["target"]["id"]
+                process_claims[pid_id] = process_claims.get(pid_id, 0) + 1
     derived = []
     for start, end, spawn in candidates:
         target = spawn["target"]
