@@ -6,6 +6,7 @@ The module remains importable without the optional openai-agents package.
 from __future__ import annotations
 
 import hashlib
+import os
 import threading
 from collections import Counter
 from typing import Any
@@ -288,7 +289,11 @@ class AgentsSDKTraceProcessor(TracingProcessor):
                     call, owner, tool,
                     arguments=_safe(getattr(data, "input", None))
                     if self.capture_mode != "metadata_only" else None,
-                    attributes={**self._identity(span), "effect_attestation": "not_provided"},
+                    attributes={**self._identity(span),
+                                "effect_attestation": "not_provided",
+                                "sdk_host_pid": os.getpid(),
+                                "sdk_callback_tid": threading.get_native_id(),
+                                "sdk_host_pid_source": "sdk_callback_self_report"},
                 ))
 
     def on_span_end(self, span: Any) -> None:
@@ -391,7 +396,10 @@ class AgentsSDKTraceProcessor(TracingProcessor):
                 self.context.record_tool_call(ToolCallRecord(
                     call, owner, tool, result=response,
                     status="failure" if failed else "result",
-                    attributes={**evidence, "effect_attestation": "not_provided"},
+                    attributes={**evidence, "effect_attestation": "not_provided",
+                                "sdk_host_pid": os.getpid(),
+                                "sdk_callback_tid": threading.get_native_id(),
+                                "sdk_host_pid_source": "sdk_callback_self_report"},
                 ))
             elif kind == "handoff" and not failed:
                 sender_name = getattr(data, "from_agent", None)
