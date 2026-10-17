@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "execweave"
-# ExecWeave v0.8.38 release metadata; evidence provenance hardening
-version = "0.8.38"
+# ExecWeave v0.8.39 release metadata; SDK-to-OS provenance repair
+version = "0.8.39"
 description = "Local AI-agent execution graphs that identify sender/recipient handoffs with no observed receive in graph.json."
 readme = "README.md"
 requires-python = ">=3.10"
