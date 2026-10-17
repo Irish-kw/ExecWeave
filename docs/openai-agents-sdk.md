@@ -93,6 +93,34 @@ To attest remote Windows effects, observe the target machine independently and
 correlate with trustworthy identifiers; the processor intentionally does not
 infer effects from socket sends or tool return text.
 
+### v0.8.39 candidate: Linux native spawn correlation (inferred only)
+
+When recording with the Linux strace backend, function TOOL_CALL/TOOL_RESULT
+callbacks now include the SDK callback host PID and native TID as **self-reported
+hints**, not OS attestations. The post-run correlator may link the function
+call's identity to an independently observed native `process.started/SPAWNED`
+event, but only when the host TGID matches, the spawn is within the bounded
+function-span window, and exactly one candidate/claim exists. Concurrent,
+mismatched, missing, or unobserved cases abstain. The edge is
+`CORRELATED_WITH_PROCESS`, explicitly `inferred=true`, `causal=false`,
+with grade D (heuristic) and supporting event IDs. It is **not** a verified
+agent→OS effect chain, and it does not promote a TOOL_RESULT to an OS receipt.
+
+The strace backend also distinguishes `CLONE_THREAD` from real process
+creation: traced thread IDs are represented as threads and their syscalls
+attributed to the thread-group process. Native `process.started` records
+retain the spawning TID separately to audit provenance. Numeric Linux clone flags are decoded for the CLONE_THREAD bit (0x10000).
+If clone or clone3 flags cannot be decoded at all, the observed task is
+classified as `unclassified_task`, not a native process or thread; its file
+activity retains the observed TID but cannot establish process ancestry.
+Thread-group mappings expire at observed thread exit (or confirmed TID reuse).
+These are observation safeguards, not a completeness or cryptographic guarantee. Remote hosts, Windows and macOS do not gain an
+SDK-to-OS verification guarantee from this change.
+
+SDK process references with an independently unverified process create-time
+are not automatically merged into native process identities. This preserves
+the existing strict PID-reuse protection and leaves unproven joins unresolved.
+
 A two-phase workflow that runs a selector Agent and then constructs a new Agent
 is recorded as two SDK traces unless the user wraps both runs in an explicit
 SDK trace context. The selector's generated JSON is **model output**. A list

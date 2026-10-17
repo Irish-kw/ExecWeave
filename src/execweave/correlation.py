@@ -483,6 +483,195 @@ def _derived_event(
     }
 
 
+
+def _sdk_native_spawn_correlations(
+    events: list[dict[str, Any]],
+    *,
+    session_id: str,
+    max_window_ms: int,
+) -> tuple[list[dict[str, Any]], int, int, int, int]:
+    """Infer *non-causal* SDK function-span/native-spawn links.
+
+    This is a deliberately weaker result than execution-context propagation:
+    SDK callback PID/timestamps originate in a same-UID process sidecar,
+    whereas the child spawn is independently observed by strace. A temporal
+    match is not proof that the tool caused the spawn. Never classify it as
+    syscall-attributed; ambiguity (including concurrent spans) abstains.
+    """
+    starts: dict[str, dict[str, Any]] = {}
+    # Retain even invalid/duplicated starts as competing declarations. Dropping
+    # them would let a different span claim an otherwise ambiguous native spawn.
+    all_starts: list[dict[str, Any]] = []
+    ends: dict[str, dict[str, Any]] = {}
+    spawns: list[dict[str, Any]] = []
+    for event in events:
+        attrs = event.get("attributes")
+        if not isinstance(attrs, dict):
+            continue
+        if (
+            event.get("event_type") == "process.started"
+            and event.get("relation") == "SPAWNED"
+            and attrs.get("backend") == "strace"
+            and attrs.get("attribution") == "syscall"
+            and isinstance(event.get("source"), dict)
+            and isinstance(event.get("target"), dict)
+            and event["source"].get("type") == "process"
+            and event["target"].get("type") == "process"
+        ):
+            spawns.append(event)
+            continue
+        if attrs.get("evidence_source") != "agents_sdk_tracing_callback":
+            continue
+        if attrs.get("framework") != "openai-agents-sdk":
+            continue
+        call_id = attrs.get("tool_call_id")
+        pid = attrs.get("sdk_host_pid")
+        if (
+            not isinstance(call_id, str) or not call_id
+            or not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0
+            or not isinstance(attrs.get("sdk_span_id"), str)
+        ):
+            continue
+        if event.get("event_type") == "TOOL_CALL" and event.get("relation") == "REQUESTS_TOOL_CALL":
+            all_starts.append(event)
+            if call_id in starts:
+                # A duplicate declaration is ambiguous; refuse to join.
+                starts[call_id] = {}
+            else:
+                starts[call_id] = event
+        elif event.get("event_type") in {"TOOL_RESULT", "TOOL_FAILURE"}:
+            if call_id in ends:
+                ends[call_id] = {}
+            else:
+                ends[call_id] = event
+
+    considered = len(starts)
+    skipped_no_match = 0
+    skipped_ambiguous = 0
+    candidates: list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]] = []
+    for call_id, start in starts.items():
+        end = ends.get(call_id)
+        if not start or not end:
+            skipped_no_match += 1
+            continue
+        start_attrs = start["attributes"]
+        end_attrs = end["attributes"]
+        if (
+            start_attrs["sdk_host_pid"] != end_attrs.get("sdk_host_pid")
+            or start_attrs["sdk_span_id"] != end_attrs.get("sdk_span_id")
+            or start_attrs.get("sdk_trace_id") != end_attrs.get("sdk_trace_id")
+        ):
+            skipped_ambiguous += 1
+            continue
+        begin = _event_time(start, index=1)
+        finish = _event_time(end, index=1)
+        if finish < begin:
+            skipped_no_match += 1
+            continue
+        # A time window cannot be stretched merely because a tool is slow.
+        limit = min(finish, begin + timedelta(milliseconds=max_window_ms))
+        matching = []
+        for spawn in spawns:
+            native_parent = (spawn.get("source") or {}).get("attributes") or {}
+            if native_parent.get("pid") != start_attrs["sdk_host_pid"]:
+                continue
+            when = _event_time(spawn, index=1)
+            if begin <= when < limit:
+                matching.append(spawn)
+        if len(matching) != 1:
+            if matching:
+                skipped_ambiguous += 1
+            else:
+                skipped_no_match += 1
+            continue
+        candidates.append((start, end, matching[0]))
+
+    # A span missing TOOL_RESULT still competes for a spawn in its bounded
+    # window. Ignoring incomplete spans could falsely attribute its child to
+    # a different, completed span. Never use absence of a callback as proof
+    # that a tool was not active.
+    process_claims: dict[str, int] = {}
+    for spawn in spawns:
+        parent = (spawn["source"].get("attributes") or {}).get("pid")
+        spawn_time = _event_time(spawn, index=1)
+        for start in all_starts:
+            if start["attributes"].get("sdk_host_pid") != parent:
+                continue
+            begin = _event_time(start, index=1)
+            limit = begin + timedelta(milliseconds=max_window_ms)
+            finish_event = ends.get(start["attributes"].get("tool_call_id"))
+            if finish_event:
+                finish_attrs = finish_event.get("attributes") or {}
+                if (
+                    finish_attrs.get("sdk_host_pid") == parent
+                    and finish_attrs.get("sdk_span_id") == start["attributes"].get("sdk_span_id")
+                    and finish_attrs.get("sdk_trace_id") == start["attributes"].get("sdk_trace_id")
+                ):
+                    limit = min(limit, _event_time(finish_event, index=1))
+            if begin <= spawn_time < limit:
+                pid_id = spawn["target"]["id"]
+                process_claims[pid_id] = process_claims.get(pid_id, 0) + 1
+    derived = []
+    for start, end, spawn in candidates:
+        target = spawn["target"]
+        if process_claims[target["id"]] != 1:
+            skipped_ambiguous += 1
+            continue
+        attrs = start["attributes"]
+        supporting = sorted({
+            value for value in (start.get("event_id"), end.get("event_id"), spawn.get("event_id"))
+            if isinstance(value, str) and value
+        })
+        call_id = attrs["tool_call_id"]
+        digest = hashlib.sha256(
+            "|".join([session_id, call_id, target["id"], *supporting]).encode()
+        ).hexdigest()[:24]
+        parent_tid = (spawn.get("attributes") or {}).get("spawn_origin_tid")
+        callback_tid = attrs.get("sdk_callback_tid")
+        derived.append({
+            "schema_version": SCHEMA_VERSION,
+            "event_id": f"inference:sdk-native-spawn:{digest}",
+            "session_id": session_id,
+            "timestamp": spawn["timestamp"],
+            "event_type": _EVENT_TYPE,
+            "relation": _RELATION,
+            "source": {
+                "type": "tool_call", "id": call_id,
+                "name": "SDK function span",
+                "attributes": {"sdk_trace_id": attrs.get("sdk_trace_id"),
+                               "sdk_span_id": attrs["sdk_span_id"]},
+            },
+            "target": deepcopy(target),
+            "sequence": None,
+            "attributes": {
+                "backend": "inference",
+                "attribution": "execweave_correlation",
+                "evidence_source": "derived",
+                "inferred": True, "causal": False,
+                "process_effect_verified": False,
+                "inference_method": "unique_sdk_span_host_pid_native_spawn_window",
+                "confidence": 0.65,
+                "confidence_semantics": "heuristic_score_not_probability",
+                "candidate_count": 1,
+                "sdk_trace_id": attrs.get("sdk_trace_id"),
+                "sdk_span_id": attrs["sdk_span_id"],
+                "tool_call_id": call_id,
+                "sdk_host_pid": attrs["sdk_host_pid"],
+                "sdk_callback_tid": callback_tid,
+                "native_spawn_origin_tid": parent_tid,
+                "same_callback_and_spawn_tid": (
+                    callback_tid == parent_tid
+                    if isinstance(callback_tid, int) and isinstance(parent_tid, int)
+                    else None
+                ),
+                "max_window_ms": max_window_ms,
+                "supporting_event_ids": supporting,
+                "limitation": "SDK callback PID/time window is a claim, not an OS-verified tool context",
+            },
+        })
+    return derived, considered, skipped_no_match, skipped_ambiguous, len(derived)
+
+
 def correlate_tool_process(
     input_path: str | Path,
     output_path: str | Path,
@@ -567,6 +756,15 @@ def correlate_tool_process(
             )
         )
 
+    sdk_derived, sdk_considered, sdk_missing, sdk_ambiguous, sdk_joined = (
+        _sdk_native_spawn_correlations(
+            events, session_id=session_id, max_window_ms=max_window_ms
+        )
+    )
+    derived.extend(sdk_derived)
+    skipped_no_match += sdk_missing
+    skipped_ambiguous += sdk_ambiguous
+
     starts = [event for event in events if event.get("event_type") == "session.started"]
     finishes = [event for event in events if event.get("event_type") == "session.finished"]
     if len(starts) != 1 or len(finishes) != 1:
@@ -610,7 +808,7 @@ def correlate_tool_process(
         session_id=session_id,
         input_event_count=len(events),
         output_event_count=len(correlated),
-        tool_calls_considered=len(declarations),
+        tool_calls_considered=len(declarations) + sdk_considered,
         correlated_tool_calls=len(derived),
         skipped_unsupported=skipped_unsupported,
         skipped_no_match=skipped_no_match,
