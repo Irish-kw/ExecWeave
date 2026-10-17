@@ -21,6 +21,7 @@ from .sink import JsonlSink, _protect_git_run_directory
 _TIMESTAMP_RE = re.compile(r"^(?P<ts>\d+(?:\.\d+)?)\s+(?P<body>.*)$")
 _SYSCALL_RE = re.compile(r"^(?P<name>[a-zA-Z0-9_]+)\((?P<args>.*)\)\s+=\s+(?P<result>.*)$")
 _CLONE_RESULT_RE = re.compile(r"^(?P<pid>\d+)(?:\s|$)")
+_CLONE_THREAD_RE = re.compile(r"\bCLONE_THREAD\b")
 _CONNECT_ERROR_RE = re.compile(r"^-1\s+(?P<errno>[A-Z0-9_]+)(?:\s|$)")
 _EXIT_RE = re.compile(r"^\+\+\+ exited with (?P<code>-?\d+) \+\+\+$")
 _KILLED_RE = re.compile(r"^\+\+\+ killed by (?P<signal>[A-Z0-9]+).*$")
@@ -155,8 +156,33 @@ class StraceParser:
         self._executable_by_pid: dict[int, str] = {}
         self._cwd_by_pid: dict[int, Path] = {}
         self._parent_by_pid: dict[int, int] = {}
+        # strace -ff uses TIDs as trace-file suffixes; CLONE_THREAD does not
+        # create another process. Keep thread identity distinct from process.
+        self._thread_leader_by_tid: dict[int, int] = {}
+        self._spawn_origin_tid: dict[int, int] = {}
+
+    def _process_pid(self, tid: int) -> int:
+        """Map a traced thread to the native thread-group leader (TGID)."""
+        seen: set[int] = set()
+        while tid in self._thread_leader_by_tid and tid not in seen:
+            seen.add(tid)
+            tid = self._thread_leader_by_tid[tid]
+        return tid
+
+    @staticmethod
+    def _is_thread_clone(name: str, args: str) -> bool:
+        # An unrecognized/numeric clone flag is *not* assumed to be a thread.
+        return name in {"clone", "clone3"} and _CLONE_THREAD_RE.search(args) is not None
+
+    def _thread_entity(self, tid: int) -> Entity:
+        leader = self._process_pid(tid)
+        return Entity(
+            type="thread", id=f"thread:{self.session_id}:{tid}", name=str(tid),
+            attributes={"tid": tid, "tgid": leader, "backend": "strace"},
+        )
 
     def process_entity(self, pid: int) -> Entity:
+        pid = self._process_pid(pid)
         return Entity(
             type="process",
             id=f"process:{self.session_id}:{pid}",
@@ -190,7 +216,12 @@ class StraceParser:
             child_match = _CLONE_RESULT_RE.match(syscall.group("result"))
             if child_match is None:
                 continue
-            self._parent_by_pid[int(child_match.group("pid"))] = record.pid
+            child = int(child_match.group("pid"))
+            if self._is_thread_clone(syscall.group("name"), syscall.group("args")):
+                self._thread_leader_by_tid[child] = self._process_pid(record.pid)
+            else:
+                self._parent_by_pid[child] = self._process_pid(record.pid)
+                self._spawn_origin_tid[child] = record.pid
 
     def _ensure_process(
         self,
@@ -200,6 +231,9 @@ class StraceParser:
         parent_pid: int | None = None,
         relation: str | None = None,
     ) -> None:
+        pid = self._process_pid(pid)
+        if parent_pid is not None:
+            parent_pid = self._process_pid(parent_pid)
         if pid in self._known_processes:
             return
         if parent_pid is None:
@@ -223,6 +257,7 @@ class StraceParser:
                     "attribution": "syscall",
                     "causal": True,
                     "backend": "strace",
+                    "spawn_origin_tid": self._spawn_origin_tid.get(pid),
                 },
             )
         )
@@ -230,6 +265,9 @@ class StraceParser:
     def _parse_record(self, record: TraceRecord) -> None:
         exit_match = _EXIT_RE.match(record.body)
         if exit_match is not None:
+            if record.pid in self._thread_leader_by_tid:
+                self._emit_thread_exit(record, exit_code=int(exit_match.group("code")))
+                return
             self._ensure_process(record.pid, record.timestamp)
             self.sink.emit(
                 RuntimeEvent.create(
@@ -248,6 +286,9 @@ class StraceParser:
 
         killed_match = _KILLED_RE.match(record.body)
         if killed_match is not None:
+            if record.pid in self._thread_leader_by_tid:
+                self._emit_thread_exit(record, signal=killed_match.group("signal"))
+                return
             self._ensure_process(record.pid, record.timestamp)
             self.sink.emit(
                 RuntimeEvent.create(
@@ -273,7 +314,7 @@ class StraceParser:
         self._ensure_process(record.pid, record.timestamp)
 
         if name in {"clone", "clone3", "fork", "vfork"}:
-            self._parse_process_spawn(record, result)
+            self._parse_process_spawn(record, name, args, result)
         elif name in {"execve", "execveat"}:
             self._parse_exec(record, name, args, result)
         elif name == "chdir":
@@ -289,15 +330,43 @@ class StraceParser:
         elif name == "connect":
             self._parse_connect(record, args, result)
 
-    def _parse_process_spawn(self, record: TraceRecord, result: str) -> None:
+    def _emit_thread_exit(
+        self, record: TraceRecord, *, exit_code: int | None = None,
+        signal: str | None = None,
+    ) -> None:
+        self.sink.emit(RuntimeEvent.create(
+            session_id=self.session_id, event_type="thread.exited",
+            relation="EXITED_THREAD" if signal is None else "THREAD_KILLED_BY",
+            source=self._thread_entity(record.pid),
+            timestamp=_iso_timestamp(record.timestamp),
+            attributes={"exit_code": exit_code, "signal": signal,
+                        "attribution": "syscall", "backend": "strace"},
+        ))
+
+    def _parse_process_spawn(
+        self, record: TraceRecord, name: str, args: str, result: str
+    ) -> None:
         child_match = _CLONE_RESULT_RE.match(result)
         if child_match is None:
             return
         child_pid = int(child_match.group("pid"))
+        if self._is_thread_clone(name, args):
+            # CLONE_THREAD creates a task/TID in the same thread group, not a
+            # new process. Retain the observed thread without inventing SPAWNED.
+            self.sink.emit(RuntimeEvent.create(
+                session_id=self.session_id, event_type="thread.started",
+                relation="STARTED_THREAD",
+                source=self.process_entity(record.pid),
+                target=self._thread_entity(child_pid),
+                timestamp=_iso_timestamp(record.timestamp),
+                attributes={"syscall": name, "attribution": "syscall",
+                            "causal": True, "backend": "strace"},
+            ))
+            return
         self._ensure_process(
             child_pid,
             record.timestamp,
-            parent_pid=record.pid,
+            parent_pid=self._process_pid(record.pid),
             relation="SPAWNED",
         )
 
@@ -309,7 +378,7 @@ class StraceParser:
             return
         executable = quoted[0]
         target_path = self._resolve_path(record.pid, executable)
-        self._executable_by_pid[record.pid] = target_path.name
+        self._executable_by_pid[self._process_pid(record.pid)] = target_path.name
         target = Entity(
             type="executable",
             id=f"executable:{target_path}",
@@ -340,7 +409,7 @@ class StraceParser:
         if not quoted:
             return
         new_cwd = self._resolve_path(record.pid, quoted[0])
-        self._cwd_by_pid[record.pid] = new_cwd
+        self._cwd_by_pid[self._process_pid(record.pid)] = new_cwd
         target = Entity(
             type="directory",
             id=f"directory:{new_cwd}",
@@ -560,7 +629,7 @@ class StraceParser:
         path = Path(raw_path).expanduser()
         if path.is_absolute():
             return path.resolve(strict=False)
-        cwd = self._cwd_by_pid.get(pid, self.watch_root)
+        cwd = self._cwd_by_pid.get(self._process_pid(pid), self.watch_root)
         return (cwd / path).resolve(strict=False)
 
     def _within_watch_root(self, path: Path) -> bool:
