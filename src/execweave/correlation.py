@@ -499,6 +499,9 @@ def _sdk_native_spawn_correlations(
     syscall-attributed; ambiguity (including concurrent spans) abstains.
     """
     starts: dict[str, dict[str, Any]] = {}
+    # Retain even invalid/duplicated starts as competing declarations. Dropping
+    # them would let a different span claim an otherwise ambiguous native spawn.
+    all_starts: list[dict[str, Any]] = []
     ends: dict[str, dict[str, Any]] = {}
     spawns: list[dict[str, Any]] = []
     for event in events:
@@ -530,6 +533,7 @@ def _sdk_native_spawn_correlations(
         ):
             continue
         if event.get("event_type") == "TOOL_CALL" and event.get("relation") == "REQUESTS_TOOL_CALL":
+            all_starts.append(event)
             if call_id in starts:
                 # A duplicate declaration is ambiguous; refuse to join.
                 starts[call_id] = {}
@@ -572,7 +576,7 @@ def _sdk_native_spawn_correlations(
             if native_parent.get("pid") != start_attrs["sdk_host_pid"]:
                 continue
             when = _event_time(spawn, index=1)
-            if begin <= when <= limit:
+            if begin <= when < limit:
                 matching.append(spawn)
         if len(matching) != 1:
             if matching:
@@ -590,12 +594,12 @@ def _sdk_native_spawn_correlations(
     for spawn in spawns:
         parent = (spawn["source"].get("attributes") or {}).get("pid")
         spawn_time = _event_time(spawn, index=1)
-        for call_id, start in starts.items():
-            if not start or start["attributes"].get("sdk_host_pid") != parent:
+        for start in all_starts:
+            if start["attributes"].get("sdk_host_pid") != parent:
                 continue
             begin = _event_time(start, index=1)
             limit = begin + timedelta(milliseconds=max_window_ms)
-            finish_event = ends.get(call_id)
+            finish_event = ends.get(start["attributes"].get("tool_call_id"))
             if finish_event:
                 finish_attrs = finish_event.get("attributes") or {}
                 if (
@@ -604,7 +608,7 @@ def _sdk_native_spawn_correlations(
                     and finish_attrs.get("sdk_trace_id") == start["attributes"].get("sdk_trace_id")
                 ):
                     limit = min(limit, _event_time(finish_event, index=1))
-            if begin <= spawn_time <= limit:
+            if begin <= spawn_time < limit:
                 pid_id = spawn["target"]["id"]
                 process_claims[pid_id] = process_claims.get(pid_id, 0) + 1
     derived = []
