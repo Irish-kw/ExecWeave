@@ -1,0 +1,1111 @@
+{
+  "tested_source": {
+    "python": "3.11.16",
+    "platform": "Windows-10-10.0.26200-SP0",
+    "metagpt": "1.0.0",
+    "model": "llama3.1:8b",
+    "execweave_sha": "84d02eb23696c8cadd2010cd63ee171e68ad9dd8",
+    "source_hashes": {
+      "base_llm.py": "eadb2ec250316c88017cee64f4db4e56cc3f374b8421909274ce7ff6fd7a8276",
+      "ollama_api.py": "4f1706c30303a509ac838c221cb446eca641c6fff1af69a3ed48ab17c1d77ba9"
+    }
+  },
+  "ollama_version": "0.24.0",
+  "model_id_prefix": "46e0c10c039e",
+  "cases": [
+    {
+      "name": "single",
+      "fidelity": "PASS",
+      "requests": 1,
+      "intended_history_preserved": true,
+      "compatibility": false
+    },
+    {
+      "name": "upstream_history_loss",
+      "fidelity": "PASS",
+      "requests": 1,
+      "intended_history_preserved": false,
+      "compatibility": false
+    },
+    {
+      "name": "corrected_history",
+      "fidelity": "PASS",
+      "requests": 1,
+      "intended_history_preserved": true,
+      "compatibility": true
+    },
+    {
+      "name": "explicit_system",
+      "fidelity": "PASS",
+      "requests": 1,
+      "intended_history_preserved": true,
+      "compatibility": true
+    },
+    {
+      "name": "default_system",
+      "fidelity": "PASS",
+      "requests": 1,
+      "intended_history_preserved": true,
+      "compatibility": true
+    },
+    {
+      "name": "disabled_system",
+      "fidelity": "PASS",
+      "requests": 1,
+      "intended_history_preserved": true,
+      "compatibility": true
+    },
+    {
+      "name": "format_system",
+      "fidelity": "PASS",
+      "requests": 1,
+      "intended_history_preserved": true,
+      "compatibility": true
+    },
+    {
+      "name": "caller_system",
+      "fidelity": "PASS",
+      "requests": 1,
+      "intended_history_preserved": true,
+      "compatibility": true
+    },
+    {
+      "name": "parallel_and_direct",
+      "fidelity": "PASS",
+      "requests": 5,
+      "logical_calls": 5
+    },
+    {
+      "name": "compression",
+      "fidelity": "PASS",
+      "requests": 1
+    },
+    {
+      "name": "stream_False_True",
+      "fidelity": "PASS",
+      "requests": 1,
+      "logical_failure": null
+    },
+    {
+      "name": "stream_True_True",
+      "fidelity": "PASS",
+      "requests": 1,
+      "logical_failure": null
+    },
+    {
+      "name": "stream_True_False",
+      "fidelity": "PASS",
+      "requests": 1,
+      "logical_failure": "JSONDecodeError"
+    },
+    {
+      "name": "pretransport_failure",
+      "fidelity": "PASS",
+      "requests": 0
+    },
+    {
+      "name": "transport_retry",
+      "fidelity": "PASS",
+      "requests": 2,
+      "fault_injection": "ConnectionError after real HTTP response",
+      "logical_calls": 1
+    },
+    {
+      "name": "provider_http_failure",
+      "fidelity": "PASS",
+      "requests": 1,
+      "expected_http_status": 404
+    },
+    {
+      "name": "actionnode_False",
+      "fidelity": "PASS",
+      "requests": 1,
+      "task_success": true
+    },
+    {
+      "name": "actionnode_True",
+      "fidelity": "PASS",
+      "requests": 1,
+      "task_success": true
+    },
+    {
+      "name": "malformed_actionnode",
+      "fidelity": "PASS",
+      "requests": 2,
+      "fault_injection": "replace two real responses",
+      "attempts": 2,
+      "retries": 1,
+      "parser_failures": 2
+    },
+    {
+      "name": "recovered_parser_retry",
+      "fidelity": "PASS",
+      "requests": 2,
+      "task_success": true,
+      "fault_injection": "replace first real response",
+      "attempts": 2,
+      "retries": 1,
+      "parser_failures": 1
+    },
+    {
+      "name": "image_transform",
+      "fidelity": "PASS",
+      "requests": 1,
+      "mock_response": true
+    }
+  ],
+  "counts": {
+    "logical_requests": 27,
+    "logical_responses": 24,
+    "logical_failures": 3,
+    "http_requests": 27,
+    "real_ollama_requests": 26,
+    "mock_response_requests": 1
+  },
+  "comparisons": [
+    {
+      "case": "single",
+      "logical_call_id": "metagpt-agent:metagpt:single:probe-ollama-55d20093c1f34aedaf50ae0c4307e3b2-call-1",
+      "provider_attempt_id": "metagpt-agent:metagpt:single:probe-ollama-55d20093c1f34aedaf50ae0c4307e3b2-call-1-attempt-1",
+      "recorded_sha256": "bea5b87f1afcdf2b638e53e3633ee57c65896cfa8af8ea0251e56f5a448ac437",
+      "observed_sha256": "bea5b87f1afcdf2b638e53e3633ee57c65896cfa8af8ea0251e56f5a448ac437",
+      "equal": true
+    },
+    {
+      "case": "upstream_history_loss",
+      "logical_call_id": "metagpt-agent:metagpt:upstream_history_loss:probe-ollama-9158f2f04f724f49b9aa01cb7d14ca37-call-1",
+      "provider_attempt_id": "metagpt-agent:metagpt:upstream_history_loss:probe-ollama-9158f2f04f724f49b9aa01cb7d14ca37-call-1-attempt-1",
+      "recorded_sha256": "c1898c837c075cd390fc46bb36b6d95f5665713e7b29fa1419a8c997da1deb78",
+      "observed_sha256": "c1898c837c075cd390fc46bb36b6d95f5665713e7b29fa1419a8c997da1deb78",
+      "equal": true
+    },
+    {
+      "case": "corrected_history",
+      "logical_call_id": "metagpt-agent:metagpt:corrected_history:probe-ollama-6dd95119a62a48778fdba808de1f5945-call-1",
+      "provider_attempt_id": "metagpt-agent:metagpt:corrected_history:probe-ollama-6dd95119a62a48778fdba808de1f5945-call-1-attempt-1",
+      "recorded_sha256": "63e32cde5c48ccc42b895da2618d57c7ced510f35cc2582450d7c019cc990b82",
+      "observed_sha256": "63e32cde5c48ccc42b895da2618d57c7ced510f35cc2582450d7c019cc990b82",
+      "equal": true
+    },
+    {
+      "case": "explicit_system",
+      "logical_call_id": "metagpt-agent:metagpt:explicit_system:probe-ollama-cf4df7904e194d77bdf22915ef9f0599-call-1",
+      "provider_attempt_id": "metagpt-agent:metagpt:explicit_system:probe-ollama-cf4df7904e194d77bdf22915ef9f0599-call-1-attempt-1",
+      "recorded_sha256": "bd67ed731f35e9b01b476a0752f94a68b18fac65080c54c29121331d6196e3e2",
+      "observed_sha256": "bd67ed731f35e9b01b476a0752f94a68b18fac65080c54c29121331d6196e3e2",
+      "equal": true
+    },
+    {
+      "case": "default_system",
+      "logical_call_id": "metagpt-agent:metagpt:default_system:probe-ollama-bb8e03974ee446e9a72194ba6ac8b58f-call-1",
+      "provider_attempt_id": "metagpt-agent:metagpt:default_system:probe-ollama-bb8e03974ee446e9a72194ba6ac8b58f-call-1-attempt-1",
+      "recorded_sha256": "dc3d9d5fd4d76c942c35da92de716fd9cf18b36806e739955cd41d226d6acd28",
+      "observed_sha256": "dc3d9d5fd4d76c942c35da92de716fd9cf18b36806e739955cd41d226d6acd28",
+      "equal": true
+    },
+    {
+      "case": "disabled_system",
+      "logical_call_id": "metagpt-agent:metagpt:disabled_system:probe-ollama-d7ab555dad2d424287fbd8c1ce4ffe34-call-1",
+      "provider_attempt_id": "metagpt-agent:metagpt:disabled_system:probe-ollama-d7ab555dad2d424287fbd8c1ce4ffe34-call-1-attempt-1",
+      "recorded_sha256": "bea5b87f1afcdf2b638e53e3633ee57c65896cfa8af8ea0251e56f5a448ac437",
+      "observed_sha256": "bea5b87f1afcdf2b638e53e3633ee57c65896cfa8af8ea0251e56f5a448ac437",
+      "equal": true
+    },
+    {
+      "case": "format_system",
+      "logical_call_id": "metagpt-agent:metagpt:format_system:probe-ollama-fe4aaa790b8540dba68725725866c896-call-1",
+      "provider_attempt_id": "metagpt-agent:metagpt:format_system:probe-ollama-fe4aaa790b8540dba68725725866c896-call-1-attempt-1",
+      "recorded_sha256": "3c08752db343aea0609cfef86381aff2f623bca07a3d96cc8e6ce3729a8862bf",
+      "observed_sha256": "3c08752db343aea0609cfef86381aff2f623bca07a3d96cc8e6ce3729a8862bf",
+      "equal": true
+    },
+    {
+      "case": "caller_system",
+      "logical_call_id": "metagpt-agent:metagpt:caller_system:probe-ollama-d9c888970b0348fb876b367ca016dcda-call-1",
+      "provider_attempt_id": "metagpt-agent:metagpt:caller_system:probe-ollama-d9c888970b0348fb876b367ca016dcda-call-1-attempt-1",
+      "recorded_sha256": "8e34fccdf9f6ff19e93dab9353d89fab6c95c0c97515156bfd57f4985963e35f",
+      "observed_sha256": "8e34fccdf9f6ff19e93dab9353d89fab6c95c0c97515156bfd57f4985963e35f",
+      "equal": true
+    },
+    {
+      "case": "parallel_and_direct",
+      "logical_call_id": "metagpt-agent:metagpt:parallel_and_direct:probe-ollama-db66ddc4f17d466aafa5c595390de120-call-1",
+      "provider_attempt_id": "metagpt-agent:metagpt:parallel_and_direct:probe-ollama-db66ddc4f17d466aafa5c595390de120-call-1-attempt-1",
+      "recorded_sha256": "e28f800087cc6373fbeeb4783d5d83fb3fe89514937f86321167a785dbca3a27",
+      "observed_sha256": "e28f800087cc6373fbeeb4783d5d83fb3fe89514937f86321167a785dbca3a27",
+      "equal": true
+    },
+    {
+      "case": "parallel_and_direct",
+      "logical_call_id": "metagpt-agent:metagpt:parallel_and_direct:probe-ollama-db66ddc4f17d466aafa5c595390de120-call-2",
+      "provider_attempt_id": "metagpt-agent:metagpt:parallel_and_direct:probe-ollama-db66ddc4f17d466aafa5c595390de120-call-2-attempt-1",
+      "recorded_sha256": "d6813e92a05fe921532b1840cee51af086c9b20a4091ac75eab0589dc8a3185c",
+      "observed_sha256": "d6813e92a05fe921532b1840cee51af086c9b20a4091ac75eab0589dc8a3185c",
+      "equal": true
+    },
+    {
+      "case": "parallel_and_direct",
+      "logical_call_id": "metagpt-agent:metagpt:parallel_and_direct:probe-ollama-db66ddc4f17d466aafa5c595390de120-call-3",
+      "provider_attempt_id": "metagpt-agent:metagpt:parallel_and_direct:probe-ollama-db66ddc4f17d466aafa5c595390de120-call-3-attempt-1",
+      "recorded_sha256": "8cdb17ceba17092b6677a6704e2a9e94dbf52dd3070d36e93d98fcc2d764100b",
+      "observed_sha256": "8cdb17ceba17092b6677a6704e2a9e94dbf52dd3070d36e93d98fcc2d764100b",
+      "equal": true
+    },
+    {
+      "case": "parallel_and_direct",
+      "logical_call_id": "metagpt-agent:metagpt:parallel_and_direct:probe-ollama-db66ddc4f17d466aafa5c595390de120-call-4",
+      "provider_attempt_id": "metagpt-agent:metagpt:parallel_and_direct:probe-ollama-db66ddc4f17d466aafa5c595390de120-call-4-attempt-1",
+      "recorded_sha256": "d216421e4419a56eec50d31d8fd9afe93de2ea2624195b8d89b1b7469819ebd2",
+      "observed_sha256": "d216421e4419a56eec50d31d8fd9afe93de2ea2624195b8d89b1b7469819ebd2",
+      "equal": true
+    },
+    {
+      "case": "parallel_and_direct",
+      "logical_call_id": "metagpt-agent:metagpt:parallel_and_direct:probe-ollama-db66ddc4f17d466aafa5c595390de120-call-5",
+      "provider_attempt_id": "metagpt-agent:metagpt:parallel_and_direct:probe-ollama-db66ddc4f17d466aafa5c595390de120-call-5-attempt-1",
+      "recorded_sha256": "8a5a8e8bbbcb9d9573566edec271078e3799c73acd03546b8aa83a0a402d17d4",
+      "observed_sha256": "8a5a8e8bbbcb9d9573566edec271078e3799c73acd03546b8aa83a0a402d17d4",
+      "equal": true
+    },
+    {
+      "case": "compression",
+      "logical_call_id": "metagpt-agent:metagpt:compression:probe-ollama-f9dbc7f582774873bba3c09d6be8017a-call-1",
+      "provider_attempt_id": "metagpt-agent:metagpt:compression:probe-ollama-f9dbc7f582774873bba3c09d6be8017a-call-1-attempt-1",
+      "recorded_sha256": "bea5b87f1afcdf2b638e53e3633ee57c65896cfa8af8ea0251e56f5a448ac437",
+      "observed_sha256": "bea5b87f1afcdf2b638e53e3633ee57c65896cfa8af8ea0251e56f5a448ac437",
+      "equal": true
+    },
+    {
+      "case": "stream_False_True",
+      "logical_call_id": "metagpt-agent:metagpt:stream_False_True:probe-ollama-5cdee66acf6f4562908bf9f85cc799ec-call-1",
+      "provider_attempt_id": "metagpt-agent:metagpt:stream_False_True:probe-ollama-5cdee66acf6f4562908bf9f85cc799ec-call-1-attempt-1",
+      "recorded_sha256": "bea5b87f1afcdf2b638e53e3633ee57c65896cfa8af8ea0251e56f5a448ac437",
+      "observed_sha256": "bea5b87f1afcdf2b638e53e3633ee57c65896cfa8af8ea0251e56f5a448ac437",
+      "equal": true
+    },
+    {
+      "case": "stream_True_True",
+      "logical_call_id": "metagpt-agent:metagpt:stream_True_True:probe-ollama-83735bc7228a4f1493b95ddd62e53c85-call-1",
+      "provider_attempt_id": "metagpt-agent:metagpt:stream_True_True:probe-ollama-83735bc7228a4f1493b95ddd62e53c85-call-1-attempt-1",
+      "recorded_sha256": "11235923dcf8694d013ad119e0ec397ba0579b71266b306fb6a11653df784165",
+      "observed_sha256": "11235923dcf8694d013ad119e0ec397ba0579b71266b306fb6a11653df784165",
+      "equal": true
+    },
+    {
+      "case": "stream_True_False",
+      "logical_call_id": "metagpt-agent:metagpt:stream_True_False:probe-ollama-301808678f0144b08a9851fc224d007f-call-1",
+      "provider_attempt_id": "metagpt-agent:metagpt:stream_True_False:probe-ollama-301808678f0144b08a9851fc224d007f-call-1-attempt-1",
+      "recorded_sha256": "11235923dcf8694d013ad119e0ec397ba0579b71266b306fb6a11653df784165",
+      "observed_sha256": "11235923dcf8694d013ad119e0ec397ba0579b71266b306fb6a11653df784165",
+      "equal": true
+    },
+    {
+      "case": "transport_retry",
+      "logical_call_id": "metagpt-agent:metagpt:transport_retry:probe-ollama-7213bb7c4a8747aabd68e1a4f0e2923b-call-1",
+      "provider_attempt_id": "metagpt-agent:metagpt:transport_retry:probe-ollama-7213bb7c4a8747aabd68e1a4f0e2923b-call-1-attempt-1",
+      "recorded_sha256": "79505ac58f72297200664b1038b76728b23e9a3a7d143ed30149615c600e5e44",
+      "observed_sha256": "79505ac58f72297200664b1038b76728b23e9a3a7d143ed30149615c600e5e44",
+      "equal": true
+    },
+    {
+      "case": "transport_retry",
+      "logical_call_id": "metagpt-agent:metagpt:transport_retry:probe-ollama-7213bb7c4a8747aabd68e1a4f0e2923b-call-1",
+      "provider_attempt_id": "metagpt-agent:metagpt:transport_retry:probe-ollama-7213bb7c4a8747aabd68e1a4f0e2923b-call-1-attempt-2",
+      "recorded_sha256": "79505ac58f72297200664b1038b76728b23e9a3a7d143ed30149615c600e5e44",
+      "observed_sha256": "79505ac58f72297200664b1038b76728b23e9a3a7d143ed30149615c600e5e44",
+      "equal": true
+    },
+    {
+      "case": "provider_http_failure",
+      "logical_call_id": "metagpt-agent:metagpt:provider_http_failure:probe-ollama-7acd6d37089642deb6ec6b6526587ddf-call-1",
+      "provider_attempt_id": "metagpt-agent:metagpt:provider_http_failure:probe-ollama-7acd6d37089642deb6ec6b6526587ddf-call-1-attempt-1",
+      "recorded_sha256": "9db01b4fce8e232cacd31f7ebc8382694fa4883ba1afb3f3142aa84d7076aea9",
+      "observed_sha256": "9db01b4fce8e232cacd31f7ebc8382694fa4883ba1afb3f3142aa84d7076aea9",
+      "equal": true
+    },
+    {
+      "case": "actionnode_False",
+      "logical_call_id": "metagpt-agent:metagpt:metagpt-real-ollama-12345:metagpt-acceptance-role-ollama-bad64b6d7a254584b64def981e30bb11-call-1",
+      "provider_attempt_id": "metagpt-agent:metagpt:metagpt-real-ollama-12345:metagpt-acceptance-role-ollama-bad64b6d7a254584b64def981e30bb11-call-1-attempt-1",
+      "recorded_sha256": "bdc0faa987b6a991f7775f6fda4e7de7c54fe2af812944ac1a712b3d6e64365e",
+      "observed_sha256": "bdc0faa987b6a991f7775f6fda4e7de7c54fe2af812944ac1a712b3d6e64365e",
+      "equal": true
+    },
+    {
+      "case": "actionnode_True",
+      "logical_call_id": "metagpt-agent:metagpt:metagpt-real-ollama-12345:metagpt-acceptance-role-ollama-41dd02723c1d44bcae38284c3bd699f1-call-1",
+      "provider_attempt_id": "metagpt-agent:metagpt:metagpt-real-ollama-12345:metagpt-acceptance-role-ollama-41dd02723c1d44bcae38284c3bd699f1-call-1-attempt-1",
+      "recorded_sha256": "bdc0faa987b6a991f7775f6fda4e7de7c54fe2af812944ac1a712b3d6e64365e",
+      "observed_sha256": "bdc0faa987b6a991f7775f6fda4e7de7c54fe2af812944ac1a712b3d6e64365e",
+      "equal": true
+    },
+    {
+      "case": "malformed_actionnode",
+      "logical_call_id": "metagpt-agent:metagpt:malformed_actionnode:probe-ollama-b38dc8cf7a2145e197a0c7b7d73fe458-call-1",
+      "provider_attempt_id": "metagpt-agent:metagpt:malformed_actionnode:probe-ollama-b38dc8cf7a2145e197a0c7b7d73fe458-call-1-attempt-1",
+      "recorded_sha256": "546f392f718c3c8c0901f1cf06c50dfa6d7f49665baac47313565e2c425da64b",
+      "observed_sha256": "546f392f718c3c8c0901f1cf06c50dfa6d7f49665baac47313565e2c425da64b",
+      "equal": true
+    },
+    {
+      "case": "malformed_actionnode",
+      "logical_call_id": "metagpt-agent:metagpt:malformed_actionnode:probe-ollama-b38dc8cf7a2145e197a0c7b7d73fe458-call-2",
+      "provider_attempt_id": "metagpt-agent:metagpt:malformed_actionnode:probe-ollama-b38dc8cf7a2145e197a0c7b7d73fe458-call-2-attempt-1",
+      "recorded_sha256": "546f392f718c3c8c0901f1cf06c50dfa6d7f49665baac47313565e2c425da64b",
+      "observed_sha256": "546f392f718c3c8c0901f1cf06c50dfa6d7f49665baac47313565e2c425da64b",
+      "equal": true
+    },
+    {
+      "case": "recovered_parser_retry",
+      "logical_call_id": "metagpt-agent:metagpt:recovered_parser_retry:probe-ollama-e857f1130c5348ac969f49ad454706d2-call-1",
+      "provider_attempt_id": "metagpt-agent:metagpt:recovered_parser_retry:probe-ollama-e857f1130c5348ac969f49ad454706d2-call-1-attempt-1",
+      "recorded_sha256": "a8db7c829715e1709128174a8896cf58d0a4b0adff0d84aae230f391c9f5fe62",
+      "observed_sha256": "a8db7c829715e1709128174a8896cf58d0a4b0adff0d84aae230f391c9f5fe62",
+      "equal": true
+    },
+    {
+      "case": "recovered_parser_retry",
+      "logical_call_id": "metagpt-agent:metagpt:recovered_parser_retry:probe-ollama-e857f1130c5348ac969f49ad454706d2-call-2",
+      "provider_attempt_id": "metagpt-agent:metagpt:recovered_parser_retry:probe-ollama-e857f1130c5348ac969f49ad454706d2-call-2-attempt-1",
+      "recorded_sha256": "a8db7c829715e1709128174a8896cf58d0a4b0adff0d84aae230f391c9f5fe62",
+      "observed_sha256": "a8db7c829715e1709128174a8896cf58d0a4b0adff0d84aae230f391c9f5fe62",
+      "equal": true
+    },
+    {
+      "case": "image_transform",
+      "logical_call_id": "metagpt-agent:metagpt:image_transform:probe-ollama-f00c31d885df44b7b3754060d7b0d182-call-1",
+      "provider_attempt_id": "metagpt-agent:metagpt:image_transform:probe-ollama-f00c31d885df44b7b3754060d7b0d182-call-1-attempt-1",
+      "recorded_sha256": "3178d9db0c74a4065a60cd804583a7630e141c4904412494cf65124f2a659263",
+      "observed_sha256": "3178d9db0c74a4065a60cd804583a7630e141c4904412494cf65124f2a659263",
+      "equal": true
+    }
+  ],
+  "wire": [
+    {
+      "path": "/api/chat",
+      "payload": {
+        "model": "llama3.1:8b",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Reply OK."
+          }
+        ],
+        "options": {
+          "temperature": 0.3,
+          "num_predict": 32
+        },
+        "stream": false
+      },
+      "source": "ollama",
+      "http_status": 200
+    },
+    {
+      "path": "/api/chat",
+      "payload": {
+        "model": "llama3.1:8b",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Remember ALPHA. Reply OK."
+          }
+        ],
+        "options": {
+          "temperature": 0.3,
+          "num_predict": 32
+        },
+        "stream": false
+      },
+      "source": "ollama",
+      "http_status": 200
+    },
+    {
+      "path": "/api/chat",
+      "payload": {
+        "options": {
+          "temperature": 0.3,
+          "num_predict": 32
+        },
+        "stream": false,
+        "model": "llama3.1:8b",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Remember ALPHA. Reply OK."
+          },
+          {
+            "role": "assistant",
+            "content": "OK"
+          },
+          {
+            "role": "user",
+            "content": "What code?"
+          }
+        ]
+      },
+      "source": "ollama",
+      "http_status": 200
+    },
+    {
+      "path": "/api/chat",
+      "payload": {
+        "options": {
+          "temperature": 0.3,
+          "num_predict": 32
+        },
+        "stream": false,
+        "model": "llama3.1:8b",
+        "messages": [
+          {
+            "role": "system",
+            "content": "Reply BRAVO."
+          },
+          {
+            "role": "user",
+            "content": "Reply OK."
+          }
+        ]
+      },
+      "source": "ollama",
+      "http_status": 200
+    },
+    {
+      "path": "/api/chat",
+      "payload": {
+        "options": {
+          "temperature": 0.3,
+          "num_predict": 32
+        },
+        "stream": false,
+        "model": "llama3.1:8b",
+        "messages": [
+          {
+            "role": "system",
+            "content": "You are a helpful assistant."
+          },
+          {
+            "role": "user",
+            "content": "Reply OK."
+          }
+        ]
+      },
+      "source": "ollama",
+      "http_status": 200
+    },
+    {
+      "path": "/api/chat",
+      "payload": {
+        "options": {
+          "temperature": 0.3,
+          "num_predict": 32
+        },
+        "stream": false,
+        "model": "llama3.1:8b",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Reply OK."
+          }
+        ]
+      },
+      "source": "ollama",
+      "http_status": 200
+    },
+    {
+      "path": "/api/chat",
+      "payload": {
+        "options": {
+          "temperature": 0.3,
+          "num_predict": 32
+        },
+        "stream": false,
+        "model": "llama3.1:8b",
+        "messages": [
+          {
+            "role": "system",
+            "content": "Reply DELTA."
+          },
+          {
+            "role": "user",
+            "content": "Reply OK."
+          }
+        ]
+      },
+      "source": "ollama",
+      "http_status": 200
+    },
+    {
+      "path": "/api/chat",
+      "payload": {
+        "options": {
+          "temperature": 0.3,
+          "num_predict": 32
+        },
+        "stream": false,
+        "model": "llama3.1:8b",
+        "messages": [
+          {
+            "role": "system",
+            "content": "Reply ECHO."
+          },
+          {
+            "role": "user",
+            "content": "Reply OK."
+          }
+        ]
+      },
+      "source": "ollama",
+      "http_status": 200
+    },
+    {
+      "path": "/api/chat",
+      "payload": {
+        "options": {
+          "temperature": 0.3,
+          "num_predict": 32
+        },
+        "stream": false,
+        "model": "llama3.1:8b",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Reply ONE."
+          }
+        ]
+      },
+      "source": "ollama",
+      "http_status": 200
+    },
+    {
+      "path": "/api/chat",
+      "payload": {
+        "options": {
+          "temperature": 0.3,
+          "num_predict": 32
+        },
+        "stream": false,
+        "model": "llama3.1:8b",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Reply TWO."
+          }
+        ]
+      },
+      "source": "ollama",
+      "http_status": 200
+    },
+    {
+      "path": "/api/chat",
+      "payload": {
+        "options": {
+          "temperature": 0.3,
+          "num_predict": 32
+        },
+        "stream": false,
+        "model": "llama3.1:8b",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Reply DIRECT."
+          }
+        ]
+      },
+      "source": "ollama",
+      "http_status": 200
+    },
+    {
+      "path": "/api/chat",
+      "payload": {
+        "options": {
+          "temperature": 0.3,
+          "num_predict": 32
+        },
+        "stream": false,
+        "model": "llama3.1:8b",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Reply BATCH1."
+          }
+        ]
+      },
+      "source": "ollama",
+      "http_status": 200
+    },
+    {
+      "path": "/api/chat",
+      "payload": {
+        "options": {
+          "temperature": 0.3,
+          "num_predict": 32
+        },
+        "stream": false,
+        "model": "llama3.1:8b",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Reply BATCH1."
+          },
+          {
+            "role": "assistant",
+            "content": "I'm ready when you are. What's the first question or topic for BATCH 1?"
+          },
+          {
+            "role": "user",
+            "content": "Reply BATCH2."
+          }
+        ]
+      },
+      "source": "ollama",
+      "http_status": 200
+    },
+    {
+      "path": "/api/chat",
+      "payload": {
+        "options": {
+          "temperature": 0.3,
+          "num_predict": 32
+        },
+        "stream": false,
+        "model": "llama3.1:8b",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Reply OK."
+          }
+        ]
+      },
+      "source": "ollama",
+      "http_status": 200
+    },
+    {
+      "path": "/api/chat",
+      "payload": {
+        "model": "llama3.1:8b",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Reply OK."
+          }
+        ],
+        "options": {
+          "temperature": 0.3,
+          "num_predict": 32
+        },
+        "stream": false
+      },
+      "source": "ollama",
+      "http_status": 200
+    },
+    {
+      "path": "/api/chat",
+      "payload": {
+        "model": "llama3.1:8b",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Reply OK."
+          }
+        ],
+        "options": {
+          "temperature": 0.3,
+          "num_predict": 32
+        },
+        "stream": true
+      },
+      "source": "ollama",
+      "http_status": 200
+    },
+    {
+      "path": "/api/chat",
+      "payload": {
+        "model": "llama3.1:8b",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Reply OK."
+          }
+        ],
+        "options": {
+          "temperature": 0.3,
+          "num_predict": 32
+        },
+        "stream": true
+      },
+      "source": "ollama",
+      "http_status": 200
+    },
+    {
+      "path": "/api/chat",
+      "payload": {
+        "model": "llama3.1:8b",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Reply RETRY."
+          }
+        ],
+        "options": {
+          "temperature": 0.3,
+          "num_predict": 32
+        },
+        "stream": false
+      },
+      "source": "ollama",
+      "http_status": 200
+    },
+    {
+      "path": "/api/chat",
+      "payload": {
+        "model": "llama3.1:8b",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Reply RETRY."
+          }
+        ],
+        "options": {
+          "temperature": 0.3,
+          "num_predict": 32
+        },
+        "stream": false
+      },
+      "source": "ollama",
+      "http_status": 200
+    },
+    {
+      "path": "/api/chat",
+      "payload": {
+        "model": "execweave-intentionally-missing-model",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Reply OK."
+          }
+        ],
+        "options": {
+          "temperature": 0.3,
+          "num_predict": 32
+        },
+        "stream": false
+      },
+      "source": "ollama",
+      "http_status": 404
+    },
+    {
+      "path": "/api/chat",
+      "payload": {
+        "model": "llama3.1:8b",
+        "messages": [
+          {
+            "role": "user",
+            "content": "\n## context\n## History Messages\n0: user: Use the real local Ollama endpoint http://127.0.0.1:52574 and model llama3.1:8b. Return the acceptance result through the ActionNode structured-output contract.\n\n-----\n\n## format example\n[CONTENT]\n{\n    \"endpoint\": \"http://127.0.0.1:52574\",\n    \"model\": \"llama3.1:8b\"\n}\n[/CONTENT]\n\n## nodes: \"<node>: <type>  # <instruction>\"\n## endpoint: <class 'str'>  # State the exact local Ollama endpoint used by this run.\n## model: <class 'str'>  # State the exact model name used by this run.\n\n\n## constraint\nLanguage: Please use the same language as Human INPUT.\nFormat: output wrapped inside [CONTENT][/CONTENT] like format example, nothing else.\n\n## action\nFollow instructions of nodes, generate output and make sure it follows the format example.\n"
+          }
+        ],
+        "options": {
+          "temperature": 0.3
+        },
+        "stream": false
+      },
+      "source": "ollama",
+      "http_status": 200
+    },
+    {
+      "path": "/api/chat",
+      "payload": {
+        "options": {
+          "temperature": 0.3
+        },
+        "stream": false,
+        "model": "llama3.1:8b",
+        "messages": [
+          {
+            "role": "user",
+            "content": "\n## context\n## History Messages\n0: user: Use the real local Ollama endpoint http://127.0.0.1:52574 and model llama3.1:8b. Return the acceptance result through the ActionNode structured-output contract.\n\n-----\n\n## format example\n[CONTENT]\n{\n    \"endpoint\": \"http://127.0.0.1:52574\",\n    \"model\": \"llama3.1:8b\"\n}\n[/CONTENT]\n\n## nodes: \"<node>: <type>  # <instruction>\"\n## endpoint: <class 'str'>  # State the exact local Ollama endpoint used by this run.\n## model: <class 'str'>  # State the exact model name used by this run.\n\n\n## constraint\nLanguage: Please use the same language as Human INPUT.\nFormat: output wrapped inside [CONTENT][/CONTENT] like format example, nothing else.\n\n## action\nFollow instructions of nodes, generate output and make sure it follows the format example.\n"
+          }
+        ]
+      },
+      "source": "ollama",
+      "http_status": 200
+    },
+    {
+      "path": "/api/chat",
+      "payload": {
+        "model": "llama3.1:8b",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Return [CONTENT]{\"value\":\"OK\"}[/CONTENT]"
+          }
+        ],
+        "options": {
+          "temperature": 0.3,
+          "num_predict": 128
+        },
+        "stream": false
+      },
+      "source": "ollama",
+      "http_status": 200,
+      "fault_injection": "replace_real_response_with_malformed_content"
+    },
+    {
+      "path": "/api/chat",
+      "payload": {
+        "model": "llama3.1:8b",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Return [CONTENT]{\"value\":\"OK\"}[/CONTENT]"
+          }
+        ],
+        "options": {
+          "temperature": 0.3,
+          "num_predict": 128
+        },
+        "stream": false
+      },
+      "source": "ollama",
+      "http_status": 200,
+      "fault_injection": "replace_real_response_with_malformed_content"
+    },
+    {
+      "path": "/api/chat",
+      "payload": {
+        "model": "llama3.1:8b",
+        "messages": [
+          {
+            "role": "user",
+            "content": "\n## context\nReturn value OK as a structured object.\n\n-----\n\n## format example\n[CONTENT]\n{\n    \"value\": \"OK\"\n}\n[/CONTENT]\n\n## nodes: \"<node>: <type>  # <instruction>\"\n## value: <class 'str'>  # Return the string OK\n\n\n## constraint\nLanguage: Please use the same language as Human INPUT.\nFormat: output wrapped inside [CONTENT][/CONTENT] like format example, nothing else.\n\n## action\nFollow instructions of nodes, generate output and make sure it follows the format example.\n"
+          }
+        ],
+        "options": {
+          "temperature": 0.3,
+          "num_predict": 128
+        },
+        "stream": false
+      },
+      "source": "ollama",
+      "http_status": 200,
+      "fault_injection": "replace_real_response_with_malformed_content"
+    },
+    {
+      "path": "/api/chat",
+      "payload": {
+        "model": "llama3.1:8b",
+        "messages": [
+          {
+            "role": "user",
+            "content": "\n## context\nReturn value OK as a structured object.\n\n-----\n\n## format example\n[CONTENT]\n{\n    \"value\": \"OK\"\n}\n[/CONTENT]\n\n## nodes: \"<node>: <type>  # <instruction>\"\n## value: <class 'str'>  # Return the string OK\n\n\n## constraint\nLanguage: Please use the same language as Human INPUT.\nFormat: output wrapped inside [CONTENT][/CONTENT] like format example, nothing else.\n\n## action\nFollow instructions of nodes, generate output and make sure it follows the format example.\n"
+          }
+        ],
+        "options": {
+          "temperature": 0.3,
+          "num_predict": 128
+        },
+        "stream": false
+      },
+      "source": "ollama",
+      "http_status": 200
+    },
+    {
+      "path": "/api/chat",
+      "payload": {
+        "model": "llama3.1:8b",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Image",
+            "images": [
+              "YWJj"
+            ]
+          }
+        ],
+        "options": {
+          "temperature": 0.3,
+          "num_predict": 32
+        },
+        "stream": false
+      },
+      "source": "mock",
+      "http_status": 200
+    }
+  ],
+  "baseline": [
+    {
+      "name": "normal",
+      "use_system_prompt": false,
+      "msg": "Reply OK.",
+      "kwargs": {},
+      "http_requests": [
+        {
+          "model": "llama3.1:8b",
+          "messages": [
+            {
+              "role": "user",
+              "content": "Reply OK."
+            }
+          ],
+          "options": {
+            "temperature": 0.3,
+            "num_predict": 24
+          },
+          "stream": false
+        }
+      ],
+      "response": "OK!"
+    },
+    {
+      "name": "multi_turn",
+      "use_system_prompt": false,
+      "msg": [
+        {
+          "role": "user",
+          "content": "Remember code ALPHA. Reply OK."
+        },
+        {
+          "role": "assistant",
+          "content": "OK"
+        },
+        {
+          "role": "user",
+          "content": "What code?"
+        }
+      ],
+      "kwargs": {},
+      "http_requests": [
+        {
+          "model": "llama3.1:8b",
+          "messages": [
+            {
+              "role": "user",
+              "content": "Remember code ALPHA. Reply OK."
+            }
+          ],
+          "options": {
+            "temperature": 0.3,
+            "num_predict": 24
+          },
+          "stream": false
+        }
+      ],
+      "response": "I'm happy to play along! However, I don't have any prior knowledge or context about \"code ALPHA\", so"
+    },
+    {
+      "name": "explicit_suppressed",
+      "use_system_prompt": false,
+      "msg": "Reply OK.",
+      "kwargs": {
+        "system_msgs": [
+          "Reply BRAVO."
+        ]
+      },
+      "http_requests": [
+        {
+          "model": "llama3.1:8b",
+          "messages": [
+            {
+              "role": "user",
+              "content": "Reply OK."
+            }
+          ],
+          "options": {
+            "temperature": 0.3,
+            "num_predict": 24
+          },
+          "stream": false
+        }
+      ],
+      "response": "OK!"
+    },
+    {
+      "name": "default_enabled",
+      "use_system_prompt": true,
+      "msg": "Reply OK.",
+      "kwargs": {},
+      "http_requests": [
+        {
+          "model": "llama3.1:8b",
+          "messages": [
+            {
+              "role": "user",
+              "content": "You are a helpful assistant."
+            }
+          ],
+          "options": {
+            "temperature": 0.3,
+            "num_predict": 24
+          },
+          "stream": false
+        }
+      ],
+      "response": "How can I assist you today? Do you have any questions, need help with a task, or just want to chat"
+    },
+    {
+      "name": "explicit_enabled",
+      "use_system_prompt": true,
+      "msg": "Reply OK.",
+      "kwargs": {
+        "system_msgs": [
+          "Reply CHARLIE."
+        ]
+      },
+      "http_requests": [
+        {
+          "model": "llama3.1:8b",
+          "messages": [
+            {
+              "role": "user",
+              "content": "Reply CHARLIE."
+            }
+          ],
+          "options": {
+            "temperature": 0.3,
+            "num_predict": 24
+          },
+          "stream": false
+        }
+      ],
+      "response": "I'm happy to chat with you! What's on your mind?"
+    },
+    {
+      "name": "format_system",
+      "use_system_prompt": false,
+      "msg": "Reply OK.",
+      "kwargs": {
+        "format_msgs": [
+          {
+            "role": "system",
+            "content": "Reply DELTA."
+          }
+        ]
+      },
+      "http_requests": [
+        {
+          "model": "llama3.1:8b",
+          "messages": [
+            {
+              "role": "user",
+              "content": "Reply DELTA."
+            }
+          ],
+          "options": {
+            "temperature": 0.3,
+            "num_predict": 24
+          },
+          "stream": false
+        }
+      ],
+      "response": "DELTA"
+    }
+  ],
+  "focused_regression": "88 passed in 40.22s",
+  "lint": "ruff check .: PASS",
+  "dashboard_static": "2 passed; synthetic process anchors; no browser claim",
+  "source_file_sha256": {
+    "src\\execweave\\framework_adapters\\metagpt_recording.py": "445f0128c6edf67956e0a47ab7ade03a56a0309a11aff40aee757257a9ad0a63",
+    "src\\execweave\\framework_adapters\\metagpt_ollama_compat.py": "c004e5561b038c8d969a9171d02d87e36df3ce76d920e830269f8bb3494d2030",
+    "scripts\\real_metagpt_acceptance.py": "bed34f261c6063432e83e4401812c6334309ae8cc33c6e980b98b5a739c99ba2",
+    "scripts\\verify_metagpt_ollama_fidelity.py": "067f403c4872941eeb288e8c524cdf9567afec1d5bc49471743ae43a6eed56c5"
+  }
+}

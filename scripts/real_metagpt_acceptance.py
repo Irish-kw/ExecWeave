@@ -7,6 +7,7 @@ import argparse
 import atexit
 import asyncio
 import json
+import importlib.metadata
 import os
 import shutil
 import sys
@@ -55,70 +56,12 @@ from execweave.framework_adapters import (
 )
 
 
-class ObservedOllamaLLM(OllamaLLM):
-    """Capture MetaGPT's public BaseLLM.aask boundary around real Ollama calls."""
+from execweave.framework_adapters.metagpt_recording import OllamaRecordingMixin, observe_actionnode_retries
+from execweave.framework_adapters.metagpt_ollama_compat import enable_chat_history_compatibility
 
-    def __init__(self, config: Any, *, adapter: MetaGPTAdapter, role_ref: Any):
-        self._adapter = adapter
-        self._role_ref = role_ref
-        self._counter = 0
-        self._request_count = 0
-        self._response_count = 0
-        self._failure_count = 0
-        super().__init__(config)
 
-    async def aask(self, msg: Any, system_msgs=None, format_msgs=None, images=None, timeout=0, stream=None) -> str:
-        self._counter += 1
-        self._request_count += 1
-        call_id = f"metagpt-{self._role_ref.id}-ollama-call-{self._counter}"
-        boundary = "metagpt.provider.base_llm.BaseLLM.aask"
-        self._adapter.observe_model_call(
-            call_id,
-            role=self._role_ref,
-            model_id=self.model,
-            request={
-                "messages": (
-                    json.loads(json.dumps(msg, ensure_ascii=False, default=str))
-                    if isinstance(msg, list)
-                    else [{"role": "user", "content": str(msg)}]
-                ),
-                "system_messages": json.loads(json.dumps(system_msgs or [], ensure_ascii=False, default=str)),
-                "format_messages": json.loads(json.dumps(format_msgs or [], ensure_ascii=False, default=str)),
-                "stream": bool(stream) if stream is not None else bool(self.config.stream),
-            },
-            status="request",
-            boundary=boundary,
-        )
-        try:
-            response = await super().aask(
-                msg,
-                system_msgs=system_msgs,
-                format_msgs=format_msgs,
-                images=images,
-                timeout=timeout,
-                stream=stream,
-            )
-        except BaseException as exc:
-            self._failure_count += 1
-            self._adapter.observe_model_call(
-                call_id,
-                role=self._role_ref,
-                model_id=self.model,
-                response={"failure_type": type(exc).__name__},
-                status="failure",
-                boundary=boundary,
-            )
-            raise
-        self._response_count += 1
-        self._adapter.observe_model_call(
-            call_id,
-            role=self._role_ref,
-            model_id=self.model,
-            response=response,
-            status="response",
-            boundary=boundary,
-        )
-        return response
+class ObservedOllamaLLM(OllamaRecordingMixin, OllamaLLM):
+    """Observe logical, processed and serialized HTTP boundaries per instance."""
 
 
 def _records(path: Path) -> list[dict[str, Any]]:
@@ -174,6 +117,8 @@ async def run_acceptance(args: argparse.Namespace) -> dict[str, Any]:
     cfg.llm.timeout = 120
     cfg.llm.max_token = 160
     llm = ObservedOllamaLLM(cfg.llm, adapter=adapter, role_ref=role_ref)
+    if getattr(args, "preserve_chat_history", False):
+        enable_chat_history_compatibility(llm)
     metagpt_context = Context(config=cfg)
     metagpt_context._llm = llm
 
@@ -195,6 +140,7 @@ async def run_acceptance(args: argparse.Namespace) -> dict[str, Any]:
         ],
     )
     node.schema = "json"
+    parser_counts = observe_actionnode_retries(node, llm, adapter, role_ref, task_ref)
     action = Action(
         name="StructuredAcceptanceAction",
         desc="Produce a structured acceptance result.",
@@ -264,25 +210,7 @@ async def run_acceptance(args: argparse.Namespace) -> dict[str, Any]:
             "type": type(exc).__name__,
             "message": str(exc)[:300],
         }
-        parser_failure = llm._response_count > 0 and getattr(node, "instruct_content", None) is None
-        retry_count = max(0, llm._request_count - 1)
-        if parser_failure:
-            adapter.observe_parser_failure(
-                "metagpt-parser-failure-1",
-                role=role_ref,
-                task=task_ref,
-                error=type(exc).__name__,
-                parser="metagpt.actions.action_node.ActionNode._aask_v1",
-                retry_attempts=retry_count,
-            )
-            for index in range(1, retry_count + 1):
-                adapter.observe_retry(
-                    f"metagpt-retry-{index}",
-                    role=role_ref,
-                    task=task_ref,
-                    retry_index=index,
-                    retry_source="metagpt.actions.action_node.ActionNode._aask_v1",
-                )
+        parser_failure = parser_counts["parser_failures"] > 0
         adapter.observe_action_object(
             action,
             owner=role_ref,
@@ -293,6 +221,8 @@ async def run_acceptance(args: argparse.Namespace) -> dict[str, Any]:
         )
         task_success = False
         task_event = "TASK_FAILED"
+    parser_failure = parser_counts["parser_failures"] > 0
+    retry_count = parser_counts["retries"]
     context.emit(
         task_event,
         task_event,
@@ -346,7 +276,12 @@ async def run_acceptance(args: argparse.Namespace) -> dict[str, Any]:
     )
     summary = {
         "framework": "metagpt",
-        "framework_version": "1.0.0",
+        "framework_version": importlib.metadata.version("metagpt"),
+        "provider_compatibility": "preserve_chat_history" if getattr(args, "preserve_chat_history", False) else "unmodified",
+        "provider_attempt_count": llm._provider_attempt_count,
+        "provider_response_count": llm._provider_response_count,
+        "provider_failure_count": llm._provider_failure_count,
+        "logical_call_count": llm._request_count,
         "model": args.model,
         "endpoint": args.endpoint,
         "event_count": len(records),
@@ -374,6 +309,7 @@ async def run_acceptance(args: argparse.Namespace) -> dict[str, Any]:
             )
             and event_types.count("MESSAGE_SENT") >= 1
         ),
+        "transport_payload_independently_verified": False,
         "parser_failure": parser_failure,
         "retry_count": retry_count,
         "exception": exception_payload,
@@ -392,6 +328,8 @@ def main() -> int:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--endpoint", default="http://127.0.0.1:12345")
     parser.add_argument("--model", default="llama3.1:8b")
+    parser.add_argument("--preserve-chat-history", action="store_true",
+                        help="Explicitly correct upstream Ollama chat history/role loss")
     args = parser.parse_args()
     summary = asyncio.run(run_acceptance(args))
     print(json.dumps(summary, ensure_ascii=False, sort_keys=True))
