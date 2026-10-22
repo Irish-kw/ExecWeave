@@ -67,7 +67,7 @@ claimed model successes. Transport retry injects built-in `ConnectionError`
 after a real response, because installed MetaGPT does not retry every translated
 network exception. See the operator contract for exact scope.
 
-87 focused SDK/framework regression tests passed. Whole-repository Ruff passed.
+88 focused SDK/framework regression tests passed (14 new recording tests). Whole-repository Ruff passed.
 Static dashboard materialization of both ActionNode sidecars passed, including
 live/finished semantic identity parity and existing conversation references.
 Those static runs used the existing synthetic process anchor; they are not
@@ -85,3 +85,34 @@ The committed machine-readable evidence and final CI results accompany the PR.
 Acceptance requires G1–G10 and exact-head CI; pending/blocked checks do not
 authorize a merge. This document does not claim the unmodified upstream adapter
 preserves history, cloud/vision inference works, or local logs resist tampering.
+
+## Fixed-source verification and gates
+
+Implementation commit `84d02eb23696c8cadd2010cd63ee171e68ad9dd8` completed all
+21 scenarios again in `fidelity-committed`. The [sanitized evidence](2026-10-22-metagpt-ollama-evidence.json)
+contains source hashes, original baseline probes, every independently observed
+request body, and recorded-versus-observed canonical SHA-256 comparisons.
+It records 27 logical calls: 24 responses and 3 expected failures (pre-transport,
+HTTP 404, stream mismatch). There were 27 HTTP attempts: 26 genuine Ollama
+requests and one mock image response. The controlled transport retry is one
+logical call with two attempts. Both ordinary ActionNode runs and the recovered
+parser scenario succeeded; the deliberately malformed scenario failed after two
+model responses as intended.
+
+| Gate | Local status | Evidence |
+|---|---|---|
+| G1 source | PASS | Installed 1.0.0 files inspected, SHA-256 and imported paths retained locally |
+| G2 baseline | PASS | Original script plus six real proxy probes; baseline payloads committed |
+| G3 recording fidelity | PASS | 27/27 exact full JSON comparisons; no lossy normalization |
+| G4 system semantics | PASS | Explicit/default/disabled/format/caller-injected cases |
+| G5 multi-turn understood | PASS | Upstream loss reproduced; opt-in correction preserves exact turns/roles |
+| G6 retries/concurrency | PASS | Parallel, direct/batch, multiple instances, HTTP retry, failed/recovered parser attempts |
+| G7 real Ollama | PASS | 26 genuine requests on fixed implementation SHA, local 0.24.0/llama3.1:8b |
+| G8 compatibility | PASS | 88 focused tests; both static graph/conversation audits; CI remains a separate merge requirement |
+| G9 security | PASS | Four capture policies tested; header sentinel absent; no global patch or credential capture |
+| G10 retained evidence | PASS | Reproduction harness, source hashes, payloads, comparison hashes, actual counts |
+
+Stage integrity on the committed change passed: 3,295 baseline test identities
+retained, 3,309 current identities, no modified historical tests, no new
+skip/xfail, unchanged release metadata and capture boundaries. PR #127 must
+also pass all required exact-head GitHub checks before becoming mergeable.
