@@ -1,0 +1,67 @@
+{
+  "environment": {
+    "cpu_model": "INTEL(R) XEON(R) PLATINUM 8573C",
+    "logical_cpus": 4,
+    "machine": "x86_64",
+    "memory_total_mb": 15988.7,
+    "os": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+    "python": "3.12.14"
+  },
+  "execweave_version": "0.6.0",
+  "generated_at": "2026-08-25T17:10:48.321264Z",
+  "interpretation": {
+    "bubble": "artifact_median_kb",
+    "preferred_region": "lower-left",
+    "warning": "Reference microbenchmark only; rerun on the target host before making capacity claims.",
+    "x": "additional_peak_rss_mb",
+    "y": "runtime_overhead_percent"
+  },
+  "iterations": 7,
+  "package": {
+    "distribution_kb": 848.689,
+    "scope": "ExecWeave distribution files only; Python and dependency footprints excluded"
+  },
+  "profiles": [
+    {
+      "additional_peak_rss_mb": 0.0,
+      "artifact_median_kb": 0.0,
+      "backend": "off",
+      "name": "ExecWeave OFF",
+      "peak_tree_rss_delta_mb": 0.0,
+      "peak_tree_rss_median_mb": 25.402,
+      "runtime_overhead_percent": 0.0,
+      "samples": 7,
+      "wall_median_ms": 236.221,
+      "wall_p95_ms": 613.538
+    },
+    {
+      "additional_peak_rss_mb": 27.852,
+      "artifact_median_kb": 741.355,
+      "backend": "portable",
+      "name": "Portable ON",
+      "peak_tree_rss_delta_mb": 27.852,
+      "peak_tree_rss_median_mb": 53.254,
+      "runtime_overhead_percent": 65.768,
+      "samples": 7,
+      "wall_median_ms": 391.58,
+      "wall_p95_ms": 875.703
+    },
+    {
+      "additional_peak_rss_mb": 37.653,
+      "artifact_median_kb": 572.838,
+      "backend": "strace",
+      "name": "Strace ON",
+      "peak_tree_rss_delta_mb": 37.653,
+      "peak_tree_rss_median_mb": 63.055,
+      "runtime_overhead_percent": 419.038,
+      "samples": 7,
+      "wall_median_ms": 1226.076,
+      "wall_p95_ms": 1624.559
+    }
+  ],
+  "schema_version": "0.1",
+  "workload": {
+    "description": "fixed file read/write/hash operations plus short-lived Python subprocesses",
+    "id": "agent_like_files_and_subprocesses_v1"
+  }
+}

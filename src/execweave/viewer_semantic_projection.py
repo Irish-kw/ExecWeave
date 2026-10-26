@@ -1,0 +1,641 @@
+from __future__ import annotations
+
+from collections import defaultdict
+from copy import deepcopy
+from pathlib import Path
+from typing import Any
+
+from .viewer_background_files import CACHE_FILES_NODE_ID, collapse_python_cache_files
+
+ORPHAN_FILES_NODE_ID = "viewer-cluster:orphan-files"
+MODEL_RELATIONS = {"USED_MODEL": 0, "ROUTED_TO_MODEL": 1, "INVOKED_MODEL": 2, "REQUESTED_MODEL": 3}
+
+
+def _attrs(node: dict[str, Any]) -> dict[str, Any]:
+    value = node.get("attributes")
+    return value if isinstance(value, dict) else {}
+
+
+def _provider(node: dict[str, Any]) -> str:
+    attrs = _attrs(node)
+    for key in ("provider", "provider_name", "gateway", "runtime"):
+        value = attrs.get(key)
+        if isinstance(value, str) and value:
+            return value.lower()
+    parts = str(node.get("id") or "").split(":", 2)
+    return parts[1].lower() if len(parts) > 2 else "unknown"
+
+
+def _entries(graph: dict[str, Any]) -> list[dict[str, Any]]:
+    source = graph.get("source_path")
+    if not isinstance(source, str) or not source:
+        return []
+    try:
+        from .conversation_records import conversation_record_entries
+
+        return conversation_record_entries(graph, Path(source).expanduser().resolve(strict=False).parent)
+    except (OSError, RuntimeError, ValueError):
+        return []
+
+
+def _roots(nodes: list[dict[str, Any]], entries: list[dict[str, Any]], edges: list[dict[str, Any]] = ()) -> tuple[list[str], dict[str, list[str]]]:
+    agents = {str(n["id"]): n for n in nodes if n.get("type") == "agent" and isinstance(n.get("id"), str)}
+    roots: set[str] = set()
+    by_provider: dict[str, set[str]] = defaultdict(set)
+    for node_id, node in agents.items():
+        attrs = _attrs(node)
+        if attrs.get("agent_role") == "root" or "/root" in {
+            str(node.get("name") or ""), str(attrs.get("agent_path") or ""), str(attrs.get("root_agent_path") or "")
+        }:
+            roots.add(node_id)
+    for entry in entries:
+        preview = entry.get("conversation_preview") if isinstance(entry, dict) else None
+        source_id = entry.get("source_id") if isinstance(entry, dict) else None
+        if isinstance(preview, dict) and preview.get("is_root") is True and isinstance(source_id, str) and source_id in agents:
+            roots.add(source_id)
+            by_provider[str(entry.get("provider") or _provider(agents[source_id])).lower()].add(source_id)
+    if not roots and len(agents) == 1:
+        roots.add(next(iter(agents)))
+    if not roots:
+        # Framework agents run inside the recorded program; the program that started
+        # the recording session is still the one process-level actor its wire calls belong to.
+        launchers = {
+            str(edge["source"]) for edge in edges
+            if edge.get("relation") == "STARTED_SESSION" and edge.get("source") in agents
+            and _attrs(agents[str(edge["source"])]).get("conversation_scope") != "framework_agent"
+        }
+        if len(launchers) == 1:
+            roots.update(launchers)
+    for root in roots:
+        provider = _provider(agents[root])
+        if provider != "unknown":
+            by_provider[provider].add(root)
+    return sorted(roots), {key: sorted(value) for key, value in by_provider.items()}
+
+
+def _components(ids: set[str], edges: list[dict[str, Any]]) -> list[list[str]]:
+    parent = {value: value for value in ids}
+
+    def find(value: str) -> str:
+        while parent[value] != value:
+            parent[value] = parent[parent[value]]
+            value = parent[value]
+        return value
+
+    for edge in edges:
+        if edge.get("relation") != "SAME_INFERENCE_REQUEST":
+            continue
+        a, b = edge.get("source"), edge.get("target")
+        if isinstance(a, str) and a in ids and isinstance(b, str) and b in ids:
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                parent[rb] = ra
+    groups: dict[str, list[str]] = defaultdict(list)
+    for value in ids:
+        groups[find(value)].append(value)
+    return [sorted(value) for value in groups.values()]
+
+
+def _matching_entries(ids: set[str], entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        entry for entry in entries if isinstance(entry, dict)
+        and (entry.get("source_id") in ids or entry.get("evidence_source_id") in ids)
+    ]
+
+
+def _messages(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[tuple[Any, ...]] = set()
+    out: list[dict[str, Any]] = []
+    for entry in entries:
+        preview = entry.get("conversation_preview")
+        if not isinstance(preview, dict):
+            continue
+        for message in preview.get("messages") or []:
+            if not isinstance(message, dict) or not isinstance(message.get("text"), str) or not message["text"].strip():
+                continue
+            key = (message.get("timestamp"), message.get("ordinal"), message.get("kind"), message.get("sender"), message["text"])
+            if key in seen:
+                continue
+            seen.add(key)
+            text = message["text"]
+            out.append({
+                "timestamp": message.get("timestamp"), "ordinal": message.get("ordinal"),
+                "kind": message.get("kind"), "sender": message.get("sender"),
+                "recipient": message.get("recipient"), "phase": message.get("phase"),
+                "text": text[:4000], "text_truncated": len(text) > 4000,
+            })
+    out.sort(key=lambda m: (str(m.get("timestamp") or ""), m.get("ordinal") if isinstance(m.get("ordinal"), int) else 2**63 - 1))
+    return out
+
+
+def _content_refs(ids: set[str], edges: list[dict[str, Any]], node_by_id: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for edge in edges:
+        a, b = edge.get("source"), edge.get("target")
+        if a not in ids and b not in ids:
+            continue
+        other = b if a in ids else a
+        node = node_by_id.get(str(other))
+        if not node or node.get("type") != "observed_content":
+            continue
+        key = (str(other), str(edge.get("relation") or ""))
+        if key in seen:
+            continue
+        seen.add(key)
+        attrs = _attrs(node)
+        out.append({"id": other, "relation": edge.get("relation"), "content_kind": attrs.get("content_kind"), "path": attrs.get("path"), "sha256": attrs.get("sha256")})
+    return out
+
+
+def collapse_inference_requests(nodes: list[dict[str, Any]], edges: list[dict[str, Any]], entries: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
+    node_by_id = {str(n["id"]): n for n in nodes if isinstance(n.get("id"), str)}
+    request_ids = {node_id for node_id, node in node_by_id.items() if node.get("type") == "inference_request"}
+    if not request_ids:
+        return nodes, edges, {"collapsed_request_count": 0, "logical_inference_count": 0, "direct_inference_edge_count": 0, "unresolved": []}
+    roots, roots_by_provider = _roots(nodes, entries, edges)
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+    unresolved: list[dict[str, Any]] = []
+    hidden_content: set[str] = set()
+    alias_candidates: set[str] = set()
+    for component in _components(request_ids, edges):
+        members = set(component)
+        matches = _matching_entries(members, entries)
+        owner = next((str(e.get("source_id")) for e in matches if node_by_id.get(str(e.get("source_id")), {}).get("type") == "agent"), None)
+        if owner is None:
+            providers = {str(e.get("provider") or "").lower() for e in matches if e.get("provider")}
+            if not providers:
+                providers = {_provider(node_by_id[value]) for value in members}
+            candidates = {root for provider in providers for root in roots_by_provider.get(provider, [])}
+            owner = next(iter(candidates)) if len(candidates) == 1 else (roots[0] if len(roots) == 1 else None)
+        model_edges = [
+            edge for edge in edges if edge.get("source") in members and edge.get("relation") in MODEL_RELATIONS
+            and isinstance(edge.get("target"), str) and node_by_id.get(str(edge.get("target")), {}).get("type") == "model"
+        ]
+        model_edges.sort(key=lambda edge: MODEL_RELATIONS.get(str(edge.get("relation")), 99))
+        model_id = str(model_edges[0]["target"]) if model_edges else None
+        if owner is None or model_id is None:
+            unresolved.append({"request_ids": sorted(members), "reason": "missing_owner" if owner is None else "missing_model"})
+            continue
+        # The served model is the inference target; an alias the caller asked for stays on the occurrence.
+        requested = sorted({str(edge["target"]) for edge in model_edges if str(edge["target"]) != model_id})
+        alias_candidates.update(requested)
+        served_by = sorted({
+            str(edge["source"]) for edge in edges
+            if edge.get("relation") == "SERVED_INFERENCE" and edge.get("target") in members and isinstance(edge.get("source"), str)
+            and edge["source"] in node_by_id
+        })
+        routed_providers = sorted({
+            str(edge["target"]) for edge in edges
+            if edge.get("relation") == "ROUTED_TO_PROVIDER" and edge.get("source") in members and isinstance(edge.get("target"), str)
+            and edge["target"] in node_by_id
+        })
+        related = [edge for edge in edges if edge.get("source") in members or edge.get("target") in members]
+        first_seen_values = [
+            str(node_by_id[value].get("first_seen"))
+            for value in members
+            if node_by_id[value].get("first_seen")
+        ] + [str(edge.get("first_seen")) for edge in related if edge.get("first_seen")]
+        last_seen_values = [
+            str(node_by_id[value].get("last_seen"))
+            for value in members
+            if node_by_id[value].get("last_seen")
+        ] + [str(edge.get("last_seen")) for edge in related if edge.get("last_seen")]
+        first_seen = min(first_seen_values, default=None)
+        last_seen = max(last_seen_values, default=None)
+        seqs = [edge.get("first_sequence") for edge in related if isinstance(edge.get("first_sequence"), int)]
+        last_seqs = [edge.get("last_sequence") for edge in related if isinstance(edge.get("last_sequence"), int)]
+        refs = _content_refs(members, edges, node_by_id)
+        hidden_content.update(str(ref["id"]) for ref in refs if ref.get("id"))
+        providers = sorted({_provider(node_by_id[value]) for value in members})
+        grouped[(owner, model_id)].append({
+            "request_ids": sorted(members), "provider": providers[0] if len(providers) == 1 else providers,
+            "model_id": model_id, "first_seen": first_seen, "last_seen": last_seen,
+            "first_sequence": min(seqs) if seqs else None, "last_sequence": max(last_seqs) if last_seqs else None,
+            "messages": _messages(matches), "content_references": refs,
+            **({"requested_model_ids": requested, "requested_model_names": [str(node_by_id[value].get("name") or value) for value in requested]} if requested else {}),
+            **({"served_by_ids": served_by} if served_by else {}),
+            **({"routed_provider_ids": routed_providers} if routed_providers else {}),
+        })
+    hidden = set(request_ids)
+    # A requested alias whose only evidence is hidden request evidence is shown on the served model's occurrence.
+    for model in alias_candidates:
+        incident = [edge for edge in edges if edge.get("source") == model or edge.get("target") == model]
+        if incident and all((edge.get("source") in request_ids or edge.get("target") in request_ids) for edge in incident):
+            hidden.add(model)
+    # Content attached only to hidden request evidence is inspector evidence, not a main graph node.
+    for content_id in list(hidden_content):
+        incident = [edge for edge in edges if edge.get("source") == content_id or edge.get("target") == content_id]
+        if all((edge.get("source") in request_ids or edge.get("target") in request_ids) for edge in incident):
+            hidden.add(content_id)
+    kept_nodes = [deepcopy(node) for node in nodes if node.get("id") not in hidden]
+    kept_edges = [deepcopy(edge) for edge in edges if edge.get("source") not in hidden and edge.get("target") not in hidden]
+    for (owner, model_id), occurrences in grouped.items():
+        occurrences.sort(key=lambda item: (str(item.get("first_seen") or ""), item.get("first_sequence") if isinstance(item.get("first_sequence"), int) else 2**63 - 1))
+        kept_edges.append({
+            "id": f"viewer:{owner}--INFERRED-->{model_id}", "source": owner, "target": model_id,
+            "relation": "INFERRED", "count": len(occurrences), "evidence_event_count": len(occurrences),
+            "first_seen": occurrences[0].get("first_seen"), "last_seen": occurrences[-1].get("last_seen"),
+            "first_sequence": occurrences[0].get("first_sequence"), "last_sequence": occurrences[-1].get("last_sequence"),
+            "causal": False, "inferred": False, "viewer_only": True,
+            "attributions": ["viewer_provider_inference_projection"], "viewer_occurrences": occurrences,
+        })
+    return kept_nodes, kept_edges, {
+        "collapsed_request_count": len(request_ids), "logical_inference_count": sum(len(v) for v in grouped.values()),
+        "direct_inference_edge_count": len(grouped), "unresolved": unresolved,
+    }
+
+
+RUNTIME_MODEL_RELATIONS = {"SERVES_MODEL", "LOADED_MODEL", "ADVERTISES_MODEL"}
+
+
+def _seen_bounds(items: list[dict[str, Any]]) -> dict[str, Any]:
+    firsts = [str(item["first_seen"]) for item in items if item.get("first_seen")]
+    lasts = [str(item.get("last_seen") or item["first_seen"]) for item in items if item.get("last_seen") or item.get("first_seen")]
+    seqs = [item["first_sequence"] for item in items if isinstance(item.get("first_sequence"), int)]
+    last_seqs = [item["last_sequence"] for item in items if isinstance(item.get("last_sequence"), int)]
+    return {
+        "first_seen": min(firsts, default=None), "last_seen": max(lasts, default=None),
+        "first_sequence": min(seqs) if seqs else None, "last_sequence": max(last_seqs) if last_seqs else None,
+    }
+
+
+def link_inference_infrastructure(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
+    """Attach the gateway/API/runtime that served an inferred model, and the provider it was routed to.
+
+    Collapsing inference requests removes the request node that carried SERVED_INFERENCE and
+    ROUTED_TO_PROVIDER, so the occurrence keeps those ids and the served model links to them here.
+    A runtime is the same server when it shares the model's endpoint scope or reports that exact
+    model node; a runtime-namespace model with the same name or catalog id on that runtime is the
+    same model seen through the runtime's catalog, so it is folded into the served model.
+    """
+    node_by_id = {str(n["id"]): n for n in nodes if isinstance(n.get("id"), str)}
+    occurrences: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for edge in edges:
+        target = edge.get("target")
+        if edge.get("relation") == "INFERRED" and isinstance(target, str) and target in node_by_id:
+            occurrences[target].extend(item for item in edge.get("viewer_occurrences") or [] if isinstance(item, dict))
+    if not occurrences:
+        return nodes, edges, {"infrastructure_edge_count": 0, "folded_runtime_model_count": 0}
+    links: dict[tuple[str, str, str], dict[str, Any]] = {}
+
+    def link(model: str, other: str, relation: str, basis: str, evidence: list[dict[str, Any]], **extra: Any) -> None:
+        item = links.setdefault((model, other, relation), {"basis": set(), "evidence": [], "edge_ids": set(), "request_ids": set(), "relations": set(), "folded": []})
+        item["basis"].add(basis)
+        item["evidence"].extend(evidence)
+        item["edge_ids"].update(extra.get("edge_ids", ()))
+        item["request_ids"].update(extra.get("request_ids", ()))
+        item["relations"].update(extra.get("relations", ()))
+        item["folded"].extend(extra.get("folded", ()))
+
+    for model, items in occurrences.items():
+        for occurrence in items:
+            request_ids = [str(value) for value in occurrence.get("request_ids") or []]
+            for server in occurrence.get("served_by_ids") or []:
+                if server in node_by_id and server != model:
+                    link(model, server, "SERVED_BY", "served_inference", [occurrence], request_ids=request_ids)
+            for provider in occurrence.get("routed_provider_ids") or []:
+                if provider in node_by_id and provider != model:
+                    link(model, provider, "ROUTED_TO_PROVIDER", "routed_to_provider", [occurrence], request_ids=request_ids)
+
+    runtime_edges: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for edge in edges:
+        if edge.get("relation") in RUNTIME_MODEL_RELATIONS and node_by_id.get(str(edge.get("source")), {}).get("type") == "model_runtime" and edge.get("target") in node_by_id:
+            runtime_edges[str(edge["source"])].append(edge)
+    runtimes = [node_id for node_id, node in node_by_id.items() if node.get("type") == "model_runtime"]
+    replaced: set[str] = set()
+    folded: dict[str, str] = {}
+    for model in occurrences:
+        attrs = _attrs(node_by_id[model])
+        scope = attrs.get("endpoint_scope")
+        names = {str(value) for value in (node_by_id[model].get("name"), attrs.get("catalog_id")) if value}
+        for runtime in runtimes:
+            direct = [edge for edge in runtime_edges[runtime] if edge.get("target") == model]
+            scoped = bool(scope) and _attrs(node_by_id[runtime]).get("endpoint_scope") == scope
+            if not direct and not scoped:
+                continue
+            same = []
+            if scoped:
+                for edge in runtime_edges[runtime]:
+                    other = str(edge["target"])
+                    if other == model or other in occurrences or node_by_id[other].get("type") != "model":
+                        continue
+                    other_names = {str(value) for value in (node_by_id[other].get("name"), _attrs(node_by_id[other]).get("catalog_id")) if value}
+                    if names & other_names:
+                        same.append(edge)
+            for edge in direct + same:
+                replaced.add(str(edge["id"]))
+            for edge in same:
+                folded[str(edge["target"])] = model
+            link(
+                model, runtime, "SERVED_BY", "runtime_model" if direct else "endpoint_scope", direct + same,
+                edge_ids=[str(edge["id"]) for edge in direct + same], relations=[str(edge["relation"]) for edge in direct + same],
+                folded=[{"id": str(edge["target"]), "name": node_by_id[str(edge["target"])].get("name"), "relation": edge.get("relation"), "runtime_id": runtime} for edge in same],
+            )
+    # A folded catalog model is hidden only when its catalog edges are all it has.
+    for other in list(folded):
+        incident = [edge for edge in edges if edge.get("source") == other or edge.get("target") == other]
+        if not all(str(edge.get("id")) in replaced for edge in incident):
+            replaced.difference_update(str(edge.get("id")) for edge in incident)
+            del folded[other]
+    out_nodes = []
+    for node in nodes:
+        node_id = node.get("id")
+        if node_id in folded:
+            continue
+        absorbed = [item for (model, _, _), value in links.items() if model == node_id for item in value["folded"] if item["id"] in folded]
+        out_nodes.append({**node, "attributes": {**_attrs(node), "viewer_runtime_models": absorbed}} if absorbed else node)
+    out_edges = [edge for edge in edges if str(edge.get("id")) not in replaced]
+    for (model, other, relation), value in sorted(links.items()):
+        evidence = [item for item in value["evidence"] if isinstance(item, dict)]
+        out_edges.append({
+            "id": f"viewer:{model}--{relation}-->{other}", "source": model, "target": other, "relation": relation,
+            "count": max(1, len(value["request_ids"]) or len(evidence)), **_seen_bounds(evidence),
+            "causal": False, "inferred": "endpoint_scope" in value["basis"], "viewer_only": True,
+            "attributions": ["viewer_inference_infrastructure_projection"], "viewer_link_basis": sorted(value["basis"]),
+            **({"viewer_request_ids": sorted(value["request_ids"])} if value["request_ids"] else {}),
+            **({"evidence_edge_ids": sorted(value["edge_ids"]), "viewer_runtime_relations": sorted(value["relations"])} if value["edge_ids"] else {}),
+        })
+    return out_nodes, out_edges, {"infrastructure_edge_count": len(links), "folded_runtime_model_count": len(folded)}
+
+
+def _file_path(node: dict[str, Any]) -> str:
+    attrs = _attrs(node)
+    for value in (attrs.get("path"), attrs.get("file_path"), attrs.get("source_path"), attrs.get("target_path"), node.get("name"), node.get("id")):
+        if isinstance(value, str) and value:
+            return value.removeprefix("file:").removeprefix("directory:")
+    return "unknown"
+
+
+def collapse_orphan_files(nodes: list[dict[str, Any]], edges: list[dict[str, Any]], root_id: str | None) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any] | None]:
+    degree: dict[str, int] = defaultdict(int)
+    for edge in edges:
+        for value in (edge.get("source"), edge.get("target")):
+            if isinstance(value, str):
+                degree[value] += 1
+    members = [node for node in nodes if node.get("type") in {"file", "directory"} and isinstance(node.get("id"), str) and degree.get(str(node["id"]), 0) == 0]
+    if not members:
+        return nodes, edges, None
+    entries = [{"id": n.get("id"), "type": n.get("type"), "name": n.get("name"), "path": _file_path(n), "first_seen": n.get("first_seen"), "last_seen": n.get("last_seen"), "event_count": int(n.get("event_count") or 0), "event_types": list(n.get("event_types") or [])} for n in sorted(members, key=_file_path)]
+    first = min((str(n.get("first_seen")) for n in members if n.get("first_seen")), default=None)
+    last = max((str(n.get("last_seen")) for n in members if n.get("last_seen")), default=None)
+    cluster = {"id": ORPHAN_FILES_NODE_ID, "type": "file_cluster", "name": "Files / directories", "attributes": {"viewer_only": True, "collapsed": True, "expandable": True, "reason": "orphan_file_directory_nodes", "member_count": len(members), "entries": entries, "viewer_occurrences": entries}, "first_seen": first, "last_seen": last, "event_count": sum(int(n.get("event_count") or 0) for n in members)}
+    ids = {str(n["id"]) for n in members}
+    out_nodes = [deepcopy(n) for n in nodes if n.get("id") not in ids] + [cluster]
+    out_edges = [deepcopy(e) for e in edges]
+    edge_id = None
+    if root_id:
+        edge_id = f"viewer:{root_id}--OBSERVED_FILES-->{ORPHAN_FILES_NODE_ID}"
+        out_edges.append({"id": edge_id, "source": root_id, "target": ORPHAN_FILES_NODE_ID, "relation": "OBSERVED_FILES", "count": len(members), "first_seen": first, "last_seen": last, "causal": False, "inferred": False, "viewer_only": True})
+    return out_nodes, out_edges, {"cluster_node_id": ORPHAN_FILES_NODE_ID, "cluster_edge_id": edge_id, "nodes": deepcopy(members), "edges": [], "viewer_only": True}
+
+
+def orphan_audit(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> dict[str, Any]:
+    degree: dict[str, int] = defaultdict(int)
+    for edge in edges:
+        for value in (edge.get("source"), edge.get("target")):
+            if isinstance(value, str):
+                degree[value] += 1
+    grouped: dict[str, list[str]] = defaultdict(list)
+    for node in nodes:
+        node_id = node.get("id")
+        if isinstance(node_id, str) and degree.get(node_id, 0) == 0:
+            grouped[str(node.get("type") or "unknown")].append(node_id)
+    by_type = [{"node_type": kind, "count": len(ids), "examples": sorted(ids)[:8]} for kind, ids in sorted(grouped.items())]
+    return {"count": sum(item["count"] for item in by_type), "by_type": by_type}
+
+
+_FRAMEWORK_TASK_RELATIONS = frozenset(
+    {"ASSIGNED_TO", "TASK_CREATED", "TASK_STARTED", "TASK_UPDATED", "TASK_COMPLETED", "TASK_FAILED"}
+)
+
+
+def _framework_task_edge_score(edge: dict[str, Any]) -> tuple[int, str, str]:
+    sequence = edge.get("last_sequence")
+    if not isinstance(sequence, int) or isinstance(sequence, bool):
+        sequence = edge.get("first_sequence")
+    if not isinstance(sequence, int) or isinstance(sequence, bool):
+        sequence = -1
+    return (sequence, str(edge.get("last_seen") or edge.get("first_seen") or ""), str(edge.get("id") or ""))
+
+
+def _framework_task_text(task: dict[str, Any]) -> str:
+    attributes = _attrs(task)
+    for value in (
+        attributes.get("task_prompt"),
+        attributes.get("prompt"),
+        attributes.get("description"),
+        task.get("name"),
+    ):
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def collapse_framework_tasks(
+    nodes: list[dict[str, Any]],
+    edges: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, int]]:
+    """Fold framework task presentation into the owning agent, like provider views.
+
+    Framework adapters retain first-class task entities in the raw graph because task
+    lifecycle and prompt evidence must remain auditable.  Provider dashboards expose
+    that same information on the agent card, however, so the viewer projection hides
+    only framework task nodes and copies the latest authoritative task text onto each
+    assigned framework agent.  Provider graphs are untouched because they do not use
+    the framework-agent conversation scope.
+    """
+    node_by_id = {
+        str(node["id"]): node
+        for node in nodes
+        if isinstance(node, dict) and isinstance(node.get("id"), str)
+    }
+    framework_agents = {
+        node_id
+        for node_id, node in node_by_id.items()
+        if node.get("type") == "agent" and _attrs(node).get("conversation_scope") == "framework_agent"
+    }
+    if not framework_agents:
+        return nodes, edges, {
+            "framework_task_node_count": 0,
+            "framework_task_content_node_count": 0,
+            "framework_task_agent_count": 0,
+        }
+
+    task_ids: set[str] = set()
+    tasks_by_agent: dict[str, list[tuple[tuple[int, str, str], str]]] = defaultdict(list)
+    for edge in edges:
+        if not isinstance(edge, dict) or edge.get("relation") not in _FRAMEWORK_TASK_RELATIONS:
+            continue
+        source = str(edge.get("source") or "")
+        target = str(edge.get("target") or "")
+        source_node = node_by_id.get(source)
+        target_node = node_by_id.get(target)
+        task_id = source if source_node and source_node.get("type") == "task" else target if target_node and target_node.get("type") == "task" else None
+        if task_id is None:
+            continue
+        agent_id = source if source in framework_agents else target if target in framework_agents else None
+        if agent_id is None:
+            continue
+        task_ids.add(task_id)
+        tasks_by_agent[agent_id].append((_framework_task_edge_score(edge), task_id))
+
+    if not task_ids:
+        return nodes, edges, {
+            "framework_task_node_count": 0,
+            "framework_task_content_node_count": 0,
+            "framework_task_agent_count": 0,
+        }
+
+    projected_nodes: list[dict[str, Any]] = []
+    for node in nodes:
+        node_id = str(node.get("id") or "")
+        if node_id in task_ids:
+            continue
+        if node.get("type") == "agent" and node_id in framework_agents:
+            candidates: dict[str, tuple[int, str, str]] = {}
+            for score, task_id in tasks_by_agent.get(node_id, []):
+                previous = candidates.get(task_id)
+                if previous is None or score > previous:
+                    candidates[task_id] = score
+            ordered_ids = [
+                task_id
+                for task_id, _ in sorted(
+                    candidates.items(),
+                    key=lambda item: (
+                        not bool(_attrs(node_by_id[item[0]]).get("action")),
+                        bool(_attrs(node_by_id[item[0]]).get("task_prompt") or _attrs(node_by_id[item[0]]).get("prompt")),
+                        item[1], item[0],
+                    ),
+                    reverse=True,
+                )
+            ]
+            latest_task = node_by_id.get(ordered_ids[0]) if ordered_ids else None
+            attributes = dict(_attrs(node))
+            attributes["viewer_assigned_task_ids"] = ordered_ids
+            attributes["viewer_assigned_task_count"] = len(ordered_ids)
+            if latest_task is not None:
+                attributes["viewer_assigned_task_id"] = str(latest_task.get("id") or "")
+                attributes["viewer_assigned_task_name"] = str(latest_task.get("name") or "")
+                task_text = _framework_task_text(latest_task)
+                if task_text:
+                    attributes["viewer_assigned_task_prompt"] = task_text
+            projected_nodes.append({**node, "attributes": attributes})
+            continue
+        projected_nodes.append(node)
+
+    hidden_content_ids: set[str] = set()
+    for node in nodes:
+        node_id = str(node.get("id") or "")
+        if node.get("type") != "observed_content" or not node_id:
+            continue
+        incident = [
+            edge
+            for edge in edges
+            if edge.get("source") == node_id or edge.get("target") == node_id
+        ]
+        if incident and all(
+            (edge.get("source") in task_ids or edge.get("target") in task_ids)
+            for edge in incident
+        ):
+            hidden_content_ids.add(node_id)
+
+    hidden_ids = task_ids | hidden_content_ids
+    projected_nodes = [node for node in projected_nodes if str(node.get("id") or "") not in hidden_content_ids]
+    projected_edges = [
+        edge
+        for edge in edges
+        if edge.get("source") not in hidden_ids and edge.get("target") not in hidden_ids
+    ]
+    return projected_nodes, projected_edges, {
+        "framework_task_node_count": len(task_ids),
+        "framework_task_content_node_count": len(hidden_content_ids),
+        "framework_task_agent_count": len(tasks_by_agent),
+    }
+
+
+def project_provider_neutral_viewer_graph(graph: dict[str, Any]) -> dict[str, Any]:
+    """Provider-neutral display projection; raw graph/evidence remains unchanged."""
+    from . import viewer_projection_base as base
+    from .viewer_external_endpoints import LOCAL_NODE_ID, collapse_local_endpoints
+
+    decorated = base.decorate_viewer_content_references(graph)
+    filtered, hook_nodes, hook_edges = base._without_internal_hook_processes(decorated)
+    nodes = [deepcopy(n) for n in filtered.get("nodes", []) if isinstance(n, dict)]
+    edges = [deepcopy(e) for e in filtered.get("edges", []) if isinstance(e, dict)]
+    entries = _entries(graph)
+    nodes, edges, framework_tasks = collapse_framework_tasks(nodes, edges)
+    nodes, edges, inference = collapse_inference_requests(nodes, edges, entries)
+    nodes, edges, infrastructure = link_inference_infrastructure(nodes, edges)
+    roots, _ = _roots(nodes, entries, edges)
+    nodes, edges, cache = collapse_python_cache_files(nodes, edges, roots[0] if len(roots) == 1 else None)
+    nodes, edges, files = collapse_orphan_files(nodes, edges, roots[0] if len(roots) == 1 else None)
+    nodes, edges, local = collapse_local_endpoints(nodes, edges)
+
+    per_model: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for edge in edges:
+        if edge.get("relation") == "INFERRED" and isinstance(edge.get("target"), str) and isinstance(edge.get("viewer_occurrences"), list):
+            per_model[str(edge["target"])].extend(deepcopy(edge["viewer_occurrences"]))
+    if per_model:
+        rewritten = []
+        for node in nodes:
+            node_id = node.get("id")
+            if not isinstance(node_id, str) or node_id not in per_model:
+                rewritten.append(node)
+                continue
+            occurrences = sorted(per_model[node_id], key=lambda item: (str(item.get("first_seen") or ""), item.get("first_sequence") if isinstance(item.get("first_sequence"), int) else 2**63 - 1))
+            rewritten.append({**node, "attributes": {**_attrs(node), "viewer_inference_occurrences": occurrences, "viewer_inference_count": len(occurrences)}})
+        nodes = rewritten
+
+    result = deepcopy(filtered)
+    result.update({"nodes": nodes, "edges": edges, "node_count": len(nodes), "edge_count": len(edges)})
+    audit = orphan_audit(nodes, edges)
+    topology_changed = bool(
+        hook_nodes
+        or hook_edges
+        or inference["collapsed_request_count"]
+        or local is not None
+        or files is not None
+        or cache is not None
+        or framework_tasks["framework_task_node_count"]
+    )
+    if not topology_changed:
+        if audit["count"]:
+            result["viewer_orphan_audit"] = audit
+        return result
+
+    meta = dict(result.get("viewer_projection") or {"schema_version": "0.1", "viewer_only": True})
+    semantic_projection = bool(inference["collapsed_request_count"] or local is not None or files is not None or cache is not None)
+    meta.update({
+        "kind": "provider_neutral_semantics" if semantic_projection else "internal_hook_processes",
+        "local_endpoint_policy": "all_loopback",
+        "local_endpoint_count": len(local.get("nodes") or []) if local else 0,
+        "cluster_count": (1 if local else 0) + (1 if files else 0) + (1 if cache else 0),
+        "python_cache_file_node_count": len(cache["nodes"]) if cache else 0,
+        "orphan_file_node_count": len(files.get("nodes") or []) if files else 0,
+        "inference_request_count": inference["collapsed_request_count"], "logical_inference_count": inference["logical_inference_count"],
+        "direct_inference_edge_count": inference["direct_inference_edge_count"], "unresolved_inference_requests": inference["unresolved"],
+        "inference_infrastructure_edge_count": infrastructure["infrastructure_edge_count"],
+        "folded_runtime_model_count": infrastructure["folded_runtime_model_count"],
+        "framework_task_node_count": framework_tasks["framework_task_node_count"],
+        "framework_task_content_node_count": framework_tasks["framework_task_content_node_count"],
+        "framework_task_agent_count": framework_tasks["framework_task_agent_count"],
+        "internal_hook_node_count": len(hook_nodes), "internal_hook_edge_count": len(hook_edges),
+        "projection_topology_changed": True,
+    })
+    payload = deepcopy(result.get("expansion")) if isinstance(result.get("expansion"), dict) else {}
+    clusters = deepcopy(payload.get("clusters")) if isinstance(payload.get("clusters"), dict) else {}
+    if local:
+        clusters[LOCAL_NODE_ID] = local
+    if files:
+        clusters[ORPHAN_FILES_NODE_ID] = files
+    if cache:
+        clusters[CACHE_FILES_NODE_ID] = cache
+    if clusters:
+        payload.setdefault("schema_version", "0.1")
+        payload["clusters"] = clusters
+        result["expansion"] = payload
+    meta["orphan_audit"] = audit
+    result["viewer_orphan_audit"] = audit
+    result["viewer_projection"] = meta
+    return result

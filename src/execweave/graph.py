@@ -1,0 +1,590 @@
+from __future__ import annotations
+
+import hashlib
+import json
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from .session_summary import SessionSummary
+from .observation import session_outcome as assessed_session_outcome
+from .fidelity import FidelityAccumulator
+from .provider_lifecycle import ProviderLifecycleAnnotation, provider_lifecycle_annotation
+from .validate import validate_event_stream
+from .private_io import private_artifact_path, write_private_json
+
+GRAPH_SCHEMA_VERSION = "0.2"
+
+
+def logical_event_key(event: dict[str, Any]) -> str | None:
+    """Return a replay key only when the event exposes occurrence identity.
+
+    A semantic sidecar can replay one transcript occurrence many times, but equal
+    endpoints do *not* prove equal occurrences.  Model invocations are the important
+    counterexample: one provider session legitimately invokes the same model more than
+    once.  We therefore fold only events that carry a provider occurrence discriminator
+    or point at an occurrence-shaped entity whose stable ID supplies that discriminator.
+    """
+    if not isinstance(event, dict):
+        return None
+    event_type = event.get("event_type")
+    attributes = event.get("attributes")
+    semantic = (
+        isinstance(event_type, str)
+        and event_type.startswith("semantic.")
+    ) or (
+        isinstance(attributes, dict)
+        and attributes.get("backend") == "semantic"
+    )
+    event_id = event.get("event_id")
+    if not semantic and isinstance(event_id, str) and event_id:
+        return f"event_id:{event_id}"
+    if not semantic:
+        return None
+    def endpoint_identity(value: object) -> dict[str, str] | None:
+        if not isinstance(value, dict):
+            return None
+        identity = {
+            key: value[key]
+            for key in ("id", "type")
+            if isinstance(value.get(key), str) and value[key]
+        }
+        return identity or None
+
+    source = endpoint_identity(event.get("source"))
+    target = endpoint_identity(event.get("target"))
+    occurrence_entity_types = {
+        "agent_operation",
+        "agent_turn",
+        "command",
+        "context_compaction",
+        "conversation_item",
+        "observed_content",
+        "permission_request",
+        "subtask",
+        "terminal_operation",
+        "tool_call",
+        "tool_call_observation",
+        "tool_result",
+    }
+    endpoint_occurrence = any(
+        endpoint is not None and endpoint.get("type") in occurrence_entity_types
+        for endpoint in (source, target)
+    )
+
+    occurrence_keys = (
+        "tool_use_id",
+        "tool_call_id",
+        "call_id",
+        "provider_call_id",
+        "invocation_id",
+        "request_id",
+        "response_id",
+        "message_id",
+        "item_id",
+        "turn_id",
+        "step_index",
+        "stepIdx",
+        "antigravity_step_index",
+        "invocation_number",
+        "antigravity_invocation_number",
+        "initial_num_steps",
+        "antigravity_initial_num_steps",
+        "transcript_record_ordinal",
+        "transcript_tool_call_index",
+    )
+
+    occurrence: dict[str, Any] = {}
+    if not endpoint_occurrence:
+        for scope, value in (
+            ("event", event.get("attributes")),
+            (
+                "source",
+                (event.get("source") or {}).get("attributes")
+                if isinstance(event.get("source"), dict)
+                else None,
+            ),
+            (
+                "target",
+                (event.get("target") or {}).get("attributes")
+                if isinstance(event.get("target"), dict)
+                else None,
+            ),
+        ):
+            if not isinstance(value, dict):
+                continue
+            selected = {
+                key: value[key]
+                for key in occurrence_keys
+                if value.get(key) is not None
+            }
+            if selected:
+                occurrence[scope] = selected
+
+    if not endpoint_occurrence and not occurrence:
+        return None
+
+    stable = {
+        "event_type": event.get("event_type"),
+        "relation": event.get("relation"),
+        "source": source,
+        "target": target,
+        "occurrence": occurrence,
+    }
+    encoded = json.dumps(
+        stable,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return "semantic:" + hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+@dataclass
+class GraphNode:
+    id: str
+    type: str
+    name: str | None = None
+    attributes: dict[str, Any] = field(default_factory=dict)
+    first_seen: str | None = None
+    last_seen: str | None = None
+    event_count: int = 0
+    evidence_event_count: int = 0
+    event_types: set[str] = field(default_factory=set)
+
+    def observe(
+        self,
+        entity: dict[str, Any],
+        event: dict[str, Any],
+        *,
+        logical: bool = True,
+    ) -> None:
+        incoming_name = entity.get("name")
+        self.name = self.name or incoming_name
+        # Strace sees a PID at spawn time, and the executable only at execve.
+        # Upgrade this PID-only display name when syscall evidence arrives.
+        if (
+            self.type == "process"
+            and isinstance(self.name, str) and self.name.isdecimal()
+            and isinstance(incoming_name, str) and incoming_name != self.name
+            and incoming_name.endswith(" · " + self.name)
+        ):
+            self.name = incoming_name
+        incoming = entity.get("attributes") or {}
+        if isinstance(incoming, dict):
+            for key, value in incoming.items():
+                # First non-null wins. A key written with None by an early event used
+                # to block the real value a later event carried, which silently froze
+                # agent identity at "unknown".
+                if value is None:
+                    self.attributes.setdefault(key, None)
+                elif self.attributes.get(key) is None:
+                    self.attributes[key] = value
+        # Event-level exit status belongs to the *exiting process*, never to
+        # the run-level session outcome and never to an unrelated target node.
+        if (
+            self.type == "process"
+            and event.get("event_type") == "process.exited"
+            and isinstance(event.get("source"), dict)
+            and event["source"].get("id") == self.id
+        ):
+            exit_fields = event.get("attributes")
+            if isinstance(exit_fields, dict):
+                code = exit_fields.get("exit_code")
+                if type(code) is int:
+                    self.attributes["exit_code"] = code
+                    self.attributes["return_code"] = code
+                signal = exit_fields.get("signal")
+                if isinstance(signal, str) and signal:
+                    self.attributes["exit_signal"] = signal
+                if type(code) is int or (isinstance(signal, str) and signal):
+                    self.attributes["exit_observed"] = True
+                    when = event.get("timestamp")
+                    if isinstance(when, str):
+                        self.attributes["exit_observed_at"] = when
+        timestamp = event.get("timestamp")
+        if isinstance(timestamp, str):
+            self.first_seen = min(self.first_seen, timestamp) if self.first_seen else timestamp
+            self.last_seen = max(self.last_seen, timestamp) if self.last_seen else timestamp
+        self.evidence_event_count += 1
+        if logical:
+            self.event_count += 1
+        event_type = event.get("event_type")
+        if isinstance(event_type, str):
+            self.event_types.add(event_type)
+
+    def to_dict(self) -> dict[str, Any]:
+        payload = asdict(self)
+        payload["event_types"] = sorted(self.event_types)
+        return payload
+
+
+@dataclass
+class GraphEdge:
+    id: str
+    source: str
+    target: str
+    relation: str
+    count: int = 0
+    evidence_event_count: int = 0
+    first_seen: str | None = None
+    last_seen: str | None = None
+    first_sequence: int | None = None
+    last_sequence: int | None = None
+    event_ids: list[str] = field(default_factory=list)
+    event_types: set[str] = field(default_factory=set)
+    backends: set[str] = field(default_factory=set)
+    attributions: set[str] = field(default_factory=set)
+    causal_values: set[bool] = field(default_factory=set)
+    inferred_values: set[bool] = field(default_factory=set)
+    inference_methods: set[str] = field(default_factory=set)
+    # Observations that omit a flag are ignored by the Boolean sets above, so
+    # count them separately; evidence grading must not treat them as covered.
+    causal_unannotated_count: int = 0
+    attribution_unannotated_count: int = 0
+    identity_exact_values: set[bool] = field(default_factory=set)
+    identity_methods: set[str] = field(default_factory=set)
+    identity_hashes: set[str] = field(default_factory=set)
+    confidence_values: list[float] = field(default_factory=list)
+    confidence_semantics: set[str] = field(default_factory=set)
+    supporting_event_ids: set[str] = field(default_factory=set)
+    provider_lifecycle: set[ProviderLifecycleAnnotation] = field(default_factory=set)
+
+    def observe(
+        self,
+        event: dict[str, Any],
+        *,
+        retain_event_id: bool = True,
+        logical: bool = True,
+    ) -> None:
+        self.evidence_event_count += 1
+        if logical:
+            self.count += 1
+        timestamp = event.get("timestamp")
+        if isinstance(timestamp, str):
+            self.first_seen = min(self.first_seen, timestamp) if self.first_seen else timestamp
+            self.last_seen = max(self.last_seen, timestamp) if self.last_seen else timestamp
+        sequence = event.get("sequence")
+        if isinstance(sequence, int) and not isinstance(sequence, bool):
+            self.first_sequence = (
+                min(self.first_sequence, sequence) if self.first_sequence is not None else sequence
+            )
+            self.last_sequence = (
+                max(self.last_sequence, sequence) if self.last_sequence is not None else sequence
+            )
+        event_id = event.get("event_id")
+        if retain_event_id and isinstance(event_id, str):
+            self.event_ids.append(event_id)
+        event_type = event.get("event_type")
+        if isinstance(event_type, str):
+            self.event_types.add(event_type)
+        attributes = event.get("attributes") or {}
+        if not isinstance(attributes, dict) or not isinstance(attributes.get("causal"), bool):
+            self.causal_unannotated_count += 1
+        if not isinstance(attributes, dict) or not isinstance(attributes.get("attribution"), str):
+            self.attribution_unannotated_count += 1
+        if isinstance(attributes, dict):
+            backend = attributes.get("backend")
+            if isinstance(backend, str):
+                self.backends.add(backend)
+            attribution = attributes.get("attribution")
+            if isinstance(attribution, str):
+                self.attributions.add(attribution)
+            causal = attributes.get("causal")
+            if isinstance(causal, bool):
+                self.causal_values.add(causal)
+            inferred = attributes.get("inferred")
+            if isinstance(inferred, bool):
+                self.inferred_values.add(inferred)
+            method = attributes.get("inference_method")
+            if isinstance(method, str) and method:
+                self.inference_methods.add(method)
+            identity_exact = attributes.get("identity_exact")
+            if isinstance(identity_exact, bool):
+                self.identity_exact_values.add(identity_exact)
+            identity_method = attributes.get("identity_method")
+            if isinstance(identity_method, str) and identity_method:
+                self.identity_methods.add(identity_method)
+            identity_hash = attributes.get("shared_request_id_hash")
+            if isinstance(identity_hash, str) and identity_hash:
+                self.identity_hashes.add(identity_hash)
+            confidence = attributes.get("confidence")
+            if isinstance(confidence, (int, float)) and not isinstance(confidence, bool):
+                self.confidence_values.append(float(confidence))
+            semantics = attributes.get("confidence_semantics")
+            if isinstance(semantics, str) and semantics:
+                self.confidence_semantics.add(semantics)
+            supporting = attributes.get("supporting_event_ids")
+            if isinstance(supporting, list):
+                self.supporting_event_ids.update(
+                    value for value in supporting if isinstance(value, str) and value
+                )
+        lifecycle = provider_lifecycle_annotation(event)
+        if lifecycle is not None:
+            self.provider_lifecycle.add(lifecycle)
+
+    def to_dict(self) -> dict[str, Any]:
+        if self.causal_values == {True}:
+            causal: bool | None = True
+        elif self.causal_values == {False}:
+            causal = False
+        else:
+            causal = None
+        if self.inferred_values == {True}:
+            inferred: bool | None = True
+        elif self.inferred_values == {False}:
+            inferred = False
+        else:
+            inferred = None
+        if self.identity_exact_values == {True}:
+            identity_exact: bool | None = True
+        elif self.identity_exact_values == {False}:
+            identity_exact = False
+        else:
+            identity_exact = None
+        payload: dict[str, Any] = {
+            "id": self.id,
+            "source": self.source,
+            "target": self.target,
+            "relation": self.relation,
+            "count": self.count,
+            "evidence_event_count": self.evidence_event_count,
+            "first_seen": self.first_seen,
+            "last_seen": self.last_seen,
+            "first_sequence": self.first_sequence,
+            "last_sequence": self.last_sequence,
+            "event_ids": self.event_ids,
+            "event_types": sorted(self.event_types),
+            "backends": sorted(self.backends),
+            "attributions": sorted(self.attributions),
+            "causal": causal,
+            "causal_unannotated_count": self.causal_unannotated_count,
+            "attribution_unannotated_count": self.attribution_unannotated_count,
+            "inferred": inferred,
+            "inference_methods": sorted(self.inference_methods),
+            "identity_exact": identity_exact,
+            "identity_methods": sorted(self.identity_methods),
+            "identity_hashes": sorted(self.identity_hashes),
+            "confidence_min": min(self.confidence_values) if self.confidence_values else None,
+            "confidence_max": max(self.confidence_values) if self.confidence_values else None,
+            "confidence_semantics": sorted(self.confidence_semantics),
+            "supporting_event_ids": sorted(self.supporting_event_ids),
+        }
+        if self.provider_lifecycle:
+            payload["provider_lifecycle"] = [
+                annotation.to_dict() for annotation in sorted(self.provider_lifecycle)
+            ]
+        return payload
+
+
+@dataclass
+class ExecutionGraph:
+    session_id: str
+    source_path: str
+    source_schema_versions: list[str]
+    event_count: int
+    nodes: list[GraphNode]
+    edges: list[GraphEdge]
+    fidelity: dict[str, Any] = field(default_factory=dict)
+    built_at: str = field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    )
+
+    evidence_counts: dict[str, int] = field(default_factory=dict)
+    session_outcome: dict[str, Any] = field(default_factory=dict)
+    runtime_environment: dict[str, Any] = field(default_factory=dict)
+    observation_assessment: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "graph_schema_version": GRAPH_SCHEMA_VERSION,
+            "session_id": self.session_id,
+            "source_path": self.source_path,
+            "source_schema_versions": self.source_schema_versions,
+            "event_count": self.event_count,
+            "node_count": len(self.nodes),
+            "edge_count": len(self.edges),
+            "built_at": self.built_at,
+            "fidelity": self.fidelity,
+            "evidence_counts": dict(self.evidence_counts),
+            "session_outcome": dict(self.session_outcome),
+            "runtime_environment": dict(self.runtime_environment),
+            "observation_assessment": dict(self.observation_assessment),
+            "nodes": [node.to_dict() for node in self.nodes],
+            "edges": [edge.to_dict() for edge in self.edges],
+        }
+
+
+def _edge_id(source: str, relation: str, target: str) -> str:
+    return f"{source}--{relation}-->{target}"
+
+
+class GraphAccumulator:
+    """Incrementally materialize graph state without retaining raw event objects.
+
+    This is intentionally a small, replaceable seam for live graph maintenance.
+    The canonical final graph builder still validates and materializes the complete
+    event stream independently. ``retain_event_ids=False`` is therefore suitable
+    for disposable live/browser state while preserving explicit inferred support
+    and exact-identity justification fields.
+    """
+
+    def __init__(
+        self,
+        *,
+        session_id: str,
+        source_path: str | Path,
+        retain_event_ids: bool = True,
+    ) -> None:
+        self.session_id = session_id
+        self.source_path = str(Path(source_path).expanduser().resolve())
+        self.retain_event_ids = retain_event_ids
+        self.source_schema_versions: set[str] = set()
+        self.event_count = 0
+        self.nodes: dict[str, GraphNode] = {}
+        self.edges: dict[tuple[str, str, str], GraphEdge] = {}
+        self._fidelity = FidelityAccumulator()
+        self._session_summary = SessionSummary()
+        self._seen_logical_events: set[str] = set()
+
+    @property
+    def node_count(self) -> int:
+        return len(self.nodes)
+
+    @property
+    def edge_count(self) -> int:
+        return len(self.edges)
+
+    def apply(self, event: dict[str, Any]) -> None:
+        if not isinstance(event, dict):
+            raise TypeError("event must be a dictionary")
+        event_session = event.get("session_id")
+        if isinstance(event_session, str) and event_session != self.session_id:
+            raise ValueError(
+                f"event session_id {event_session!r} does not match accumulator {self.session_id!r}"
+            )
+
+        schema_version = event.get("schema_version")
+        if isinstance(schema_version, str) and schema_version:
+            self.source_schema_versions.add(schema_version)
+        self.event_count += 1
+        self._fidelity.observe(event)
+        self._session_summary.observe(event)
+        logical_key = logical_event_key(event)
+        logical = logical_key not in self._seen_logical_events
+        if logical_key is not None:
+            self._seen_logical_events.add(logical_key)
+
+        source = event.get("source")
+        target = event.get("target")
+        for entity in (source, target):
+            if not isinstance(entity, dict):
+                continue
+            entity_id = entity.get("id")
+            entity_type = entity.get("type")
+            if not isinstance(entity_id, str) or not isinstance(entity_type, str):
+                continue
+            node = self.nodes.get(entity_id)
+            if node is None:
+                node = GraphNode(
+                    id=entity_id,
+                    type=entity_type,
+                    name=entity.get("name") if isinstance(entity.get("name"), str) else None,
+                )
+                self.nodes[entity_id] = node
+            node.observe(entity, event, logical=logical)
+
+        if not isinstance(source, dict) or not isinstance(target, dict):
+            return
+        source_id = source.get("id")
+        target_id = target.get("id")
+        relation = event.get("relation")
+        if not all(isinstance(value, str) and value for value in (source_id, target_id, relation)):
+            return
+        key = (source_id, relation, target_id)
+        edge = self.edges.get(key)
+        if edge is None:
+            edge = GraphEdge(
+                id=_edge_id(source_id, relation, target_id),
+                source=source_id,
+                target=target_id,
+                relation=relation,
+            )
+            self.edges[key] = edge
+        edge.observe(
+            event,
+            retain_event_id=self.retain_event_ids,
+            logical=logical,
+        )
+
+    def to_execution_graph(self) -> ExecutionGraph:
+        return ExecutionGraph(
+            session_id=self.session_id,
+            source_path=self.source_path,
+            source_schema_versions=sorted(self.source_schema_versions),
+            event_count=self.event_count,
+            nodes=sorted(self.nodes.values(), key=lambda node: (node.type, node.id)),
+            edges=sorted(
+                self.edges.values(), key=lambda edge: (edge.source, edge.relation, edge.target)
+            ),
+            fidelity=self._fidelity.to_dict(),
+            evidence_counts=dict(self._session_summary.counts),
+            session_outcome=assessed_session_outcome(
+                self._session_summary.outcome, self._session_summary.observation
+            ),
+            observation_assessment=self._session_summary.observation,
+            runtime_environment=dict(self._session_summary.environment),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return self.to_execution_graph().to_dict()
+
+
+def _load_events(path: Path) -> list[dict[str, Any]]:
+    return [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+
+def build_execution_graph(
+    path: str | Path,
+    *,
+    allow_incomplete: bool = False,
+) -> ExecutionGraph:
+    source_path = Path(path).expanduser().resolve()
+    validation = validate_event_stream(
+        source_path,
+        require_complete_session=not allow_incomplete,
+    )
+    if not validation.valid:
+        details = "; ".join(validation.errors)
+        raise ValueError(f"invalid ExecWeave event stream: {details}")
+
+    events = _load_events(source_path)
+    session_id = validation.session_ids[0] if validation.session_ids else "unknown"
+    accumulator = GraphAccumulator(session_id=session_id, source_path=source_path)
+    for event in events:
+        accumulator.apply(event)
+    graph = accumulator.to_execution_graph()
+    graph.source_schema_versions = validation.schema_versions
+    return graph
+
+
+def write_execution_graph(
+    graph: ExecutionGraph,
+    path: str | Path,
+    *,
+    metadata: dict[str, Any] | None = None,
+) -> Path:
+    output = private_artifact_path(path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    if output.exists() and output.stat().st_size > 0:
+        raise FileExistsError(f"ExecWeave graph output already exists: {output}")
+    payload = graph.to_dict()
+    if metadata is not None:
+        payload["metadata"] = metadata
+    write_private_json(output, payload)
+    return output

@@ -1,0 +1,284 @@
+from __future__ import annotations
+
+import io
+import json
+from pathlib import Path
+
+from execweave.claude_adapter import append_semantic_records, claude_hook_to_semantic_events
+from execweave.claude_hook_cli import claude_hook_config, main as claude_hook_main
+from execweave.claude_hook_contract import PASSIVE_CLAUDE_HOOK_EVENTS
+
+
+def _base(event: str) -> dict:
+    return {
+        "session_id": "claude-session-1",
+        "prompt_id": "prompt-1",
+        "cwd": "/repo",
+        "permission_mode": "default",
+        "hook_event_name": event,
+    }
+
+
+def test_pretooluse_bash_creates_tool_call_and_bounded_command() -> None:
+    payload = {
+        **_base("PreToolUse"),
+        "tool_name": "Bash",
+        "tool_use_id": "toolu_1",
+        "tool_input": {"command": "x" * 5000, "description": "demo"},
+    }
+    events = claude_hook_to_semantic_events(payload, timestamp="2026-08-25T03:00:00Z")
+
+    assert [event["relation"] for event in events] == [
+        "REQUESTED_TOOL_CALL",
+        "USES_TOOL",
+        "DECLARED_COMMAND",
+    ]
+    assert events[0]["source"]["id"] == "agent:Claude Code"
+    assert events[0]["target"]["id"] == "tool-call:claude:claude-session-1:toolu_1"
+    command = events[-1]["target"]
+    assert command["type"] == "command"
+    assert len(command["attributes"]["command"]) == 4096
+    assert command["attributes"]["truncated"] is True
+    assert all(event["attributes"]["causal"] is False for event in events)
+
+
+def test_pretooluse_bash_apply_patch_declares_each_file_target() -> None:
+    patch = "\n".join(
+        [
+            "*** Begin Patch",
+            "*** Add File: notes/first.md",
+            "+first",
+            "*** Update File: notes/second.md",
+            "@@",
+            "-old",
+            "+new",
+            "*** End Patch",
+        ]
+    )
+    events = claude_hook_to_semantic_events(
+        {
+            **_base("PreToolUse"),
+            "cwd": "/repo",
+            "tool_name": "Bash",
+            "tool_use_id": "toolu_patch",
+            "tool_input": {"command": patch},
+        },
+        timestamp="2026-08-25T03:00:00Z",
+    )
+
+    declared = [event for event in events if event["relation"] == "DECLARED_TARGET"]
+    assert {event["target"]["name"] for event in declared} == {"first.md", "second.md"}
+    assert {event["attributes"]["patch_operation"] for event in declared} == {"add", "update"}
+
+
+def test_write_declares_file_target_without_storing_content() -> None:
+    secret = "TOP-SECRET-CONTENT"
+    payload = {
+        **_base("PreToolUse"),
+        "tool_name": "Write",
+        "tool_use_id": "toolu_write",
+        "tool_input": {"file_path": "/repo/output.txt", "content": secret},
+    }
+    events = claude_hook_to_semantic_events(payload, timestamp="2026-08-25T03:00:00Z")
+    serialized = json.dumps(events)
+    declared = next(event for event in events if event["relation"] == "DECLARED_TARGET")
+
+    assert declared["target"]["type"] == "file"
+    assert declared["target"]["id"].startswith("file:")
+    assert declared["target"]["name"] == "output.txt"
+    assert secret not in serialized
+    assert "content" in events[0]["target"]["attributes"]["input_keys"]
+
+
+def test_notebook_edit_declares_explicit_notebook_path() -> None:
+    payload = {
+        **_base("PreToolUse"),
+        "tool_name": "NotebookEdit",
+        "tool_use_id": "toolu_notebook",
+        "tool_input": {"notebook_path": "/repo/analysis.ipynb", "new_source": "x = 1"},
+    }
+
+    events = claude_hook_to_semantic_events(payload, timestamp="2026-08-25T03:00:00Z")
+
+    declared = next(event for event in events if event["relation"] == "DECLARED_TARGET")
+    assert declared["target"]["name"] == "analysis.ipynb"
+
+
+def test_mcp_tool_creates_server_and_tool_relationships() -> None:
+    payload = {
+        **_base("PreToolUse"),
+        "tool_name": "mcp__github__search_repositories",
+        "tool_use_id": "toolu_mcp",
+        "tool_input": {"query": "execweave"},
+    }
+    events = claude_hook_to_semantic_events(payload, timestamp="2026-08-25T03:00:00Z")
+
+    assert [event["relation"] for event in events] == [
+        "REQUESTED_TOOL_CALL",
+        "USES_TOOL",
+        "VIA_MCP",
+        "EXPOSES_TOOL",
+    ]
+    assert events[2]["target"]["id"] == "mcp-server:claude:github"
+    assert events[3]["target"]["id"] == "tool:mcp:github:search_repositories"
+
+
+def test_posttooluse_records_status_not_tool_response() -> None:
+    payload = {
+        **_base("PostToolUse"),
+        "tool_name": "Bash",
+        "tool_use_id": "toolu_1",
+        "tool_input": {"command": "pytest -q"},
+        "tool_response": {"stdout": "DO-NOT-STORE", "stderr": ""},
+        "duration_ms": 12,
+    }
+    events = claude_hook_to_semantic_events(payload, timestamp="2026-08-25T03:00:01Z")
+
+    assert len(events) == 1
+    assert events[0]["relation"] == "TOOL_CALL_SUCCEEDED"
+    assert events[0]["attributes"]["duration_ms"] == 12
+    assert "DO-NOT-STORE" not in json.dumps(events)
+
+
+def test_posttooluse_failure_keeps_bounded_error_summary() -> None:
+    payload = {
+        **_base("PostToolUseFailure"),
+        "tool_name": "Bash",
+        "tool_use_id": "toolu_1",
+        "tool_input": {"command": "pytest -q"},
+        "error": "E" * 2000,
+        "is_interrupt": False,
+        "duration_ms": 99,
+    }
+    events = claude_hook_to_semantic_events(payload, timestamp="2026-08-25T03:00:01Z")
+
+    assert events[0]["relation"] == "TOOL_CALL_FAILED"
+    assert len(events[0]["attributes"]["error_summary"]) == 1024
+    assert events[0]["attributes"]["error_summary_truncated"] is True
+
+
+def test_subagent_hooks_create_agent_relationships() -> None:
+    start = {
+        **_base("SubagentStart"),
+        "agent_id": "agent-123",
+        "agent_type": "Explore",
+    }
+    stop = {**start, "hook_event_name": "SubagentStop"}
+
+    start_events = claude_hook_to_semantic_events(start, timestamp="2026-08-25T03:00:00Z")
+    stop_events = claude_hook_to_semantic_events(stop, timestamp="2026-08-25T03:00:01Z")
+
+    child_id = "agent:claude:claude-session-1:subagent:agent-123"
+    assert start_events[0]["relation"] == "SPAWNED_SUBAGENT"
+    assert start_events[0]["target"]["id"] == child_id
+    assert stop_events[0]["relation"] == "RETURNED_TO"
+    assert stop_events[0]["source"]["id"] == child_id
+
+
+def test_session_start_model_is_optional() -> None:
+    without_model = claude_hook_to_semantic_events(
+        _base("SessionStart"), timestamp="2026-08-25T03:00:00Z"
+    )
+    with_model = claude_hook_to_semantic_events(
+        {**_base("SessionStart"), "model": "claude-sonnet"},
+        timestamp="2026-08-25T03:00:00Z",
+    )
+
+    assert without_model == []
+    assert with_model[0]["relation"] == "USED_MODEL"
+    assert with_model[0]["target"]["type"] == "model"
+
+
+def test_append_semantic_records_writes_jsonl(tmp_path: Path) -> None:
+    output = tmp_path / "semantic.jsonl"
+    records = claude_hook_to_semantic_events(
+        {
+            **_base("PreToolUse"),
+            "tool_name": "Read",
+            "tool_use_id": "toolu_read",
+            "tool_input": {"file_path": "/repo/README.md"},
+        },
+        timestamp="2026-08-25T03:00:00Z",
+    )
+    append_semantic_records(output, records)
+
+    lines = [json.loads(line) for line in output.read_text(encoding="utf-8").splitlines()]
+    assert len(lines) == 3
+    assert lines[-1]["relation"] == "DECLARED_TARGET"
+    assert not output.with_name(output.name + ".lock").exists()
+
+
+def test_hook_config_covers_passive_official_events() -> None:
+    config = claude_hook_config("custom-execweave-hook")
+    hooks = config["hooks"]
+
+    assert set(hooks) == set(PASSIVE_CLAUDE_HOOK_EVENTS)
+    assert "MessageDisplay" in hooks
+    assert "WorktreeCreate" not in hooks
+    assert "FileChanged" not in hooks
+    for event_name, groups in hooks.items():
+        assert groups[0]["hooks"][0]["command"] == "custom-execweave-hook"
+        if event_name in {
+            "PreToolUse",
+            "PermissionRequest",
+            "PostToolUse",
+            "PostToolUseFailure",
+            "PermissionDenied",
+        }:
+            assert groups[0]["matcher"] == "*"
+        else:
+            assert "matcher" not in groups[0]
+
+
+def test_hook_cli_auto_scopes_sidecar_by_claude_session(monkeypatch, tmp_path: Path) -> None:
+    payload = {
+        **_base("PreToolUse"),
+        "session_id": "session/unsafe:id",
+        "cwd": str(tmp_path),
+        "tool_name": "Read",
+        "tool_use_id": "toolu_read",
+        "tool_input": {"file_path": str(tmp_path / "README.md")},
+    }
+    monkeypatch.delenv("EXECWEAVE_SEMANTIC_SIDECAR", raising=False)
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(payload)))
+
+    assert claude_hook_main([]) == 0
+    output = tmp_path / ".execweave" / "semantic" / "claude" / "session_unsafe_id.jsonl"
+    assert output.exists()
+    records = [json.loads(line) for line in output.read_text(encoding="utf-8").splitlines()]
+    assert [record["relation"] for record in records] == [
+        "REQUESTED_TOOL_CALL",
+        "USES_TOOL",
+        "DECLARED_TARGET",
+        "OBSERVED_PROVIDER_METADATA",
+        "HAS_TOOL_INPUT",
+    ]
+    content_root = output.parent / "content" / "sha256"
+    assert content_root.is_dir()
+    assert any(content_root.iterdir())
+
+
+def test_hook_cli_print_config(capsys) -> None:
+    assert claude_hook_main(["--print-config", "--command", "custom-hook"]) == 0
+    config = json.loads(capsys.readouterr().out)
+    assert config["hooks"]["PreToolUse"][0]["hooks"][0]["command"] == "custom-hook"
+    assert "UserPromptSubmit" in config["hooks"]
+    assert "PostToolBatch" in config["hooks"]
+    assert "Stop" in config["hooks"]
+    assert "InstructionsLoaded" in config["hooks"]
+    assert "DirectoryAdded" in config["hooks"]
+
+
+def test_hook_cli_is_fail_open_by_default(monkeypatch, tmp_path: Path, capsys) -> None:
+    monkeypatch.setattr("sys.stdin", io.StringIO("not-json"))
+    result = claude_hook_main(["--sidecar", str(tmp_path / "semantic.jsonl")])
+    captured = capsys.readouterr()
+
+    assert result == 0
+    assert captured.out == ""
+    assert "warning" in captured.err.lower()
+
+
+def test_hook_cli_strict_returns_nonzero(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr("sys.stdin", io.StringIO("not-json"))
+    assert claude_hook_main(["--strict", "--sidecar", str(tmp_path / "semantic.jsonl")]) == 1

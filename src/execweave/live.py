@@ -1,0 +1,445 @@
+from __future__ import annotations
+
+import json
+import re
+import shutil
+from collections import deque
+
+from . import live_core as _core
+from .conversation_records import conversation_index_payload
+from .dashboard_shell import DASHBOARD_HTML
+from .content_store import _filesystem_path
+from .graph import logical_event_key
+from .investigation_index import InvestigationCache
+from .viewer_limits import resolve_viewer_limits
+from .viewer_flow_layout import layers_of
+from .viewer_projection import (
+    internal_hook_process_ids_in_event,
+    project_viewer_graph,
+    render_graph_html as _projected_render_graph_html,
+    strip_internal_hook_execution_graph,
+    write_graph_html as _projected_write_graph_html,
+)
+
+# Re-export the established live API while keeping its implementation in live_core.
+for _export_name in dir(_core):
+    if not _export_name.startswith("__"):
+        globals()[_export_name] = getattr(_core, _export_name)
+del _export_name
+
+# Make names referenced below explicit for static analysis as well as runtime use.
+Path = _core.Path
+_JsonlTail = _core._JsonlTail
+LIVE_DELTA_HISTORY = _core.LIVE_DELTA_HISTORY
+LIVE_DELTA_HISTORY_BYTES = _core.LIVE_DELTA_HISTORY_BYTES
+VIEWER_MAX_NODES = _core.VIEWER_MAX_NODES
+VIEWER_MAX_EDGES = _core.VIEWER_MAX_EDGES
+VIEWER_MAX_DOM_ELEMENTS = _core.VIEWER_MAX_DOM_ELEMENTS
+_BASE_LIVE_HTML = _core._LIVE_HTML
+_LIVE_HTML = DASHBOARD_HTML
+render_graph_html = _projected_render_graph_html
+write_graph_html = _projected_write_graph_html
+
+LIVE_RAW_EVENT_HISTORY = 640
+LIVE_RAW_EVENT_STREAM_HISTORY = LIVE_RAW_EVENT_HISTORY // 2
+_BaseLiveState = _core._LiveState
+_base_inject_live_auth = _core._inject_live_auth
+_base_inject_final_theme = _core._inject_final_theme
+_base_build_execution_graph = _core.build_execution_graph
+_base_handler_factory = _core._handler_factory
+_RUN_CONTENT_ROUTE_RE = re.compile(r"^/content/sha256/[0-9a-f]{64}\.(?:json|txt|bin)$")
+
+
+def _within_live_payload_budget(node_count: int, edge_count: int) -> bool:
+    estimated_dom = node_count * 4 + edge_count * 3
+    max_nodes, max_edges, max_dom_elements = resolve_viewer_limits(
+        defaults=(VIEWER_MAX_NODES, VIEWER_MAX_EDGES, VIEWER_MAX_DOM_ELEMENTS)
+    )
+    return (
+        node_count <= max_nodes
+        and edge_count <= max_edges
+        and estimated_dom <= max_dom_elements
+    )
+
+
+def _inject_live_auth(html: str) -> str:
+    authenticated = _base_inject_live_auth(html)
+    # Shared offline dashboard components can optionally use an API-token global.
+    # The live browser intentionally never receives that token; same-origin cookies
+    # authenticate these fetches instead. Remove the dead header branch from the
+    # served page so no future code can accidentally revive URL-token propagation.
+    return authenticated.replace(
+        "const headers={};if(window.__execweaveToken)headers['X-ExecWeave-Token']=window.__execweaveToken;",
+        "const headers={};",
+    )
+
+
+def _inject_final_theme(html: str) -> str:
+    """Honor the dashboard's built-in theme owner without injecting legacy controls."""
+    return _base_inject_final_theme(html)
+
+
+def _build_execution_graph_without_internal_hooks(*args, **kwargs):
+    return strip_internal_hook_execution_graph(_base_build_execution_graph(*args, **kwargs))
+
+
+def _handler_factory(state, token: str, pairing=None):
+    base_handler = _base_handler_factory(state, token, pairing)
+    run_root = state.event_path.parent.resolve()
+    run_root_fs = _filesystem_path(run_root)
+
+    class Handler(base_handler):
+        def _live_conversation_index(self, *, include_investigation: bool = False) -> dict[str, object] | None:
+            project = getattr(state, "conversation_index", None)
+            if project is None:
+                return None
+            try:
+                return project(run_root, include_investigation=True) if include_investigation else project(run_root)
+            except (OSError, RuntimeError, ValueError):
+                return None
+
+        def _send_run_file(self, target: Path, content_type: str) -> None:
+            try:
+                size = target.stat().st_size
+                handle = target.open("rb")
+            except OSError:
+                self._send(b"Not found", "text/plain; charset=utf-8", 404)
+                return
+            with handle:
+                try:
+                    self.send_response(200)
+                    self.send_header("Content-Type", content_type)
+                    self.send_header("Content-Length", str(size))
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("X-Content-Type-Options", "nosniff")
+                    self.send_header("Referrer-Policy", "no-referrer")
+                    self.end_headers()
+                    shutil.copyfileobj(handle, self.wfile, length=1024 * 1024)
+                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                    self.close_connection = True
+
+        def do_GET(self) -> None:
+            parsed = _core.urlsplit(self.path)
+            request_path = parsed.path
+            run_artifact = (
+                request_path in {"/conversations.md", "/conversations.json"}
+                or request_path.startswith("/content/")
+            )
+            if not run_artifact:
+                super().do_GET()
+                return
+            if not self._authorized(parsed):
+                self._send(b"Unauthorized", "text/plain; charset=utf-8", 401)
+                return
+            if request_path.startswith("/content/") and not _RUN_CONTENT_ROUTE_RE.fullmatch(
+                request_path
+            ):
+                self._send(b"Not found", "text/plain; charset=utf-8", 404)
+                return
+            relative = request_path.lstrip("/")
+            target = (run_root_fs / relative).resolve(strict=False)
+            try:
+                target.relative_to(run_root_fs)
+            except ValueError:
+                self._send(b"Not found", "text/plain; charset=utf-8", 404)
+                return
+            if not target.is_file():
+                payload = (
+                    self._live_conversation_index(include_investigation=_core.parse_qs(parsed.query).get("investigation") == ["1"])
+                    if request_path == "/conversations.json"
+                    else None
+                )
+                if payload is None:
+                    self._send(b"Not found", "text/plain; charset=utf-8", 404)
+                    return
+                self._send(
+                    json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8"),
+                    "application/json; charset=utf-8",
+                )
+                return
+            if request_path.endswith(".json"):
+                content_type = "application/json; charset=utf-8"
+            elif request_path.endswith(".md"):
+                content_type = "text/markdown; charset=utf-8"
+            elif request_path.endswith(".txt"):
+                content_type = "text/plain; charset=utf-8"
+            else:
+                content_type = "application/octet-stream"
+            self._send_run_file(target, content_type)
+
+    return Handler
+
+
+class _LiveState(_BaseLiveState):
+    def __init__(
+        self,
+        session_id: str,
+        event_path: Path,
+        semantic_path: Path | None = None,
+    ) -> None:
+        super().__init__(session_id, event_path, semantic_path)
+        self._raw_events: deque[dict[str, object]] = deque(
+            maxlen=LIVE_RAW_EVENT_STREAM_HISTORY
+        )
+        self._raw_semantic_events: deque[dict[str, object]] = deque(
+            maxlen=LIVE_RAW_EVENT_STREAM_HISTORY
+        )
+        self._pending_raw_events: list[dict[str, object]] = []
+        self._raw_semantic_entries: dict[str, dict[str, object]] = {}
+        self._raw_semantic_entry_keys: dict[int, str] = {}
+        self._internal_hook_process_ids: set[str] = set()
+        self._viewer_projection_ever_active = False
+        self._investigation_cache = InvestigationCache()
+
+    def _reset_incremental_state_locked(self) -> None:
+        super()._reset_incremental_state_locked()
+        self._raw_events.clear()
+        self._raw_semantic_events.clear()
+        self._pending_raw_events.clear()
+        self._raw_semantic_entries.clear()
+        self._raw_semantic_entry_keys.clear()
+        self._internal_hook_process_ids.clear()
+        self._investigation_cache = InvestigationCache()
+
+    def _append_raw_entry_locked(
+        self,
+        *,
+        line_number: int,
+        event: dict[str, object],
+        stream: str,
+        semantic_key: str | None = None,
+    ) -> None:
+        if semantic_key is not None:
+            existing = self._raw_semantic_entries.get(semantic_key)
+            if existing is not None and id(existing) in self._raw_semantic_entry_keys:
+                existing["last_line"] = line_number
+                existing["evidence_event_count"] = int(
+                    existing.get("evidence_event_count", 1) or 1
+                ) + 1
+                timestamp = event.get("timestamp")
+                if isinstance(timestamp, str) and timestamp:
+                    existing["last_observed"] = timestamp
+                return
+
+        bucket = self._raw_semantic_events if stream == "semantic.jsonl" else self._raw_events
+        if len(bucket) == bucket.maxlen and bucket:
+            evicted = bucket[0]
+            evicted_key = self._raw_semantic_entry_keys.pop(id(evicted), None)
+            if evicted_key is not None:
+                self._raw_semantic_entries.pop(evicted_key, None)
+        entry: dict[str, object] = {
+            "line": line_number,
+            "stream": stream,
+            "event": event,
+            "evidence_event_count": 1,
+        }
+        bucket.append(entry)
+        self._pending_raw_events.append(entry)
+        if semantic_key is not None:
+            self._raw_semantic_entries[semantic_key] = entry
+            self._raw_semantic_entry_keys[id(entry)] = semantic_key
+
+    @staticmethod
+    def _event_entity_id(event: dict[str, object], key: str) -> str | None:
+        entity = event.get(key)
+        if not isinstance(entity, dict):
+            return None
+        value = entity.get("id")
+        return value if isinstance(value, str) and value else None
+
+    def _raw_event_snapshot_locked(self) -> list[dict[str, object]]:
+        rows = [*self._raw_events, *self._raw_semantic_events]
+        rows.sort(
+            key=lambda entry: (
+                str((entry.get("event") or {}).get("timestamp") or "")
+                if isinstance(entry.get("event"), dict)
+                else "",
+                str(entry.get("stream") or ""),
+                int(entry.get("line", 0) or 0),
+            )
+        )
+        return rows[-LIVE_RAW_EVENT_HISTORY:]
+
+    def _event_uses_internal_hook_process_locked(self, event: dict[str, object]) -> bool:
+        direct_ids = internal_hook_process_ids_in_event(event)
+        if direct_ids:
+            self._internal_hook_process_ids.update(direct_ids)
+        source_id = self._event_entity_id(event, "source")
+        target_id = self._event_entity_id(event, "target")
+        target = event.get("target")
+        if (
+            event.get("relation") == "SPAWNED"
+            and isinstance(source_id, str)
+            and source_id in self._internal_hook_process_ids
+            and isinstance(target, dict)
+            and target.get("type") == "process"
+            and isinstance(target_id, str)
+        ):
+            self._internal_hook_process_ids.add(target_id)
+        return bool(
+            direct_ids
+            or (isinstance(source_id, str) and source_id in self._internal_hook_process_ids)
+            or (isinstance(target_id, str) and target_id in self._internal_hook_process_ids)
+        )
+
+    def _read_tail_records_locked(
+        self,
+        tail: _JsonlTail,
+    ) -> list[tuple[int, dict[str, object]]]:
+        records = super()._read_tail_records_locked(tail)
+        if tail is self._runtime_tail:
+            for line_number, event in records:
+                if self._event_uses_internal_hook_process_locked(event):
+                    continue
+                self._append_raw_entry_locked(
+                    line_number=line_number,
+                    event=event,
+                    stream="events.jsonl",
+                )
+        elif tail is self._semantic_tail:
+            for line_number, event in records:
+                self._append_raw_entry_locked(
+                    line_number=line_number,
+                    event=event,
+                    stream="semantic.jsonl",
+                    semantic_key=logical_event_key(event),
+                )
+        return records
+
+    def _apply_live_event_locked(
+        self,
+        event: dict[str, object],
+        *,
+        added_nodes: set[str],
+        updated_nodes: set[str],
+        added_edges: set[tuple[str, str, str]],
+        updated_edges: set[tuple[str, str, str]],
+    ) -> bool:
+        if self._event_uses_internal_hook_process_locked(event):
+            return False
+        return super()._apply_live_event_locked(
+            event,
+            added_nodes=added_nodes,
+            updated_nodes=updated_nodes,
+            added_edges=added_edges,
+            updated_edges=updated_edges,
+        )
+
+    def _raw_graph_locked(self) -> dict[str, object]:
+        return (
+            dict(self._final_graph)
+            if self._finished and self._final_graph is not None
+            else self._accumulator.to_dict()
+        )
+
+    def _projected_graph_locked(self) -> dict[str, object]:
+        # The columns from the previous tick are a floor, not a cache: new evidence may
+        # push a node further right, but a node already on screen never travels back to
+        # the left while the operator is reading it.
+        previous = getattr(self, "_flow_layers", None)
+        projected = project_viewer_graph(self._raw_graph_locked(), previous)
+        self._flow_layers = layers_of(projected)
+        if isinstance(projected.get("viewer_projection"), dict):
+            self._viewer_projection_ever_active = True
+        return projected
+
+    @staticmethod
+    def _projected_counts(graph: dict[str, object]) -> dict[str, object]:
+        return {
+            "event_count": int(graph.get("event_count", 0) or 0),
+            "node_count": int(graph.get("node_count", 0) or 0),
+            "edge_count": int(graph.get("edge_count", 0) or 0),
+        }
+
+    def _projected_snapshot_locked(
+        self,
+        projected: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        graph = projected if projected is not None else self._projected_graph_locked()
+        node_count = int(graph.get("node_count", 0) or 0)
+        edge_count = int(graph.get("edge_count", 0) or 0)
+        return (
+            graph
+            if _within_live_payload_budget(node_count, edge_count)
+            else _core._compact_live_graph(graph)
+        )
+
+    def _snapshot_from_accumulator_locked(self) -> dict[str, object]:
+        return self._projected_snapshot_locked()
+
+    def conversation_index(self, run_root: Path, *, include_investigation: bool = False) -> dict[str, object]:
+        """Build conversation ownership from observed evidence, never viewer-only collapse."""
+        with self._lock:
+            graph = self._raw_graph_locked()
+        return conversation_index_payload(graph, run_root, investigation_cache=self._investigation_cache,
+                                          include_investigation=include_investigation)
+
+    def _refresh_incremental_locked(self) -> None:
+        before_sequence = self._update_sequence
+        super()._refresh_incremental_locked()
+        if self._pending_raw_events and self._update_sequence == before_sequence:
+            counts = self._counts_locked()
+            self._append_update_locked(
+                {
+                    **counts,
+                    "event_count_delta": 0,
+                    "evidence_event_count_delta": {"os_runtime": 0, "specialized": 0},
+                    "nodes_added": [],
+                    "nodes_updated": [],
+                    "edges_added": [],
+                    "edges_updated": [],
+                }
+            )
+
+    def _append_update_locked(self, update: dict[str, object]) -> None:
+        _core.LIVE_DELTA_HISTORY = LIVE_DELTA_HISTORY
+        _core.LIVE_DELTA_HISTORY_BYTES = LIVE_DELTA_HISTORY_BYTES
+        update.setdefault("raw_events_added", list(self._pending_raw_events))
+        super()._append_update_locked(update)
+        self._pending_raw_events.clear()
+
+    def snapshot(self) -> dict[str, object]:
+        payload = super().snapshot()
+        with self._lock:
+            payload["raw_events"] = self._raw_event_snapshot_locked()
+        return payload
+
+    def live_update(self, after: int | None) -> dict[str, object]:
+        payload = super().live_update(after)
+        with self._lock:
+            projected = self._projected_graph_locked()
+            if self._viewer_projection_ever_active:
+                counts = self._projected_counts(projected)
+                if payload.get("kind") == "delta":
+                    payload = {
+                        "kind": "snapshot",
+                        "sequence": self._update_sequence,
+                        "graph": self._projected_snapshot_locked(projected),
+                        **self._evidence_metadata_locked(),
+                        "live_finished": self._finished,
+                    }
+                elif payload.get("kind") == "noop":
+                    payload.update(counts)
+            if payload.get("kind") == "snapshot":
+                payload["raw_events"] = self._raw_event_snapshot_locked()
+            # The canvas description rides along with every update that carries state.
+            # A delta names the entities that changed; this names what to draw, so a
+            # newly folded node does not appear on screen until the next full snapshot.
+            flow = projected.get("viewer_flow")
+            if isinstance(flow, dict) and payload.get("kind") in {"snapshot", "delta"}:
+                payload["viewer_flow"] = flow
+        return payload
+
+
+# Keep the extracted core on the latest presentation projection without rewriting
+# its large implementation. run_live() resolves these globals at call time.
+_core.render_graph_html = _projected_render_graph_html
+_core.write_graph_html = _projected_write_graph_html
+_core._inject_live_auth = _inject_live_auth
+_core._inject_final_theme = _inject_final_theme
+_core.build_execution_graph = _build_execution_graph_without_internal_hooks
+_core._LiveState = _LiveState
+_core._handler_factory = _handler_factory
+_core._LIVE_HTML = _LIVE_HTML
+_AUTHENTICATED_LIVE_HTML = _inject_live_auth(_LIVE_HTML)
+_core._AUTHENTICATED_LIVE_HTML = _AUTHENTICATED_LIVE_HTML

@@ -1,0 +1,51 @@
+{
+  "fixture_schema_version": "0.1",
+  "provider": "cursor",
+  "payloads": [
+    {
+      "conversation_id": "fixture-cursor-conversation",
+      "generation_id": "fixture-cursor-generation",
+      "session_id": "fixture-cursor-session",
+      "cursor_version": "1.7.2",
+      "cwd": "/workspace/execweave-fixture",
+      "workspace_roots": ["/workspace/execweave-fixture"],
+      "model": "claude-sonnet",
+      "model_id": "claude-sonnet-4",
+      "user_email": "<redacted>",
+      "transcript_path": "/workspace/execweave-fixture/transcript.json",
+      "hook_event_name": "sessionStart"
+    },
+    {
+      "conversation_id": "fixture-cursor-conversation",
+      "generation_id": "fixture-cursor-generation",
+      "session_id": "fixture-cursor-session",
+      "cursor_version": "1.7.2",
+      "cwd": "/workspace/execweave-fixture",
+      "workspace_roots": ["/workspace/execweave-fixture"],
+      "model": "claude-sonnet",
+      "model_id": "claude-sonnet-4",
+      "user_email": "<redacted>",
+      "transcript_path": "/workspace/execweave-fixture/transcript.json",
+      "hook_event_name": "preToolUse",
+      "tool_name": "Shell",
+      "tool_use_id": "fixture-call-1",
+      "tool_input": {"command": "echo execweave-fixture", "working_directory": "/workspace/execweave-fixture"}
+    },
+    {
+      "conversation_id": "fixture-cursor-conversation",
+      "generation_id": "fixture-cursor-generation",
+      "session_id": "fixture-cursor-session",
+      "cursor_version": "1.7.2",
+      "cwd": "/workspace/execweave-fixture",
+      "workspace_roots": ["/workspace/execweave-fixture"],
+      "model": "claude-sonnet",
+      "model_id": "claude-sonnet-4",
+      "user_email": "<redacted>",
+      "transcript_path": "/workspace/execweave-fixture/transcript.json",
+      "hook_event_name": "postToolUse",
+      "tool_name": "Shell",
+      "tool_use_id": "fixture-call-1",
+      "tool_input": {"command": "echo execweave-fixture"}
+    }
+  ]
+}

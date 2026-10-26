@@ -1,0 +1,972 @@
+from __future__ import annotations
+
+import hmac
+import json
+import os
+import secrets
+import sys
+import threading
+import time
+import webbrowser
+from collections import deque
+from collections.abc import Callable
+from dataclasses import dataclass
+from functools import lru_cache
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.cookies import SimpleCookie
+from pathlib import Path
+from socketserver import TCPServer
+from urllib.parse import parse_qs, urlsplit
+from uuid import uuid4
+
+from .backends import create_collector
+from .conversation_records import write_conversation_records
+from .finalization import record_finalization
+from .delivery_status import summarize_finalization
+from .run_assessment import build_run_assessment
+from .graph import GRAPH_SCHEMA_VERSION, GraphAccumulator, build_execution_graph, write_execution_graph
+from .live_view import LIVE_HTML as _LIVE_HTML
+from .semantic import LiveSemanticNormalizer, merge_semantic_sidecar
+from .sink import JsonlSink
+from .privacy import CONTENT_CAPTURE_ENV
+from .validate import validate_event_stream
+from .viewer_dashboard_clean import fold_budget_bootstrap, resolve_fold_budget
+from .viewer_limits import resolve_viewer_limits, viewer_limits_bootstrap
+from .viewer import (
+    VIEWER_MAX_DOM_ELEMENTS,
+    VIEWER_MAX_EDGES,
+    VIEWER_MAX_NODES,
+    render_graph_html,
+    write_graph_html,
+)
+
+LIVE_DELTA_HISTORY = 256
+LIVE_DELTA_HISTORY_BYTES = 8 * 1024 * 1024
+_SEMANTIC_ENV = "EXECWEAVE_SEMANTIC_SIDECAR"
+_RUN_ID_ENV = "EXECWEAVE_RUN_ID"
+_SESSION_ID_ENV = "EXECWEAVE_SESSION_ID"
+_LIVE_TOKEN_HEADER = "X-ExecWeave-Token"
+
+_FINAL_THEME_CSS = """
+:root[data-theme="light"]{color-scheme:light;--bg:#f7f9fc;--panel:#ffffff;--panel2:#eef3f8;--text:#172033;--muted:#617083;--border:#cbd5e1;--edge:#64748b;--causal:#15803d;--noncausal:#b45309;--inferred:#7e22ce;--identity:#0369a1;--selected:#2563eb;--accent:#2563eb}
+#execweave-theme-toggle{position:fixed;right:14px;bottom:14px;z-index:9999;border:1px solid var(--border);background:var(--panel);color:var(--text);border-radius:8px;padding:7px 10px;cursor:pointer;box-shadow:0 4px 18px rgba(15,23,42,.12)}
+#execweave-theme-toggle:hover{border-color:var(--selected,var(--accent))}
+:root[data-theme="light"] .node text{fill:#f8fafc}:root[data-theme="light"] .node .node-type{fill:#cbd5e1}
+""".strip()
+
+_FINAL_THEME_CONTROLS = r"""
+<button id="execweave-theme-toggle" type="button" aria-label="Switch to light theme" title="Switch to light theme">Light</button>
+<script>
+(()=>{const key='execweave-theme',button=document.getElementById('execweave-theme-toggle');function apply(theme,persist=false){const next=theme==='light'?'light':'dark';document.documentElement.dataset.theme=next;const light=next==='light';button.textContent=light?'Dark':'Light';button.setAttribute('aria-label',light?'Switch to dark theme':'Switch to light theme');button.title=light?'Switch to dark theme':'Switch to light theme';if(persist){try{localStorage.setItem(key,next)}catch(_){}}}let initial='dark';try{if(localStorage.getItem(key)==='light')initial='light'}catch(_){}apply(initial);button.onclick=()=>apply(document.documentElement.dataset.theme==='light'?'dark':'light',true)})();
+</script>
+""".strip()
+
+
+def _inject_final_theme(html: str) -> str:
+    if 'id="theme-toggle"' in html or 'id="execweave-theme-toggle"' in html:
+        return html
+    themed = html.replace("</style>", _FINAL_THEME_CSS + "\n</style>", 1)
+    return themed.replace("</body>", _FINAL_THEME_CONTROLS + "\n</body>", 1)
+
+
+def _inject_live_auth(html: str) -> str:
+    """Keep browser authentication in an HttpOnly cookie, never page JavaScript."""
+    return html.replace(
+        "fetch(`/live.json?after=${liveSequence}`,{cache:'no-store'})",
+        "fetch(`/live.json?after=${liveSequence}`,{cache:'no-store',credentials:'same-origin'})",
+        1,
+    )
+
+
+_PAIRING_HTML = """<!doctype html>
+<meta charset="utf-8">
+<meta name="referrer" content="no-referrer">
+<title>ExecWeave live pairing</title>
+<style>body{font:16px system-ui;max-width:34rem;margin:12vh auto;padding:2rem}input,button{font:inherit;padding:.6rem}input{width:100%;box-sizing:border-box;margin:.5rem 0 1rem}</style>
+<h1>ExecWeave live pairing</h1>
+<p>Enter the one-time pairing code shown in the terminal. The evidence credential is never placed in the URL.</p>
+<form method="post" action="/pair"><label>Pairing code<input name="code" autocomplete="off" required></label><button type="submit">Open live graph</button></form>
+"""
+
+
+class _PairingGate:
+    def __init__(self, code: str) -> None:
+        self._code = code
+        self._used = False
+        self._lock = threading.Lock()
+
+    def consume(self, candidate: str) -> bool:
+        with self._lock:
+            if self._used or not candidate or not hmac.compare_digest(candidate, self._code):
+                return False
+            self._used = True
+            self._code = ""
+            return True
+
+
+_AUTHENTICATED_LIVE_HTML = _inject_live_auth(_LIVE_HTML)
+
+
+@lru_cache(maxsize=8)
+def _live_page(html: str, budget: int) -> str:
+    """The served page carries the fold budget this run was started with.
+
+    The shell is a module constant, so the budget cannot be baked in at import time —
+    the command line has not been read yet. It is spliced in per budget instead, and
+    cached, because a run resolves exactly one.
+    """
+    limits = resolve_viewer_limits(
+        defaults=(VIEWER_MAX_NODES, VIEWER_MAX_EDGES, VIEWER_MAX_DOM_ELEMENTS)
+    )
+    bootstrap = (
+        f"<script>{fold_budget_bootstrap(budget)}"
+        f"{viewer_limits_bootstrap(limits)}</script>\n"
+    )
+    if "<script>" not in html:
+        return bootstrap + html
+    return html.replace("<script>", bootstrap + "<script>", 1)
+
+
+@dataclass(frozen=True)
+class LiveResult:
+    session_id: str
+    return_code: int
+    live_url: str
+    output_dir: Path
+    event_stream: Path
+    semantic_sidecar: Path
+    materialized_event_stream: Path
+    graph: Path
+    viewer: Path
+
+    def to_dict(self) -> dict[str, object]:
+        artifacts = {}
+        for key in ("event_stream", "semantic_sidecar", "materialized_event_stream", "graph", "viewer"):
+            path = getattr(self, key)
+            try:
+                info = path.stat()
+                status = "produced" if path.is_file() and info.st_size else "empty_or_not_regular"
+            except FileNotFoundError:
+                status = "not_produced"
+            except OSError:
+                status = "unreadable"
+            artifacts[key] = {"status": status, "path": str(path) if status == "produced" else None}
+        return {
+            "session_id": self.session_id,
+            "return_code": self.return_code,
+            "live_url": self.live_url,
+            "output_dir": str(self.output_dir),
+            **{key: value["path"] for key, value in artifacts.items()},
+            "semantic_sidecar_status": artifacts["semantic_sidecar"]["status"],
+            "artifacts": artifacts,
+        }
+
+
+def _within_live_payload_budget(node_count: int, edge_count: int) -> bool:
+    estimated_dom = node_count * 4 + edge_count * 3
+    max_nodes, max_edges, max_dom_elements = resolve_viewer_limits(
+        defaults=(VIEWER_MAX_NODES, VIEWER_MAX_EDGES, VIEWER_MAX_DOM_ELEMENTS)
+    )
+    return (
+        node_count <= max_nodes
+        and edge_count <= max_edges
+        and estimated_dom <= max_dom_elements
+    )
+
+
+def _compact_live_graph(graph: dict[str, object]) -> dict[str, object]:
+    return {
+        "graph_schema_version": graph.get("graph_schema_version", GRAPH_SCHEMA_VERSION),
+        "session_id": graph.get("session_id", "unknown"),
+        "source_path": graph.get("source_path"),
+        "source_schema_versions": graph.get("source_schema_versions", []),
+        "event_count": graph.get("event_count", 0),
+        "node_count": graph.get("node_count", 0),
+        "edge_count": graph.get("edge_count", 0),
+        "nodes": [],
+        "edges": [],
+        "live_payload_compact": True,
+        "evidence_counts": graph.get("evidence_counts"),
+        "session_outcome": graph.get("session_outcome"),
+        "observation_assessment": graph.get("observation_assessment"),
+        "runtime_environment": graph.get("runtime_environment"),
+        "run_assessment": graph.get("run_assessment"),
+    }
+
+
+def _entity_id(entity: object) -> str | None:
+    if not isinstance(entity, dict):
+        return None
+    value = entity.get("id")
+    return value if isinstance(value, str) and value else None
+
+
+def _event_edge_key(event: dict[str, object]) -> tuple[str, str, str] | None:
+    source_id = _entity_id(event.get("source"))
+    target_id = _entity_id(event.get("target"))
+    relation = event.get("relation")
+    if source_id and target_id and isinstance(relation, str) and relation:
+        return (source_id, relation, target_id)
+    return None
+
+
+@dataclass
+class _JsonlTail:
+    path: Path
+    offset: int = 0
+    pending_bytes: bytes = b""
+    records_seen: int = 0
+
+
+class _LiveState:
+    def __init__(
+        self,
+        session_id: str,
+        event_path: Path,
+        semantic_path: Path | None = None,
+    ) -> None:
+        self.session_id = session_id
+        self.event_path = event_path
+        self.semantic_path = semantic_path
+        self._lock = threading.Lock()
+        self._accumulator = GraphAccumulator(
+            session_id=session_id,
+            source_path=event_path,
+            retain_event_ids=False,
+        )
+        self._runtime_tail = _JsonlTail(event_path)
+        self._semantic_tail = _JsonlTail(semantic_path) if semantic_path is not None else None
+        self._semantic_normalizer = LiveSemanticNormalizer(session_id)
+        self._runtime_event_count = 0
+        self._specialized_event_count = 0
+        self._finished = False
+        self._final_graph: dict[str, object] | None = None
+        self._final_html: str | None = None
+        self._finalization_receipt = summarize_finalization(None)
+        self._update_sequence = 0
+        self._resync_floor = 0
+        self._updates: deque[dict[str, object]] = deque()
+        self._update_sizes: deque[int] = deque()
+        self._updates_bytes = 0
+
+    def _empty_graph(self) -> dict[str, object]:
+        return {
+            "graph_schema_version": GRAPH_SCHEMA_VERSION,
+            "session_id": self.session_id,
+            "source_path": str(self.event_path.resolve()),
+            "source_schema_versions": [],
+            "event_count": 0,
+            "node_count": 0,
+            "edge_count": 0,
+            "nodes": [],
+            "edges": [],
+        }
+
+    def _counts_locked(self) -> dict[str, object]:
+        if self._finished and self._final_graph is not None:
+            return {
+                "event_count": int(self._final_graph.get("event_count", 0) or 0),
+                "node_count": int(self._final_graph.get("node_count", 0) or 0),
+                "edge_count": int(self._final_graph.get("edge_count", 0) or 0),
+            }
+        return {
+            "event_count": self._accumulator.event_count,
+            "node_count": self._accumulator.node_count,
+            "edge_count": self._accumulator.edge_count,
+        }
+
+    def _clear_update_history_locked(self) -> None:
+        self._updates.clear()
+        self._update_sizes.clear()
+        self._updates_bytes = 0
+
+    def _reset_incremental_state_locked(self) -> None:
+        self._accumulator = GraphAccumulator(
+            session_id=self.session_id,
+            source_path=self.event_path,
+            retain_event_ids=False,
+        )
+        tails = [self._runtime_tail]
+        if self._semantic_tail is not None:
+            tails.append(self._semantic_tail)
+        for tail in tails:
+            tail.offset = 0
+            tail.pending_bytes = b""
+            tail.records_seen = 0
+        self._semantic_normalizer.reset()
+        self._runtime_event_count = 0
+        self._specialized_event_count = 0
+        self._clear_update_history_locked()
+        self._update_sequence += 1
+        self._resync_floor = self._update_sequence
+
+    def _snapshot_from_accumulator_locked(self) -> dict[str, object]:
+        if self._finished and self._final_graph is not None:
+            graph = self._final_graph
+            node_count = int(graph.get("node_count", 0) or 0)
+            edge_count = int(graph.get("edge_count", 0) or 0)
+            return (
+                dict(graph)
+                if _within_live_payload_budget(node_count, edge_count)
+                else _compact_live_graph(graph)
+            )
+        if _within_live_payload_budget(
+            self._accumulator.node_count,
+            self._accumulator.edge_count,
+        ):
+            return self._accumulator.to_dict()
+        return _compact_live_graph(
+            {
+                "graph_schema_version": GRAPH_SCHEMA_VERSION,
+                "session_id": self.session_id,
+                "source_path": self._accumulator.source_path,
+                "source_schema_versions": sorted(self._accumulator.source_schema_versions),
+                "event_count": self._accumulator.event_count,
+                "node_count": self._accumulator.node_count,
+                "edge_count": self._accumulator.edge_count,
+            }
+        )
+
+    def _append_update_locked(self, update: dict[str, object]) -> None:
+        self._update_sequence += 1
+        update["sequence"] = self._update_sequence
+        encoded_size = len(
+            json.dumps(update, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        )
+        self._updates.append(update)
+        self._update_sizes.append(encoded_size)
+        self._updates_bytes += encoded_size
+        while (
+            len(self._updates) > LIVE_DELTA_HISTORY
+            or self._updates_bytes > LIVE_DELTA_HISTORY_BYTES
+        ):
+            evicted = self._updates.popleft()
+            self._updates_bytes -= self._update_sizes.popleft()
+            self._resync_floor = max(self._resync_floor, int(evicted["sequence"]))
+
+    def _tail_truncated_locked(self, tail: _JsonlTail) -> bool:
+        try:
+            return tail.path.stat().st_size < tail.offset
+        except OSError:
+            return False
+
+    def _read_tail_records_locked(
+        self,
+        tail: _JsonlTail,
+    ) -> list[tuple[int, dict[str, object]]]:
+        try:
+            file_size = tail.path.stat().st_size
+        except OSError:
+            return []
+        if file_size <= tail.offset:
+            return []
+        try:
+            with tail.path.open("rb") as handle:
+                handle.seek(tail.offset)
+                chunk = handle.read()
+        except OSError:
+            return []
+        if not chunk:
+            return []
+        tail.offset += len(chunk)
+        buffered = tail.pending_bytes + chunk
+        lines = buffered.split(b"\n")
+        tail.pending_bytes = lines.pop()
+        records: list[tuple[int, dict[str, object]]] = []
+        for raw_line in lines:
+            if not raw_line.strip():
+                continue
+            tail.records_seen += 1
+            try:
+                payload = json.loads(raw_line.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                continue
+            if isinstance(payload, dict):
+                records.append((tail.records_seen, payload))
+        return records
+
+    def _apply_live_event_locked(
+        self,
+        event: dict[str, object],
+        *,
+        added_nodes: set[str],
+        updated_nodes: set[str],
+        added_edges: set[tuple[str, str, str]],
+        updated_edges: set[tuple[str, str, str]],
+    ) -> bool:
+        source_id = _entity_id(event.get("source"))
+        target_id = _entity_id(event.get("target"))
+        node_ids = {value for value in (source_id, target_id) if value}
+        existing_nodes = {
+            node_id for node_id in node_ids if node_id in self._accumulator.nodes
+        }
+        edge_key = _event_edge_key(event)
+        edge_existed = edge_key in self._accumulator.edges if edge_key is not None else False
+        try:
+            self._accumulator.apply(event)
+        except (TypeError, ValueError):
+            return False
+
+        for node_id in node_ids:
+            if node_id in existing_nodes and node_id not in added_nodes:
+                updated_nodes.add(node_id)
+            else:
+                added_nodes.add(node_id)
+                updated_nodes.discard(node_id)
+        if edge_key is not None and edge_key in self._accumulator.edges:
+            if edge_existed and edge_key not in added_edges:
+                updated_edges.add(edge_key)
+            else:
+                added_edges.add(edge_key)
+                updated_edges.discard(edge_key)
+        return True
+
+    def _refresh_incremental_locked(self) -> None:
+        tails = [self._runtime_tail]
+        if self._semantic_tail is not None:
+            tails.append(self._semantic_tail)
+        if any(self._tail_truncated_locked(tail) for tail in tails):
+            self._reset_incremental_state_locked()
+
+        added_nodes: set[str] = set()
+        updated_nodes: set[str] = set()
+        added_edges: set[tuple[str, str, str]] = set()
+        updated_edges: set[tuple[str, str, str]] = set()
+        runtime_applied = 0
+        specialized_applied = 0
+
+        for _, event in self._read_tail_records_locked(self._runtime_tail):
+            if not self._apply_live_event_locked(
+                event,
+                added_nodes=added_nodes,
+                updated_nodes=updated_nodes,
+                added_edges=added_edges,
+                updated_edges=updated_edges,
+            ):
+                continue
+            self._semantic_normalizer.observe_runtime_event(event)
+            self._runtime_event_count += 1
+            runtime_applied += 1
+
+        if self._semantic_tail is not None and self._semantic_normalizer.ready:
+            for line_number, record in self._read_tail_records_locked(self._semantic_tail):
+                try:
+                    normalized = self._semantic_normalizer.normalize(
+                        record,
+                        line_number=line_number,
+                    )
+                except ValueError:
+                    continue
+                if normalized is None:
+                    continue
+                if not self._apply_live_event_locked(
+                    normalized,
+                    added_nodes=added_nodes,
+                    updated_nodes=updated_nodes,
+                    added_edges=added_edges,
+                    updated_edges=updated_edges,
+                ):
+                    continue
+                self._specialized_event_count += 1
+                specialized_applied += 1
+
+        applied_count = runtime_applied + specialized_applied
+        if not applied_count:
+            return
+
+        counts = self._counts_locked()
+        node_count = int(counts["node_count"])
+        edge_count = int(counts["edge_count"])
+        compact = not _within_live_payload_budget(node_count, edge_count)
+        update: dict[str, object] = {
+            **counts,
+            "event_count_delta": applied_count,
+            "evidence_event_count_delta": {
+                "os_runtime": runtime_applied,
+                "specialized": specialized_applied,
+            },
+            "nodes_added": [],
+            "nodes_updated": [],
+            "edges_added": [],
+            "edges_updated": [],
+        }
+        if compact:
+            update["live_payload_compact"] = True
+        else:
+            update["nodes_added"] = [
+                self._accumulator.nodes[node_id].to_dict()
+                for node_id in sorted(added_nodes)
+                if node_id in self._accumulator.nodes
+            ]
+            update["nodes_updated"] = [
+                self._accumulator.nodes[node_id].to_dict()
+                for node_id in sorted(updated_nodes - added_nodes)
+                if node_id in self._accumulator.nodes
+            ]
+            update["edges_added"] = [
+                self._accumulator.edges[key].to_dict()
+                for key in sorted(added_edges)
+                if key in self._accumulator.edges
+            ]
+            update["edges_updated"] = [
+                self._accumulator.edges[key].to_dict()
+                for key in sorted(updated_edges - added_edges)
+                if key in self._accumulator.edges
+            ]
+        self._append_update_locked(update)
+
+    def publish_finalization(self, report: dict[str, object]) -> None:
+        """Publish a bounded receipt without rereading or rewriting the archive."""
+        receipt = summarize_finalization(report)
+        with self._lock:
+            self._finalization_receipt = receipt
+
+    def _evidence_metadata_locked(self) -> dict[str, object]:
+        # Cache metadata work per published sequence, including the terminal switch.
+        # No content files or provider bodies are opened by this assessment.
+        version = (self._update_sequence, self._finished)
+        if getattr(self, "_assessment_version", None) != version:
+            raw = self._final_graph if self._finished and self._final_graph is not None else self._accumulator.to_dict()
+            self._assessment_snapshot = build_run_assessment(raw)
+            self._assessment_version = version
+        return {
+            "run_assessment": self._assessment_snapshot,
+            "finalization_assessment": {
+                **self._finalization_receipt,
+                "session_id": self._assessment_snapshot.get("session_id"),
+                "source_path": self._assessment_snapshot.get("source_path"),
+            },
+            "live_evidence_counts": {
+                "os_runtime": self._runtime_event_count,
+                "specialized": self._specialized_event_count,
+            },
+            "live_specialized_provisional": (
+                self._specialized_event_count > 0 and not self._finished
+            ),
+        }
+
+    def snapshot(self) -> dict[str, object]:
+        with self._lock:
+            if not self._finished:
+                self._refresh_incremental_locked()
+            payload = self._snapshot_from_accumulator_locked()
+            payload["live_finished"] = self._finished
+            payload.update(self._evidence_metadata_locked())
+            return payload
+
+    def live_update(self, after: int | None) -> dict[str, object]:
+        with self._lock:
+            if not self._finished:
+                self._refresh_incremental_locked()
+            if after is None or after < 0:
+                return {
+                    "kind": "snapshot",
+                    "sequence": self._update_sequence,
+                    "graph": self._snapshot_from_accumulator_locked(),
+                    **self._evidence_metadata_locked(),
+                    "live_finished": self._finished,
+                }
+            oldest_sequence = (
+                int(self._updates[0]["sequence"]) if self._updates else self._update_sequence + 1
+            )
+            history_gap = after < self._resync_floor or (
+                self._updates and after < oldest_sequence - 1
+            )
+            if after > self._update_sequence or history_gap:
+                return {
+                    "kind": "snapshot",
+                    "sequence": self._update_sequence,
+                    "graph": self._snapshot_from_accumulator_locked(),
+                    **self._evidence_metadata_locked(),
+                    "live_finished": self._finished,
+                    "resync": True,
+                    "resync_reason": "future_sequence" if after > self._update_sequence else "history_gap",
+                }
+            counts = self._counts_locked()
+            if after == self._update_sequence:
+                return {
+                    "kind": "noop",
+                    "sequence": self._update_sequence,
+                    **counts,
+                    **self._evidence_metadata_locked(),
+                    "live_finished": self._finished,
+                }
+            updates = [dict(update) for update in self._updates if int(update["sequence"]) > after]
+            return {
+                "kind": "delta",
+                "base_sequence": after,
+                "sequence": self._update_sequence,
+                "updates": updates,
+                **counts,
+                **self._evidence_metadata_locked(),
+                "live_finished": self._finished,
+            }
+
+    def finish(self, graph: dict[str, object], *, final_html: str | None = None) -> None:
+        final_graph = dict(graph)
+        rendered_final = (
+            final_html
+            if isinstance(final_html, str)
+            else _inject_final_theme(render_graph_html(final_graph))
+        )
+        with self._lock:
+            # The last browser poll may precede the collector's final batch.
+            # Drain complete runtime/semantic records for raw-log and evidence
+            # counters before publishing FINISHED. The canonical graph below,
+            # not the provisional accumulator, remains the graph authority.
+            self._refresh_incremental_locked()
+            self._final_graph = final_graph
+            self._final_html = rendered_final
+            self._finished = True
+            counts = self._counts_locked()
+            node_count = int(counts["node_count"])
+            edge_count = int(counts["edge_count"])
+            terminal: dict[str, object] = {
+                **counts,
+                "event_count_delta": 0,
+                "nodes_added": [],
+                "nodes_updated": [],
+                "edges_added": [],
+                "edges_updated": [],
+                "terminal": True,
+                # A counts-only terminal delta loses unpolled nodes/edges and
+                # canonical identity/metadata changes. Reconcile in this same
+                # sequence-visible response, before the client stops polling.
+                # Use the normal projection and payload budget, as on reconnect.
+                "final_graph": self._snapshot_from_accumulator_locked(),
+            }
+            if not _within_live_payload_budget(node_count, edge_count):
+                terminal["live_payload_compact"] = True
+            self._append_update_locked(terminal)
+
+    def final_html(self) -> str | None:
+        with self._lock:
+            return self._final_html
+
+
+def _handler_factory(
+    state: _LiveState, token: str, pairing: _PairingGate | None = None
+):
+    pairing = pairing or _PairingGate(secrets.token_urlsafe(18))
+    cookie_name = "execweave_live"
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, format: str, *args: object) -> None:
+            return
+
+        def _send(
+            self,
+            body: bytes,
+            content_type: str,
+            status: int = 200,
+            *,
+            headers: tuple[tuple[str, str], ...] = (),
+        ) -> None:
+            try:
+                self.send_response(status)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.send_header("Referrer-Policy", "no-referrer")
+                self.send_header("Content-Security-Policy", "default-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; form-action 'self'; frame-ancestors 'none'")
+                for name, value in headers:
+                    self.send_header(name, value)
+                self.end_headers()
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                self.close_connection = True
+
+        def _authorized(self, parsed) -> bool:
+            candidate = self.headers.get(_LIVE_TOKEN_HEADER)
+            if candidate is None:
+                raw_cookie = self.headers.get("Cookie", "")
+                try:
+                    cookies = SimpleCookie()
+                    cookies.load(raw_cookie)
+                    morsel = cookies.get(cookie_name)
+                    candidate = morsel.value if morsel is not None else None
+                except (KeyError, TypeError, ValueError):
+                    candidate = None
+            # Query-string credentials are intentionally unsupported.  A credential
+            # in a request target can leak through terminal output, browser history,
+            # proxies, crash reports and access logs.
+            return bool(candidate) and hmac.compare_digest(candidate, token)
+
+        def do_POST(self) -> None:
+            parsed = urlsplit(self.path)
+            if parsed.path != "/pair" or parsed.query or parsed.fragment:
+                self._send(b"Not found", "text/plain; charset=utf-8", 404)
+                return
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+            except ValueError:
+                length = -1
+            if length < 0 or length > 4096:
+                self._send(b"Invalid pairing request", "text/plain; charset=utf-8", 400)
+                return
+            raw = self.rfile.read(length)
+            try:
+                values = parse_qs(raw.decode("utf-8"), keep_blank_values=True).get("code", [])
+            except UnicodeDecodeError:
+                values = []
+            if len(values) != 1 or not pairing.consume(values[0]):
+                self._send(b"Pairing code rejected", "text/plain; charset=utf-8", 403)
+                return
+            self._send(
+                b"",
+                "text/plain; charset=utf-8",
+                303,
+                headers=(
+                    ("Set-Cookie", f"{cookie_name}={token}; HttpOnly; SameSite=Strict; Path=/"),
+                    ("Location", "/"),
+                ),
+            )
+
+        def do_GET(self) -> None:
+            parsed = urlsplit(self.path)
+            path = parsed.path
+            if path == "/favicon.ico" and not parsed.query and not parsed.fragment:
+                # Browsers may request a favicon before pairing/authentication.
+                # Return no content so this cosmetic request cannot leak run evidence
+                # or create a misleading authentication error in the JS console.
+                self._send(b"", "image/x-icon", 204)
+                return
+            if path == "/" and not self._authorized(parsed):
+                # This page contains no run evidence and no authentication secret.
+                self._send(_PAIRING_HTML.encode("utf-8"), "text/html; charset=utf-8")
+                return
+            if not self._authorized(parsed):
+                self._send(b"Unauthorized", "text/plain; charset=utf-8", 401)
+                return
+            if path == "/":
+                page = _live_page(_AUTHENTICATED_LIVE_HTML, resolve_fold_budget())
+                self._send(page.encode("utf-8"), "text/html; charset=utf-8")
+                return
+            if path == "/graph.json":
+                payload = json.dumps(
+                    state.snapshot(), ensure_ascii=False, separators=(",", ":")
+                ).encode("utf-8")
+                self._send(payload, "application/json; charset=utf-8")
+                return
+            if path == "/live.json":
+                values = parse_qs(parsed.query).get("after", [])
+                try:
+                    after = int(values[0]) if values else None
+                except (TypeError, ValueError):
+                    self._send(b"Invalid after sequence", "text/plain; charset=utf-8", 400)
+                    return
+                payload = json.dumps(
+                    state.live_update(after), ensure_ascii=False, separators=(",", ":")
+                ).encode("utf-8")
+                self._send(payload, "application/json; charset=utf-8")
+                return
+            if path == "/final":
+                final = state.final_html()
+                if final is None:
+                    self._send(b"Final graph is not ready", "text/plain; charset=utf-8", 404)
+                else:
+                    self._send(final.encode("utf-8"), "text/html; charset=utf-8")
+                return
+            self._send(b"Not found", "text/plain; charset=utf-8", 404)
+
+    return Handler
+
+
+class _LocalThreadingHTTPServer(ThreadingHTTPServer):
+    """Local HTTP server that skips HTTPServer's reverse-DNS lookup during bind."""
+
+    def server_bind(self) -> None:
+        TCPServer.server_bind(self)
+        host, port = self.server_address[:2]
+        self.server_name = str(host)
+        self.server_port = int(port)
+
+    def handle_error(self, request, client_address) -> None:  # type: ignore[no-untyped-def]
+        """Silence only expected browser disconnects at the handler lifecycle boundary."""
+        error = sys.exc_info()[1]
+        if isinstance(error, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)):
+            return
+        super().handle_error(request, client_address)
+
+
+def run_live(
+    command: list[str],
+    *,
+    watch_root: str | Path,
+    output_dir: str | Path | None = None,
+    poll_interval: float = 0.10,
+    collect_filesystem: bool = True,
+    collect_network: bool = True,
+    port: int = 0,
+    open_browser: bool = True,
+    linger_seconds: float = 2.0,
+    content_capture: str = "full",
+    announce: Callable[[str], None] | None = None,
+    announce_pairing_code: Callable[[str], None] | None = None,
+    announce_api_token: Callable[[str], None] | None = None,
+) -> LiveResult:
+    """Run a command with the portable collector and expose an authenticated localhost graph."""
+    if not command:
+        raise ValueError("command must not be empty")
+    if port < 0 or port > 65535:
+        raise ValueError("port must be between 0 and 65535")
+    if linger_seconds < 0:
+        raise ValueError("linger_seconds must be >= 0")
+    if content_capture not in {"metadata_only", "full"}:
+        raise ValueError("content_capture must be metadata_only or full")
+
+    session_id = uuid4().hex
+    live_token = secrets.token_urlsafe(32)
+    pairing_code = secrets.token_urlsafe(18)
+    pairing_gate = _PairingGate(pairing_code)
+    root = Path(watch_root).expanduser().resolve()
+    run_dir = (
+        Path(output_dir).expanduser().resolve()
+        if output_dir is not None
+        else root / ".execweave" / "runs" / session_id
+    )
+    run_dir.mkdir(parents=True, exist_ok=True)
+    event_path = run_dir / "events.jsonl"
+    semantic_path = run_dir / "semantic.jsonl"
+    merged_event_path = run_dir / "events.semantic.jsonl"
+    graph_path = run_dir / "graph.json"
+    viewer_path = run_dir / "viewer.html"
+    for artifact in (event_path, semantic_path, merged_event_path, graph_path, viewer_path):
+        if artifact.exists() and artifact.stat().st_size > 0:
+            raise FileExistsError(f"ExecWeave live artifact already exists: {artifact}")
+
+    recording_report = record_finalization(run_dir, state="recording")
+    sink = JsonlSink(event_path)
+    collector = create_collector(
+        backend="portable",
+        session_id=session_id,
+        sink=sink,
+        watch_root=root,
+        poll_interval=poll_interval,
+        collect_filesystem=collect_filesystem,
+        collect_network=collect_network,
+    )
+
+    state = _LiveState(session_id, event_path, semantic_path)
+    state.publish_finalization(recording_report)
+    server = _LocalThreadingHTTPServer(
+        ("127.0.0.1", port), _handler_factory(state, live_token, pairing_gate)
+    )
+    server.daemon_threads = True
+    server_thread = threading.Thread(
+        target=server.serve_forever,
+        name="execweave-live",
+        daemon=True,
+    )
+    server_thread.start()
+    host, selected_port = server.server_address[:2]
+    live_url = f"http://{host}:{selected_port}/"
+    if announce is not None:
+        announce(live_url)
+    if announce_pairing_code is not None:
+        announce_pairing_code(pairing_code)
+    if announce_api_token is not None:
+        announce_api_token(live_token)
+    if open_browser:
+        webbrowser.open(live_url)
+
+    return_code = 1
+    environment_updates = {
+        _SEMANTIC_ENV: str(semantic_path),
+        _RUN_ID_ENV: session_id,
+        _SESSION_ID_ENV: session_id,
+        CONTENT_CAPTURE_ENV: content_capture,
+    }
+    previous_environment = {
+        key: os.environ.get(key) for key in environment_updates
+    }
+    os.environ.update(environment_updates)
+    collection_error: Exception | None = None
+    export_complete = False
+    try:
+        try:
+            return_code = collector.run(command)
+        except Exception as exc:
+            # The collector can have written a valid terminal stream before
+            # raising. Export it rather than leaving only raw evidence behind.
+            collection_error = exc
+        finally:
+            for key, value in previous_environment.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+        state.publish_finalization(record_finalization(run_dir, state="exporting", error=collection_error))
+        validation = validate_event_stream(event_path)
+        if not validation.valid:
+            details = "; ".join(validation.errors)
+            raise RuntimeError(f"live event stream failed validation: {details}")
+
+        materialized_event_path = event_path
+        if semantic_path.exists() and semantic_path.stat().st_size > 0:
+            merge_semantic_sidecar(event_path, semantic_path, merged_event_path)
+            materialized_event_path = merged_event_path
+
+        execution_graph = build_execution_graph(materialized_event_path)
+        graph_payload = execution_graph.to_dict()
+        write_execution_graph(execution_graph, graph_path)
+        # The extracted core must materialize the conversation index itself. The
+        # projected live wrapper also writes it, but direct live_core callers (and
+        # failure-path export) must not depend on that presentation monkeypatch.
+        write_conversation_records(graph_payload, run_dir)
+        write_graph_html(graph_payload, viewer_path, open_browser=False)
+        state.publish_finalization(record_finalization(run_dir, state="complete", error=collection_error))
+        export_complete = True
+        state.finish(graph_payload, final_html=viewer_path.read_text(encoding="utf-8"))
+        if linger_seconds:
+            time.sleep(linger_seconds)
+
+        if collection_error is not None:
+            raise collection_error
+
+        return LiveResult(
+            session_id=session_id,
+            return_code=return_code,
+            live_url=live_url,
+            output_dir=run_dir,
+            event_stream=event_path,
+            semantic_sidecar=semantic_path,
+            materialized_event_stream=materialized_event_path,
+            graph=graph_path,
+            viewer=viewer_path,
+        )
+    except Exception as exc:
+        # Export/finalization diagnostics are secondary to an already observed
+        # collector failure. Preserve the primary exception and attach later
+        # failures as notes rather than replacing the root cause.
+        primary_error = collection_error if collection_error is not None else exc
+        if collection_error is not None and exc is not collection_error:
+            try:
+                collection_error.add_note(
+                    f"secondary export failure: {type(exc).__name__}: {exc}"
+                )
+            except AttributeError:  # pragma: no cover - Python < 3.11 compatibility
+                pass
+        try:
+            state.publish_finalization(record_finalization(
+                run_dir,
+                state="complete" if export_complete else "failed",
+                error=primary_error,
+            ))
+        except Exception as finalization_error:
+            try:
+                primary_error.add_note(
+                    "secondary finalization diagnostic failure: "
+                    f"{type(finalization_error).__name__}: {finalization_error}"
+                )
+            except AttributeError:  # pragma: no cover - Python < 3.11 compatibility
+                pass
+        if primary_error is not exc:
+            raise primary_error from exc
+        raise
+    finally:
+        server.shutdown()
+        server.server_close()
+        server_thread.join(timeout=5)

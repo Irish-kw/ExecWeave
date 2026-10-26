@@ -1,0 +1,129 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "execweave"
+# ExecWeave v1.0.0 release metadata
+version = "1.0.0"
+description = "Local AI-agent execution graphs that identify sender/recipient handoffs with no observed receive in graph.json."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [
+  { name = "ExecWeave contributors" }
+]
+keywords = [
+  "ai-agents",
+  "observability",
+  "runtime",
+  "security",
+  "provenance",
+  "execution-graph",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Information Technology",
+  "License :: Other/Proprietary License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Debuggers",
+  "Topic :: System :: Monitoring",
+]
+dependencies = [
+  "psutil>=5.9",
+  "watchdog>=4.0",
+]
+
+[project.optional-dependencies]
+agents = ["openai-agents>=0.24,<0.25"]
+validation = ["cryptography>=44"]
+dev = [
+  "cryptography>=44",
+  "pytest>=8.0",
+  "PyYAML>=6.0",
+  "pillow>=10.0",
+  "ruff>=0.16,<0.17",
+  "tomli>=2.0; python_version < '3.11'",
+  "pywinpty>=3.0.5,<4; platform_system == 'Windows'",
+]
+release = [
+  "build>=1.2",
+  "twine>=6.0",
+  "tomli>=2.0; python_version < '3.11'",
+]
+# Drives the shipped viewers in a real browser. Kept out of dev so an ordinary
+# development install stays small; CI installs it and requires the checks to run.
+e2e = [
+  "playwright>=1.44",
+  "pillow>=10.0",
+  "pywinpty>=3.0.5,<4; platform_system == 'Windows'",
+]
+
+[project.urls]
+Homepage = "https://github.com/Irish-kw/ExecWeave"
+Repository = "https://github.com/Irish-kw/ExecWeave"
+Documentation = "https://github.com/Irish-kw/ExecWeave#documentation"
+Issues = "https://github.com/Irish-kw/ExecWeave/issues"
+
+[project.entry-points."execweave.framework_adapters"]
+camel = "execweave.framework_adapters.camel:CAMELAdapter"
+autogen = "execweave.framework_adapters.autogen:AutoGenAdapter"
+metagpt = "execweave.framework_adapters.metagpt:MetaGPTAdapter"
+
+[project.scripts]
+execweave = "execweave.entry:main"
+execweave-top = "execweave.top_cli:main"
+execweave-claude-hook = "execweave.claude_hook_cli:main"
+execweave-claude-record = "execweave.claude_record:main"
+execweave-codex-hook = "execweave.codex_hook_entry:main"
+execweave-codex-record = "execweave.codex_record:main"
+execweave-antigravity-hook = "execweave.antigravity_hook_cli:main"
+execweave-antigravity-record = "execweave.antigravity_record:main"
+execweave-cursor-hook = "execweave.cursor_hook_cli:main"
+execweave-cursor-record = "execweave.cursor_record:main"
+execweave-opencode-hook = "execweave.opencode_hook_cli:main"
+execweave-opencode-plugin = "execweave.opencode_plugin_cli:main"
+execweave-opencode-record = "execweave.opencode_record:main"
+execweave-model-runtime = "execweave.model_runtime_cli:main"
+execweave-openai-compatible = "execweave.openai_compatible_cli:main"
+execweave-anthropic = "execweave.anthropic_cli:main"
+execweave-http-proxy = "execweave.http_proxy_cli:main"
+execweave-inference-gateway = "execweave.inference_gateway_cli:main"
+execweave-inference-link = "execweave.inference_identity_cli:main"
+execweave-litellm-callback = "execweave.litellm_callback_cli:main"
+execweave-rule-pack = "execweave.rule_pack_cli:main"
+execweave-integrity = "execweave.integrity_cli:main"
+execweave-overhead = "execweave.overhead_benchmark:main"
+execweave-scalability = "execweave.scalability_benchmark:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/execweave"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/src/execweave",
+  "/pyproject.toml",
+  "/README.md",
+  "/LICENSE",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+markers = [
+  "viewer_e2e: drives a shipped viewer in a real browser; needs playwright and chromium",
+]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]

@@ -1,0 +1,38 @@
+from __future__ import annotations
+
+
+
+def test_shared_dashboard_contains_premerge_hardening() -> None:
+    from execweave.dashboard_shell import DASHBOARD_HTML
+    from execweave.live_view import LIVE_HTML
+
+    for html in (LIVE_HTML, DASHBOARD_HTML):
+        assert "execweaveMeasureCache=new Map()" in html
+        assert "agentOrder=new Map(childOrder)" in html
+        assert "geometryChanged=laneShifted||dimensionsChanged" in html
+        assert "dimensionsChanged=[...priorWidth.keys()].some(" in html
+        assert "dimensionsChanged=[...nodeById.keys()].some(" not in html
+        assert "group.setAttribute('transform',`translate(${p.x} ${p.y})`)" in html
+        assert "function execweaveCameraWidth(id)" in html
+        assert "function execweaveCameraHeight(id)" in html
+        assert "positions.forEach((p,id)=>" in html
+        assert "p.x+w/2" in html
+        assert "p.y+h/2" in html
+        assert "rawNodeById=new Map()" in html
+        assert (
+            "TOOL_CALL_OWNERSHIP_RELATIONS=['REQUESTED_TOOL_CALL','OBSERVED_TOOL_CALL','OWNED_TOOL_CALL']"
+            in html
+        )
+
+        # Export freezes actual measured SVG geometry, not another graph layout.
+        assert "gifSvg.cloneNode(true)" in html
+        assert "drawGifFrame" not in html
+
+        assert "maxX:maxX+160" not in html
+        assert "maxY:maxY+50" not in html
+        assert "return{x:transform.x+(p.x+80)*transform.scale" not in html
+        assert "box.width*.5-(p.x+80)*transform.scale" not in html
+        assert (
+            "const stamps=ordered.map(call=>String(call?.first_seen||'').filter(Boolean));"
+            not in html
+        )

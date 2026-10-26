@@ -1,0 +1,12 @@
+# ExecWeave ships a platform-independent Python wheel. Keep repository text bytes
+# identical on Windows, macOS, and Linux so the same source tree builds the same wheel.
+* text=auto eol=lf
+
+*.gif binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.ico binary
+*.zip binary
+*.gz binary

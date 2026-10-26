@@ -1,0 +1,109 @@
+from __future__ import annotations
+
+from .live_view_extra_style import LIVE_EXTRA_STYLE
+from .live_view_markup import LIVE_MARKUP
+from .live_view_process_layout import LIVE_PROCESS_LAYOUT_SCRIPT
+from .live_view_readability import LIVE_READABILITY_SCRIPT, LIVE_READABILITY_STYLE
+from .live_view_script_a import LIVE_SCRIPT_A
+from .live_view_script_b import LIVE_SCRIPT_B
+from .live_view_script_c import LIVE_SCRIPT_C
+from .live_view_script_d import LIVE_SCRIPT_D
+from .live_view_style import LIVE_STYLE
+from .viewer_agent_panel import inject_agent_panel
+from .viewer_dashboard_hardening_v2 import harden_dashboard_html
+
+
+def _restore_live_safety_contracts(html: str) -> str:
+    """Preserve live-view safety contracts while retiring legacy final-page swapping."""
+    html = html.replace(
+        "activityFilter='all',cameraTimer=null,animationFrame=null,activitySerial=0;",
+        "activityFilter='all',cameraTimer=null,animationFrame=null,activitySerial=0,"
+        "lastSignature='';",
+        1,
+    )
+    html = html.replace(
+        "evidence.innerHTML=`OS <strong>${runtime}</strong> · specialized "
+        "<strong>${specialized}</strong>${provisional?' · provisional':''}`;",
+        "evidence.innerHTML=`OS <strong>${runtime}</strong> · specialized "
+        "<strong>${specialized}</strong>${provisional?' · provisional':''}`;"
+        "evidence.setAttribute('aria-label',`OS ${runtime} · specialized ${specialized}"
+        "${provisional?' · provisional':''}`);",
+        1,
+    )
+    html = html.replace(
+        "for(const n of nodeById.values())createNodeElement(n);applySearch();"
+        "restoreSelectionFocus()}",
+        "for(const n of nodeById.values())createNodeElement(n);applySearch();"
+        "refreshEdgeLabels();restoreSelectionFocus()}\n"
+        "function refreshEdgeLabels(){for(const e of edgeById.values())updateEdgeElement(e)}",
+        1,
+    )
+    html = html.replace(
+        "function setSnapshot(data){graph=data;",
+        "function setSnapshot(data){const signature=`${data.node_count||0}:"
+        "${data.edge_count||0}`;lastSignature=signature;graph=data;",
+        1,
+    )
+
+    open_final_button = '<button id="open-final" type="button">Open final graph</button>'
+    if open_final_button not in html:
+        raise RuntimeError("legacy final action patch target not found")
+    html = html.replace(open_final_button, "", 1)
+    html = html.replace(
+        ",openFinalButton=document.getElementById('open-final')",
+        "",
+        1,
+    )
+    html = html.replace(
+        "let rawEntries=[],logMode='structured',finishedShown=false,"
+        "finalHtmlCache=null,replaying=false;",
+        "let rawEntries=[],logMode='structured',finishedShown=false,replaying=false;",
+        1,
+    )
+    old_final_flow = (
+        "async function prepareFinalView(){try{const response=await fetch('/final',"
+        "{cache:'no-store'});if(!response.ok)throw new Error(String(response.status));"
+        "finalHtmlCache=await response.text()}catch(_){finalHtmlCache=null}}\n"
+        "function openFinal(){if(!finalHtmlCache)return;document.open();"
+        "document.write(finalHtmlCache);document.close()}\n"
+        "function onFinished(){if(finishedShown)return;finishedShown=true;"
+        "finishedActions.hidden=false;prepareFinalView()}\n"
+        "replayButton.onclick=replayRun;gifButton.onclick=downloadGif;"
+        "openFinalButton.onclick=openFinal;"
+    )
+    new_final_flow = (
+        "function onFinished(){if(finishedShown)return;finishedShown=true;"
+        "finishedActions.hidden=false}\n"
+        "replayButton.onclick=replayRun;gifButton.onclick=downloadGif;"
+    )
+    if old_final_flow not in html:
+        raise RuntimeError("legacy final renderer patch target not found")
+    return html.replace(old_final_flow, new_final_flow, 1)
+
+
+LIVE_HTML = harden_dashboard_html(
+    inject_agent_panel(
+        _restore_live_safety_contracts(
+            f"""<!doctype html>
+<html lang=\"en\">
+<head>
+<meta charset=\"utf-8\">
+<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">
+<link rel=\"icon\" href=\"data:,\">
+<title>ExecWeave Live</title>
+<style>
+{LIVE_STYLE}
+{LIVE_EXTRA_STYLE}
+{LIVE_READABILITY_STYLE}
+</style>
+</head>
+<body>
+{LIVE_MARKUP}
+<script>
+{LIVE_SCRIPT_A}{LIVE_READABILITY_SCRIPT}{LIVE_PROCESS_LAYOUT_SCRIPT}{LIVE_SCRIPT_B}{LIVE_SCRIPT_C}{LIVE_SCRIPT_D}
+</script>
+</body>
+</html>"""
+        )
+    )
+)

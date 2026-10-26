@@ -1,0 +1,304 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+from .private_io import private_artifact_path, write_private_json
+
+FIDELITY_SCHEMA_VERSION = "0.1"
+
+ATTRIBUTION_MODES = {
+    "syscall_attributed",
+    "process_polled",
+    "session_correlated",
+    "absent",
+}
+
+CLAIMS = {
+    "complete_process_tree",
+    "process_attributed_file_access",
+    "process_attributed_network",
+    "short_lived_process_capture",
+    "tamper_evident_evidence",
+    "byte_level_dataflow",
+}
+
+
+def _entity_backend(entity: object) -> str | None:
+    if not isinstance(entity, dict):
+        return None
+    attributes = entity.get("attributes")
+    if not isinstance(attributes, dict):
+        return None
+    backend = attributes.get("backend")
+    return backend if isinstance(backend, str) and backend else None
+
+
+def _normalized_attribution(event_type: str, raw: object) -> str | None:
+    # Even self-declared native attributions on semantic records remain
+    # session-correlated until corroborated by the trusted native collector.
+    if event_type.startswith("semantic.") or raw == "semantic_sidecar":
+        return "session_correlated"
+    if raw == "syscall":
+        return "syscall_attributed"
+    if raw in {"polling", "process_polling"}:
+        return "process_polled"
+    if raw == "session_observation":
+        return "session_correlated"
+    if event_type.startswith("semantic."):
+        return "session_correlated"
+    return None
+
+
+def _channel_for_event(event_type: str) -> str | None:
+    if event_type.startswith("process."):
+        return "process"
+    if event_type.startswith("filesystem."):
+        return "filesystem"
+    if event_type.startswith("network.connection"):
+        return "network"
+    if event_type.startswith("semantic."):
+        return "specialized"
+    return None
+
+
+def _entity_type(entity: object) -> str | None:
+    if not isinstance(entity, dict):
+        return None
+    value = entity.get("type")
+    return value if isinstance(value, str) and value else None
+
+
+def _single_or_none(values: set[Any]) -> Any | None:
+    if len(values) != 1:
+        return None
+    return next(iter(values))
+
+
+@dataclass
+class FidelityAccumulator:
+    """Summarize what a stream can and cannot substantiate.
+
+    Fidelity is intentionally orthogonal to finding severity. It describes capture
+    and attribution strength, not whether an observed behavior is benign or severe.
+    The accumulator retains bounded counters/sets of vocabulary values, never raw
+    event objects.
+    """
+
+    backends: set[str] = field(default_factory=set)
+    session_ids: set[str] = field(default_factory=set)
+    platforms: set[str] = field(default_factory=set)
+    configured_process_poll_intervals_ms: set[float] = field(default_factory=set)
+    filesystem_requested_values: set[bool] = field(default_factory=set)
+    filesystem_collected_values: set[bool] = field(default_factory=set)
+    filesystem_scope_downgraded_values: set[bool] = field(default_factory=set)
+    network_requested_values: set[bool] = field(default_factory=set)
+    network_collected_values: set[bool] = field(default_factory=set)
+    network_collection_statuses: set[str] = field(default_factory=set)
+    attribution_modes: dict[str, set[str]] = field(
+        default_factory=lambda: {
+            "process": set(),
+            "filesystem": set(),
+            "network": set(),
+            "specialized": set(),
+        }
+    )
+    event_type_counts: dict[str, int] = field(default_factory=dict)
+    unresolved_process_references: int = 0
+    observed_process_count: int = 0
+    event_count: int = 0
+
+    def observe(self, event: dict[str, Any]) -> None:
+        self.event_count += 1
+        session_id = event.get("session_id")
+        if isinstance(session_id, str) and session_id:
+            self.session_ids.add(session_id)
+
+        event_type = event.get("event_type")
+        if not isinstance(event_type, str):
+            event_type = "unknown"
+        self.event_type_counts[event_type] = self.event_type_counts.get(event_type, 0) + 1
+        if event_type == "process.started" and _entity_type(event.get("target")) == "process":
+            self.observed_process_count += 1
+
+        attributes = event.get("attributes")
+        if not isinstance(attributes, dict):
+            attributes = {}
+        backend = attributes.get("backend")
+        if isinstance(backend, str) and backend:
+            self.backends.add(backend)
+
+        if event_type == "session.started":
+            platform = attributes.get("platform")
+            if isinstance(platform, str) and platform:
+                self.platforms.add(platform)
+            interval = attributes.get("configured_process_poll_interval_ms")
+            if isinstance(interval, (int, float)) and not isinstance(interval, bool) and interval > 0:
+                self.configured_process_poll_intervals_ms.add(float(interval))
+            for key, target in (
+                ("filesystem_requested", self.filesystem_requested_values),
+                ("filesystem_collected", self.filesystem_collected_values),
+                ("filesystem_scope_downgraded", self.filesystem_scope_downgraded_values),
+                ("network_requested", self.network_requested_values),
+                ("network_collected", self.network_collected_values),
+            ):
+                value = attributes.get(key)
+                if isinstance(value, bool):
+                    target.add(value)
+
+        if event_type == "session.finished":
+            network_status = attributes.get("network_collection_status")
+            if isinstance(network_status, str) and network_status:
+                self.network_collection_statuses.add(network_status)
+
+        for entity in (event.get("source"), event.get("target")):
+            entity_backend = _entity_backend(entity)
+            if entity_backend:
+                self.backends.add(entity_backend)
+            if isinstance(entity, dict):
+                entity_type = entity.get("type")
+                entity_attributes = entity.get("attributes")
+                if entity_type == "process_reference" or (
+                    isinstance(entity_attributes, dict)
+                    and entity_attributes.get("unresolved") is True
+                ):
+                    self.unresolved_process_references += 1
+
+        channel = _channel_for_event(event_type)
+        if channel is not None:
+            mode = _normalized_attribution(event_type, attributes.get("attribution"))
+            if mode is not None:
+                self.attribution_modes[channel].add(mode)
+
+    def to_dict(self) -> dict[str, Any]:
+        modes: dict[str, list[str]] = {}
+        for channel, values in self.attribution_modes.items():
+            modes[channel] = sorted(values) if values else ["absent"]
+
+        supported: set[str] = set()
+        not_supported: set[str] = {
+            "byte_level_dataflow",
+            "tamper_evident_evidence",
+            "complete_process_tree",
+        }
+
+        if "syscall_attributed" in self.attribution_modes["filesystem"]:
+            supported.add("process_attributed_file_access")
+        else:
+            not_supported.add("process_attributed_file_access")
+
+        if (
+            "syscall_attributed" in self.attribution_modes["network"]
+            or "process_polled" in self.attribution_modes["network"]
+        ):
+            supported.add("process_attributed_network")
+        else:
+            not_supported.add("process_attributed_network")
+
+        if "portable" in self.backends or "process_polled" in self.attribution_modes["process"]:
+            not_supported.add("short_lived_process_capture")
+        elif "syscall_attributed" in self.attribution_modes["process"]:
+            supported.add("short_lived_process_capture")
+        else:
+            not_supported.add("short_lived_process_capture")
+
+        sampled = bool(self.configured_process_poll_intervals_ms) or any(
+            "process_polled" in self.attribution_modes[channel]
+            for channel in ("process", "network")
+        )
+
+        configured_interval = _single_or_none(self.configured_process_poll_intervals_ms)
+        filesystem_scope_downgraded = _single_or_none(
+            self.filesystem_scope_downgraded_values
+        )
+        network_collection_status = _single_or_none(self.network_collection_statuses)
+        capture_context = {
+            "platform": _single_or_none(self.platforms),
+            "configured_process_poll_interval_ms": configured_interval,
+            "filesystem_requested": _single_or_none(self.filesystem_requested_values),
+            "filesystem_collected": _single_or_none(self.filesystem_collected_values),
+            "filesystem_scope_downgraded": filesystem_scope_downgraded,
+            "network_requested": _single_or_none(self.network_requested_values),
+            "network_collected": _single_or_none(self.network_collected_values),
+        }
+        # Preserve the fidelity 0.1 shape for old streams that have no terminal
+        # network-health declaration. New collectors add the field only when the
+        # health state is actually observed.
+        if network_collection_status is not None:
+            capture_context["network_collection_status"] = network_collection_status
+
+        limitations: list[str] = [
+            "ExecWeave does not establish byte-level dataflow from these observations.",
+            "No current run artifact is an adversary-resistant trust anchor for its own evidence files.",
+        ]
+        if "portable" in self.backends:
+            if configured_interval is not None:
+                limitations.append(
+                    "Portable process/network collection is sampled at a configured "
+                    f"{configured_interval:g} ms interval; scheduler delay can make actual "
+                    "observation gaps longer, and activity that exists entirely between "
+                    "observations may be missed."
+                )
+            else:
+                limitations.append(
+                    "Portable process/network collection is sampled and may miss activity that exists entirely between samples."
+                )
+        if "strace" in self.backends:
+            limitations.append(
+                "Strace evidence is limited to the traced command lineage and selected syscall classes; it is not OS-wide visibility."
+            )
+        if filesystem_scope_downgraded is True:
+            limitations.append(
+                "Filesystem collection was requested but disabled for this run by the broad-scope safety guard."
+            )
+        if "session_correlated" in self.attribution_modes["filesystem"]:
+            limitations.append(
+                "Session-correlated filesystem changes do not prove which process performed the write."
+            )
+        if network_collection_status == "unavailable":
+            limitations.append(
+                "Network collection was requested but no process network sample succeeded; permission or OS errors prevented reliable network observation."
+            )
+        elif network_collection_status == "degraded":
+            limitations.append(
+                "Network collection was only partially available; at least one process network sample failed even though other samples succeeded."
+            )
+        if self.unresolved_process_references:
+            limitations.append(
+                "At least one observed process-start relationship referenced a parent that was not resolved in collector state; this proves incomplete parentage resolution, not a count of missed processes."
+            )
+
+        session_id = next(iter(self.session_ids)) if len(self.session_ids) == 1 else None
+        return {
+            "fidelity_schema_version": FIDELITY_SCHEMA_VERSION,
+            "session_id": session_id,
+            "backend_observed": sorted(self.backends),
+            "event_count": self.event_count,
+            "observed_process_count": self.observed_process_count,
+            "capture_context": capture_context,
+            "attribution_modes": modes,
+            "sampled_evidence_present": sampled,
+            "unresolved_process_references": self.unresolved_process_references,
+            "missed_process_lower_bound": None,
+            "claims_supported": sorted(supported),
+            "claims_not_supported": sorted(not_supported),
+            "limitations": limitations,
+        }
+
+
+def derive_fidelity(events: list[dict[str, Any]]) -> dict[str, Any]:
+    accumulator = FidelityAccumulator()
+    for event in events:
+        accumulator.observe(event)
+    return accumulator.to_dict()
+
+
+def write_fidelity_report(report: dict[str, Any], path: str | Path) -> Path:
+    """Write one derived fidelity declaration without mutating canonical evidence."""
+    output = private_artifact_path(path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    if output.exists() and output.stat().st_size > 0:
+        raise FileExistsError(f"ExecWeave fidelity artifact already exists: {output}")
+    write_private_json(output, report)
+    return output

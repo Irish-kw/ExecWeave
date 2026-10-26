@@ -1,0 +1,370 @@
+<p align="center">
+  <img src="docs/assets/shot5_brand.jpg" alt="ExecWeave" width="100%">
+</p>
+
+# ExecWeave
+
+<!-- i18n-nav:start -->
+<p align="center">
+  <a href="README.md">English</a> |
+  <a href="README.zh-TW.md">繁體中文</a> |
+  <a href="README.zh-CN.md">简体中文</a> |
+  <a href="README.ja.md">日本語</a> |
+  <a href="README.ko.md">한국어</a> |
+  <strong>Français</strong> |
+  <a href="README.de.md">Deutsch</a> |
+  <a href="README.ru.md">Русский</a>
+</p>
+<!-- i18n-nav:end -->
+
+<p align="center">
+  <a href="https://pypi.org/project/execweave/"><img src="https://img.shields.io/pypi/v/execweave" alt="PyPI"></a>
+  <a href="https://github.com/Irish-kw/ExecWeave/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Irish-kw/ExecWeave/ci.yml?branch=main" alt="CI"></a>
+  <img src="https://img.shields.io/badge/Python-3.10%2B-blue" alt="Python 3.10+">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue" alt="License"></a>
+</p>
+
+**Voyez ce que les agents IA font réellement sur votre machine.**
+
+**Dans les flux d’agents à plusieurs rôles, ExecWeave signale automatiquement les transmissions enregistrées dont l’événement d’envoi n’a pas d’événement de réception correspondant observé. Il identifie l’émetteur et le destinataire et consigne `message_receive_not_observed` dans `graph.json`. Il s’agit d’une lacune d’observation, non d’une preuve d’échec de livraison.**
+
+ExecWeave est un projet d’observabilité local-first pour les agents IA et les outils de développement assistés par IA. Il combine la sémantique fournie par les providers avec les preuves d’exécution observées au niveau du système d’exploitation, puis les présente dans un Execution Graph interactif sans confondre les différents niveaux de preuve.
+
+> **Les events sont les preuves. Le graph est une vue matérialisée à partir de ces preuves.**
+
+<p align="center">
+  <img src="docs/assets/codex.gif" alt="Démonstration du dashboard ExecWeave" width="100%">
+</p>
+
+## Pourquoi ExecWeave
+
+Un agent peut déclarer qu’il a utilisé un outil, modifié un fichier ou contacté un service. Cette information sémantique est utile, mais elle n’est pas équivalente à ce qui a réellement été observé par le système d’exploitation. ExecWeave permet d’inspecter ces couches ensemble tout en conservant leur différence de force probante.
+
+- **Un même Dashboard pour le Live et le Finished.** La page en cours d’exécution, le run terminé et le `viewer.html` autonome utilisent le même modèle de graph et de conversation.
+- **Sémantique aware des providers.** Hooks, rollout transcripts, plugins et runtime APIs sont utilisés lorsqu’ils sont réellement exposés.
+- **Preuves OS runtime.** Process, File et Network endpoint peuvent être observés indépendamment de ce que l’agent affirme.
+- **Attribution fondée sur les preuves.** Direct observation, exact identity, inférence conservatrice et causal claim restent distincts.
+- **Stockage local-first.** Les run artifacts restent sur votre machine tant que vous ne choisissez pas de les partager.
+- **Pas limité à un seul agent.** Une commande locale ordinaire peut être observée même sans adapter spécialisé.
+
+## Installation
+
+Depuis PyPI :
+
+```bash
+python -m pip install -U execweave
+```
+
+Pour le développement :
+
+```bash
+git clone https://github.com/Irish-kw/ExecWeave.git
+cd ExecWeave
+python -m pip install -e ".[dev]"
+```
+
+## Démarrage rapide
+
+Créez d'abord un environnement virtuel isolé, sans sudo :
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -U execweave
+```
+
+Windows PowerShell: `.venv\Scripts\Activate.ps1`.
+
+Avant les hooks, exécutez l'exemple intégré :
+
+```bash
+python -m execweave.observation_demo --output-dir ./observation-negative
+```
+
+La tâche de l’exemple peut réussir alors que les preuves d’observation restent incomplètes. Vérifiez `observation-negative/graph.json` et `observation-negative/finalization.json` : `execution_state=succeeded` ne prouve ni une observation complète ni une validation indépendante de la tâche.
+
+Autorisez ensuite explicitement le hook du provider, toujours sans sudo :
+
+```bash
+execweave hooks install antigravity
+execweave hooks status antigravity
+```
+
+
+Encapsulez n’importe quelle commande locale avec `execweave live` :
+
+```bash
+execweave live --open -- claude
+execweave live --open -- codex
+execweave live --open -- agy
+execweave live --open -- cursor
+execweave live --open -- opencode
+```
+
+Pour produire surtout des artifacts finalisés :
+
+```bash
+execweave record --open -- codex
+```
+
+Pour garder le programme interactif dans le terminal courant tout en ouvrant une vue séparée :
+
+```bash
+execweave top -- codex
+```
+
+### Autorisation de l’intégration Provider
+
+Depuis la version 0.8.35, `live` vérifie uniquement la configuration des hooks : il ne les installe ni ne les modifie. Exécutez explicitement `execweave hooks install antigravity` (ou `claude`, `codex`, `cursor`, `opencode`) dans votre environnement utilisateur, sans sudo. `execweave hooks status antigravity` contrôle la configuration sans écriture. Une autorisation supplémentaire du provider peut rester nécessaire. **Un hook configuré ne prouve pas la réception des preuves.** L’absence de preuve de réception et l’observation incomplète sont enregistrées indépendamment du code de sortie.
+
+Consultez [l’intégrité des observations et l’exemple négatif](docs/observation-integrity.md) pour les trois axes de résultat et leurs limites. Ces changements sont disponibles depuis la version 0.8.35, pas dans les versions précédentes.
+
+**Confidentialité et authentification Live (0.8.35)**
+
+Par défaut, `execweave live` et `execweave top` enregistrent l’intégralité du contenu provider/modèle exposé par l’intégration (prompts, réponses, valeurs des outils), car l’exécution reste sur votre machine. Pour éviter de conserver ce texte en clair, utilisez `--metadata-only`. `--capture-content` sélectionne explicitement le comportement par défaut. Une politique de capture invalide déclenche un repli sécurisé vers metadata-only aux frontières des enregistreurs automatiques.
+
+Le dashboard Live ne place plus d’identifiant API dans `?t=...`. L’URL affichée ne contient aucun identifiant. Le navigateur échange un code d’association à usage unique envoyé dans le corps POST contre un cookie `HttpOnly; SameSite=Strict` ; les clients API utilisent l’en-tête privé `X-ExecWeave-Token`.
+
+Google Antigravity utilise actuellement la commande CLI `agy`. ExecWeave accepte aussi `antigravity` comme alias plus lisible.
+
+Sous Windows, un simple `cursor` suit l’installation de Cursor indiquée par le PATH de l’utilisateur. Un chemin de launcher explicite est conservé tel quel.
+
+## Ollama
+
+ExecWeave prend en charge deux workflows locaux courants avec Ollama.
+
+### Managed server capture
+
+Démarrez le serveur Ollama via ExecWeave :
+
+```bash
+execweave live --open -- ollama serve
+```
+
+Puis utilisez Ollama normalement dans un autre terminal :
+
+```bash
+ollama run deepseek-r1:1.5b
+```
+
+Les appels SDK, requêtes locales OpenAI-compatible et requêtes `curl` envoyées au managed local endpoint peuvent être associés au même run ExecWeave. Le second terminal n’a pas besoin d’un autre wrapper ExecWeave.
+
+Le managed relay est volontairement limité aux endpoints loopback locaux et ne réécrit pas les listeners wildcard ou exposés à l’extérieur.
+
+### Direct client capture
+
+Si un serveur Ollama est déjà disponible, vous pouvez encapsuler directement le client :
+
+```bash
+execweave live --open -- ollama run deepseek-r1:1.5b
+```
+
+Ce mode ne démarre pas le serveur Ollama ; un upstream server accessible reste nécessaire.
+
+## Dashboard
+
+Le Dashboard est conçu pour garder les runs volumineux et multi-agents lisibles sans modifier les preuves sous-jacentes.
+
+- **Execution graph :** Agent, Process, File, Network endpoint, Tool, Model/runtime entity et relations prises en charge.
+- **Conversation rounds :** les rounds récents et historiques restent attachés au bon agent au lieu d’être écrasés par des messages plus récents.
+- **Node details :** inspection de l’identité Process, de l’historique File, des Network endpoints, des Tools et du contenu de conversation fourni par les providers.
+- **Stable live updates :** la même page se met à jour au fil du run au lieu d’être remplacée entièrement.
+- **Large-run folding :** les anciens membres des types très nombreux peuvent être repliés tout en restant inspectables.
+- **Selection-focused layout :** les éléments sans rapport avec la sélection courante sont visuellement atténués.
+
+Pour les grands runs :
+
+```text
+--fold-budget N
+--viewer-max-nodes N
+--viewer-max-edges N
+--viewer-max-dom-elements N
+```
+
+## Intégrations prises en charge
+
+| Integration | Observation OS runtime | Evidence spécialisée |
+| --- | --- | --- |
+| Claude Code | Oui lorsqu’il est lancé sous ExecWeave | native hooks et contenu conversation/tool fourni par le provider |
+| OpenAI Codex | Oui | lifecycle hooks, validated rollout transcripts, routage agent/subagent lorsqu’il est exposé |
+| Google Antigravity | Oui | passive hooks et routage conversation/subagent lorsqu’il est exposé |
+| Cursor | Oui | native hooks et routage task/subagent lorsqu’il est exposé |
+| OpenCode | Oui | project plugin, session/task routing, contenu fourni par le plugin |
+| Ollama | Oui | managed local relay et model-runtime evidence |
+| llama.cpp | Oui | model-runtime event/exchange/probe |
+| vLLM | Oui | model-runtime event/exchange/probe |
+| LM Studio | Lorsque le process local peut être observé | model-runtime catalog/runtime evidence |
+| LiteLLM Proxy | Lorsque le proxy local peut être observé | gateway metadata et event integration |
+| OpenRouter | Client local uniquement | caller-supplied gateway event/exchange evidence |
+
+Les identifiants tels qu’un tool-call ID, session ID, rollout thread ID ou subagent route sont des identités logiques du provider. Ce ne sont pas automatiquement des OS PID. ExecWeave ne relie les couches que lorsque les preuves disponibles le permettent.
+
+## Modèle de preuve
+
+ExecWeave sépare plusieurs couches principales :
+
+```text
+Agent / IDE semantics et supplied content
+                ↓
+Inference gateway / routing evidence
+                ↓
+Model runtime / inference-server evidence
+                ↓
+OS runtime evidence: process / file / network
+```
+
+Une relation n’est marquée comme causal que si la télémétrie sous-jacente soutient réellement cette affirmation. Les ponts conservateurs restent explicitement des preuves dérivées :
+
+```text
+inferred: true
+causal: false
+```
+
+Une exact shared request identity peut établir une identité sans établir une causalité :
+
+```text
+identity_exact: true
+inferred: false
+causal: false
+```
+
+Si l’attribution reste ambiguë, ExecWeave préfère ne pas créer l’edge plutôt que d’inventer une relation plus forte.
+
+### Full-fidelity supplied content
+
+Les hooks, plugins ou APIs pris en charge peuvent conserver les valeurs complètes explicitement fournies par l’intégration dans un store local adressé par SHA-256 :
+
+```text
+<run-root>/content/sha256/<sha256>.<json|txt|bin>
+```
+
+Selon l’intégration, cela peut inclure Prompt, Message, Request/Response object, Tool input/result, Assistant response, reasoning text explicitement exposé, Shell output et supplied file content.
+
+`complete_from_source: true` signifie qu’ExecWeave a conservé la valeur complète reçue à ce point d’intégration. Cela ne signifie pas qu’ExecWeave a observé un état interne du modèle ou des données Provider jamais exposées.
+
+## Commandes courantes
+
+### Agent / IDE recorder
+
+```bash
+execweave-claude-record --open -- claude
+execweave-codex-record --open -- codex
+execweave-antigravity-record --open -- antigravity
+execweave-cursor-record --open -- cursor
+execweave-opencode-plugin --install
+execweave-opencode-record --open -- opencode
+```
+
+### Gateway / model runtime
+
+```bash
+execweave-inference-gateway event --gateway openrouter --sidecar gateway.jsonl
+execweave-inference-gateway exchange --gateway openrouter --sidecar gateway.jsonl
+execweave-model-runtime event --runtime ollama --sidecar model-runtime.jsonl
+execweave-model-runtime exchange --runtime ollama --sidecar model-runtime.jsonl
+execweave-model-runtime probe --runtime ollama --sidecar model-runtime.jsonl
+```
+
+`event` représente une preuve unilatérale. `exchange` conserve une paire request/response fournie par le caller et ne prétend pas réaliser une interception transparente du trafic réseau.
+
+### Runtime / Graph / sécurité / intégrité
+
+```bash
+execweave doctor
+execweave run --backend portable -- your-command
+execweave run --backend strace -- your-command
+execweave graph-summary run.graph.json
+execweave graph-filter run.graph.json --causal-only --output causal.graph.json
+execweave graph-focus run.graph.json NODE_ID --hops 2 --output focused.graph.json
+execweave path run.graph.json SOURCE TARGET --causal-only
+execweave analyze run.graph.json --output analysis.json
+execweave-rule-pack graph.json --rule-pack local-policy.json --output report.json
+execweave-integrity seal .execweave/runs/<run-id>
+execweave-integrity verify .execweave/runs/<run-id>
+```
+
+## Run artifacts
+
+Un run avec intégration Provider peut contenir :
+
+```text
+.execweave/runs/<run-id>/
+├── events.jsonl
+├── graph.json
+├── viewer.html
+├── semantic.jsonl
+├── content/sha256/...
+├── conversations.md
+├── conversations.json
+├── events.semantic.jsonl
+├── graph.semantic.json
+├── viewer.semantic.html
+├── events.correlated.jsonl
+├── graph.correlated.json
+├── viewer.correlated.html
+└── integrity.json
+```
+
+Les observations brutes restent séparées des outputs semantic/correlation dérivés.
+
+## Limites et confidentialité
+
+- Le portable collector fonctionne sous Linux, macOS et Windows. L’observation filesystem portable est session-correlated plutôt que systématiquement process-causal, et le polling peut manquer des activités très brèves.
+- **Identité de durée de vie des process :** le suivi portable distingue la réutilisation d’un PID grâce au process creation time. Un PID réutilisé est enregistré comme une nouvelle durée de vie de process au lieu d’être fusionné avec le process précédent.
+- **État degraded explicite :** à la fin du collector, l’état de la collecte réseau est enregistré comme `available`, `degraded`, `unavailable`, `not_sampled` ou `not_requested`. Une conversation Live n’est considérée synchronized qu’après le succès du dernier conversation fetch ; l’arrêt du polling ne suffit pas à déclarer la synchronisation réussie.
+- **Nettoyage de l’ownership en cas d’échec :** si le portable collector échoue de façon inattendue après avoir lancé un managed workload, il termine le workload qu’il possède avant d’enregistrer l’état terminal de la session. Un filesystem observer qui ne démarre que partiellement est également détruit avant que l’erreur de démarrage ne soit propagée.
+- Linux dispose aussi d’un backend de référence `strace`, qui fournit des preuves syscall-attributed plus fortes pour les exécutions prises en charge.
+- La couverture Provider semantic dépend entièrement de ce que chaque intégration expose réellement. Les Prompt non exposés, hidden reasoning, internals de providers distants et routages invisibles ne peuvent pas être reconstruits de manière fiable.
+- Le contenu full-fidelity peut contenir Credential, Secret, Source code, Prompt, Tool value, Model response, Shell output et File content.
+- Conversation isolation est une règle d’attribution, pas une frontière de redaction. Un contenu explicitement routé peut légitimement apparaître chez plusieurs participants.
+- Un local integrity manifest détecte les changements par rapport au manifest, mais n’est pas un système de trusted logging résistant à un adversaire si les preuves et le manifest restent dans la même writable trust boundary.
+- Vérifiez l’intégralité du run directory avant de le partager.
+
+## Développement
+
+Tests :
+
+```bash
+python -m pytest
+```
+
+Lint :
+
+```bash
+python -m ruff check .
+```
+
+Les Issues et Pull Requests sont les bienvenues. Pour toute nouvelle intégration, distinguez clairement les preuves directement observées, celles fournies par le Provider et celles dérivées.
+
+## Licence
+
+ExecWeave est distribué sous la **PolyForm Noncommercial License 1.0.0**. Consultez [LICENSE](LICENSE) pour les conditions complètes.
+## Framework Adapter SDK
+
+ExecWeave includes an optional authoritative adapter SDK for CAMEL Workforce,
+AutoGen AgentChat/Core, and MetaGPT. Adapters emit canonical agent, task,
+message, model, and tool records; they do not infer logical conversations from
+process names or network traffic. Content capture is opt-in and hidden
+reasoning/private reasoning is never captured by the SDK. Transport credentials
+are removed from semantic metadata.
+
+See [the framework adapter guide](docs/framework-adapters.md) for the public
+API, compatibility matrix, live/final parity contract, and official CAMEL,
+AutoGen, and MetaGPT paper references. Current framework versions still require
+the corresponding optional dependency and an authoritative callback or event
+boundary in the application.
+
+Paper context: Li et al., *CAMEL: Communicative Agents for "Mind" Exploration of Large Language Model Society* ([arXiv:2303.17760](https://arxiv.org/abs/2303.17760), 2023); Wu et al., *AutoGen: Enabling Next-Gen LLM Applications via Multi-Agent Conversation* ([arXiv:2308.08155](https://arxiv.org/abs/2308.08155), 2023); Hong et al., *MetaGPT: Meta Programming for a Multi-Agent Collaborative Framework* ([OpenReview, ICLR 2024](https://openreview.net/forum?id=VtmBAGCN7o)).
+
+```python
+from execweave.framework_adapters import AdapterContext, CAMELAdapter
+adapter = CAMELAdapter(AdapterContext.from_environment("camel"))
+```
+
+## Intégration native du SDK OpenAI Agents
+
+ExecWeave fournit un processeur de traçage optionnel pour les applications utilisant `Agent`, `Runner.run` et `@function_tool`. Installez `execweave[agents]` et appelez `install_agents_sdk_tracing(capture_mode="metadata_only")` avant toute exécution. Les événements et leurs sources sont enregistrés sans assimiler un résultat d'outil à une preuve d'effet sur le système distant. Consultez [le guide du SDK](docs/openai-agents-sdk.md).
+
+## Python personnalisé avec une clé API OpenAI
+
+Lancez `execweave record -- python my_agent.py` ou `execweave live --open -- python my_agent.py` pour observer l'exécution. Pour **enregistrer les appels modèle et transferts entre un ou plusieurs agents**, enveloppez le SDK officiel dans `OpenAIAgentRecorder` et déclarez explicitement les envois et réceptions. L'adaptateur ne lit pas la clé API et ne déduit pas les rôles d'une connexion HTTPS. Voir le [guide Python OpenAI](docs/openai-python.md).
