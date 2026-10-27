@@ -1,0 +1,39 @@
+name: Package Smoke
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "pyproject.toml"
+      - "src/**"
+      - "scripts/canonicalize_wheel.py"
+      - "scripts/check_wheel_install.py"
+      - "scripts/check_sdist_install.py"
+      - "scripts/check_distribution_contents.py"
+      - ".github/workflows/package-smoke.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  wheel:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build canonical wheel and hermetic sdist
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build twine
+          python -m build
+          python scripts/canonicalize_wheel.py dist
+          python -m twine check dist/*
+      - name: Verify distribution contents match runtime source
+        run: python scripts/check_distribution_contents.py
+      - name: Clean wheel install/uninstall/reinstall
+        run: python scripts/check_wheel_install.py
+      - name: Clean sdist install/uninstall/reinstall
+        run: python scripts/check_sdist_install.py

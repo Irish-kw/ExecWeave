@@ -1,0 +1,322 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      full_matrix:
+        description: Run the full 3-OS x Python 3.10/3.12 compatibility matrix
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      mode: ${{ steps.matrix.outputs.mode }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: matrix
+        name: Choose CI matrix
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref }}
+          BEFORE_SHA: ${{ github.event.before }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          CURRENT_SHA: ${{ github.sha }}
+          FULL_MATRIX: ${{ inputs.full_matrix }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import subprocess
+
+          event = os.environ.get("EVENT_NAME", "")
+          ref = os.environ.get("REF_NAME", "")
+          full_requested = os.environ.get("FULL_MATRIX", "").lower() == "true"
+
+          if ref.startswith("refs/tags/v") or (event == "workflow_dispatch" and full_requested):
+              mode = "full"
+              systems = ["ubuntu-latest", "macos-latest", "windows-latest"]
+              versions = ["3.10", "3.12"]
+          else:
+              before = os.environ.get("BEFORE_SHA", "")
+              base = os.environ.get("BASE_SHA", "")
+              current = os.environ.get("CURRENT_SHA", "HEAD")
+              if event == "pull_request" and base:
+                  diff_base = base
+              elif before and set(before) != {"0"}:
+                  diff_base = before
+              else:
+                  diff_base = f"{current}^"
+
+              try:
+                  output = subprocess.check_output(
+                      ["git", "diff", "--name-only", diff_base, current],
+                      text=True,
+                      stderr=subprocess.DEVNULL,
+                  )
+                  changed = [line.strip() for line in output.splitlines() if line.strip()]
+              except (subprocess.CalledProcessError, OSError):
+                  changed = ["src/"]
+
+              cross_platform_prefixes = (
+                  "src/",
+                  "tests/",
+                  "scripts/",
+                  ".github/workflows/",
+                  ".github/actions/",
+              )
+              cross_platform_files = {"pyproject.toml"}
+              cross_platform = any(
+                  path in cross_platform_files
+                  or any(path.startswith(prefix) for prefix in cross_platform_prefixes)
+                  for path in changed
+              )
+              mode = "cross-platform" if cross_platform else "quick"
+              systems = (
+                  ["ubuntu-latest", "macos-latest", "windows-latest"]
+                  if cross_platform
+                  else ["ubuntu-latest"]
+              )
+              versions = ["3.10", "3.12"] if cross_platform else ["3.12"]
+
+          matrix = {
+              "include": [
+                  {"os": system, "python-version": version}
+                  for system in systems
+                  for version in versions
+              ]
+          }
+          print(f"CI mode: {mode}")
+          print(json.dumps(matrix, indent=2))
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+              handle.write(f"mode={mode}\n")
+              handle.write("matrix=" + json.dumps(matrix, separators=(",", ":")) + "\n")
+          PY
+
+  test:
+    needs: plan
+    name: test (${{ matrix.os }}, ${{ matrix.python-version }})
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    env:
+      EXECWEAVE_E2E_REQUIRED: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install strace on Linux
+        if: runner.os == 'Linux'
+        run: command -v strace >/dev/null || (sudo apt-get update && sudo apt-get install -y strace)
+      - name: Install
+        run: |
+          python -m pip install -e ".[dev,e2e,agents]"
+          python -m playwright install --with-deps chromium
+      - name: Capture exact acceptance source
+        run: python scripts/acceptance_source_provenance.py --output acceptance-source-before.json
+      - name: Ruff
+        run: ruff check .
+      - name: OpenAI Agents SDK offline native trace smoke
+        run: python scripts/smoke_openai_agents_sdk.py
+      - name: Tests
+        shell: bash
+        run: |
+          pytest_args=(-q --junitxml=pytest-results.xml)
+          if [ "$RUNNER_OS" != "Windows" ]; then
+            # Cursor's launcher-to-GUI handoff is Windows-native. The Windows
+            # matrix exercises it; Unix runners must not execute Windows-path
+            # fixtures and report a false cross-platform failure.
+            pytest_args+=(--ignore tests/test_cursor_lifecycle_handoff.py)
+          fi
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            xvfb-run -a python -m pytest "${pytest_args[@]}"
+          else
+            python -m pytest "${pytest_args[@]}"
+          fi
+      - name: Annotate pytest failures
+        if: failure() && hashFiles('pytest-results.xml') != ''
+        run: python scripts/annotate_pytest_failures.py pytest-results.xml
+      - name: Claude hook command smoke
+        run: python scripts/check_claude_hook.py
+      - name: Claude run-bound semantic and correlation smoke
+        run: execweave-claude-record --backend auto --no-files --no-network --output-dir claude-record-smoke -- python scripts/emit_claude_hook_smoke.py
+      - name: Validate Claude runtime stream
+        run: execweave validate claude-record-smoke/events.jsonl
+      - name: Validate Claude merged stream
+        run: execweave validate claude-record-smoke/events.semantic.jsonl
+      - name: Verify Claude semantic graph
+        run: python scripts/check_claude_record_graph.py claude-record-smoke/graph.semantic.json
+      - name: Validate automatic correlated stream
+        run: execweave validate claude-record-smoke/events.correlated.jsonl
+      - name: Verify automatic conservative correlation edge
+        run: python scripts/check_correlation_graph.py claude-record-smoke/graph.correlated.json
+      - name: Check correlated standalone viewer JavaScript syntax
+        run: python scripts/check_viewer_js.py claude-record-smoke/viewer.correlated.html --output claude-record-smoke/viewer.correlated.js
+      - name: Verify Claude materialized conversations
+        run: >
+          python scripts/check_conversation_records.py claude-record-smoke
+          --expect-agent /root
+          --expect-root-text "CI CLAUDE PROMPT"
+          --expect-root-text "CI CLAUDE FINAL ANSWER"
+      - name: Cursor run-bound semantic and correlation smoke
+        run: execweave-cursor-record --backend auto --no-files --no-network --output-dir cursor-record-smoke -- python scripts/emit_cursor_hook_smoke.py
+      - name: Validate Cursor runtime stream
+        run: execweave validate cursor-record-smoke/events.jsonl
+      - name: Validate Cursor merged stream
+        run: execweave validate cursor-record-smoke/events.semantic.jsonl
+      - name: Validate Cursor correlated stream
+        run: execweave validate cursor-record-smoke/events.correlated.jsonl
+      - name: Verify Cursor conservative correlation edge
+        run: python scripts/check_correlation_graph.py cursor-record-smoke/graph.correlated.json
+      - name: Check Cursor correlated viewer JavaScript syntax
+        run: python scripts/check_viewer_js.py cursor-record-smoke/viewer.correlated.html --output cursor-record-smoke/viewer.correlated.js
+      - name: Verify Cursor materialized conversations
+        run: >
+          python scripts/check_conversation_records.py cursor-record-smoke
+          --expect-agent /root
+          --expect-root-text "CI CURSOR PROMPT"
+          --expect-root-text "CI CURSOR FINAL ANSWER"
+      - name: OpenCode plugin installer smoke
+        run: execweave-opencode-plugin --install --root opencode-plugin-smoke
+      - name: OpenCode run-bound semantic and correlation smoke
+        run: execweave-opencode-record --backend auto --no-files --no-network --output-dir opencode-record-smoke -- python scripts/emit_opencode_plugin_smoke.py
+      - name: Validate OpenCode runtime stream
+        run: execweave validate opencode-record-smoke/events.jsonl
+      - name: Validate OpenCode merged stream
+        run: execweave validate opencode-record-smoke/events.semantic.jsonl
+      - name: Validate OpenCode correlated stream
+        run: execweave validate opencode-record-smoke/events.correlated.jsonl
+      - name: Verify OpenCode conservative correlation edge
+        run: python scripts/check_correlation_graph.py opencode-record-smoke/graph.correlated.json
+      - name: Check OpenCode correlated viewer JavaScript syntax
+        run: python scripts/check_viewer_js.py opencode-record-smoke/viewer.correlated.html --output opencode-record-smoke/viewer.correlated.js
+      - name: Verify OpenCode materialized conversations
+        run: >
+          python scripts/check_conversation_records.py opencode-record-smoke
+          --expect-agent /root
+          --expect-root-text "CI OPENCODE FINAL ANSWER"
+          --forbid-agent /root/ci-opencode-session
+      - name: Codex hook command smoke
+        run: python scripts/check_codex_hook.py
+      - name: Codex run-bound semantic and correlation smoke
+        run: execweave-codex-record --backend auto --no-files --no-network --output-dir codex-record-smoke -- python scripts/emit_codex_hook_smoke.py
+      - name: Validate Codex runtime stream
+        run: execweave validate codex-record-smoke/events.jsonl
+      - name: Validate Codex merged stream
+        run: execweave validate codex-record-smoke/events.semantic.jsonl
+      - name: Validate Codex correlated stream
+        run: execweave validate codex-record-smoke/events.correlated.jsonl
+      - name: Verify Codex conservative correlation edge
+        run: python scripts/check_correlation_graph.py codex-record-smoke/graph.correlated.json
+      - name: Check Codex correlated viewer JavaScript syntax
+        run: python scripts/check_viewer_js.py codex-record-smoke/viewer.correlated.html --output codex-record-smoke/viewer.correlated.js
+      # Codex reports a subagent stop with the child rollout on agent_transcript_path
+      # and the parent rollout on transcript_path. Assert the child conversation
+      # (not the parent rollout) survives end to end.
+      - name: Verify Codex agent-local subagent conversations
+        run: >
+          python scripts/check_conversation_records.py codex-record-smoke
+          --min-entries 2
+          --expect-agent /root
+          --expect-agent /root/explorer
+          --expect-root-text "CI ROOT PROMPT"
+          --expect-root-text "CI ROOT FINAL ANSWER"
+          --expect-owned "/root=CI ROOT COMMENTARY"
+          --expect-owned "/root/explorer=CI CHILD PRIVATE REASONING"
+          --forbid-agent /root/01a04cea-67b2-7683-9f6b-cd644497b862
+      - name: Model runtime CLI smoke
+        run: python scripts/check_model_runtime_cli.py
+      - name: Inference gateway CLI smoke
+        run: python scripts/check_inference_gateway_cli.py
+      - name: Collector diagnostics
+        run: execweave doctor
+      - name: Portable end-to-end smoke
+        run: execweave run --backend portable --no-files --no-network --output phase1-portable.jsonl -- python -c "print('execweave portable smoke')"
+      - name: Validate portable stream
+        run: execweave validate phase1-portable.jsonl
+      - name: Build semantic telemetry sidecar
+        run: python scripts/make_semantic_smoke.py phase1-portable.jsonl phase1-semantic.jsonl
+      - name: Merge semantic telemetry
+        run: execweave semantic-merge phase1-portable.jsonl phase1-semantic.jsonl --output phase1-semantic-merged.jsonl
+      - name: Validate semantic merged stream
+        run: execweave validate phase1-semantic-merged.jsonl
+      - name: Materialize semantic graph
+        run: execweave graph phase1-semantic-merged.jsonl --output phase1-semantic.graph.json
+      - name: Verify semantic graph relations
+        run: python scripts/check_semantic_graph.py phase1-semantic.graph.json
+      - name: Build semantic standalone viewer
+        run: execweave view phase1-semantic.graph.json --output phase1-semantic.html
+      - name: Materialize portable graph
+        run: execweave graph phase1-portable.jsonl --output phase1-portable.graph.json
+      - name: Build portable standalone viewer
+        run: execweave view phase1-portable.graph.json --output phase1-portable.html
+      - name: Check standalone viewer JavaScript syntax
+        run: python scripts/check_viewer_js.py phase1-portable.html --output phase1-portable.viewer.js
+      - name: Focus portable graph smoke
+        run: python -c "import json, subprocess; g=json.load(open('phase1-portable.graph.json', encoding='utf-8')); a=g['nodes'][0]['id']; subprocess.run(['execweave','graph-focus','phase1-portable.graph.json',a,'--hops','1','--output','phase1-portable.focus.graph.json'], check=True)"
+      - name: Build focused standalone viewer
+        run: execweave view phase1-portable.focus.graph.json --output phase1-portable.focus.html
+      - name: Condense portable graph smoke
+        run: execweave graph-condense phase1-portable.graph.json --output phase1-portable.compact.graph.json --threshold 2 --keep-expansion
+      - name: Build expandable condensed viewer
+        run: execweave view phase1-portable.compact.graph.json --output phase1-portable.compact.html
+      - name: Analyze portable graph smoke
+        run: execweave analyze phase1-portable.graph.json --output phase1-portable.analysis.json
+      - name: One-command record workflow smoke
+        run: execweave record --backend portable --no-files --no-network --output-dir record-smoke -- python -c "print('execweave record smoke')"
+      - name: Validate record workflow stream
+        run: execweave validate record-smoke/events.jsonl
+      - name: Live graph workflow smoke
+        run: execweave live --no-files --no-network --linger 0 --output-dir live-smoke -- python -c "import time; time.sleep(0.2)"
+      - name: Validate live workflow stream
+        run: execweave validate live-smoke/events.jsonl
+      - name: Summarize live workflow graph
+        run: execweave graph-summary live-smoke/graph.json
+      - name: Linux strace end-to-end smoke
+        if: runner.os == 'Linux'
+        run: execweave run --backend strace --no-network --output phase1-strace.jsonl -- python -c "from pathlib import Path; p=Path('ci-phase1.txt'); p.write_text('ok'); p.read_text(); p.unlink()"
+      - name: Validate Linux strace stream
+        if: runner.os == 'Linux'
+        run: execweave validate phase1-strace.jsonl
+      - name: Materialize Linux strace graph
+        if: runner.os == 'Linux'
+        run: execweave graph phase1-strace.jsonl --output phase1-strace.graph.json
+      - name: Phase 1 portable benchmark smoke test
+        if: runner.os == 'Linux' && matrix.python-version == '3.12'
+        run: execweave benchmark --backend portable --iterations 1
+      - name: Verify acceptance did not mutate source
+        if: always() && hashFiles('acceptance-source-before.json') != ''
+        run: python scripts/acceptance_source_provenance.py --output acceptance-source-after.json --compare acceptance-source-before.json
+      - name: Upload test and source provenance
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-provenance-${{ matrix.os }}-${{ matrix.python-version }}
+          path: |
+            pytest-results.xml
+            acceptance-source-before.json
+            acceptance-source-after.json
+          if-no-files-found: error
+          retention-days: 7

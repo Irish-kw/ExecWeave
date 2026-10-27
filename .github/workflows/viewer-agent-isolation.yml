@@ -1,0 +1,120 @@
+name: Viewer Agent Isolation
+
+# Opens the actual dashboard in Chromium, reads the visible root/subagent/non-agent
+# inspectors, compares live with viewer.html, and archives screenshots plus the
+# rendered live.html.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  viewers:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Archive exact source provenance
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/source-provenance"
+          git rev-parse HEAD > "$RUNNER_TEMP/source-provenance/HEAD.txt"
+          git rev-parse HEAD^{tree} > "$RUNNER_TEMP/source-provenance/TREE.txt"
+          git status --porcelain > "$RUNNER_TEMP/source-provenance/status.txt"
+          git bundle create "$RUNNER_TEMP/source-provenance/source.bundle" --all
+
+      - name: Upload exact source provenance
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: source-provenance
+          path: ${{ runner.temp }}/source-provenance
+          if-no-files-found: error
+          retention-days: 7
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: python -m pip install -e ".[dev,e2e]"
+
+      - name: Capture exact browser acceptance source
+        run: python scripts/acceptance_source_provenance.py --output acceptance-source-before.json
+
+      - name: Install Chromium
+        run: python -m playwright install --with-deps chromium
+
+      - name: Read live and viewer.html in a browser (Linux)
+        if: runner.os == 'Linux'
+        env:
+          EXECWEAVE_E2E_REQUIRED: "1"
+          EXECWEAVE_VISUAL_ARTIFACT_DIR: visual-artifacts
+        run: xvfb-run -a python -m pytest -m viewer_e2e -v --junitxml=viewer-pytest-results.xml
+
+      - name: Read live and viewer.html in a browser (macOS/Windows)
+        if: runner.os != 'Linux'
+        env:
+          EXECWEAVE_E2E_REQUIRED: "1"
+          EXECWEAVE_VISUAL_ARTIFACT_DIR: visual-artifacts
+        run: python -m pytest -m viewer_e2e -v --junitxml=viewer-pytest-results.xml
+
+      - name: Annotate viewer pytest failures
+        if: failure() && hashFiles('viewer-pytest-results.xml') != ''
+        run: python scripts/annotate_pytest_failures.py viewer-pytest-results.xml
+
+      - name: Run formal offline dashboard acceptance
+        run: >-
+          python scripts/dashboard_acceptance.py
+          --mode offline
+          --output-dir "${{ github.workspace }}/artifacts/dashboard-acceptance"
+          --require offline-ollama-fixture
+
+      - name: Run formal owned-process cleanup acceptance
+        run: >-
+          python scripts/owned_cleanup_acceptance.py
+          --output-dir "${{ github.workspace }}/artifacts/dashboard-acceptance/owned-cleanup"
+
+      - name: Run formal native Python OS acceptance (Linux)
+        if: runner.os == 'Linux'
+        run: >-
+          xvfb-run -a python scripts/python_native_acceptance.py
+          --output-dir "${{ github.workspace }}/artifacts/dashboard-acceptance/python-native"
+          --require python
+
+      - name: Run formal native Python OS acceptance (macOS/Windows)
+        if: runner.os != 'Linux'
+        run: >-
+          python scripts/python_native_acceptance.py
+          --output-dir "${{ github.workspace }}/artifacts/dashboard-acceptance/python-native"
+          --require python
+
+      - name: Verify browser acceptance did not mutate source
+        if: always() && hashFiles('acceptance-source-before.json') != ''
+        run: python scripts/acceptance_source_provenance.py --output acceptance-source-after.json --compare acceptance-source-before.json
+
+      - name: Upload dashboard visuals and acceptance output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unified-dashboard-visuals-${{ matrix.os }}
+          path: |
+            visual-artifacts
+            artifacts/dashboard-acceptance
+            viewer-pytest-results.xml
+            acceptance-source-before.json
+            acceptance-source-after.json
+          if-no-files-found: error
+          retention-days: 7
