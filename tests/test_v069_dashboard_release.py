@@ -102,7 +102,7 @@ def test_all_readmes_use_current_release_dashboard_and_conversation_anchors() ->
     assert len(readmes) >= 8
     for path in readmes:
         text = path.read_text(encoding="utf-8")
-        assert 'src="docs/assets/codex.gif"' in text, path
+        assert 'src="https://raw.githubusercontent.com/Irish-kw/ExecWeave/main/docs/assets/codex.gif"' in text, path
         assert "execweave-launch-demo-v5-x.gif" not in text, path
         assert hardcoded_release.search(text) is None, path
         assert "conversations.json" in text, path

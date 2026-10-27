@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/shot5_brand.jpg" alt="ExecWeave" width="100%">
+  <img src="https://raw.githubusercontent.com/Irish-kw/ExecWeave/main/docs/assets/shot5_brand.jpg" alt="ExecWeave" width="100%">
 </p>
 
 # ExecWeave
@@ -33,7 +33,7 @@ ExecWeave — это local-first проект наблюдаемости для 
 > **Events — это evidence. Graph — материализованное представление этих evidence.**
 
 <p align="center">
-  <img src="docs/assets/codex.gif" alt="Демонстрация live dashboard ExecWeave" width="100%">
+  <img src="https://raw.githubusercontent.com/Irish-kw/ExecWeave/main/docs/assets/codex.gif" alt="Демонстрация live dashboard ExecWeave" width="100%">
 </p>
 
 ## Зачем нужен ExecWeave

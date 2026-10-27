@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/shot5_brand.jpg" alt="ExecWeave" width="100%">
+  <img src="https://raw.githubusercontent.com/Irish-kw/ExecWeave/main/docs/assets/shot5_brand.jpg" alt="ExecWeave" width="100%">
 </p>
 
 # ExecWeave
@@ -33,7 +33,7 @@ ExecWeave est un projet d’observabilité local-first pour les agents IA et les
 > **Les events sont les preuves. Le graph est une vue matérialisée à partir de ces preuves.**
 
 <p align="center">
-  <img src="docs/assets/codex.gif" alt="Démonstration du dashboard ExecWeave" width="100%">
+  <img src="https://raw.githubusercontent.com/Irish-kw/ExecWeave/main/docs/assets/codex.gif" alt="Démonstration du dashboard ExecWeave" width="100%">
 </p>
 
 ## Pourquoi ExecWeave

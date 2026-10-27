@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/shot5_brand.jpg" alt="ExecWeave" width="100%">
+  <img src="https://raw.githubusercontent.com/Irish-kw/ExecWeave/main/docs/assets/shot5_brand.jpg" alt="ExecWeave" width="100%">
 </p>
 
 # ExecWeave
@@ -33,7 +33,7 @@ ExecWeave ist ein local-first Observability-Projekt fÃ¼r KI-Agenten und KI-gestÃ
 > **Events sind Evidence. Der Graph ist eine daraus materialisierte View.**
 
 <p align="center">
-  <img src="docs/assets/codex.gif" alt="ExecWeave Live-Dashboard" width="100%">
+  <img src="https://raw.githubusercontent.com/Irish-kw/ExecWeave/main/docs/assets/codex.gif" alt="ExecWeave Live-Dashboard" width="100%">
 </p>
 
 ## Warum ExecWeave

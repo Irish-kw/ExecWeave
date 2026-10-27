@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/shot5_brand.jpg" alt="ExecWeave" width="100%">
+  <img src="https://raw.githubusercontent.com/Irish-kw/ExecWeave/main/docs/assets/shot5_brand.jpg" alt="ExecWeave" width="100%">
 </p>
 
 # ExecWeave
@@ -33,7 +33,7 @@ ExecWeave 是一个 local-first 的 AI Agent 与 AI 开发工具可观测性项�
 > **Event 是证据；Graph 是由证据物化出的视图。**
 
 <p align="center">
-  <img src="docs/assets/codex.gif" alt="ExecWeave 实时 Dashboard 演示" width="100%">
+  <img src="https://raw.githubusercontent.com/Irish-kw/ExecWeave/main/docs/assets/codex.gif" alt="ExecWeave 实时 Dashboard 演示" width="100%">
 </p>
 
 ## 为什么需要 ExecWeave

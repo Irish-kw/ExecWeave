@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/shot5_brand.jpg" alt="ExecWeave" width="100%">
+  <img src="https://raw.githubusercontent.com/Irish-kw/ExecWeave/main/docs/assets/shot5_brand.jpg" alt="ExecWeave" width="100%">
 </p>
 
 # ExecWeave
@@ -33,7 +33,7 @@ ExecWeave는 AI Agent와 AI 개발 도구를 위한 local-first observability �
 > **Event는 증거이고, Graph는 그 증거로부터 materialize된 view입니다.**
 
 <p align="center">
-  <img src="docs/assets/codex.gif" alt="ExecWeave live dashboard demo" width="100%">
+  <img src="https://raw.githubusercontent.com/Irish-kw/ExecWeave/main/docs/assets/codex.gif" alt="ExecWeave live dashboard demo" width="100%">
 </p>
 
 ## 왜 ExecWeave인가
