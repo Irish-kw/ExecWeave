@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Irish-kw/ExecWeave/main/docs/assets/shot5_brand.jpg" alt="ExecWeave" width="100%">
+  <img src="https://raw.githubusercontent.com/Irish-kw/ExecWeave/main/docs/assets/shot5_brand.gif" alt="ExecWeave" width="100%">
 </p>
 
 # ExecWeave
