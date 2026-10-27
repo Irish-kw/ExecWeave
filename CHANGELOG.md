@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.1
+
+- README banner is now an animated GIF, and README images use absolute URLs so they render on PyPI.
+
 ## 1.0.0
 
 First release of the ExecWeave 1.0 line.

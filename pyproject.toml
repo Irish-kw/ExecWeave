@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "execweave"
-# ExecWeave v1.0.0 release metadata
-version = "1.0.0"
+# ExecWeave v1.0.1 release metadata
+version = "1.0.1"
 description = "Local AI-agent execution graphs that identify sender/recipient handoffs with no observed receive in graph.json."
 readme = "README.md"
 requires-python = ">=3.10"

@@ -82,10 +82,10 @@ def test_release_version_and_noncommercial_license_metadata_are_078() -> None:
     stage-integrity node-ID floor refuses renames; the assertions below are the
     current release.
     """
-    assert __version__ == "1.0.0"
+    assert __version__ == "1.0.1"
     pyproject = Path("pyproject.toml").read_text(encoding="utf-8")
-    assert 'version = "1.0.0"' in pyproject
-    assert "ExecWeave v1.0.0 release metadata" in pyproject
+    assert 'version = "1.0.1"' in pyproject
+    assert "ExecWeave v1.0.1 release metadata" in pyproject
     assert "License :: Other/Proprietary License" in pyproject
     assert "License :: OSI Approved :: MIT License" not in pyproject
 
