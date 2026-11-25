@@ -12,7 +12,10 @@ from __future__ import annotations
 
 import json
 import os
-import pwd
+try:
+    import pwd
+except ImportError:   # not POSIX: check_available() reports the lane backend as unavailable before pwd is needed
+    pwd = None
 import signal
 import subprocess
 import sys

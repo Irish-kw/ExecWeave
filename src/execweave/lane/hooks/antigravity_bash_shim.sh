@@ -1,7 +1,8 @@
 #!/usr/bin/bash
 # `bash` shim for the Antigravity CLI (agy).  agy starts every run_command as `bash -c '<CommandLine>'`, looking `bash` up through PATH (verified, see
 # cli_facts/agy.md), and sets ANTIGRAVITY_SOURCE_METADATA={"tool":{"conversationId":..,"stepIndex":N,"toolCall":{"id":"call_N",..}}} for it.
-# Install this file as <dir>/bash and put <dir> first in the PATH of the agy process.  Modes (EW_AGY_SHIM_MODE):
+# Install a copy of this file as <dir>/bash (mode 0755: the wheel ships it without the executable bit, so its bytes are
+# the same on every OS) and put <dir> first in the PATH of the agy process.  Modes (EW_AGY_SHIM_MODE):
 #   log   (default) append one JSON line (argv[1..2] shortened, call id and agy's own tool-call id parsed from the metadata) to $EW_AGY_SHIM_LOG and run the real bash unchanged
 #   lane  run `bash -c CMD` of a tool call through the lane launcher as its own call lane (call id <conversationId>:<stepIndex>, the same id the hook uses);
 #         invocations without tool metadata, nested ones (EW_IN_LANE) and commands that already start with lane_exec are passed through unchanged

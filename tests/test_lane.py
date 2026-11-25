@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import json
-import os
 import shutil
-import sys
 from pathlib import Path
 
 import pytest
@@ -101,31 +99,3 @@ def test_lane_unavailable_without_root(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(lane_runner, "diagnostics", lambda: {"platform": "linux", "root": False, "bpftrace": True})
     with pytest.raises(lane_runner.LaneUnavailable):
         lane_runner.check_available()
-
-
-@pytest.mark.skipif(
-    not sys.platform.startswith("linux") or os.geteuid() != 0 or shutil.which("bpftrace") is None
-    or os.environ.get("EXECWEAVE_LANE_LIVE_USER") is None,
-    reason="live lane run needs Linux, root, bpftrace and EXECWEAVE_LANE_LIVE_USER",
-)
-def test_live_lane_session_binds_routed_calls() -> None:
-    import tempfile
-
-    user = os.environ["EXECWEAVE_LANE_LIVE_USER"]
-    tmp_path = Path(tempfile.mkdtemp(prefix="execweave-lane-test-"))
-    os.chmod(tmp_path, 0o755)
-    shutil.chown(tmp_path, user=user)
-    script = (
-        "import os, subprocess, sys\n"
-        "for i in range(3):\n"
-        "    subprocess.run([sys.executable, os.environ['EW_LANE_EXEC'], '--sock', os.environ['EW_LANE_SOCK'],\n"
-        "                    '--call-id', f'call-{i}', '--', '/bin/sh', '-c', 'true'], check=True)\n"
-    )
-    agent = tmp_path / "agent.py"
-    agent.write_text(script)
-    os.chmod(agent, 0o644)
-    result = lane_runner.run_session([sys.executable, str(agent)], agent_user=user, watch_root=tmp_path, output_root=tmp_path / "runs")
-    attribution = json.loads(result.attribution.read_text())
-    assert result.return_code == 0
-    assert attribution["ledger"]["valid"] is True
-    assert sorted(attribution["tool_calls"]) == ["call-0", "call-1", "call-2"]

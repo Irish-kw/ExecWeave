@@ -22,7 +22,10 @@ Protocol: one JSON request per Unix-socket connection, one JSON reply.
 from __future__ import annotations
 
 import ctypes
-import fcntl
+try:
+    import fcntl
+except ImportError:   # not Linux: the launcher cannot run there, but verify_ledger and the offline auditor (backend.py) still import this module
+    fcntl = None
 import hashlib
 import json
 import secrets
@@ -116,7 +119,7 @@ OPERATOR = "<operator>"
 # An unknown value or an option the host cannot provide stops LaneService.__init__ (fail closed).  See prototypes/lanes_hardening/README.md.
 ISOLATION_MODES = ("pidns", "uid", "landlock")
 warnings.filterwarnings("ignore", message=r"This process .* is multi-threaded", category=DeprecationWarning)    # os.fork in the pidns option (single-threaded child follows)
-_libc = ctypes.CDLL(None, use_errno=True)
+_libc = ctypes.CDLL(None, use_errno=True) if os.name == "posix" else None   # Linux syscalls; unused off Linux, where the launcher cannot run
 CLONE_NEWNS, CLONE_NEWPID = 0x00020000, 0x20000000
 MS_NOSUID, MS_NODEV, MS_NOEXEC, MS_REC, MS_PRIVATE = 2, 4, 8, 0x4000, 1 << 18
 LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET, LANDLOCK_SCOPE_SIGNAL = 1, 2
