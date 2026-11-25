@@ -294,6 +294,25 @@ execweave-integrity seal .execweave/runs/<run-id>
 execweave-integrity verify .execweave/runs/<run-id>
 ```
 
+### Per-call lanes (Linux, root)
+
+The `lane` backend binds each routed shell call to the processes it starts. A root launcher starts every call in its own cgroup v2 lane and records the call id, lane, and launched process in a hash-chained, Ed25519-signed ledger. A root eBPF sensor (bpftrace) stamps each recorded event with the cgroup id of the acting task, and the auditor attributes events to calls by matching that id against the ledger, so attribution does not depend on command text, timing, or process-tree reconstruction.
+
+Requirements: Linux with cgroup v2 and Landlock ABI 6 or later (Linux 6.12+ for signal scoping; sender pidfds need Linux 6.5+), root, `bpftrace`, and `pip install "execweave[lane]"`.
+
+```bash
+sudo execweave lane doctor
+sudo execweave run --backend lane --agent-user "$USER" -- your-agent-command
+execweave lane verify .execweave/runs/<run-id>/lane/ledger.jsonl
+execweave lane audit .execweave/runs/<run-id>/lane --output-dir audit-out
+```
+
+The command runs as `--agent-user` in the agent lane. A call gets its own lane only when it is routed through the launcher: a harness hook or shell shim runs the launch client (`execweave-lane-exec`, the `EW_LANE_EXEC` path exported to the command) with the call id. `execweave-lane-claude-hook` is a Claude Code `PreToolUse` hook that does this for Bash tool calls; `execweave/lane/hooks/` also contains Cursor and Antigravity hooks and a bash shim for Codex. By default the launcher requires sender pidfds and runs each call in its own Landlock domain with signal scoping (`--call-isolation`, `--no-require-pidfd`).
+
+Outputs in the run directory: `lane/ledger.jsonl` and `lane/ledger_pub.pem` (the signed ledger), `lane/sensor.log`, `events.jsonl` (ExecWeave event stream), `lane_attribution.json` (call id to lane and root process), and `meta.json`.
+
+Limits: the call id is only as trustworthy as the harness and hook that supply it; a hook that is bypassed, or a process outside every lane, is not attributed to a call; the sensor can lose events under load, and lost events cannot be recovered; work that an existing daemon performs for a later call stays in the lane of the call that started the daemon unless delegation grants are used.
+
 ## Run artifacts
 
 A provider-integrated run can contain:

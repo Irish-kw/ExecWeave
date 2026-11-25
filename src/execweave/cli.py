@@ -46,9 +46,25 @@ def _add_collection_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--backend",
-        choices=["auto", "portable", "strace"],
+        choices=["auto", "portable", "strace", "lane"],
         default="auto",
-        help="Runtime backend. auto prefers strace on Linux when available",
+        help="Runtime backend. auto prefers strace on Linux when available; lane runs each "
+        "routed shell call in its own cgroup lane (Linux, root, bpftrace)",
+    )
+    parser.add_argument(
+        "--agent-user",
+        default=None,
+        help="lane backend: user that runs the command (required with --backend lane)",
+    )
+    parser.add_argument(
+        "--call-isolation",
+        default="landlock",
+        help="lane backend: per-call isolation modes, comma-separated from pidns, uid, landlock, or off (default: landlock)",
+    )
+    parser.add_argument(
+        "--no-require-pidfd",
+        action="store_true",
+        help="lane backend: accept launch requests without a sender pidfd",
     )
     parser.add_argument("--no-files", action="store_true", help="Disable filesystem observation")
     parser.add_argument("--no-network", action="store_true", help="Disable network observation")
@@ -174,6 +190,16 @@ def build_parser() -> argparse.ArgumentParser:
     live.add_argument("command", nargs=argparse.REMAINDER, help="Command to execute")
 
     subparsers.add_parser("doctor", help="Show runtime collector availability")
+
+    lane = subparsers.add_parser("lane", help="Per-call execution lanes: diagnostics, ledger verification, and audit")
+    lane_sub = lane.add_subparsers(dest="lane_command", required=True)
+    lane_sub.add_parser("doctor", help="Show whether this host can run the lane backend")
+    lane_verify = lane_sub.add_parser("verify", help="Verify a lane ledger's hash chain and signatures")
+    lane_verify.add_argument("ledger", type=Path)
+    lane_verify.add_argument("--pubkey", type=Path, default=None, help="Pinned public key (default: ledger_pub.pem beside the ledger)")
+    lane_audit = lane_sub.add_parser("audit", help="Rebuild events and lane attribution from a sensor log and ledger")
+    lane_audit.add_argument("lane_dir", type=Path, help="Directory with sensor.log, ledger.jsonl and ledger_pub.pem")
+    lane_audit.add_argument("--output-dir", type=Path, required=True)
 
     benchmark = subparsers.add_parser(
         "benchmark", help="Run the Phase 1 overhead smoke benchmark"
@@ -337,6 +363,68 @@ def _clean_command(command: list[str]) -> list[str]:
     return result
 
 
+def _run_lane(args: argparse.Namespace, parser: argparse.ArgumentParser, command: list[str]) -> int:
+    from .lane import runner as lane_runner
+
+    if not args.agent_user:
+        parser.error("--backend lane requires --agent-user")
+    watch_root = (args.watch_root or Path.cwd()).expanduser().resolve()
+    isolation = "" if args.call_isolation in ("", "off", "none") else args.call_isolation
+    try:
+        result = lane_runner.run_session(
+            command,
+            agent_user=args.agent_user,
+            watch_root=watch_root,
+            output_root=args.output.parent if args.output else None,
+            call_isolation=isolation,
+            require_pidfd=not args.no_require_pidfd,
+        )
+    except (lane_runner.LaneUnavailable, KeyError, RuntimeError, OSError) as exc:
+        parser.error(str(exc))
+    print(f"ExecWeave session: {result.session_id}")
+    print("Backend: lane")
+    print(f"Working directory: {watch_root}")
+    print(f"Events: {result.events}")
+    print(f"Lane attribution: {result.attribution}")
+    return result.return_code
+
+
+def _lane_main(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
+    from .lane import runner as lane_runner
+    from .lane import service as lane_service
+
+    if args.lane_command == "doctor":
+        print(json.dumps(lane_runner.diagnostics(), indent=2, sort_keys=True))
+        return 0
+    if args.lane_command == "verify":
+        pubkey = args.pubkey or args.ledger.with_name("ledger_pub.pem")
+        result = lane_service.verify_ledger(args.ledger, pubkey)
+        print(json.dumps(result, indent=2, sort_keys=True, default=str))
+        return 0 if result.get("valid") else 1
+    if args.lane_command == "audit":
+        from .lane import backend as lane_backend
+
+        out = args.output_dir
+        out.mkdir(parents=True, exist_ok=True)
+        built = lane_backend.build(
+            sensor_path=args.lane_dir / "sensor.log",
+            ledger_path=args.lane_dir / "ledger.jsonl",
+            pubkey_path=args.lane_dir / "ledger_pub.pem",
+            session_id=uuid4().hex,
+            mono_offset_ns=0,
+            started_ns_wall=0,
+            finished_ns_wall=0,
+            agent_name="agent",
+            command=[],
+            out_events=out / "events.jsonl",
+            out_attr=out / "lane_attribution.json",
+        )
+        print(json.dumps(built, indent=2, sort_keys=True, default=str))
+        return 0
+    parser.error(f"unknown lane command: {args.lane_command}")
+    return 2
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -350,6 +438,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.subcommand == "doctor":
         print(json.dumps(backend_diagnostics(), indent=2, sort_keys=True))
         return 0
+
+    if args.subcommand == "lane":
+        return _lane_main(args, parser)
 
     if args.subcommand == "benchmark":
         try:
@@ -544,6 +635,9 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"output": str(written)}, indent=2, sort_keys=True))
         return 0
 
+    if getattr(args, "backend", None) == "lane" and args.subcommand in ("record", "live"):
+        parser.error("the lane backend is available with `execweave run --backend lane`")
+
     if args.subcommand == "record":
         command = _clean_command(args.command)
         if not command:
@@ -598,6 +692,9 @@ def main(argv: list[str] | None = None) -> int:
     command = _clean_command(args.command)
     if not command:
         parser.error("execweave run requires a command, e.g. execweave run -- claude")
+
+    if args.backend == "lane":
+        return _run_lane(args, parser, command)
 
     session_id = uuid4().hex
     watch_root = (args.watch_root or Path.cwd()).expanduser().resolve()

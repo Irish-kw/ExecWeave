@@ -1,0 +1,152 @@
+// Lane sensor with native-tag capture (envp scan with a truncation marker). Privileged eBPF (bpftrace) observer that stamps every event with the
+// kernel cgroup id of the acting task. Runs as root; its output file is root-owned,
+// so an unprivileged agent cannot rewrite the evidence stream.
+// Output: one JSON object per line; an execve header line is followed by one raw
+// line carrying argv joined by U+001F (unit separator).
+BEGIN { printf("{\"ev\":\"sensor_start\",\"ns\":%lld}\n", nsecs); }
+
+tracepoint:sched:sched_process_fork
+{
+  printf("{\"ev\":\"fork\",\"ns\":%lld,\"cg\":%llu,\"ppid\":%d,\"pid\":%d}\n",
+         nsecs, cgroup, args->parent_pid, args->child_pid);
+}
+
+tracepoint:syscalls:sys_enter_execve
+{
+  printf("{\"ev\":\"execve\",\"ns\":%lld,\"cg\":%llu,\"pid\":%d,\"uid\":%d,\"filename\":\"%s\"}\n",
+         nsecs, cgroup, pid, uid, str(args->filename));
+  join(args->argv, "\x1f");
+  // environment call-id tags, scanned in the first 48 envp slots (no early stop; values printed up to 96 bytes):
+  //   EW_TOOL_CALL_ID=...    our hook's tag (env-tag baseline and truth channel of the no-launcher sessions)  -> "envtag"
+  //   TRACEPARENT=...        Claude Code's native W3C trace context of the tool execution span               -> "nativetag"
+  //   CODEX_TOOL_CALL_ID=... Codex CLI's native per-call id                                                  -> "nativetag"
+  // All three are process-inherited and agent-controllable; they are recorded only to evaluate tag-based attribution.
+  $i = 0;
+  $done = 0;
+  unroll(48) {
+    if ($done == 0) {
+      $p = *(args->envp + $i);
+      if ($p == 0) {
+        $done = 1;
+      } else {
+        if (strncmp(str($p, 16), "EW_TOOL_CALL_ID=", 16) == 0) {
+          printf("{\"ev\":\"envtag\",\"ns\":%lld,\"cg\":%llu,\"pid\":%d,\"tag\":\"%s\"}\n", nsecs, cgroup, pid, str($p, 96));
+        } else {
+          if (strncmp(str($p, 12), "TRACEPARENT=", 12) == 0 || strncmp(str($p, 19), "CODEX_TOOL_CALL_ID=", 19) == 0) {
+            printf("{\"ev\":\"nativetag\",\"ns\":%lld,\"cg\":%llu,\"pid\":%d,\"tag\":\"%s\"}\n", nsecs, cgroup, pid, str($p, 96));
+          }
+        }
+      }
+      $i = $i + 1;
+    }
+  }
+  if ($done == 0) {
+    // more than 48 environment entries: the scan above did not see all of them, so a missing tag is not evidence of absence
+    printf("{\"ev\":\"envscan_truncated\",\"ns\":%lld,\"cg\":%llu,\"pid\":%d}\n", nsecs, cgroup, pid);
+  }
+}
+
+tracepoint:sched:sched_process_exec
+{
+  printf("{\"ev\":\"exec\",\"ns\":%lld,\"cg\":%llu,\"pid\":%d,\"ppid\":%d,\"uid\":%d,\"filename\":\"%s\"}\n",
+         nsecs, cgroup, pid, curtask->real_parent->tgid, uid, str(args->filename));
+}
+
+tracepoint:sched:sched_process_exit
+{
+  printf("{\"ev\":\"exit\",\"ns\":%lld,\"cg\":%llu,\"pid\":%d}\n", nsecs, cgroup, args->pid);
+}
+
+// write-intent opens only (O_WRONLY=1, O_RDWR=2, O_CREAT=0x40)
+tracepoint:syscalls:sys_enter_openat
+/ (args->flags & 3) != 0 || (args->flags & 0x40) != 0 /
+{
+  printf("{\"ev\":\"open_write\",\"ns\":%lld,\"cg\":%llu,\"pid\":%d,\"uid\":%d,\"flags\":%d,\"path\":\"%s\"}\n",
+         nsecs, cgroup, pid, uid, args->flags, str(args->filename));
+}
+
+tracepoint:syscalls:sys_enter_connect
+{
+  $sa = (struct sockaddr_in *)args->uservaddr;
+  if ($sa->sin_family == 2) {
+    printf("{\"ev\":\"connect\",\"ns\":%lld,\"cg\":%llu,\"pid\":%d,\"uid\":%d,\"addr\":\"%s\",\"port\":%d}\n",
+           nsecs, cgroup, pid, uid, ntop(2, $sa->sin_addr.s_addr), (($sa->sin_port & 0xff) << 8) | ($sa->sin_port >> 8));
+  }
+}
+
+tracepoint:syscalls:sys_exit_connect
+{
+  printf("{\"ev\":\"connect_ret\",\"ns\":%lld,\"cg\":%llu,\"pid\":%d,\"ret\":%d}\n", nsecs, cgroup, pid, args->ret);
+}
+
+// ===== v2 additions (2026-10-29): file-system effects other than write-intent openat, and more connection kinds =====
+// Every record carries the acting task's cgroup id like the records above.  Paths are the strings the process passed (not resolved against cwd or a directory descriptor).
+// "op" names the operation; "p1"/"p2" are the path arguments.  This file only adds probes: the probes above are unchanged.
+tracepoint:syscalls:sys_enter_open
+/ (args->flags & 3) != 0 || (args->flags & 0x40) != 0 /
+{ printf("{\"ev\":\"open_write\",\"ns\":%lld,\"cg\":%llu,\"pid\":%d,\"uid\":%d,\"flags\":%d,\"path\":\"%s\",\"via\":\"open\"}\n", nsecs, cgroup, pid, uid, args->flags, str(args->filename)); }
+tracepoint:syscalls:sys_enter_creat
+{ printf("{\"ev\":\"open_write\",\"ns\":%lld,\"cg\":%llu,\"pid\":%d,\"uid\":%d,\"flags\":65,\"path\":\"%s\",\"via\":\"creat\"}\n", nsecs, cgroup, pid, uid, str(args->pathname)); }
+tracepoint:syscalls:sys_enter_openat2
+{ printf("{\"ev\":\"open_write\",\"ns\":%lld,\"cg\":%llu,\"pid\":%d,\"uid\":%d,\"flags\":-1,\"path\":\"%s\",\"via\":\"openat2\"}\n", nsecs, cgroup, pid, uid, str(args->filename)); }
+
+tracepoint:syscalls:sys_enter_unlink    { printf("{\"ev\":\"fsop\",\"op\":\"unlink\",\"ns\":%lld,\"cg\":%llu,\"pid\":%d,\"uid\":%d,\"p1\":\"%s\"}\n", nsecs, cgroup, pid, uid, str(args->pathname)); }
+tracepoint:syscalls:sys_enter_unlinkat  { printf("{\"ev\":\"fsop\",\"op\":\"unlinkat\",\"ns\":%lld,\"cg\":%llu,\"pid\":%d,\"uid\":%d,\"p1\":\"%s\",\"flag\":%d}\n", nsecs, cgroup, pid, uid, str(args->pathname), args->flag); }
+tracepoint:syscalls:sys_enter_rmdir     { printf("{\"ev\":\"fsop\",\"op\":\"rmdir\",\"ns\":%lld,\"cg\":%llu,\"pid\":%d,\"uid\":%d,\"p1\":\"%s\"}\n", nsecs, cgroup, pid, uid, str(args->pathname)); }
+tracepoint:syscalls:sys_enter_rename { printf("{\"ev\":\"fsop\",\"op\":\"rename\",\"ns\":%lld,\"cg\":%llu,\"pid\":%d,\"uid\":%d,\"from\":\"%s\"}\n", nsecs, cgroup, pid, uid, str(args->oldname)); }
+tracepoint:syscalls:sys_enter_rename { printf("{\"ev\":\"fsop\",\"op\":\"rename\",\"ns\":%lld,\"cg\":%llu,\"pid\":%d,\"uid\":%d,\"to\":\"%s\"}\n", nsecs, cgroup, pid, uid, str(args->newname)); }
+tracepoint:syscalls:sys_enter_renameat { printf("{\"ev\":\"fsop\",\"op\":\"renameat\",\"ns\":%lld,\"cg\":%llu,\"pid\":%d,\"uid\":%d,\"from\":\"%s\"}\n", nsecs, cgroup, pid, uid, str(args->oldname)); }
+tracepoint:syscalls:sys_enter_renameat { printf("{\"ev\":\"fsop\",\"op\":\"renameat\",\"ns\":%lld,\"cg\":%llu,\"pid\":%d,\"uid\":%d,\"to\":\"%s\"}\n", nsecs, cgroup, pid, uid, str(args->newname)); }
+tracepoint:syscalls:sys_enter_renameat2 { printf("{\"ev\":\"fsop\",\"op\":\"renameat2\",\"ns\":%lld,\"cg\":%llu,\"pid\":%d,\"uid\":%d,\"from\":\"%s\"}\n", nsecs, cgroup, pid, uid, str(args->oldname)); }
+tracepoint:syscalls:sys_enter_renameat2 { printf("{\"ev\":\"fsop\",\"op\":\"renameat2\",\"ns\":%lld,\"cg\":%llu,\"pid\":%d,\"uid\":%d,\"to\":\"%s\"}\n", nsecs, cgroup, pid, uid, str(args->newname)); }
+tracepoint:syscalls:sys_enter_mkdir     { printf("{\"ev\":\"fsop\",\"op\":\"mkdir\",\"ns\":%lld,\"cg\":%llu,\"pid\":%d,\"uid\":%d,\"p1\":\"%s\"}\n", nsecs, cgroup, pid, uid, str(args->pathname)); }
+tracepoint:syscalls:sys_enter_mkdirat   { printf("{\"ev\":\"fsop\",\"op\":\"mkdirat\",\"ns\":%lld,\"cg\":%llu,\"pid\":%d,\"uid\":%d,\"p1\":\"%s\"}\n", nsecs, cgroup, pid, uid, str(args->pathname)); }
+tracepoint:syscalls:sys_enter_chmod     { printf("{\"ev\":\"fsop\",\"op\":\"chmod\",\"ns\":%lld,\"cg\":%llu,\"pid\":%d,\"uid\":%d,\"p1\":\"%s\",\"mode\":%d}\n", nsecs, cgroup, pid, uid, str(args->filename), args->mode); }
+tracepoint:syscalls:sys_enter_fchmodat  { printf("{\"ev\":\"fsop\",\"op\":\"fchmodat\",\"ns\":%lld,\"cg\":%llu,\"pid\":%d,\"uid\":%d,\"p1\":\"%s\",\"mode\":%d}\n", nsecs, cgroup, pid, uid, str(args->filename), args->mode); }
+tracepoint:syscalls:sys_enter_fchmodat2 { printf("{\"ev\":\"fsop\",\"op\":\"fchmodat2\",\"ns\":%lld,\"cg\":%llu,\"pid\":%d,\"uid\":%d,\"p1\":\"%s\",\"mode\":%d}\n", nsecs, cgroup, pid, uid, str(args->filename), args->mode); }
+tracepoint:syscalls:sys_enter_chown     { printf("{\"ev\":\"fsop\",\"op\":\"chown\",\"ns\":%lld,\"cg\":%llu,\"pid\":%d,\"uid\":%d,\"p1\":\"%s\"}\n", nsecs, cgroup, pid, uid, str(args->filename)); }
+tracepoint:syscalls:sys_enter_fchownat  { printf("{\"ev\":\"fsop\",\"op\":\"fchownat\",\"ns\":%lld,\"cg\":%llu,\"pid\":%d,\"uid\":%d,\"p1\":\"%s\"}\n", nsecs, cgroup, pid, uid, str(args->filename)); }
+tracepoint:syscalls:sys_enter_truncate  { printf("{\"ev\":\"fsop\",\"op\":\"truncate\",\"ns\":%lld,\"cg\":%llu,\"pid\":%d,\"uid\":%d,\"p1\":\"%s\"}\n", nsecs, cgroup, pid, uid, str(args->path)); }
+tracepoint:syscalls:sys_enter_symlink { printf("{\"ev\":\"fsop\",\"op\":\"symlink\",\"ns\":%lld,\"cg\":%llu,\"pid\":%d,\"uid\":%d,\"from\":\"%s\"}\n", nsecs, cgroup, pid, uid, str(args->oldname)); }
+tracepoint:syscalls:sys_enter_symlink { printf("{\"ev\":\"fsop\",\"op\":\"symlink\",\"ns\":%lld,\"cg\":%llu,\"pid\":%d,\"uid\":%d,\"to\":\"%s\"}\n", nsecs, cgroup, pid, uid, str(args->newname)); }
+tracepoint:syscalls:sys_enter_symlinkat { printf("{\"ev\":\"fsop\",\"op\":\"symlinkat\",\"ns\":%lld,\"cg\":%llu,\"pid\":%d,\"uid\":%d,\"from\":\"%s\"}\n", nsecs, cgroup, pid, uid, str(args->oldname)); }
+tracepoint:syscalls:sys_enter_symlinkat { printf("{\"ev\":\"fsop\",\"op\":\"symlinkat\",\"ns\":%lld,\"cg\":%llu,\"pid\":%d,\"uid\":%d,\"to\":\"%s\"}\n", nsecs, cgroup, pid, uid, str(args->newname)); }
+tracepoint:syscalls:sys_enter_link { printf("{\"ev\":\"fsop\",\"op\":\"link\",\"ns\":%lld,\"cg\":%llu,\"pid\":%d,\"uid\":%d,\"from\":\"%s\"}\n", nsecs, cgroup, pid, uid, str(args->oldname)); }
+tracepoint:syscalls:sys_enter_link { printf("{\"ev\":\"fsop\",\"op\":\"link\",\"ns\":%lld,\"cg\":%llu,\"pid\":%d,\"uid\":%d,\"to\":\"%s\"}\n", nsecs, cgroup, pid, uid, str(args->newname)); }
+tracepoint:syscalls:sys_enter_linkat { printf("{\"ev\":\"fsop\",\"op\":\"linkat\",\"ns\":%lld,\"cg\":%llu,\"pid\":%d,\"uid\":%d,\"from\":\"%s\"}\n", nsecs, cgroup, pid, uid, str(args->oldname)); }
+tracepoint:syscalls:sys_enter_linkat { printf("{\"ev\":\"fsop\",\"op\":\"linkat\",\"ns\":%lld,\"cg\":%llu,\"pid\":%d,\"uid\":%d,\"to\":\"%s\"}\n", nsecs, cgroup, pid, uid, str(args->newname)); }
+tracepoint:syscalls:sys_enter_utimensat / args->filename != 0 / { printf("{\"ev\":\"fsop\",\"op\":\"utimensat\",\"ns\":%lld,\"cg\":%llu,\"pid\":%d,\"uid\":%d,\"p1\":\"%s\"}\n", nsecs, cgroup, pid, uid, str(args->filename)); }
+
+// io_uring submissions are not visible to the syscall probes above (the operation is carried out by the kernel from a shared ring): record that the task used io_uring at all
+tracepoint:syscalls:sys_enter_io_uring_enter { printf("{\"ev\":\"io_uring_enter\",\"ns\":%lld,\"cg\":%llu,\"pid\":%d,\"uid\":%d}\n", nsecs, cgroup, pid, uid); }
+
+// connections other than IPv4 connect(): Unix sockets and IPv6 connect, datagrams sent to an explicit address, bind/listen/accept
+tracepoint:syscalls:sys_enter_connect
+{
+  $sa = (struct sockaddr *)args->uservaddr;
+  if ($sa->sa_family == 1) {
+    $su = (struct sockaddr_un *)args->uservaddr;
+    printf("{\"ev\":\"connect_unix\",\"ns\":%lld,\"cg\":%llu,\"pid\":%d,\"uid\":%d,\"path\":\"%s\"}\n", nsecs, cgroup, pid, uid, $su->sun_path);
+  }
+  if ($sa->sa_family == 10) {
+    $s6 = (struct sockaddr_in6 *)args->uservaddr;
+    printf("{\"ev\":\"connect6\",\"ns\":%lld,\"cg\":%llu,\"pid\":%d,\"uid\":%d,\"addr\":\"%s\",\"port\":%d}\n", nsecs, cgroup, pid, uid, ntop(10, $s6->sin6_addr.in6_u.u6_addr8), (($s6->sin6_port & 0xff) << 8) | ($s6->sin6_port >> 8));
+  }
+}
+tracepoint:syscalls:sys_enter_sendto
+/ args->addr != 0 /
+{
+  $sa = (struct sockaddr_in *)args->addr;
+  if ($sa->sin_family == 2) {
+    printf("{\"ev\":\"sendto\",\"ns\":%lld,\"cg\":%llu,\"pid\":%d,\"uid\":%d,\"addr\":\"%s\",\"port\":%d}\n", nsecs, cgroup, pid, uid, ntop(2, $sa->sin_addr.s_addr), (($sa->sin_port & 0xff) << 8) | ($sa->sin_port >> 8));
+  }
+}
+tracepoint:syscalls:sys_enter_bind
+{
+  $sa = (struct sockaddr_in *)args->umyaddr;
+  if ($sa->sin_family == 2) {
+    printf("{\"ev\":\"bind\",\"ns\":%lld,\"cg\":%llu,\"pid\":%d,\"uid\":%d,\"addr\":\"%s\",\"port\":%d}\n", nsecs, cgroup, pid, uid, ntop(2, $sa->sin_addr.s_addr), (($sa->sin_port & 0xff) << 8) | ($sa->sin_port >> 8));
+  }
+}
+tracepoint:syscalls:sys_enter_listen  { printf("{\"ev\":\"listen\",\"ns\":%lld,\"cg\":%llu,\"pid\":%d,\"uid\":%d}\n", nsecs, cgroup, pid, uid); }
+tracepoint:syscalls:sys_enter_accept4 { printf("{\"ev\":\"accept\",\"ns\":%lld,\"cg\":%llu,\"pid\":%d,\"uid\":%d}\n", nsecs, cgroup, pid, uid); }
