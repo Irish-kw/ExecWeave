@@ -50,4 +50,11 @@ jobs:
           if [[ "$HEAD_REF" == release/* && -n "$release_metadata_changed" ]]; then
             args+=(--allow-test-change "tests/test_v069_dashboard_release.py=release metadata assertions may advance only on a release/* pull request; the historical test name remains stable because the node-ID floor refuses renames")
           fi
+          # One-off allowance for the lane-backend pull request only: pytest 9.2 calls os.fstat from its
+          # output capture when the call phase ends, and this test replaced os.fstat process-wide until
+          # fixture teardown. The edit undoes the replacement inside the test body; every assertion is unchanged.
+          if [[ "$HEAD_REF" == lane-backend ]] && git diff --name-only "$BASELINE_REF...HEAD" \
+              | grep -qx 'tests/test_content_integrity_portability.py'; then
+            args+=(--allow-test-change "tests/test_content_integrity_portability.py=os.fstat was patched process-wide until fixture teardown and pytest 9.2 output capture calls it; the patch now ends inside the test body and all assertions are unchanged")
+          fi
           python scripts/check_release_stage_integrity.py "${args[@]}"

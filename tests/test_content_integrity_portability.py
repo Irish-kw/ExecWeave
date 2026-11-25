@@ -62,9 +62,13 @@ def test_additional_handle_is_closed_when_fstat_fails(tmp_path, monkeypatch):
         descriptor = fd
         raise OSError('simulated stat failure')
 
-    monkeypatch.setattr(integrity.os, 'fstat', fail)
-    with pytest.raises(OSError, match='simulated stat failure'):
-        integrity._path_descriptor_stat(path)
+    # integrity.os is the os module itself, so the replacement is process-wide. Undo it
+    # before the test body ends: pytest's own output capture calls os.fstat when the call
+    # phase finishes (pytest 9.2), which a fixture-scoped patch would still intercept.
+    with monkeypatch.context() as patch:
+        patch.setattr(integrity.os, 'fstat', fail)
+        with pytest.raises(OSError, match='simulated stat failure'):
+            integrity._path_descriptor_stat(path)
     assert descriptor is not None
     with pytest.raises(OSError):
         real_fstat(descriptor)
