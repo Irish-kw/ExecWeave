@@ -283,6 +283,25 @@ execweave-integrity seal .execweave/runs/<run-id>
 execweave-integrity verify .execweave/runs/<run-id>
 ```
 
+### 每个 call 一个 lane（Linux、root）
+
+`lane` backend 把每个经过路由的 shell call 绑定到它启动的 process。root launcher 为每个 call 建立独立的 cgroup v2 lane，并把 call id、lane 与启动的 process 记录在 hash 串链、Ed25519 签名的 ledger 中。root eBPF sensor（bpftrace）在每条记录上标记执行者的 cgroup id，auditor 以该 id 对照 ledger 将事件归属到 call，因此不依赖命令文本、时间或 process tree 重建。
+
+需求：支持 cgroup v2 与 Landlock ABI 6 以上的 Linux（signal scoping 需 Linux 6.12 以上；sender pidfd 需 Linux 6.5 以上）、root、`bpftrace`，以及 `pip install "execweave[lane]"`。
+
+```bash
+sudo execweave lane doctor
+sudo execweave run --backend lane --agent-user "$USER" -- your-agent-command
+execweave lane verify .execweave/runs/<run-id>/lane/ledger.jsonl
+execweave lane audit .execweave/runs/<run-id>/lane --output-dir audit-out
+```
+
+命令以 `--agent-user` 的身份在 agent lane 中执行。只有经过 launcher 路由的 call 才会得到自己的 lane：harness 的 hook 或 shell shim 以 call id 执行 launch client（`execweave-lane-exec`，路径另以 `EW_LANE_EXEC` 提供给命令）。`execweave-lane-claude-hook` 是 Claude Code 的 `PreToolUse` hook，会为 Bash tool call 做这件事；`execweave/lane/hooks/` 另有 Cursor、Antigravity 的 hook 与 Codex 的 bash shim。launcher 默认要求 sender pidfd，并让每个 call 在自己的 Landlock domain 中执行（`--call-isolation`、`--no-require-pidfd`）。
+
+run 目录的输出：`lane/ledger.jsonl` 与 `lane/ledger_pub.pem`（签名 ledger）、`lane/sensor.log`、`events.jsonl`（ExecWeave event stream）、`lane_attribution.json`（call id 对应的 lane 与 root process）以及 `meta.json`。
+
+限制：call id 的可信度取决于提供它的 harness 与 hook；被绕过的 hook 或不在任何 lane 中的 process 不会被归属到 call；sensor 在高负载下可能丢失事件，丢失的事件无法还原；已有 daemon 替之后的 call 所做的工作，除非使用 delegation grant，否则仍归属于启动该 daemon 的 call。
+
 ## Run artifacts
 
 Provider-integrated run 可能包含：

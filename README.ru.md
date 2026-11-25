@@ -283,6 +283,25 @@ execweave-integrity seal .execweave/runs/<run-id>
 execweave-integrity verify .execweave/runs/<run-id>
 ```
 
+### Отдельная lane для каждого call (Linux, root)
+
+Backend `lane` связывает каждый маршрутизированный shell call с процессами, которые он запускает. Root launcher запускает каждый call в собственной cgroup v2 lane и записывает идентификатор call, lane и запущенный процесс в ledger, связанный цепочкой хешей и подписанный Ed25519. Root eBPF sensor (bpftrace) помечает каждое записанное событие cgroup id выполняющей задачи, а auditor приписывает события call, сопоставляя этот идентификатор с ledger. Поэтому атрибуция не зависит ни от текста команд, ни от времени, ни от восстановления дерева процессов.
+
+Требования: Linux с cgroup v2 и Landlock ABI 6 или новее (для signal scoping нужен Linux 6.12+; sender pidfd требует Linux 6.5+), root, `bpftrace` и `pip install "execweave[lane]"`.
+
+```bash
+sudo execweave lane doctor
+sudo execweave run --backend lane --agent-user "$USER" -- your-agent-command
+execweave lane verify .execweave/runs/<run-id>/lane/ledger.jsonl
+execweave lane audit .execweave/runs/<run-id>/lane --output-dir audit-out
+```
+
+Команда выполняется в agent lane от имени `--agent-user`. Call получает собственную lane, только если он маршрутизирован через launcher: hook harness или shell shim запускает launch client (`execweave-lane-exec`; путь также передаётся команде в `EW_LANE_EXEC`) с идентификатором call. `execweave-lane-claude-hook` — это hook `PreToolUse` для Claude Code, который делает это для Bash tool calls; в `execweave/lane/hooks/` также есть hooks для Cursor и Antigravity и bash shim для Codex. По умолчанию launcher требует sender pidfd и выполняет каждый call в собственном домене Landlock с signal scoping (`--call-isolation`, `--no-require-pidfd`).
+
+Результаты в каталоге run: `lane/ledger.jsonl` и `lane/ledger_pub.pem` (подписанный ledger), `lane/sensor.log`, `events.jsonl` (поток событий ExecWeave), `lane_attribution.json` (соответствие идентификатора call lane и корневому процессу) и `meta.json`.
+
+Ограничения: идентификатор call заслуживает доверия ровно настолько, насколько harness и hook, которые его передают; обойдённый hook или процесс вне любой lane не приписывается ни одному call; под нагрузкой sensor может терять события, и потерянные события восстановить нельзя; работа, которую существующий daemon выполняет для более позднего call, остаётся в lane того call, который запустил daemon, если не используются delegation grants.
+
 ## Run artifacts
 
 Provider-integrated run может содержать:

@@ -283,6 +283,25 @@ execweave-integrity seal .execweave/runs/<run-id>
 execweave-integrity verify .execweave/runs/<run-id>
 ```
 
+### call별 lane (Linux, root)
+
+`lane` backend는 라우팅된 각 shell call을 그 call이 시작한 process에 연결합니다. root launcher는 call마다 별도의 cgroup v2 lane을 만들고, call id, lane, 시작한 process를 해시 체인과 Ed25519 서명으로 보호되는 ledger에 기록합니다. root eBPF sensor(bpftrace)는 기록하는 각 이벤트에 실행 주체의 cgroup id를 표시하고, auditor는 이 id를 ledger와 대조해 이벤트를 call에 귀속시킵니다. 따라서 명령 텍스트, 시간, process tree 재구성에 의존하지 않습니다.
+
+요구 사항: cgroup v2와 Landlock ABI 6 이상을 지원하는 Linux(signal scoping에는 Linux 6.12 이상, sender pidfd에는 Linux 6.5 이상), root, `bpftrace`, 그리고 `pip install "execweave[lane]"`.
+
+```bash
+sudo execweave lane doctor
+sudo execweave run --backend lane --agent-user "$USER" -- your-agent-command
+execweave lane verify .execweave/runs/<run-id>/lane/ledger.jsonl
+execweave lane audit .execweave/runs/<run-id>/lane --output-dir audit-out
+```
+
+명령은 `--agent-user` 사용자로 agent lane에서 실행됩니다. launcher를 거쳐 라우팅된 call만 자신의 lane을 받습니다. harness의 hook 또는 shell shim이 call id와 함께 launch client(`execweave-lane-exec`, 경로는 명령에 `EW_LANE_EXEC`로도 전달됨)를 실행합니다. `execweave-lane-claude-hook`은 Bash tool call에 대해 이를 수행하는 Claude Code `PreToolUse` hook입니다. `execweave/lane/hooks/`에는 Cursor와 Antigravity hook, Codex용 bash shim도 있습니다. launcher는 기본적으로 sender pidfd를 요구하며 각 call을 별도의 Landlock domain에서 실행합니다(`--call-isolation`, `--no-require-pidfd`).
+
+run 디렉터리 출력: `lane/ledger.jsonl`과 `lane/ledger_pub.pem`(서명된 ledger), `lane/sensor.log`, `events.jsonl`(ExecWeave event stream), `lane_attribution.json`(call id에 대응하는 lane과 root process), `meta.json`.
+
+제한: call id의 신뢰도는 이를 제공하는 harness와 hook에 달려 있습니다. 우회된 hook이나 어떤 lane에도 속하지 않는 process는 call에 귀속되지 않습니다. sensor는 부하가 높을 때 이벤트를 잃을 수 있으며, 잃은 이벤트는 복구할 수 없습니다. 기존 daemon이 이후 call을 위해 수행하는 작업은 delegation grant를 사용하지 않으면 그 daemon을 시작한 call에 계속 귀속됩니다.
+
 ## Run artifacts
 
 Provider-integrated run에는 다음 파일이 포함될 수 있습니다:
