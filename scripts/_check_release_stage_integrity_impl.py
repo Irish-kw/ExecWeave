@@ -78,6 +78,15 @@ FORBIDDEN_CAPTURE_MARKERS = (
     "ssl_read",
     "process_vm_readv",
 )
+# The lane backend (src/execweave/lane/) is opt-in, needs root, and is built on a kernel
+# sensor: its eBPF probes stamp process, file and network events with the cgroup of a
+# call lane, and "ptrace" appears where Landlock scoping refuses ptrace between call
+# domains. Those two markers are therefore its subject, not interception, and only
+# there. Everything else stays refused in the lane package as well: TLS machinery,
+# uprobes/kprobes (the sensor uses tracepoints), LD_PRELOAD, SSL_read/SSL_write hooks
+# and process_vm_readv. Outside the lane package eBPF and ptrace remain refused.
+LANE_BACKEND_PREFIX = "src/execweave/lane/"
+LANE_BACKEND_MARKERS = frozenset({"ebpf", "ptrace"})
 
 # Conversation completeness describes how much evidence a whole agent thread rests on.
 # Field-level availability describes one observed value. Later stages extend the field
@@ -484,6 +493,8 @@ def _marker_sites(sources: dict[str, str]) -> set[str]:
     for name, text in sources.items():
         lowered = text.lower()
         for marker in TLS_MITM_MARKERS + FORBIDDEN_CAPTURE_MARKERS:
+            if name.startswith(LANE_BACKEND_PREFIX) and marker in LANE_BACKEND_MARKERS:
+                continue
             if marker.lower() in lowered:
                 sites.add(f"{name}: {marker}")
     return sites

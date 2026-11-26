@@ -1,0 +1,206 @@
+{
+  "agents": {
+    "agent:orchestrator": {
+      "lane": "/ewlanes/s01_sequenti-r0-24598/root",
+      "parent_agent": null,
+      "process_id": "process:3bc934d2-5c7e-441b-b65f-df02e1f3a0b4:24613"
+    }
+  },
+  "duplicate_call_ids": [],
+  "lanes": {
+    "75531": {
+      "agent": "agent:orchestrator",
+      "argv": [
+        "/home/user/ew-venv/bin/python",
+        "/home/user/ExecWeave/research/top-tier-security-2026/prototypes/gt_harness/scripted_agent.py",
+        "s01_sequential_distinct"
+      ],
+      "call_id": null,
+      "child_pid": 24613,
+      "declared": null,
+      "delegated_by": null,
+      "kind": "agent",
+      "lane": "/ewlanes/s01_sequenti-r0-24598/root",
+      "requester_agent": null,
+      "requester_pid": 24598,
+      "seq": 2,
+      "ts": "2026-11-08T21:24:23.009002Z"
+    },
+    "75550": {
+      "agent": "agent:orchestrator",
+      "argv": [
+        "/usr/bin/touch",
+        "/home/user/ew_runs/ablation_e0_20261108/suite/e0/s01_sequential_distinct/rep0/work/s01_a.txt"
+      ],
+      "call_id": "tool-call:s01_sequential_distinct:24613:1",
+      "child_pid": 24615,
+      "declared": "/usr/bin/touch /home/user/ew_runs/ablation_e0_20261108/suite/e0/s01_sequential_distinct/rep0/work/s01_a.txt",
+      "delegated_by": null,
+      "kind": "call",
+      "lane": "/ewlanes/s01_sequenti-r0-24598/root/c-1",
+      "requester_agent": "agent:orchestrator",
+      "requester_pid": 24613,
+      "seq": 4,
+      "ts": "2026-11-08T21:24:23.049765Z"
+    },
+    "75569": {
+      "agent": "agent:orchestrator",
+      "argv": [
+        "/usr/bin/cp",
+        "/home/user/ew_runs/ablation_e0_20261108/suite/e0/s01_sequential_distinct/rep0/work/s01_a.txt",
+        "/home/user/ew_runs/ablation_e0_20261108/suite/e0/s01_sequential_distinct/rep0/work/s01_b.txt"
+      ],
+      "call_id": "tool-call:s01_sequential_distinct:24613:2",
+      "child_pid": 24618,
+      "declared": "/usr/bin/cp /home/user/ew_runs/ablation_e0_20261108/suite/e0/s01_sequential_distinct/rep0/work/s01_a.txt /home/user/ew_runs/ablation_e0_20261108/suite/e0/s01_sequential_distinct/rep0/work/s01_b.txt",
+      "delegated_by": null,
+      "kind": "call",
+      "lane": "/ewlanes/s01_sequenti-r0-24598/root/c-2",
+      "requester_agent": "agent:orchestrator",
+      "requester_pid": 24613,
+      "seq": 7,
+      "ts": "2026-11-08T21:24:23.358725Z"
+    },
+    "75588": {
+      "agent": "agent:orchestrator",
+      "argv": [
+        "/usr/bin/sort",
+        "-o",
+        "/home/user/ew_runs/ablation_e0_20261108/suite/e0/s01_sequential_distinct/rep0/work/s01_c.txt",
+        "/home/user/ew_runs/ablation_e0_20261108/suite/e0/s01_sequential_distinct/rep0/work/s01_a.txt"
+      ],
+      "call_id": "tool-call:s01_sequential_distinct:24613:3",
+      "child_pid": 24621,
+      "declared": "/usr/bin/sort -o /home/user/ew_runs/ablation_e0_20261108/suite/e0/s01_sequential_distinct/rep0/work/s01_c.txt /home/user/ew_runs/ablation_e0_20261108/suite/e0/s01_sequential_distinct/rep0/work/s01_a.txt",
+      "delegated_by": null,
+      "kind": "call",
+      "lane": "/ewlanes/s01_sequenti-r0-24598/root/c-3",
+      "requester_agent": "agent:orchestrator",
+      "requester_pid": 24613,
+      "seq": 10,
+      "ts": "2026-11-08T21:24:23.669837Z"
+    },
+    "75607": {
+      "agent": "agent:orchestrator",
+      "argv": [
+        "/home/user/ew-venv/bin/python",
+        "/home/user/ExecWeave/research/top-tier-security-2026/prototypes/gt_harness/effect_helper.py",
+        "--write",
+        "/home/user/ew_runs/ablation_e0_20261108/suite/e0/s01_sequential_distinct/rep0/work/s01_d.txt"
+      ],
+      "call_id": "tool-call:s01_sequential_distinct:24613:4",
+      "child_pid": 24624,
+      "declared": "/home/user/ew-venv/bin/python /home/user/ExecWeave/research/top-tier-security-2026/prototypes/gt_harness/effect_helper.py --write /home/user/ew_runs/ablation_e0_20261108/suite/e0/s01_sequential_distinct/rep0/work/s01_d.txt",
+      "delegated_by": null,
+      "kind": "call",
+      "lane": "/ewlanes/s01_sequenti-r0-24598/root/c-4",
+      "requester_agent": "agent:orchestrator",
+      "requester_pid": 24613,
+      "seq": 13,
+      "ts": "2026-11-08T21:24:23.979308Z"
+    },
+    "75626": {
+      "agent": "agent:orchestrator",
+      "argv": [
+        "/usr/bin/sleep",
+        "0.2"
+      ],
+      "call_id": "tool-call:s01_sequential_distinct:24613:5",
+      "child_pid": 24627,
+      "declared": "/usr/bin/sleep 0.2",
+      "delegated_by": null,
+      "kind": "call",
+      "lane": "/ewlanes/s01_sequenti-r0-24598/root/c-5",
+      "requester_agent": "agent:orchestrator",
+      "requester_pid": 24613,
+      "seq": 16,
+      "ts": "2026-11-08T21:24:24.311635Z"
+    }
+  },
+  "ledger": {
+    "entries": 18,
+    "errors": [],
+    "head": "a83636ffc3dd1b787d261c071a0a06aa4c1906f26cd105ba3df6d9ce15cead07",
+    "valid": true
+  },
+  "sensor_lost_events": 0,
+  "sensor_records_in_lanes": 76,
+  "sensor_records_total": 199,
+  "tool_calls": {
+    "tool-call:s01_sequential_distinct:24613:1": {
+      "agent": "agent:orchestrator",
+      "argv": [
+        "/usr/bin/touch",
+        "/home/user/ew_runs/ablation_e0_20261108/suite/e0/s01_sequential_distinct/rep0/work/s01_a.txt"
+      ],
+      "confidence": 1.0,
+      "declared": "/usr/bin/touch /home/user/ew_runs/ablation_e0_20261108/suite/e0/s01_sequential_distinct/rep0/work/s01_a.txt",
+      "declared_matches_argv": true,
+      "lane": "/ewlanes/s01_sequenti-r0-24598/root/c-1",
+      "lane_inode": 75550,
+      "method": "lane_exact",
+      "process_id": "process:3bc934d2-5c7e-441b-b65f-df02e1f3a0b4:24615"
+    },
+    "tool-call:s01_sequential_distinct:24613:2": {
+      "agent": "agent:orchestrator",
+      "argv": [
+        "/usr/bin/cp",
+        "/home/user/ew_runs/ablation_e0_20261108/suite/e0/s01_sequential_distinct/rep0/work/s01_a.txt",
+        "/home/user/ew_runs/ablation_e0_20261108/suite/e0/s01_sequential_distinct/rep0/work/s01_b.txt"
+      ],
+      "confidence": 1.0,
+      "declared": "/usr/bin/cp /home/user/ew_runs/ablation_e0_20261108/suite/e0/s01_sequential_distinct/rep0/work/s01_a.txt /home/user/ew_runs/ablation_e0_20261108/suite/e0/s01_sequential_distinct/rep0/work/s01_b.txt",
+      "declared_matches_argv": true,
+      "lane": "/ewlanes/s01_sequenti-r0-24598/root/c-2",
+      "lane_inode": 75569,
+      "method": "lane_exact",
+      "process_id": "process:3bc934d2-5c7e-441b-b65f-df02e1f3a0b4:24618"
+    },
+    "tool-call:s01_sequential_distinct:24613:3": {
+      "agent": "agent:orchestrator",
+      "argv": [
+        "/usr/bin/sort",
+        "-o",
+        "/home/user/ew_runs/ablation_e0_20261108/suite/e0/s01_sequential_distinct/rep0/work/s01_c.txt",
+        "/home/user/ew_runs/ablation_e0_20261108/suite/e0/s01_sequential_distinct/rep0/work/s01_a.txt"
+      ],
+      "confidence": 1.0,
+      "declared": "/usr/bin/sort -o /home/user/ew_runs/ablation_e0_20261108/suite/e0/s01_sequential_distinct/rep0/work/s01_c.txt /home/user/ew_runs/ablation_e0_20261108/suite/e0/s01_sequential_distinct/rep0/work/s01_a.txt",
+      "declared_matches_argv": true,
+      "lane": "/ewlanes/s01_sequenti-r0-24598/root/c-3",
+      "lane_inode": 75588,
+      "method": "lane_exact",
+      "process_id": "process:3bc934d2-5c7e-441b-b65f-df02e1f3a0b4:24621"
+    },
+    "tool-call:s01_sequential_distinct:24613:4": {
+      "agent": "agent:orchestrator",
+      "argv": [
+        "/home/user/ew-venv/bin/python",
+        "/home/user/ExecWeave/research/top-tier-security-2026/prototypes/gt_harness/effect_helper.py",
+        "--write",
+        "/home/user/ew_runs/ablation_e0_20261108/suite/e0/s01_sequential_distinct/rep0/work/s01_d.txt"
+      ],
+      "confidence": 1.0,
+      "declared": "/home/user/ew-venv/bin/python /home/user/ExecWeave/research/top-tier-security-2026/prototypes/gt_harness/effect_helper.py --write /home/user/ew_runs/ablation_e0_20261108/suite/e0/s01_sequential_distinct/rep0/work/s01_d.txt",
+      "declared_matches_argv": true,
+      "lane": "/ewlanes/s01_sequenti-r0-24598/root/c-4",
+      "lane_inode": 75607,
+      "method": "lane_exact",
+      "process_id": "process:3bc934d2-5c7e-441b-b65f-df02e1f3a0b4:24624"
+    },
+    "tool-call:s01_sequential_distinct:24613:5": {
+      "agent": "agent:orchestrator",
+      "argv": [
+        "/usr/bin/sleep",
+        "0.2"
+      ],
+      "confidence": 1.0,
+      "declared": "/usr/bin/sleep 0.2",
+      "declared_matches_argv": true,
+      "lane": "/ewlanes/s01_sequenti-r0-24598/root/c-5",
+      "lane_inode": 75626,
+      "method": "lane_exact",
+      "process_id": "process:3bc934d2-5c7e-441b-b65f-df02e1f3a0b4:24627"
+    }
+  }
+}

@@ -93,10 +93,21 @@ def create_collector(
     return collector
 
 
+def _lane_available() -> bool:
+    try:
+        from .lane import runner as lane_runner
+
+        lane_runner.check_available()
+    except Exception:
+        return False
+    return True
+
+
 def backend_diagnostics() -> dict[str, object]:
     return {
         "platform": sys.platform,
         "portable": True,
         "strace": strace_available(),
+        "lane": _lane_available(),
         "auto_selected": resolve_backend("auto"),
     }

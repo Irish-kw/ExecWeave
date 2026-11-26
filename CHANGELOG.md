@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- `lane` runtime backend (Linux, root): every routed shell call runs in its own cgroup v2 lane; a signed launch ledger, an eBPF sensor that stamps each event with its cgroup id, and an auditor attribute recorded events to calls. New commands: `execweave run --backend lane`, `execweave lane doctor|verify|audit`, `execweave-lane-exec`, and `execweave-lane-claude-hook`; new extra `execweave[lane]`.
+
 ## 1.0.1
 
 - README banner is now an animated GIF, and README images use absolute URLs so they render on PyPI.

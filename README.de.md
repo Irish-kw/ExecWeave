@@ -283,6 +283,25 @@ execweave-integrity seal .execweave/runs/<run-id>
 execweave-integrity verify .execweave/runs/<run-id>
 ```
 
+### Eine Lane pro Call (Linux, root)
+
+Das `lane`-Backend verknüpft jeden gerouteten Shell-Call mit den Prozessen, die er startet. Ein Root-Launcher startet jeden Call in einer eigenen cgroup-v2-Lane und schreibt Call-ID, Lane und gestarteten Prozess in ein hashverkettetes, mit Ed25519 signiertes Ledger. Ein Root-eBPF-Sensor (bpftrace) versieht jedes aufgezeichnete Ereignis mit der cgroup-ID des handelnden Tasks, und der Auditor ordnet Ereignisse Calls zu, indem er diese ID mit dem Ledger abgleicht. Die Zuordnung hängt daher weder von Befehlstext noch von Zeitpunkten oder einer Rekonstruktion des Prozessbaums ab.
+
+Voraussetzungen: Linux mit cgroup v2 und Landlock ABI 6 oder neuer (Linux 6.12+ für Signal-Scoping; Sender-pidfds erfordern Linux 6.5+), root, `bpftrace` und `pip install "execweave[lane]"`.
+
+```bash
+sudo execweave lane doctor
+sudo execweave run --backend lane --agent-user "$USER" -- your-agent-command
+execweave lane verify .execweave/runs/<run-id>/lane/ledger.jsonl
+execweave lane audit .execweave/runs/<run-id>/lane --output-dir audit-out
+```
+
+Der Befehl läuft als `--agent-user` in der Agent-Lane. Ein Call erhält nur dann eine eigene Lane, wenn er über den Launcher geroutet wird: Ein Hook des Harness oder ein Shell-Shim führt den Launch-Client (`execweave-lane-exec`; der Pfad wird dem Befehl zusätzlich als `EW_LANE_EXEC` übergeben) mit der Call-ID aus. `execweave-lane-claude-hook` ist ein `PreToolUse`-Hook für Claude Code, der dies für Bash-Tool-Calls übernimmt; `execweave/lane/hooks/` enthält außerdem Hooks für Cursor und Antigravity sowie einen Bash-Shim für Codex. Standardmäßig verlangt der Launcher Sender-pidfds und führt jeden Call in einer eigenen Landlock-Domäne mit Signal-Scoping aus (`--call-isolation`, `--no-require-pidfd`).
+
+Ausgaben im Run-Verzeichnis: `lane/ledger.jsonl` und `lane/ledger_pub.pem` (das signierte Ledger), `lane/sensor.log`, `events.jsonl` (ExecWeave-Ereignisstrom), `lane_attribution.json` (Call-ID zu Lane und Root-Prozess) und `meta.json`.
+
+Grenzen: Die Call-ID ist nur so vertrauenswürdig wie der Harness und der Hook, die sie liefern; ein umgangener Hook oder ein Prozess außerhalb jeder Lane wird keinem Call zugeordnet; der Sensor kann unter Last Ereignisse verlieren, und verlorene Ereignisse lassen sich nicht wiederherstellen; Arbeit, die ein bestehender Daemon für einen späteren Call erledigt, bleibt in der Lane des Calls, der den Daemon gestartet hat, sofern keine Delegation Grants verwendet werden.
+
 ## Run Artifacts
 
 Ein Provider-integrated Run kann enthalten:
