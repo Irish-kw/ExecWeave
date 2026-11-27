@@ -14,6 +14,18 @@ for _name in dir(_impl):
     if not _name.startswith("__"):
         globals()[_name] = getattr(_impl, _name)
 
+# A release branch may also update the changelog and this policy module. The
+# historical allowlist omitted CHANGELOG.md, so a version bump that promoted
+# Unreleased notes could not pass as a release-only pull request.
+_impl.RELEASE_ONLY_PATHS = frozenset(
+    _impl.RELEASE_ONLY_PATHS
+    | {
+        "CHANGELOG.md",
+        "scripts/check_release_stage_integrity.py",
+    }
+)
+RELEASE_ONLY_PATHS = _impl.RELEASE_ONLY_PATHS
+
 ROOT = Path(__file__).resolve().parents[1]
 STABLE_README_ANCHORS = (
     "python -m pip install -U execweave",

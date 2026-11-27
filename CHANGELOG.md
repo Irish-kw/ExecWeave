@@ -2,7 +2,10 @@
 
 ## Unreleased
 
+## 1.0.2
+
 - `lane` runtime backend (Linux, root): every routed shell call runs in its own cgroup v2 lane; a signed launch ledger, an eBPF sensor that stamps each event with its cgroup id, and an auditor attribute recorded events to calls. New commands: `execweave run --backend lane`, `execweave lane doctor|verify|audit`, `execweave-lane-exec`, and `execweave-lane-claude-hook`; new extra `execweave[lane]`.
+- The lane service, verifier, and auditor import on Windows and macOS; launching a live lane still requires Linux. Hook and shim files are shipped with the same bytes on every OS. The root-only live session check is a manual script (`scripts/lane_live_check.py`).
 
 ## 1.0.1
 
